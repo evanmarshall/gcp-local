@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moo Development"
+  short_description: "Use isolated machines for gcp-local development"
+  default_prompt: "Use $moo-code to develop and verify this gcp-local change in an isolated machine."

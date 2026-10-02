@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moo Baseline Setup"
+  short_description: "Provision the gcp-local development baseline"
+  default_prompt: "Use $moo-golden-image to set up the gcp-local development environment."

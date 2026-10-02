@@ -9,6 +9,7 @@ A local GCP emulator following LocalStack's architecture: generated API contract
 - [Implementation roadmap](docs/roadmap.md)
 - [GitHub issues](https://github.com/evanmarshall/gcp-local/issues)
 - [Contributing and local setup](CONTRIBUTING.md)
+- [Isolated agent development with moo](docs/moo.md)
 - [Agent instructions](AGENTS.md)
 
 The canonical design now lives in this repository. The original pre-review outline is retained in `docs/gcp-local.before-localstack-review.md` as historical context.

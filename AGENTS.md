@@ -12,6 +12,7 @@ gcp-local is a LocalStack-style GCP emulator. The repository currently contains 
 
 - Use [gcp-provider](.agents/skills/gcp-provider/SKILL.md) for API providers, emulator integration, state ownership, or service execution.
 - Use [gcp-conformance](.agents/skills/gcp-conformance/SKILL.md) for recorded GCP behavior, permission probes, Terraform compatibility, or fidelity claims.
+- Use [moo-code](.agents/skills/moo-code/SKILL.md) for development in isolated machines and [moo-golden-image](.agents/skills/moo-golden-image/SKILL.md) for baseline setup. Give concurrent tasks separate worktrees and machines; follow [the moo guide](docs/moo.md).
 - Skills live in `.agents/skills/`; keep descriptions specific and instructions concise. Do not copy this entire file into each skill.
 
 ## Working agreements
@@ -33,6 +34,8 @@ python3 scripts/check_history.py HEAD
 ```
 
 The history check needs an existing commit. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup without `uv`. Add runtime build/test commands here when the stack is selected; do not invent commands for software that is not present.
+
+For moo setup, run `sh scripts/setup_moo.sh`. Run tooling tests inside the task machine with `moo run task-name -- 'cd /srv/app && python3 -m unittest discover -s tests/tooling -v'`. Keep the repository and history checks above on the host: moo syncs source files, not `.git`.
 
 ## Git and GitHub
 

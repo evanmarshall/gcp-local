@@ -28,6 +28,10 @@ Root `AGENTS.md` supplies project instructions. Repository-local skills are in `
 
 Keep task-specific workflow details in the skills and shared project rules in `AGENTS.md`. Add narrower instructions only when a directory acquires different requirements.
 
+## Isolated development with moo
+
+On Apple Silicon Macs, run `sh scripts/setup_moo.sh` to check/install moo and provision this repository's baseline. The [moo guide](docs/moo.md) covers separate worktrees/machines, guest tests, host Git checks, snapshots, and cleanup. Adapted `moo-code` and `moo-golden-image` skills are included in `.agents/skills/`. Ordinary local checks and Linux CI do not require moo.
+
 ## Commit messages
 
 Use one or two short summary sentences and a few concise bullets as needed. For example:

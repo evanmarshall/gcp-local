@@ -1,0 +1,17 @@
+[project]
+base = "debian:bookworm-20260918-slim"
+workdir = "/srv/app"
+
+[recipe]
+lockfiles = ["requirements-tools.txt", "scripts/provision_moo.sh"]
+
+[resources]
+cpus = 2
+memory = "2GiB"
+
+[network]
+# Development smoke server; no emulator endpoint has been implemented yet.
+ports = [8080]
+
+[quiesce]
+commands = ["sync"]
