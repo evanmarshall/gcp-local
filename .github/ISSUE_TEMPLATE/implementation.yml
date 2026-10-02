@@ -1,0 +1,38 @@
+name: Implementation
+description: A scoped service, runtime, or tooling change
+title: ""
+labels: [enhancement]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: Describe the supported user workflow or observable behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and reference
+      description: Link the design section and LocalStack analogue. Note backend reuse and boundaries.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use checkboxes for observable results, including relevant failures.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Link blocking issues, or state none.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: Distinguish local checks, recorded evidence, and any required live-cloud scope.
+    validations:
+      required: true

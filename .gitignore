@@ -1,0 +1,17 @@
+.DS_Store
+.venv-tools/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+!.terraform.lock.hcl
+credentials/
+recordings/raw/
+.codex-log/

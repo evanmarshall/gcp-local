@@ -1,0 +1,23 @@
+name: Bug or parity gap
+description: Report incorrect emulator behavior or a missing verified scenario
+labels: [bug]
+body:
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction and versions
+      description: Include a minimal request or Terraform configuration and SDK/provider/backend versions. Remove credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+      description: Link documentation or a sanitized recording; distinguish inference from observed GCP behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: coverage
+    attributes:
+      label: Coverage and context
+      description: Include the provider, principal/resource relationship, and whether this was a local or authorized sandbox run.

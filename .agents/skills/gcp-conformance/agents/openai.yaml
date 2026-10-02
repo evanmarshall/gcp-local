@@ -1,0 +1,4 @@
+interface:
+  display_name: "GCP Conformance"
+  short_description: "Record and verify GCP behavior with local fixtures"
+  default_prompt: "Use $gcp-conformance to verify this behavior against recorded GCP scenarios."

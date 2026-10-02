@@ -1,0 +1,4 @@
+interface:
+  display_name: "GCP Provider"
+  short_description: "Implement LocalStack-style GCP service providers"
+  default_prompt: "Use $gcp-provider to implement the next supported API behavior."
