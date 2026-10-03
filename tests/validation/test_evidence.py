@@ -116,6 +116,8 @@ def test_candidates_are_unique_unreviewed_and_integrity_bound(tmp_path, scenario
     {"Authorization": "a secret"}, {"nested": [{"refresh_token": "secret"}]},
     {"Cookie": "secret"}, {"api-key": "secret"}, {"value": "Bearer secret-value"},
     {"value": "-----BEGIN RSA PRIVATE KEY-----"}, {"value": float("nan")},
+    {"value": '{"refresh_token":"synthetic-secret"}'},
+    {"value": '[{"client_secret":"synthetic-secret"}]'},
 ])
 def test_credential_material_never_enters_snapshot(tmp_path, scenario, secret):
     recorder = SnapshotCase(scenario, "record", tmp_path / "baseline", tmp_path / "candidates",

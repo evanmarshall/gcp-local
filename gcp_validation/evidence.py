@@ -80,6 +80,14 @@ def check_observation(value):
     elif isinstance(value, str):
         if re.search(r"(?i)\bBearer\s+\S+|-----BEGIN .*PRIVATE KEY-----", value):
             raise ValueError("Observation contains credential material")
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                decoded = json.loads(value)
+            except ValueError:
+                pass
+            else:
+                # The upstream snapshot library also parses JSON-valued strings.
+                check_observation(decoded)
     elif value is not None and not isinstance(value, (bool, int, float)):
         raise ValueError("Observations must contain JSON values, not SDK/HTTP objects")
     json.dumps(value, allow_nan=False)

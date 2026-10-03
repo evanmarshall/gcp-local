@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from gcp_validation.sandbox import Sandbox, inspect_credentials, main
+from gcp_validation.sandbox import Sandbox, inspect_credentials, load_credentials, main
 
 
 @pytest.fixture
@@ -100,3 +100,13 @@ def test_live_doctor_requires_explicit_flag(profile, monkeypatch, capsys):
     main(["doctor", "--profile", str(profile), "--allow-live"])
     assert len(refreshed) == 3
     assert json.loads(capsys.readouterr().out.split("}\n", 1)[-1])["mode"] == "live-auth"
+
+
+def test_typed_credential_loader_does_not_refresh_or_discover_ambient_credentials(profile, monkeypatch):
+    pytest.importorskip("google.auth")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/unselected-file")
+    sandbox = Sandbox.load(profile)
+    credential = load_credentials(sandbox.identities["allowed"], sandbox.project)
+    assert credential.signer_email == sandbox.identities["allowed"].email
+    assert credential.quota_project_id == sandbox.project
+    assert not credential.valid

@@ -120,14 +120,14 @@ def inspect_credentials(identity, project):
             raise SandboxError
     except (KeyError, TypeError, ValueError):
         raise SandboxError("Expected explicit, keyless ADC for the selected sandbox identity") from None
+    return data
 
 
 def load_credentials(identity, project):
-    inspect_credentials(identity, project)
-    import google.auth
-    credentials, _ = google.auth.load_credentials_from_file(
-        str(identity.credentials_file), scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    return credentials
+    data = inspect_credentials(identity, project)
+    from google.auth.impersonated_credentials import Credentials
+    return Credentials.from_impersonated_service_account_info(
+        data, scopes=["https://www.googleapis.com/auth/cloud-platform"])
 
 
 def refresh_credentials(credentials):

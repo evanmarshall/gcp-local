@@ -44,14 +44,19 @@ class StorageObservations:
                 "soft_delete_seconds": int(value.get("softDeletePolicy", {}).get("retentionDurationSeconds", 0))}
 
     def error(self, response):
-        if response.content_type == "application/json":
-            error = response.json()["error"]
+        try:
+            value = response.json()
+        except (ValueError, UnicodeError):
+            selected = {"status": response.status, "format": "text",
+                        "message": self.text(response.body.decode("utf-8"))}
+        else:
+            if not isinstance(value, dict) or not isinstance(value.get("error"), dict):
+                raise ValueError("Unexpected Storage error structure")
+            error = value["error"]
             selected = {"status": response.status, "format": "json", "code": error["code"],
                         "message": self.text(error["message"]),
                         "reasons": [entry["reason"] for entry in error.get("errors", [])]}
-        else:
-            selected = {"status": response.status, "format": "text",
-                        "message": self.text(response.body.decode("utf-8"))}
+        selected["content_type"] = response.content_type
         check_observation(selected)
         return selected
 

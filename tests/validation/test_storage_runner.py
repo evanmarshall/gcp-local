@@ -151,3 +151,16 @@ def test_missing_baseline_fails_before_storage_mutation(tmp_path):
         with pytest.raises(Unverified):
             execute(endpoint, tmp_path, "local")
         assert state["requests"] == []
+
+
+def test_json_error_with_non_json_content_type_still_selects_public_fields(tmp_path):
+    fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint="http://127.0.0.1:1234")), tmp_path)
+    normalizer = StorageObservations(fixture)
+    response = Response(403, json.dumps({"error": {
+        "code": 403, "message": "storage.objects.create denied", "authorization": "Bearer synthetic-secret",
+        "errors": [{"reason": "forbidden", "refresh_token": "synthetic-private-value"}],
+    }}).encode(), "text/plain")
+    result = normalizer.error(response)
+    assert result["format"] == "json" and result["content_type"] == "text/plain"
+    assert result["reasons"] == ["forbidden"]
+    assert "synthetic" not in json.dumps(result)
