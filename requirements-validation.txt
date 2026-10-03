@@ -1,0 +1,14 @@
+# Python test tooling; independent of the emulator implementation language.
+# Direct runners match the archived LocalStack baseline where applicable.
+pytest==9.0.2
+pytest-socket==0.8.1
+localstack-snapshot==0.3.3
+# Fully pinned transitive dependencies, resolved on Python 3.11.
+cachebox==5.2.3
+deepdiff==9.1.0
+iniconfig==2.3.0
+jsonpath-ng==1.8.0
+orderly-set==5.5.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0

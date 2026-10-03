@@ -22,6 +22,8 @@ python3 scripts/check_history.py HEAD
 
 Alternatively, `uv run --with 'PyYAML==6.0.3' python scripts/check_repo.py` supplies the YAML parser without installing it globally. Normal checks do not require GCP credentials, Docker, or the sibling LocalStack checkout.
 
+Install `requirements-validation.txt` in the same environment and run `.venv-tools/bin/python -m pytest` for the offline validation harness and existing tooling tests. [The validation guide](docs/validation.md) documents explicit local/live modes and reports. Prepare real-cloud project inputs in the ignored `.env` using [the sandbox guide](docs/gcp-sandbox.md); ordinary tests do not load it or discover ambient credentials.
+
 ## Agent setup
 
 Root `AGENTS.md` supplies project instructions. Repository-local skills are in `.agents/skills/gcp-provider` and `.agents/skills/gcp-conformance`, each with `SKILL.md` and optional UI metadata. Open Codex in this repository; restart the session if newly added guidance is not discovered. These locations follow the official [AGENTS.md guidance](https://learn.chatgpt.com/docs/agent-configuration/agents-md) and [skill discovery documentation](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills).

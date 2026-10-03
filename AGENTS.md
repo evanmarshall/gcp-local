@@ -1,6 +1,6 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The repository currently contains the design, backlog, and contributor tooling; an emulator runtime has not been implemented. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator. The repository currently contains the design, backlog, contributor tooling, and validation foundation; an emulator runtime has not been implemented. Do not describe planned services as working features.
 
 ## Start here
 
@@ -34,6 +34,8 @@ python3 scripts/check_history.py HEAD
 ```
 
 The history check needs an existing commit. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup without `uv`. Add runtime build/test commands here when the stack is selected; do not invent commands for software that is not present.
+
+After installing `requirements-validation.txt` in the tooling environment, run `.venv-tools/bin/python -m pytest`. It defaults to offline harness checks and writes separate harness/conformance results. Read [the validation guide](docs/validation.md) before writing a scenario. `.env` holds sandbox setup inputs described in [the sandbox guide](docs/gcp-sandbox.md); it is not automatically loaded by tests.
 
 For moo setup, run `sh scripts/setup_moo.sh`. Run tooling tests inside the task machine with `moo run task-name -- 'cd /srv/app && python3 -m unittest discover -s tests/tooling -v'`. Keep the repository and history checks above on the host: moo syncs source files, not `.git`.
 

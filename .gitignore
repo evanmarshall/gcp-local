@@ -15,3 +15,5 @@ __pycache__/
 credentials/
 recordings/raw/
 .codex-log/
+.pytest_cache/
+.artifacts/
