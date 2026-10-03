@@ -16,3 +16,5 @@ A local GCP emulator following LocalStack's architecture: generated API contract
 - [Agent instructions](AGENTS.md)
 
 The canonical design now lives in this repository. The original pre-review outline is retained in `docs/gcp-local.before-localstack-review.md` as historical context.
+
+The [pinned upstream SDK slice](docs/sdk-compatibility.md) and Linux isolation launcher validate client behavior before provider integration.

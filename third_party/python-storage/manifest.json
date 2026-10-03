@@ -1,0 +1,47 @@
+{
+  "repository": "https://github.com/googleapis/python-storage",
+  "revision": "fce6a6bf4561eabc939c972bb92282be86fb6aec",
+  "tag": "v3.10.1",
+  "license": "Apache-2.0",
+  "sdk": "google-cloud-storage==3.10.1",
+  "source_file": "tests/system/test_blob.py",
+  "source_sha256": "249d0727d340d5f1716d83aae9349aae524718014667ada0bce23b84e06609d7",
+  "slice_sha256": "db43668d954e53b32c48dff2fb5c6edeaa20c1736b1ca9436398a73af1d8b058",
+  "tests": [
+    {
+      "id": "tests/system/test_blob.py::test_blob_direct_write_and_read_into_file",
+      "start_line": 556,
+      "end_line": 576,
+      "body_sha256": "d6822b2faed1154dca2dc712ca55ab4042daa8715fc451bd16dd29cae2f1b9cb"
+    },
+    {
+      "id": "tests/system/test_blob.py::test_blob_download_w_generation_match",
+      "start_line": 579,
+      "end_line": 610,
+      "body_sha256": "4f75e6b897a37a3804ad891c02cf4007d4249a025fd9305b69973398e4bf112a"
+    },
+    {
+      "id": "tests/system/test_blob.py::test_blob_crud_w_etag_match",
+      "start_line": 311,
+      "end_line": 357,
+      "body_sha256": "cade4058f1e0abb307612cd58c857855f6cd25434e98d4555d261af3051d9d3a"
+    }
+  ],
+  "adaptations": [
+    "Only allowlisted function bodies and required imports are loaded; upstream conftest and module side effects are excluded.",
+    "Explicit authenticated SDK client and owned private bucket replace ambient session fixtures.",
+    "Bucket proxy maps MyBuffer/SmallFile to bounded lowercase names and records ownership intent before SDK mutations.",
+    "The simple file payload is 34 bytes; service_account fixture is the explicit keyless caller; fixture administrator owns cleanup."
+  ],
+  "requirements": [
+    "Storage JSON v1 metadata and multipart upload",
+    "Media download via /download/storage/v1",
+    "ifGenerationMatch/ifMetagenerationMatch and etag match/not-match",
+    "CRC32C and MD5 metadata, list and generation-guarded delete"
+  ],
+  "coverage": {
+    "upstream": "selected assertions only",
+    "iam": "separate recorded authorization scenarios",
+    "local": "unverified until #8 provider passes"
+  }
+}

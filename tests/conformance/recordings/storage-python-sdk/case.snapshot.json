@@ -1,0 +1,42 @@
+{
+  "storage-python-sdk": {
+    "recorded-date": "03-10-2026, 07:32:04",
+    "recorded-content": {
+      "upstream-tests": [
+        "tests/system/test_blob.py::test_blob_direct_write_and_read_into_file",
+        "tests/system/test_blob.py::test_blob_download_w_generation_match",
+        "tests/system/test_blob.py::test_blob_crud_w_etag_match"
+      ],
+      "listed": [
+        {
+          "name": "mybuffer",
+          "size": "11",
+          "contentType": "text/plain",
+          "md5Hash": "sQqNsWTgdUEFt6mb5y4/5Q==",
+          "bucket": "<bucket>",
+          "generation": "<generation-1>",
+          "metageneration": "<metageneration-1>",
+          "etag": "<etag-1>"
+        },
+        {
+          "name": "smallfile",
+          "size": "34",
+          "contentType": "text/plain",
+          "md5Hash": "i/UDAfDLECm47tjHTIhVdg==",
+          "bucket": "<bucket>",
+          "generation": "<generation-2>",
+          "metageneration": "<metageneration-1>",
+          "etag": "<etag-2>"
+        }
+      ],
+      "deleted": {
+        "objects_deleted": 2,
+        "remaining_objects": 0
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # Validation runners
 
-The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain, not a choice of emulator implementation language. The bounded Storage lifecycle and same-project authorization scenarios have real-GCP baselines recorded and revalidated on 2026-10-03 UTC. See [the authorization matrix](authorization-baseline.md) for exact coverage and the pending cross-project recording. Ordinary offline checks still report that scenario as unverified because they do not execute it; harness passes do not count as service coverage.
+The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain, not a choice of emulator implementation language. The bounded Storage lifecycle, same-project authorization, and selected Python SDK scenarios have real-GCP baselines recorded and revalidated on 2026-10-03 UTC. See [the authorization matrix](authorization-baseline.md) for exact coverage and the pending cross-project recording. Ordinary offline checks still report that scenario as unverified because they do not execute it; harness passes do not count as service coverage.
 
 ## Run offline checks
 
@@ -99,3 +99,10 @@ The authentication lane reuses [google-auth](https://github.com/googleapis/googl
 
 
 The first reviewed [Storage recording](../tests/conformance/recordings/storage-object-lifecycle/provenance.json) was revalidated successfully on 2026-10-03 UTC. It covers only this JSON API lifecycle and one denied-create case. There are no emulator, upstream SDK-suite, Terraform, broader IAM, or cross-project coverage claims. The controlled-server comparison is a runner test, even when it matches the GCP baseline; its temporary report is not published as emulator coverage.
+
+
+## Selected upstream SDK suite
+
+Install `requirements-sdk.txt` to run the pinned Google Python Storage slice; see [SDK compatibility](sdk-compatibility.md) for the source pin, exact upstream IDs, fixture adaptations, and coverage limits. The default harness CI installs these dependencies. Real SDK execution selects `tests/conformance/test_storage_sdk.py` through the same explicit profile and live flag as other scenarios. It uses the same owned Storage fixture and resource limits.
+
+Local upstream tests require process-level network isolation. Run the future provider and its tests together in the Linux namespace launcher described in that guide. A Python socket guard alone is not accepted for local SDK conformance. This also isolates helper subprocesses. No fallback to a networked runner or real GCP exists when local methods are absent.

@@ -37,3 +37,19 @@ def peer_storage(gcp_snapshot, gcp_target, pytestconfig, request):
                                       or "peer" not in pytestconfig.gcp_sandbox.identities):
         raise Unverified("Cross-project recording requires an explicitly authorized peer project and identity")
     return request.getfixturevalue("storage")
+
+
+@pytest.fixture
+def sdk_storage(gcp_snapshot, gcp_target, request):
+    from gcp_validation.evidence import Unverified
+    from gcp_validation.sdk_storage import require_local_isolation, upstream_slice
+    try:
+        from importlib.metadata import version, PackageNotFoundError
+        if version("google-cloud-storage") != "3.10.1":
+            raise Unverified("Install the pinned requirements-sdk.txt before SDK conformance")
+    except (ModuleNotFoundError, PackageNotFoundError):
+        raise Unverified("Install requirements-sdk.txt before SDK conformance") from None
+    if gcp_target.mode == "local":
+        require_local_isolation()
+    upstream_slice()
+    return request.getfixturevalue("storage")

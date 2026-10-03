@@ -1,6 +1,8 @@
 """Synthetic protocol stub for the recorder tests; never cloud evidence."""
 
 from contextlib import contextmanager
+from email.parser import BytesParser
+from email.policy import default
 import base64
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -37,7 +39,7 @@ def storage_server():
 
         def handle_request(self):
             parsed = urlsplit(self.path)
-            path = unquote(parsed.path)
+            path = unquote(parsed.path).removeprefix("/download")
             query = parse_qs(parsed.query)
             method = self.command
             authorization = self.headers.get("Authorization")
@@ -82,7 +84,16 @@ def storage_server():
                         state["objects"]["object.txt"][0]["etag"] = "corrupted"
                     return self.error(403, "<" + actor + "> lacks " + permission + " on " + bucket["name"], "forbidden")
             if path.startswith("/upload/"):
-                name = query["name"][0]
+                if query.get("uploadType") == ["multipart"]:
+                    message = BytesParser(policy=default).parsebytes(
+                        ("Content-Type: " + self.headers["Content-Type"] + "\r\nMIME-Version: 1.0\r\n\r\n").encode() + body)
+                    parts = list(message.iter_parts())
+                    info = json.loads(parts[0].get_payload(decode=True))
+                    name = info["name"]
+                    body = parts[1].get_payload(decode=True)
+                else:
+                    info = {}
+                    name = query["name"][0]
                 if actor == "denied" and not state["denied_side_effect"]:
                     if state.get("recorded_error_shape"):
                         message = ("<denied> does not have storage.objects.create access to the Google Cloud Storage object. "
@@ -100,16 +111,33 @@ def storage_server():
                             "etag": "etag-" + str(state["generation"]), "contentType": "application/octet-stream",
                             "md5Hash": base64.b64encode(hashlib.md5(body).digest()).decode(),
                             "authorization": "Bearer synthetic-secret-must-not-persist"}
+                if state.get("sdk"):
+                    import google_crc32c
+                    metadata["crc32c"] = base64.b64encode(google_crc32c.Checksum(body).digest()).decode()
+                    metadata["contentType"] = info.get("contentType", metadata["contentType"])
                 state["objects"][name] = (metadata, body)
                 if actor == "denied":
                     return self.error(403, "<denied> lacks storage.objects.create on " + bucket["name"], "forbidden")
                 return self.respond(200, metadata)
             if path.endswith("/o"):
-                return self.respond(200, {"items": [value[0] for _, value in sorted(state["objects"].items())]})
+                items = [value[0] for _, value in sorted(state["objects"].items())]
+                offset = int(query.get("pageToken", ["0"])[0])
+                size = int(query.get("maxResults", ["100"])[0])
+                result = {"items": items[offset:offset + size]}
+                if offset + size < len(items):
+                    result["nextPageToken"] = str(offset + size)
+                return self.respond(200, result)
             name = path.split("/o/", 1)[1]
             if name not in state["objects"]:
                 return self.error(404, "No such object: " + bucket["name"] + "/" + name, "notFound")
             metadata, content = state["objects"][name]
+            if state.get("sdk") and not state.get("ignore_preconditions"):
+                if (self.headers.get("If-Match") not in {None, metadata["etag"]}
+                        or query.get("ifGenerationMatch", [metadata["generation"]]) != [metadata["generation"]]
+                        or query.get("ifMetagenerationMatch", [metadata["metageneration"]]) != [metadata["metageneration"]]):
+                    return self.error(412, "Precondition failed", "conditionNotMet")
+                if self.headers.get("If-None-Match") == metadata["etag"]:
+                    return self.respond(304)
             if method == "DELETE":
                 if query.get("ifGenerationMatch") != [metadata["generation"]]:
                     return self.error(412, "Precondition failed", "conditionNotMet")
