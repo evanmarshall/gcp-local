@@ -17,3 +17,5 @@ recordings/raw/
 .codex-log/
 .pytest_cache/
 .artifacts/
+# GitHub OIDC credentials, generated only in the manual CI job.
+gha-creds-*.json

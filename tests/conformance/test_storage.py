@@ -12,7 +12,7 @@ from gcp_validation.normalization import StorageObservations
     versions={"sdk": "stdlib-http/" + platform.python_version() + ";google-auth/2.56.2",
               "provider": "not-applicable", "backend": "not-applicable"},
     contract_files=("gcp_validation/storage.py", "gcp_validation/normalization.py",
-                    "gcp_validation/sandbox.py", "tests/conformance/conftest.py"),
+                    "gcp_validation/sandbox.py", "gcp_validation/federation.py", "tests/conformance/conftest.py"),
 )
 def test_storage_object_lifecycle(storage, gcp_snapshot):
     observations = StorageObservations(storage)

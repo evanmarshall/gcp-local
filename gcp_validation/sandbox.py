@@ -16,6 +16,7 @@ class SandboxError(ValueError):
 class Identity:
     email: str
     credentials_file: Path
+    wif_provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,11 @@ class Sandbox:
         region = required("GCP_REGION")
         if not re.fullmatch(r"[a-z]+-[a-z]+[0-9]+", region):
             raise SandboxError("Select an explicit GCP region")
+        wif_provider = values.get("GCP_TEST_WIF_PROVIDER") or None
+        if wif_provider and not re.fullmatch(
+                r"projects/" + re.escape(number) + r"/locations/global/workloadIdentityPools/[a-z][a-z0-9-]{3,31}/providers/[a-z][a-z0-9-]{3,31}",
+                wif_provider):
+            raise SandboxError("Select an explicit WIF provider in the sandbox project")
         identities = {}
         for alias, prefix in (("allowed", "GCP_TEST"), ("fixture", "GCP_TEST_FIXTURE"),
                               ("denied", "GCP_TEST_DENIED")):
@@ -74,7 +80,7 @@ class Sandbox:
             credential_path = Path(required(prefix + "_CREDENTIALS_FILE")).expanduser()
             if not credential_path.is_absolute():
                 raise SandboxError("Credential paths must be absolute (or start with ~/)")
-            identities[alias] = Identity(email, credential_path.resolve())
+            identities[alias] = Identity(email, credential_path.resolve(), wif_provider)
         if len({identity.email for identity in identities.values()}) != 3:
             raise SandboxError("Fixture, allowed, and denied identities must be distinct")
         peer_project = values.get("GCP_TEST_PEER_PROJECT_ID") or None
@@ -91,7 +97,7 @@ class Sandbox:
             path = Path(required(peer_fields[2])).expanduser()
             if not path.is_absolute():
                 raise SandboxError("Peer credentials require an absolute path")
-            identities["peer"] = Identity(email, path.resolve())
+            identities["peer"] = Identity(email, path.resolve(), wif_provider)
         limits = {}
         for name, maximum in (("max_buckets", 1), ("max_objects", 10),
                               ("max_object_bytes", 1048576)):
@@ -117,6 +123,11 @@ def inspect_credentials(identity, project):
         raise SandboxError("Credential file is missing or not owner-readable-only")
     try:
         data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            raise SandboxError
+        if data.get("type") == "external_account":
+            from .federation import validate_github_credentials
+            return validate_github_credentials(data, identity, project)
         expected = ("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
                     + identity.email + ":generateAccessToken")
         source = data["source_credentials"]
@@ -141,6 +152,9 @@ def inspect_credentials(identity, project):
 
 def load_credentials(identity, project):
     data = inspect_credentials(identity, project)
+    if data["type"] == "external_account":
+        from google.auth.identity_pool import Credentials
+        return Credentials.from_info(data, scopes=["https://www.googleapis.com/auth/cloud-platform"])
     from google.auth.impersonated_credentials import Credentials
     return Credentials.from_impersonated_service_account_info(
         data, scopes=["https://www.googleapis.com/auth/cloud-platform"])

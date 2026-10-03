@@ -1,0 +1,101 @@
+name: Manual Storage conformance
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Record a candidate or revalidate the committed GCP baseline
+        required: true
+        default: revalidate
+        type: choice
+        options: [revalidate, record]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gcp-local-live-storage
+  cancel-in-progress: false
+
+jobs:
+  storage:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: gcp-conformance
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_TEST_WIF_PROVIDER: ${{ vars.GCP_TEST_WIF_PROVIDER }}
+      GCP_TEST_LIVE_SCOPE: 'Storage only; us-central1; one temporary bucket; at most 10 objects of 1 MiB each; cleanup after each run; no scheduled runs.'
+      GCP_TEST_SERVICE_ACCOUNT: ${{ vars.GCP_TEST_SERVICE_ACCOUNT }}
+      GCP_TEST_FIXTURE_SERVICE_ACCOUNT: ${{ vars.GCP_TEST_FIXTURE_SERVICE_ACCOUNT }}
+      GCP_TEST_DENIED_SERVICE_ACCOUNT: ${{ vars.GCP_TEST_DENIED_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-cloud.txt
+      - id: fixture
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_TEST_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_TEST_FIXTURE_SERVICE_ACCOUNT }}
+          export_environment_variables: false
+      - id: allowed
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_TEST_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_TEST_SERVICE_ACCOUNT }}
+          export_environment_variables: false
+      - id: denied
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_TEST_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_TEST_DENIED_SERVICE_ACCOUNT }}
+          export_environment_variables: false
+      - name: Prepare explicit credential profile
+        env:
+          GCP_TEST_CREDENTIALS_FILE: ${{ steps.allowed.outputs.credentials_file_path }}
+          GCP_TEST_FIXTURE_CREDENTIALS_FILE: ${{ steps.fixture.outputs.credentials_file_path }}
+          GCP_TEST_DENIED_CREDENTIALS_FILE: ${{ steps.denied.outputs.credentials_file_path }}
+        run: python scripts/prepare_ci_profile.py --output "$RUNNER_TEMP/gcp-local.env"
+      - name: Run bounded Storage scenarios
+        env:
+          CONFORMANCE_MODE: ${{ inputs.mode }}
+        run: >-
+          python -m pytest tests/conformance/test_storage.py tests/conformance/test_storage_authorization.py
+          -q --tb=short --gcp-mode "$CONFORMANCE_MODE" --gcp-profile "$RUNNER_TEMP/gcp-local.env"
+          --gcp-allow-live --gcp-artifacts .artifacts/cloud
+      - name: Retry owned cleanup after an interrupted scenario
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/gcp-local.env" ]; then
+            python scripts/cleanup_ci.py --profile "$RUNNER_TEMP/gcp-local.env" --allow-live
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: storage-conformance-${{ github.run_id }}
+          retention-days: 14
+          include-hidden-files: true
+          path: |
+            .artifacts/cloud/coverage.json
+            .artifacts/cloud/junit.xml
+            .artifacts/cloud/candidates/*/case.snapshot.json
+            .artifacts/cloud/candidates/*/provenance.json
+            ~/.local/state/gcp-local/${{ env.GCP_PROJECT_ID }}/*.json
+      - name: Remove live profile
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gcp-local.env"
