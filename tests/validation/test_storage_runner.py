@@ -1,7 +1,10 @@
 import json
+import os
 from pathlib import Path
 import runpy
 import shutil
+import subprocess
+import sys
 
 import pytest
 
@@ -164,3 +167,32 @@ def test_json_error_with_non_json_content_type_still_selects_public_fields(tmp_p
     assert result["format"] == "json" and result["content_type"] == "text/plain"
     assert result["reasons"] == ["forbidden"]
     assert "synthetic" not in json.dumps(result)
+
+
+def test_local_cli_uses_committed_cloud_contract_and_detects_corruption(tmp_path):
+    """A controlled server exercises the matcher; it is not an emulator release."""
+    baseline_dir = ROOT / "tests/conformance/recordings/storage-object-lifecycle"
+    before = {path.name: path.read_bytes() for path in baseline_dir.iterdir()}
+    with storage_server() as (endpoint, state):
+        state["recorded_error_shape"] = True
+        env = os.environ.copy()
+        env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+        env.pop("PYTEST_ADDOPTS", None)
+        env["GOOGLE_APPLICATION_CREDENTIALS"] = "/unselected-live-credential.json"
+        for corrupted in (False, True):
+            state["corrupt_reason"] = corrupted
+            artifacts = tmp_path / ("corrupt" if corrupted else "matching")
+            result = subprocess.run([sys.executable, "-m", "pytest", "-p", "pytest_socket",
+                "tests/conformance/test_storage.py", "-q", "--gcp-mode", "local",
+                "--gcp-project", "synthetic-project", "--gcp-endpoint", endpoint,
+                "--gcp-artifacts", str(artifacts)], cwd=ROOT, env=env,
+                text=True, capture_output=True, timeout=30)
+            report = json.loads((artifacts / "coverage.json").read_text())
+            if corrupted:
+                assert result.returncode != 0
+                assert report["conformance"]["outcomes"] == {"divergence": 1}
+            else:
+                assert result.returncode == 0, result.stdout + result.stderr
+                assert report["conformance"]["outcomes"] == {"pass": 1}
+            assert state["bucket"] is None
+    assert before == {path.name: path.read_bytes() for path in baseline_dir.iterdir()}

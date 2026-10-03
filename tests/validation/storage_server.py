@@ -71,6 +71,12 @@ def storage_server():
             if path.startswith("/upload/"):
                 name = query["name"][0]
                 if actor == "denied" and not state["denied_side_effect"]:
+                    if state.get("recorded_error_shape"):
+                        message = ("<denied> does not have storage.objects.create access to the Google Cloud Storage object. "
+                            "Permission 'storage.objects.create' denied on resource '//storage.googleapis.com/projects/_/buckets/"
+                            + bucket["name"] + "/objects/" + name + "' (or it may not exist).")
+                        return self.respond(403, {"error": {"code": 403, "message": message,
+                            "errors": [{"reason": "forbidden"}]}}, "text/html")
                     return self.error(403, "<denied> lacks storage.objects.create on " + bucket["name"], "forbidden")
                 if name in state["objects"] and query.get("ifGenerationMatch") == ["0"]:
                     reason = "corruptedReason" if state["corrupt_reason"] else "conditionNotMet"

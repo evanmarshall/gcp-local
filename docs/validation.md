@@ -1,6 +1,6 @@
 # Validation runners
 
-The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain, not a choice of emulator implementation language. A bounded Storage lifecycle scenario is implemented; its real-GCP baseline is recorded separately from the synthetic harness checks. Passing harness tests establishes that the tooling works; the coverage report correctly shows zero verified cloud scenarios.
+The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain, not a choice of emulator implementation language. One bounded Storage lifecycle scenario has a reviewed real-GCP baseline, recorded and revalidated on 2026-10-03 UTC. Ordinary offline checks still report that scenario as unverified because they do not execute it; harness passes do not count as service coverage.
 
 ## Run offline checks
 
@@ -96,3 +96,6 @@ Each live scenario holds a per-project process lock and rejects an already occup
 Cleanup only visits manifest-owned object names in the matching bucket. It does not sweep unrelated buckets or repair ownership mismatches. A failed cleanup leaves the manifest pending and prevents candidate publication. Different developer machines must still coordinate use of the one-bucket sandbox; the local process lock is not a distributed lock.
 
 The authentication lane reuses [google-auth](https://github.com/googleapis/google-auth-library-python) 2.56.2 (Apache-2.0), with all transitive versions pinned in `requirements-cloud.txt`. Its additional dependency licenses are: Requests Apache-2.0; urllib3 and charset-normalizer MIT; cffi MIT-0; cryptography Apache-2.0 OR BSD-3-Clause; certifi MPL-2.0; idna BSD-3-Clause; pyasn1 and pyasn1-modules BSD-2-Clause; pycparser BSD-3-Clause. Update these pins with the offline suite and explicit live revalidation. Cloud CLI bundles are not imported by the repository runner.
+
+
+The first reviewed [Storage recording](../tests/conformance/recordings/storage-object-lifecycle/provenance.json) was revalidated successfully on 2026-10-03 UTC. It covers only this JSON API lifecycle and one denied-create case. There are no emulator, upstream SDK-suite, Terraform, broader IAM, or cross-project coverage claims. The controlled-server comparison is a runner test, even when it matches the GCP baseline; its temporary report is not published as emulator coverage.

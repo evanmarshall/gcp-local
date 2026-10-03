@@ -1,0 +1,105 @@
+{
+  "storage-object-lifecycle": {
+    "recorded-date": "03-10-2026, 06:37:12",
+    "recorded-content": {
+      "bucket-created": {
+        "location": "US-CENTRAL1",
+        "name": "<bucket>",
+        "public_access": "enforced",
+        "soft_delete_seconds": 0,
+        "status": 200,
+        "storageClass": "STANDARD",
+        "uniform_access": true
+      },
+      "uploaded": {
+        "object": {
+          "bucket": "<bucket>",
+          "contentType": "application/octet-stream",
+          "etag": "<etag-1>",
+          "generation": "<generation-1>",
+          "md5Hash": "EZdO48VKxVcGezRRMa/4yA==",
+          "metageneration": "<metageneration-1>",
+          "name": "object.txt",
+          "size": "38"
+        },
+        "status": 200
+      },
+      "downloaded": {
+        "bytes": 38,
+        "sha256": "cbd4d6832bc317dc7f7d064539d749afd6d7a3bf8cad38939a1489de677a7544",
+        "status": 200
+      },
+      "listed": [
+        {
+          "name": "object.txt",
+          "size": "38",
+          "contentType": "application/octet-stream",
+          "md5Hash": "EZdO48VKxVcGezRRMa/4yA==",
+          "bucket": "<bucket>",
+          "generation": "<generation-1>",
+          "metageneration": "<metageneration-1>",
+          "etag": "<etag-1>"
+        }
+      ],
+      "conditional-write-rejected": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "At least one of the pre-conditions you specified did not hold.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "unchanged-after-precondition": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "EZdO48VKxVcGezRRMa/4yA==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "38"
+      },
+      "denied-write": {
+        "code": 403,
+        "content_type": "text/html",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.create access to the Google Cloud Storage object. Permission 'storage.objects.create' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/denied.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unchanged-after-denial": [
+        {
+          "name": "object.txt",
+          "size": "38",
+          "contentType": "application/octet-stream",
+          "md5Hash": "EZdO48VKxVcGezRRMa/4yA==",
+          "bucket": "<bucket>",
+          "generation": "<generation-1>",
+          "metageneration": "<metageneration-1>",
+          "etag": "<etag-1>"
+        }
+      ],
+      "deleted": {
+        "status": 204
+      },
+      "missing-after-delete": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "No such object: <bucket>/object.txt",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

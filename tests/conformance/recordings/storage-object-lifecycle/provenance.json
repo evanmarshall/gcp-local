@@ -1,0 +1,46 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-03T06:37:12.361047+00:00",
+  "scenario": {
+    "id": "storage-object-lifecycle",
+    "service": "storage",
+    "transport": "rest-json-v1",
+    "revision": "ad8a5c00f78c167a063ff43ec04a6babdc357f2da7e542ca36aa8f3f1140cf9c",
+    "versions": {
+      "sdk": "stdlib-http/3.11.12;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "755804f0a094b6f6dbe896826ffda9d8eccde62c3a98e8585a89365b8cf67a9e",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/storage.py": "7b3636b8608749ffa978e6aa0124caa0d656a8984ba22832985e13bb6f05a9bc",
+      "gcp_validation/normalization.py": "77be84b37e9e77d0108756a6ac95a5053f8a82fb96e42274ea96a14376abe3fd",
+      "gcp_validation/sandbox.py": "d99b5af803d5be2438e7aadd31b1d2bfa31fc1741766016458af1033537b6a22",
+      "tests/conformance/conftest.py": "fe84077dd9ab89bd01053a1df53bd60c4755aa91956a5b0c7a1f686c821a0f16"
+    },
+    "scope": {
+      "services": [
+        "storage"
+      ],
+      "region": "us-central1",
+      "max_buckets": 1,
+      "max_objects": 10,
+      "max_object_bytes": 1048576,
+      "cleanup_required": true,
+      "identities": [
+        "allowed",
+        "denied",
+        "fixture"
+      ]
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 A local GCP emulator following LocalStack's architecture: generated API contracts, service providers, reusable emulator backends, and cloud-recorded conformance tests. GCP identity, IAM enforcement, and analytical networking are core design goals.
 
-**Status:** design, contributor tooling, and the offline validation foundation. No emulator runtime, real-GCP recordings, or supported-service release is available yet.
+**Status:** validation runners and one reviewed, revalidated real-GCP Storage lifecycle baseline. Local comparison is tested against a controlled protocol server. No emulator runtime or supported-service release is available yet.
 
 - [Design and architecture diagram](docs/design.md)
 - [Direct comparison with archived LocalStack](docs/localstack-comparison.md)
