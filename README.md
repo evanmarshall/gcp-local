@@ -9,6 +9,7 @@ A local GCP emulator following LocalStack's architecture: generated API contract
 - [Implementation roadmap](docs/roadmap.md)
 - [Validation runners and evidence](docs/validation.md)
 - [GCP sandbox configuration](docs/gcp-sandbox.md)
+- [Portable agent setup for application repositories](docs/agent-setup.md)
 - [GitHub issues](https://github.com/evanmarshall/gcp-local/issues)
 - [Contributing and local setup](CONTRIBUTING.md)
 - [Isolated agent development with moo](docs/moo.md)

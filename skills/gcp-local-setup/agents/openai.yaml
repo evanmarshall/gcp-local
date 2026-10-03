@@ -1,0 +1,4 @@
+interface:
+  display_name: "GCP Local Setup"
+  short_description: "Inspect GCP apps and prepare isolated validation"
+  default_prompt: "Use $gcp-local-setup to inspect this application and prepare its local and sandbox validation profiles."

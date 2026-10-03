@@ -14,6 +14,7 @@ gcp-local is a LocalStack-style GCP emulator. The repository currently contains 
 - Use [gcp-conformance](.agents/skills/gcp-conformance/SKILL.md) for recorded GCP behavior, permission probes, Terraform compatibility, or fidelity claims.
 - Use [moo-code](.agents/skills/moo-code/SKILL.md) for development in isolated machines and [moo-golden-image](.agents/skills/moo-golden-image/SKILL.md) for baseline setup. Give concurrent tasks separate worktrees and machines; follow [the moo guide](docs/moo.md).
 - Skills live in `.agents/skills/`; keep descriptions specific and instructions concise. Do not copy this entire file into each skill.
+- The portable application-onboarding bundle lives in `skills/gcp-local-setup/`. See [its installer guide](docs/agent-setup.md); do not copy emulator-contributor instructions into application repositories.
 
 ## Working agreements
 

@@ -51,7 +51,8 @@ def main():
                 if not destination.exists():
                     errors.append(f"{label}: broken relative link: {target}")
 
-    skills = sorted((ROOT / ".agents/skills").glob("*/SKILL.md"))
+    skills = sorted([*(ROOT / ".agents/skills").glob("*/SKILL.md"),
+                     *(ROOT / "skills").glob("*/SKILL.md")])
     if not skills:
         errors.append("No repository skills found")
     for path in skills:
