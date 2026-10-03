@@ -1,0 +1,49 @@
+{
+  "status": "selected-not-executable",
+  "repository": "https://github.com/hashicorp/terraform-provider-google",
+  "revision": "70539b4b7bb9ea096987422d9596186417b73f51",
+  "provider_version": "8.5.0",
+  "license": "MPL-2.0",
+  "go_minimum": "1.26.0",
+  "test_framework": "github.com/hashicorp/terraform-plugin-testing v1.15.0",
+  "package": "./google/services/storage",
+  "test_ids": [
+    "TestAccStorageBucket_basic",
+    "TestAccStorageBucket_labels",
+    "TestAccStorageObject_recreate"
+  ],
+  "source_files": {
+    "google/services/storage/resource_storage_bucket_test.go": "48ea2846c87a7d2ad42d047e8f5e2df2e7079a897c79114f7f8ad1088f60022a",
+    "google/services/storage/resource_storage_bucket_object_test.go": "f36225775a0cd4f15d2e126e358aece96f918b87b4a1ad1e346db586d5742835",
+    "google/provider/provider.go": "6f7937c01d0e2f3af5543ff2a0c6d76da2b73bf42d47119298bb62328c52799d",
+    "google/transport/config.go": "916eb89a53ec86d47f197cc9f3320ad4e6ba8b21d88c373826e2f94d5fef477e",
+    "google/acctest/test_utils.go": "caa636b5f228da8344ae4bb3f2fa6d81161dcae53c37a4246368c4cff8345144",
+    "google/acctest/vcr_utils.go": "a1a6d72eb90e40f0c8a3e38d3da3716f5dfee1f9b623a023db6ba78e215b4802",
+    "google/envvar/envvar_utils.go": "6387dbbdfbde0269715b8e08a4777c12cb0fe03ebff5b657afe6b4ba34728b40",
+    "go.mod": "86a1735a71cca27b124814f9d1852e0a38665bdd798cec31dfb2c62af31e05a5",
+    "LICENSE": "588768dc819dc773d6914c22df7de8932cc7899c24188f5b09b013d86457e115"
+  },
+  "required_adapter_changes": [
+    "Replace multi-region US fixtures with us-central1, UBLA, enforced public access prevention, zero soft-delete retention, no versioning or retention.",
+    "Run exact tests serially with -parallel=1 and an owned-resource cleanup manifest, not global sweepers.",
+    "Inject explicit synthetic local project/access_token and Storage custom endpoint into provider factories and destroy-check clients.",
+    "Replace ambient credential/project prechecks for the selected local runner only; preserve upstream resource assertions.",
+    "Add an unchanged second plan and machine-readable results; disable provider VCR and raw HTTP logs."
+  ],
+  "required_local_apis": [
+    "storage.buckets.insert/get/patch/delete",
+    "storage.objects.insert/get/list/delete",
+    "Storage generation/metageneration, etag, hashes, timestamps and defaults"
+  ],
+  "pending": [
+    "Complete transitive helper/client audit and adapter patch",
+    "Pin and cache Terraform CLI and Go module artifacts before isolating the run",
+    "Run against #8 local provider within the Linux namespace and prove incorrect responses fail",
+    "Record required additional real-GCP behavior within the approved sandbox scope"
+  ],
+  "coverage": {
+    "local": "unverified",
+    "real_gcp": "not-run",
+    "second_plan": "not-run"
+  }
+}

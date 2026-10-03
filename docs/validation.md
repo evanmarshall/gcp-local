@@ -106,3 +106,5 @@ The first reviewed [Storage recording](../tests/conformance/recordings/storage-o
 Install `requirements-sdk.txt` to run the pinned Google Python Storage slice; see [SDK compatibility](sdk-compatibility.md) for the source pin, exact upstream IDs, fixture adaptations, and coverage limits. The default harness CI installs these dependencies. Real SDK execution selects `tests/conformance/test_storage_sdk.py` through the same explicit profile and live flag as other scenarios. It uses the same owned Storage fixture and resource limits.
 
 Local upstream tests require process-level network isolation. Run the future provider and its tests together in the Linux namespace launcher described in that guide. A Python socket guard alone is not accepted for local SDK conformance. This also isolates helper subprocesses. No fallback to a networked runner or real GCP exists when local methods are absent.
+
+The [Terraform acceptance selection](terraform-compatibility.md) pins candidate provider tests and records the remaining adapter work. It is not yet executable or certified.
