@@ -22,7 +22,7 @@ python3 scripts/check_history.py HEAD
 
 Alternatively, `uv run --with 'PyYAML==6.0.3' python scripts/check_repo.py` supplies the YAML parser without installing it globally. Normal checks do not require GCP credentials, Docker, or the sibling LocalStack checkout.
 
-Install `requirements-validation.txt` in the same environment and run `.venv-tools/bin/python -m pytest` for the offline validation harness and existing tooling tests. [The validation guide](docs/validation.md) documents explicit local/live modes and reports. Prepare real-cloud project inputs in the ignored `.env` using [the sandbox guide](docs/gcp-sandbox.md); ordinary tests do not load it or discover ambient credentials.
+Install `requirements-sdk.txt` in the same environment (it includes the runner and keyless-auth dependencies) and run `.venv-tools/bin/python -m pytest` for the offline validation harness and existing tooling tests. [The validation guide](docs/validation.md) documents explicit local/live modes and reports. Prepare real-cloud project inputs in the ignored `.env` using [the sandbox guide](docs/gcp-sandbox.md); ordinary tests do not load it or discover ambient credentials.
 
 ## Agent setup
 

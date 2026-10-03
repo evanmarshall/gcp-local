@@ -6,7 +6,7 @@ The foundation uses pytest and the same snapshot package pinned by archived Loca
 
 ```sh
 python3 -m venv .venv-tools
-.venv-tools/bin/python -m pip install -r requirements-tools.txt -r requirements-validation.txt
+.venv-tools/bin/python -m pip install -r requirements-tools.txt -r requirements-sdk.txt
 .venv-tools/bin/python -m pytest
 ```
 
