@@ -211,3 +211,45 @@ def test_cloud(gcp_snapshot):
     assert report["conformance"]["outcomes"] == {"divergence": 1}
     assert "Snapshot mismatch in: resource" in result.stdout
     assert before == {path.name: path.read_bytes() for path in destination.iterdir()}
+
+
+def test_profile_requires_live_opt_in_before_reading_or_importing(tmp_path):
+    result, _ = run_suite(tmp_path, 'raise AssertionError("must not import")',
+                          "--gcp-profile", "/does/not/exist")
+    assert result.returncode == 4
+    assert "profiles require an explicit live mode" in result.stderr
+
+
+def test_contract_dependency_changes_invalidate_evidence(tmp_path):
+    dependency = tmp_path / "adapter.py"
+    dependency.write_text("contract = 1\n")
+    credentials = tmp_path / "synthetic.json"
+    credentials.write_text("{}")
+    marker = SCENARIO.replace('id="synthetic-case",', 'id="synthetic-case", contract_files=("adapter.py",),')
+    source = "import pytest\n" + marker + '''
+def test_cloud(gcp_snapshot):
+    gcp_snapshot.match("resource", {"status": 200})
+'''
+    result, _ = run_suite(tmp_path, source, "--gcp-mode", "record", "--gcp-project", "sandbox-test",
+        "--gcp-credentials-file", str(credentials), "--gcp-allow-live", "--gcp-live-scope", "synthetic only", synthetic=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    candidate = next((tmp_path / "artifacts/candidates").iterdir())
+    destination = tmp_path / "baselines/synthetic-case"
+    shutil.copytree(candidate, destination)
+    manifest = destination / "provenance.json"
+    data = json.loads(manifest.read_text())
+    data["reviewed"] = True
+    assert "adapter.py" in data["context"]["contract_files"]
+    manifest.write_text(json.dumps(data))
+    dependency.write_text("contract = 2\n")
+    result, report = run_suite(tmp_path, source, "--gcp-mode", "local", "--gcp-project", "local-test",
+        "--gcp-endpoint", "http://127.0.0.1:8080", "--gcp-baselines", str(destination.parent), synthetic=True)
+    assert result.returncode != 0
+    assert report["conformance"]["outcomes"] == {"unverified": 1}
+
+
+def test_contract_dependencies_cannot_escape_repository(tmp_path):
+    marker = SCENARIO.replace('id="synthetic-case",', 'id="synthetic-case", contract_files=("../secret",),')
+    result, _ = run_suite(tmp_path, "import pytest\n" + marker + "def test_cloud(): pass\n")
+    assert result.returncode == 4
+    assert "repository-relative" in result.stderr

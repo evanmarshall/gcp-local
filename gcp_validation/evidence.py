@@ -93,6 +93,7 @@ class SnapshotCase:
         self.last_cloud_validation = None
         self.baseline = Path(baseline_dir) / scenario.id
         self.manifest = None
+        self.context = {}
         if mode not in {"local", "record", "revalidate"}:
             raise ValueError("Snapshots require an explicit comparison or recording mode")
         if source not in {"gcp", "synthetic"}:
@@ -130,6 +131,7 @@ class SnapshotCase:
 
     def finish(self):
         """Invoke only after all test and cleanup phases succeeded."""
+        check_observation(self.context)
         if not self.observations:
             raise Unverified("Scenario completed without any snapshot observations")
         recording = self.mode == "record"
@@ -164,5 +166,6 @@ class SnapshotCase:
             "runner_versions": {name: version(name) for name in (
                 "pytest", "pytest-socket", "localstack-snapshot")},
         }
+        manifest["context"] = self.context
         (directory / "provenance.json").write_text(json.dumps(manifest, indent=2) + "\n")
         return directory

@@ -1,6 +1,6 @@
 # Validation runners
 
-The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain, not a choice of emulator implementation language. There are currently no real-GCP recordings or supported service scenarios. Passing harness tests establishes that the tooling works; the coverage report correctly shows zero verified cloud scenarios.
+The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain, not a choice of emulator implementation language. A bounded Storage lifecycle scenario is implemented; its real-GCP baseline is recorded separately from the synthetic harness checks. Passing harness tests establishes that the tooling works; the coverage report correctly shows zero verified cloud scenarios.
 
 ## Run offline checks
 
@@ -23,7 +23,7 @@ Results are written to `.artifacts/validation/junit.xml` and `coverage.json`. Us
 | `record` | `--gcp-project`, `--gcp-credentials-file`, `--gcp-live-scope`, `--gcp-allow-live` | Allow an explicitly authorized live scenario; write a new, unreviewed candidate only after all tests and cleanup succeed. |
 | `revalidate` | Same explicit live inputs | Compare against a reviewed recording; report a successful cloud validation date without silently rewriting the baseline. |
 
-The live credential file is selected explicitly and is never read by the foundation itself; the service adapter must load exactly that file. No project or credential discovery uses environment variables or metadata services. `.env` is for [sandbox setup inputs](gcp-sandbox.md), not an automatic mode switch. Real service adapters, endpoint selection, authentication, and cloud verification are follow-on work in #9/#21.
+The live credential file is selected explicitly. The Storage adapter loads only the identities in the selected sandbox profile. No project or credential discovery uses environment variables or metadata services. `.env` is for [sandbox setup inputs](gcp-sandbox.md), not an automatic mode switch. The Storage adapter selects the fixed Google Storage endpoint in live modes and the explicit loopback endpoint in local mode. GitHub WIF and reusable project provisioning remain in #21.
 
 Example local invocation, once a matching service and baseline exist:
 
@@ -39,7 +39,7 @@ Live invocations add `--gcp-mode record` or `revalidate`, the dedicated sandbox 
 
 ## Write a scenario
 
-Mark cloud scenarios with `gcp_scenario(id=..., service=..., transport=..., versions=...)`. Supply `versions` with `sdk`, `provider`, and `backend` string values; use `not-applicable` where appropriate. IDs are unique lowercase hyphenated names. The runner hashes the source module as the scenario revision so a changed contract requires a reviewed baseline.
+Mark cloud scenarios with `gcp_scenario(id=..., service=..., transport=..., versions=...)`. Supply `versions` with `sdk`, `provider`, and `backend` string values; use `not-applicable` where appropriate. IDs are unique lowercase hyphenated names. The runner hashes the source module and any repository-relative `contract_files` as the scenario revision, so changed adapter/normalization behavior requires a reviewed baseline.
 
 Use `gcp_target` to configure the service client explicitly. Send selected public fields to `gcp_snapshot.match("operation-name", observation)`. Assert lifecycle, etag, and side effects in the test as well. Model resource setup/cleanup with pytest fixtures; service fixtures should depend on `gcp_snapshot` when they need the evidence preflight. The plugin compares or persists only after every teardown succeeds. Do not call snapshot finalization yourself.
 
@@ -64,3 +64,35 @@ Raise `Unsupported`, `Unverified`, or `Inconclusive` from `gcp_validation.eviden
 All installed dependencies, including transitives, are pinned in `requirements-validation.txt`. Transitive licenses: cachebox, deepdiff, iniconfig, orderly-set, and pluggy are MIT; jsonpath-ng is Apache-2.0; packaging is Apache-2.0 OR BSD-2-Clause; Pygments is BSD-2-Clause. PyYAML in the contributor requirements is MIT. No upstream suite is vendored or claimed as running yet.
 
 The runner versions follow [the archived LocalStack dependency list](https://github.com/localstack/localstack/blob/8b9a79f05846835cf4dff63ab7eefdde9df83783/requirements-test.txt). Update pins in reviewed changes, run dependency checks and the complete synthetic harness on Python 3.11/3.12, and explicitly review the private SnapshotSession methods used by the adapter. Keep GCP baselines unchanged during dependency upgrades; revalidation is a separate live task.
+
+
+## Bounded Storage lifecycle
+
+The scenario in `tests/conformance/test_storage.py` creates one private, regional Standard bucket with soft delete and versioning disabled. A separate fixture identity manages the bucket and grants Object User to the allowed caller. The scenario uploads a fixed synthetic payload, reads and lists it, checks a failed conditional overwrite preserves content/generation/etag, checks a denied upload leaves the object list unchanged, deletes the object, and verifies absence. Cleanup removes the owned bucket even when the scenario fails.
+
+Install the optional, pinned Google authentication dependencies for live runs:
+
+```sh
+.venv-tools/bin/python -m pip install -r requirements-cloud.txt
+.venv-tools/bin/python -m gcp_validation.sandbox doctor --profile /absolute/path/to/.env
+.venv-tools/bin/python -m pytest tests/conformance/test_storage.py -q \
+  --gcp-mode record --gcp-profile /absolute/path/to/.env --gcp-allow-live \
+  --gcp-artifacts .artifacts/storage-record
+```
+
+`--gcp-profile` supplies the explicit project, allowed credential path, and owner-provided scope; conflicting target overrides fail before resource creation. The initial local profile contract requires separate fixture, allowed, and denied ADC files from the dedicated project. Region and resource bounds are recorded in provenance, together with source-file and snapshot integrity hashes. The free-text authorization description and actual project/identity names are not persisted in snapshots.
+
+Inspect the new candidate pair before promoting it using the review procedure above. Then run the same command with `--gcp-mode revalidate` and a separate artifacts directory. Revalidation compares the same contract without rewriting the baseline. Local comparison uses the earlier local-mode command and the committed recording; it cannot load the live profile, use ambient proxies, or follow redirects to cloud endpoints.
+
+The initial local adapter sends explicit synthetic `gcp-local-test:fixture`, `:allowed`, and `:denied` bearer identities. The controlled protocol server used by offline harness tests recognizes these identities; the actual emulator identity protocol remains #6. This is not a working Storage emulator or SDK compatibility certification. The controlled-server recordings are always labeled synthetic and never count as GCP evidence.
+
+Each live scenario holds a per-project process lock and rejects an already occupied sandbox before creating another bucket. An owner-readable manifest is written under `~/.local/state/gcp-local/PROJECT_ID/` before mutations. Normal cleanup verifies both the numeric project and unique bucket ownership label. For an interrupted run, explicitly select its manifest:
+
+```sh
+.venv-tools/bin/python -m gcp_validation.storage cleanup \
+  --profile /absolute/path/to/.env --manifest /absolute/path/to/RUN_ID.json --allow-live
+```
+
+Cleanup only visits manifest-owned object names in the matching bucket. It does not sweep unrelated buckets or repair ownership mismatches. A failed cleanup leaves the manifest pending and prevents candidate publication. Different developer machines must still coordinate use of the one-bucket sandbox; the local process lock is not a distributed lock.
+
+The authentication lane reuses [google-auth](https://github.com/googleapis/google-auth-library-python) 2.56.2 (Apache-2.0), with all transitive versions pinned in `requirements-cloud.txt`. Its additional dependency licenses are: Requests Apache-2.0; urllib3 and charset-normalizer MIT; cffi MIT-0; cryptography Apache-2.0 OR BSD-3-Clause; certifi MPL-2.0; idna BSD-3-Clause; pyasn1 and pyasn1-modules BSD-2-Clause; pycparser BSD-3-Clause. Update these pins with the offline suite and explicit live revalidation. Cloud CLI bundles are not imported by the repository runner.

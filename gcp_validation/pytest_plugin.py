@@ -2,6 +2,7 @@
 
 from collections import Counter
 from dataclasses import asdict
+import hashlib
 import json
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -10,6 +11,7 @@ import pytest
 import pytest_socket
 
 from .config import Target
+from .sandbox import Sandbox
 from .evidence import (
     Divergence, Inconclusive, Scenario, SnapshotCase, Unsupported, Unverified, now, sha256,
 )
@@ -23,6 +25,7 @@ def pytest_addoption(parser):
     group = parser.getgroup("GCP validation")
     group.addoption("--gcp-mode", choices=("offline", "local", "record", "revalidate"), default="offline")
     group.addoption("--gcp-project")
+    group.addoption("--gcp-profile", help="Explicit sandbox .env; live modes only")
     group.addoption("--gcp-endpoint")
     group.addoption("--gcp-credentials-file")
     group.addoption("--gcp-live-scope")
@@ -48,11 +51,18 @@ def network_policy(config, *, loopback=False):
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config):
     try:
+        profile_path = config.getoption("gcp_profile")
+        config.gcp_sandbox = None
+        if profile_path:
+            if config.getoption("gcp_mode") not in {"record", "revalidate"} or not config.getoption("gcp_allow_live"):
+                raise ValueError("Sandbox profiles require an explicit live mode and --gcp-allow-live")
+            config.gcp_sandbox = Sandbox.load(profile_path)
+        profile = config.gcp_sandbox
         config.gcp_target = Target.select(
-            config.getoption("gcp_mode"), project=config.getoption("gcp_project"),
+            config.getoption("gcp_mode"), project=config.getoption("gcp_project") or (profile.project if profile else None),
             endpoint=config.getoption("gcp_endpoint"),
-            credentials_file=config.getoption("gcp_credentials_file"),
-            live_scope=config.getoption("gcp_live_scope"),
+            credentials_file=config.getoption("gcp_credentials_file") or (profile.identities["allowed"].credentials_file if profile else None),
+            live_scope=config.getoption("gcp_live_scope") or (profile.live_scope if profile else None),
             allow_live=config.getoption("gcp_allow_live"),
         )
         if any(config.getoption(option, default=False) for option in (
@@ -61,7 +71,7 @@ def pytest_configure(config):
             raise ValueError("Use the GCP target options instead of overriding network guards")
         if config.pluginmanager.hasplugin("localstack_snapshot.pytest.snapshot"):
             raise ValueError("Use the GCP snapshot adapter, not the AWS-oriented upstream pytest plugin")
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         raise pytest.UsageError(str(exc)) from None
     config.gcp_results = []
     config.gcp_artifacts = Path(config.getoption("gcp_artifacts")).resolve()
@@ -79,6 +89,7 @@ def pytest_collection_modifyitems(config, items):
         item.gcp_status = None
         item.gcp_case = None
         item.gcp_scenario = None
+        item.gcp_contract_files = {}
         if (any(item.get_closest_marker(name) for name in ("enable_socket", "allow_hosts"))
                 or "socket_enabled" in item.fixturenames):
             raise pytest.UsageError("Use harness_loopback or an explicit GCP mode, not socket overrides")
@@ -87,7 +98,20 @@ def pytest_collection_modifyitems(config, items):
             if item.get_closest_marker("harness_loopback"):
                 raise pytest.UsageError("Cloud scenarios cannot be labeled as synthetic harness tests")
             try:
-                item.gcp_scenario = Scenario(**marker.kwargs, revision=sha256(item.path))
+                metadata = dict(marker.kwargs)
+                files = metadata.pop("contract_files", ())
+                revision = sha256(item.path)
+                if files:
+                    root = Path(config.rootpath).resolve()
+                    for name in files:
+                        path = (root / name).resolve()
+                        if Path(name).is_absolute() or not path.is_relative_to(root) or not path.is_file():
+                            raise ValueError("Contract files must be repository-relative files")
+                        item.gcp_contract_files[name] = sha256(path)
+                    revision = hashlib.sha256(json.dumps(
+                        {"scenario_module": revision, "contract_files": item.gcp_contract_files},
+                        sort_keys=True).encode()).hexdigest()
+                item.gcp_scenario = Scenario(**metadata, revision=revision)
             except (ValueError, TypeError) as exc:
                 raise pytest.UsageError(f"Invalid gcp_scenario metadata: {exc}") from None
             if item.gcp_scenario.id in ids:
@@ -107,6 +131,7 @@ def pytest_runtest_setup(item):
             item.gcp_scenario, mode, item.config.getoption("gcp_baselines"),
             item.config.gcp_artifacts / "candidates",
         )
+        item.gcp_case.context["contract_files"] = item.gcp_contract_files
 
 
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)

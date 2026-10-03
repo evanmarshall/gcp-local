@@ -132,3 +132,12 @@ def test_public_error_fields_and_relationships_are_retained():
              "permission": "storage.objects.get", "reason": "forbidden", "etag_changed": False}
     check_observation(value)
     assert value["permission"] == "storage.objects.get"
+
+
+def test_unsafe_provenance_is_rejected_before_any_candidate_is_written(tmp_path, scenario):
+    recorder = SnapshotCase(scenario, "record", tmp_path / "baseline", tmp_path / "candidates", source="synthetic")
+    recorder.match("ok", {"status": 200})
+    recorder.context = {"authorization": "synthetic-secret"}
+    with pytest.raises(ValueError):
+        recorder.finish()
+    assert not (tmp_path / "candidates").exists()
