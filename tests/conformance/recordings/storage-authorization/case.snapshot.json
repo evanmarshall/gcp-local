@@ -1,0 +1,181 @@
+{
+  "storage-authorization": {
+    "recorded-date": "03-10-2026, 07:17:42",
+    "recorded-content": {
+      "initial-object": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "4Df1k2XFqQkezQ8kDc2z8Q==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "33"
+      },
+      "bucket-granted-read": {
+        "bytes": 33,
+        "sha256": "8719c83915b7d4e505409aa4f497f15caf769786fa7c43e0ce6d557c2b58e113",
+        "status": 200
+      },
+      "missing-read-permission": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/object.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "missing-create-permission": {
+        "code": 403,
+        "content_type": "text/html",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.create access to the Google Cloud Storage object. Permission 'storage.objects.create' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/denied.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unchanged-after-denied-write": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "4Df1k2XFqQkezQ8kDc2z8Q==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "33"
+      },
+      "anonymous-read": {
+        "code": 401,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Anonymous caller does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/object.txt' (or it may not exist).",
+        "reasons": [
+          "required"
+        ],
+        "status": 401
+      },
+      "anonymous-write": {
+        "code": 401,
+        "content_type": "text/html",
+        "format": "json",
+        "message": "Anonymous caller does not have storage.objects.create access to the Google Cloud Storage object. Permission 'storage.objects.create' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/anonymous.txt' (or it may not exist).",
+        "reasons": [
+          "required"
+        ],
+        "status": 401
+      },
+      "unchanged-after-anonymous-write": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "4Df1k2XFqQkezQ8kDc2z8Q==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "33"
+      },
+      "allowed-grant-removed": {
+        "actor": "allowed",
+        "attachment": "bucket",
+        "roles": []
+      },
+      "bucket-revocation": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/object.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "project-inherited-read": {
+        "actor": "fixture",
+        "attachment": "project",
+        "explicit_bucket_binding": false,
+        "result": {
+          "bytes": 33,
+          "sha256": "8719c83915b7d4e505409aa4f497f15caf769786fa7c43e0ce6d557c2b58e113",
+          "status": 200
+        },
+        "role": "roles/storage.admin"
+      },
+      "allowed-grant-restored": {
+        "actor": "allowed",
+        "attachment": "bucket",
+        "roles": [
+          "roles/storage.objectUser"
+        ]
+      },
+      "reader-granted": {
+        "actor": "denied",
+        "attachment": "bucket",
+        "roles": [
+          "roles/storage.objectViewer"
+        ]
+      },
+      "reader-after-grant": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "4Df1k2XFqQkezQ8kDc2z8Q==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "33"
+      },
+      "reader-still-cannot-write": {
+        "code": 403,
+        "content_type": "text/html",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.create access to the Google Cloud Storage object. Permission 'storage.objects.create' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/reader-write.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unchanged-after-reader-write": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "4Df1k2XFqQkezQ8kDc2z8Q==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "33"
+      },
+      "reader-revoked": {
+        "actor": "denied",
+        "attachment": "bucket",
+        "roles": []
+      },
+      "reader-after-revocation": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/object.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unchanged-after-transitions": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "4Df1k2XFqQkezQ8kDc2z8Q==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "33"
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

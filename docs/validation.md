@@ -1,6 +1,6 @@
 # Validation runners
 
-The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain, not a choice of emulator implementation language. One bounded Storage lifecycle scenario has a reviewed real-GCP baseline, recorded and revalidated on 2026-10-03 UTC. Ordinary offline checks still report that scenario as unverified because they do not execute it; harness passes do not count as service coverage.
+The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain, not a choice of emulator implementation language. The bounded Storage lifecycle and same-project authorization scenarios have real-GCP baselines recorded and revalidated on 2026-10-03 UTC. See [the authorization matrix](authorization-baseline.md) for exact coverage and the pending cross-project recording. Ordinary offline checks still report that scenario as unverified because they do not execute it; harness passes do not count as service coverage.
 
 ## Run offline checks
 

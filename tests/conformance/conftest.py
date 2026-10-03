@@ -28,3 +28,12 @@ def storage(gcp_snapshot, gcp_target, pytestconfig):
         fixture.cleanup()
         if fixture.manifest["cleanup"] == "passed":
             gcp_snapshot.match("cleanup", {"bucket_absent": True, "owned_objects_removed": True})
+
+
+@pytest.fixture
+def peer_storage(gcp_snapshot, gcp_target, pytestconfig, request):
+    from gcp_validation.evidence import Unverified
+    if gcp_target.mode != "local" and (pytestconfig.gcp_sandbox is None
+                                      or "peer" not in pytestconfig.gcp_sandbox.identities):
+        raise Unverified("Cross-project recording requires an explicitly authorized peer project and identity")
+    return request.getfixturevalue("storage")

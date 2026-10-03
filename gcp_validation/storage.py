@@ -59,7 +59,7 @@ class StorageClient:
         self.credentials = {}
 
     def request(self, actor, method, path, *, query=None, body=None, media=False):
-        if actor not in {"fixture", "allowed", "denied", "anonymous"}:
+        if actor not in {"fixture", "allowed", "denied", "anonymous", "peer"}:
             raise ValueError("Unknown scenario identity")
         if not path.startswith(("/storage/v1/", "/upload/storage/v1/")):
             raise ValueError("Select an explicit Storage JSON API path")

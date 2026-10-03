@@ -56,7 +56,7 @@ def storage_server():
             if bucket is None:
                 return self.error(404, "Bucket not found", "notFound")
             if path.endswith("/iam"):
-                if method == "PUT":
+                if method == "PUT" and not state.get("ignore_policy"):
                     state["policy"] = json.loads(body)
                 return self.respond(200, state["policy"])
             if path == "/storage/v1/b/" + bucket["name"]:
@@ -68,6 +68,19 @@ def storage_server():
                     state["bucket"] = None
                     return self.respond(204)
                 return self.respond(200, bucket)
+            if state.get("authorization") and actor != "fixture":
+                roles = [binding["role"] for binding in state["policy"].get("bindings", [])
+                         if any(member.startswith("serviceAccount:" + actor + "@")
+                                for member in binding["members"])]
+                permission = "storage.objects.create" if path.startswith("/upload/") else "storage.objects.get"
+                permitted = ("roles/storage.objectUser" in roles or
+                             (method == "GET" and "roles/storage.objectViewer" in roles))
+                if state.get("leaked_access") == actor:
+                    permitted = True
+                if not permitted:
+                    if state.get("authorization_side_effect") and path.startswith("/upload/"):
+                        state["objects"]["object.txt"][0]["etag"] = "corrupted"
+                    return self.error(403, "<" + actor + "> lacks " + permission + " on " + bucket["name"], "forbidden")
             if path.startswith("/upload/"):
                 name = query["name"][0]
                 if actor == "denied" and not state["denied_side_effect"]:

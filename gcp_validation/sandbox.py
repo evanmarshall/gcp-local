@@ -28,6 +28,7 @@ class Sandbox:
     max_buckets: int = 1
     max_objects: int = 10
     max_object_bytes: int = 1048576
+    peer_project: str | None = None
 
     @classmethod
     def load(cls, filename):
@@ -76,6 +77,21 @@ class Sandbox:
             identities[alias] = Identity(email, credential_path.resolve())
         if len({identity.email for identity in identities.values()}) != 3:
             raise SandboxError("Fixture, allowed, and denied identities must be distinct")
+        peer_project = values.get("GCP_TEST_PEER_PROJECT_ID") or None
+        peer_fields = ("GCP_TEST_PEER_PROJECT_ID", "GCP_TEST_PEER_SERVICE_ACCOUNT", "GCP_TEST_PEER_CREDENTIALS_FILE")
+        if any(values.get(key) for key in peer_fields):
+            peer_project = required(peer_fields[0])
+            if (not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", peer_project)
+                    or peer_project == project):
+                raise SandboxError("Cross-project tests require a distinct explicit peer project")
+            email = required(peer_fields[1])
+            if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]@" + re.escape(peer_project)
+                                + r"\.iam\.gserviceaccount\.com", email):
+                raise SandboxError("Peer identity must belong to the selected peer project")
+            path = Path(required(peer_fields[2])).expanduser()
+            if not path.is_absolute():
+                raise SandboxError("Peer credentials require an absolute path")
+            identities["peer"] = Identity(email, path.resolve())
         limits = {}
         for name, maximum in (("max_buckets", 1), ("max_objects", 10),
                               ("max_object_bytes", 1048576)):
@@ -86,7 +102,7 @@ class Sandbox:
             if not 1 <= value <= maximum:
                 raise SandboxError("Initial Storage runner resource limit exceeded: " + name)
             limits[name] = value
-        return cls(project, number, region, required("GCP_TEST_LIVE_SCOPE"), identities, **limits)
+        return cls(project, number, region, required("GCP_TEST_LIVE_SCOPE"), identities, peer_project=peer_project, **limits)
 
     def scope(self):
         return {"services": ["storage"], "region": self.region, "max_buckets": self.max_buckets,

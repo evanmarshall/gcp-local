@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-03T06:37:12.361047+00:00",
+  "recorded_at": "2026-10-03T07:17:32.107114+00:00",
   "scenario": {
     "id": "storage-object-lifecycle",
     "service": "storage",
     "transport": "rest-json-v1",
-    "revision": "ad8a5c00f78c167a063ff43ec04a6babdc357f2da7e542ca36aa8f3f1140cf9c",
+    "revision": "714aa6babf0316ee662290097e944205e151307de005acf387494fd8d9d5913c",
     "versions": {
       "sdk": "stdlib-http/3.11.12;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "755804f0a094b6f6dbe896826ffda9d8eccde62c3a98e8585a89365b8cf67a9e",
+  "snapshot_sha256": "ad6ff1beb856005edf0dbd878929c12698cc72b6e04d618bb07569fd54580d3f",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/storage.py": "7b3636b8608749ffa978e6aa0124caa0d656a8984ba22832985e13bb6f05a9bc",
-      "gcp_validation/normalization.py": "77be84b37e9e77d0108756a6ac95a5053f8a82fb96e42274ea96a14376abe3fd",
-      "gcp_validation/sandbox.py": "d99b5af803d5be2438e7aadd31b1d2bfa31fc1741766016458af1033537b6a22",
-      "tests/conformance/conftest.py": "fe84077dd9ab89bd01053a1df53bd60c4755aa91956a5b0c7a1f686c821a0f16"
+      "gcp_validation/storage.py": "18b25751e765c562713bf2ead41e42b9d3ead111af62a2b67f771eb670ef70be",
+      "gcp_validation/normalization.py": "908078b633aeccc6cb800ee272874bd0c0c67b1d94f3e06b0d0fc3d73cac0a14",
+      "gcp_validation/sandbox.py": "17ce6526ed2cf54efa4ff3049a2e374d73df790d4353ee97364ec206ff36aed4",
+      "tests/conformance/conftest.py": "2c0f00aa2512e74afbdec75738bda09096916cf8d99b254bab64554c62d2acad"
     },
     "scope": {
       "services": [

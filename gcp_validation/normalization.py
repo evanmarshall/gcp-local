@@ -13,6 +13,8 @@ class StorageObservations:
         if fixture.sandbox:
             self.aliases.update({identity.email: "<" + alias + ">"
                                 for alias, identity in fixture.sandbox.identities.items()})
+        if fixture.sandbox and fixture.sandbox.peer_project:
+            self.aliases[fixture.sandbox.peer_project] = "<peer-project>"
         self.references = {}
 
     def reference(self, kind, value):

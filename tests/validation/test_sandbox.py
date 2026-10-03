@@ -110,3 +110,24 @@ def test_typed_credential_loader_does_not_refresh_or_discover_ambient_credential
     assert credential.signer_email == sandbox.identities["allowed"].email
     assert credential.quota_project_id == sandbox.project
     assert not credential.valid
+
+
+def test_peer_profile_requires_all_fields_and_distinct_project(profile):
+    original = profile.read_text()
+    with profile.open("a") as output:
+        output.write("GCP_TEST_PEER_PROJECT_ID=synthetic-peer\n")
+    with pytest.raises(ValueError, match="Missing"):
+        Sandbox.load(profile)
+    with profile.open("a") as output:
+        output.write("GCP_TEST_PEER_SERVICE_ACCOUNT=foreign-caller@synthetic-peer.iam.gserviceaccount.com\n")
+        output.write("GCP_TEST_PEER_CREDENTIALS_FILE=/explicit/peer.json\n")
+    sandbox = Sandbox.load(profile)
+    assert sandbox.peer_project == "synthetic-peer"
+    assert sandbox.identities["peer"].credentials_file == Path("/explicit/peer.json")
+    assert sandbox.scope()["max_buckets"] == 1
+    profile.write_text(profile.read_text().replace("synthetic-peer", "synthetic-sandbox"))
+    with pytest.raises(ValueError, match="distinct explicit peer"):
+        Sandbox.load(profile)
+    profile.write_text(original + "GCP_TEST_PEER_SERVICE_ACCOUNT=unselected@example.com\n")
+    with pytest.raises(ValueError, match="Missing"):
+        Sandbox.load(profile)
