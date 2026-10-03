@@ -24,7 +24,7 @@ def wif(tmp_path, monkeypatch):
     data = {"type": "external_account", "audience": "//iam.googleapis.com/" + PROVIDER,
         "subject_token_type": "urn:ietf:params:oauth:token-type:jwt", "token_url": "https://sts.googleapis.com/v1/token",
         "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/" + identity.email + ":generateAccessToken",
-        "credential_source": {"url": endpoint + "&" + urlencode({"audience": PROVIDER}),
+        "credential_source": {"url": endpoint + "&" + urlencode({"audience": "https://iam.googleapis.com/" + PROVIDER}),
             "headers": {"Authorization": "Bearer synthetic-runner-secret"},
             "format": {"type": "json", "subject_token_field_name": "value"}}}
     identity.credentials_file.write_text(json.dumps(data))

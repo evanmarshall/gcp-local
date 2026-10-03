@@ -24,7 +24,7 @@ def validate_github_credentials(data, identity, project):
     runner_url = urlsplit(os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", ""))
     query = parse_qs(url.query, keep_blank_values=True)
     runner_query = parse_qs(runner_url.query, keep_blank_values=True)
-    runner_query["audience"] = [provider]
+    runner_query["audience"] = ["https://iam.googleapis.com/" + provider]
     if (os.environ.get("GITHUB_ACTIONS") != "true"
             or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
             or os.environ.get("GITHUB_REF") != "refs/heads/main"
