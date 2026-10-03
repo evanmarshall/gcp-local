@@ -58,6 +58,8 @@ def plan(project, project_number, setup_account, repository, repository_id, owne
         {"name": provider, "state": "ACTIVE", "attributeCondition": condition,
          "attributeMapping": dict(entry.split("=", 1) for entry in mapping.split(",")),
          "oidc": {"issuerUri": "https://token.actions.githubusercontent.com"}})
+    add("Allow selected workflow quota charges during impersonation", ["projects", "add-iam-policy-binding", project,
+        "--role=roles/serviceusage.serviceUsageConsumer", "--member=" + principal, "--condition=None"])
     for alias, name in IDENTITIES.items():
         add("Permit bounded workflow to impersonate " + alias, ["iam", "service-accounts", "add-iam-policy-binding",
             name + "@" + project + ".iam.gserviceaccount.com", "--role=roles/iam.workloadIdentityUser",
