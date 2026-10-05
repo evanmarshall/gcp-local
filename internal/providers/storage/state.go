@@ -55,6 +55,22 @@ func (c *Catalog) Bucket(scope state.Scope, name string) (Bucket, bool, error) {
 	return result, found, err
 }
 
+// UpdateMetadata changes provider-owned bucket fields under the backend gate.
+// It cannot move a bucket or change its global ownership.
+func (c *Catalog) UpdateMetadata(scope state.Scope, name, metadata string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.store.With(scope, func(value *projectState) error {
+		bucket, ok := value.Buckets[name]
+		if !ok {
+			return errors.New("bucket metadata is absent")
+		}
+		bucket.Metadata = metadata
+		value.Buckets[name] = bucket
+		return nil
+	})
+}
+
 // ForgetBucket follows confirmed backend deletion, never an attempted deletion.
 func (c *Catalog) ForgetBucket(scope state.Scope, name string) error {
 	c.mu.Lock()

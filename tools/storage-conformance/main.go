@@ -7,8 +7,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
 	"log"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,6 +26,9 @@ import (
 )
 
 func main() {
+	trace := flag.Bool("trace", false, "Log local request methods, paths and status codes only")
+	fault := flag.Bool("fault-rpo", false, "Inject incorrect bucket RPO to verify acceptance-test failures")
+	flag.Parse()
 	interfaces, err := net.Interfaces()
 	if err != nil || len(interfaces) != 1 || interfaces[0].Name != "lo" || os.Getenv("GCP_LOCAL_ISOLATED") != "1" {
 		log.Fatal("Run the conformance fixture inside scripts/run_isolated.py")
@@ -56,6 +63,30 @@ func main() {
 	server.IAM = engine
 	_, err = storage.New(registry, server.Backends, index, engine)
 	must(err)
+	if *trace || *fault {
+		handler := server.HTTP.Handler
+		server.HTTP.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			recorded := httptest.NewRecorder()
+			handler.ServeHTTP(recorded, r)
+			if *trace {
+				log.Printf("%s %s %d", r.Method, r.URL.Path, recorded.Code)
+			}
+			body := recorded.Body.Bytes()
+			if *fault && recorded.Code == 200 {
+				var value map[string]any
+				if json.Unmarshal(body, &value) == nil && value["kind"] == "storage#bucket" {
+					value["rpo"] = "ASYNC_TURBO"
+					body, _ = json.Marshal(value)
+				}
+			}
+			for key, values := range recorded.Header() {
+				w.Header()[key] = values
+			}
+			w.Header().Del("Content-Length")
+			w.WriteHeader(recorded.Code)
+			_, _ = w.Write(body)
+		})
+	}
 	http, err := net.Listen("tcp", "127.0.0.1:4566")
 	must(err)
 	grpc, err := net.Listen("tcp", "127.0.0.1:0")

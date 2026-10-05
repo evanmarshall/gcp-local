@@ -43,7 +43,11 @@ def main(argv=None):
         if sys.platform != "linux":
             parser.error("Run in moo or Linux CI; no weaker host fallback is available")
         original = list(argv if argv is not None else sys.argv[1:])
-        os.execvp("unshare", ["unshare", "--net", "--fork", sys.executable, str(Path(__file__).resolve()), "--inside", *original])
+        # Terraform and other helpers may create their own process groups. A
+        # private PID namespace also removes detached descendants when this
+        # runner exits, including after timeout or a killed test process.
+        os.execvp("unshare", ["unshare", "--net", "--mount", "--pid", "--mount-proc", "--fork", "--kill-child",
+                            sys.executable, str(Path(__file__).resolve()), "--inside", *original])
     subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
     assert_isolated()
     env = {key: value for key, value in os.environ.items()

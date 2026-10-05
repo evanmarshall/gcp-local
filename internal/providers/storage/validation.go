@@ -42,12 +42,14 @@ func validateQuery(method string, r *gateway.RESTRequest) error {
 		add("project", "prefix", "maxResults", "pageToken")
 	case "storage.buckets.getIamPolicy":
 		add("optionsRequestedPolicyVersion")
+	case "storage.buckets.patch":
+		add("ifMetagenerationMatch", "ifMetagenerationNotMatch")
 	case "storage.objects.insert":
 		add("uploadType", "name", "ifGenerationMatch", "ifGenerationNotMatch", "ifMetagenerationMatch", "ifMetagenerationNotMatch")
 	case "storage.objects.get", "storage.objects.delete":
 		add("generation", "ifGenerationMatch", "ifGenerationNotMatch", "ifMetagenerationMatch", "ifMetagenerationNotMatch")
 	case "storage.objects.list":
-		add("prefix", "delimiter", "maxResults", "pageToken", "startOffset", "endOffset")
+		add("prefix", "delimiter", "maxResults", "pageToken", "startOffset", "endOffset", "versions")
 	}
 	for key, values := range r.Query {
 		if !allowed[key] {
@@ -65,6 +67,9 @@ func validateQuery(method string, r *gateway.RESTRequest) error {
 	}
 	if projection := r.Query.Get("projection"); projection != "" && projection != "noAcl" {
 		return gap("only the noAcl projection is supported")
+	}
+	if versions := r.Query.Get("versions"); versions != "" && versions != "true" && versions != "false" {
+		return invalid("versions must be a boolean")
 	}
 	for key := range r.Headers {
 		lower := strings.ToLower(key)
@@ -111,19 +116,33 @@ func parseUpload(r *gateway.RESTRequest) (*uploadRequest, error) {
 		}
 		for key := range value {
 			switch key {
-			case "name", "contentType", "metadata", "md5Hash", "crc32c", "cacheControl", "contentDisposition", "contentLanguage":
+			case "name", "bucket", "storageClass", "contentType", "metadata", "md5Hash", "crc32c", "cacheControl", "contentDisposition", "contentLanguage":
 			default:
 				return nil, gap("unsupported object metadata " + key)
 			}
 		}
 		var name string
-		if json.Unmarshal(value["name"], &name) != nil {
-			return nil, status.Error(codes.InvalidArgument, "Object name is required")
+		if raw, ok := value["storageClass"]; ok {
+			var class string
+			if json.Unmarshal(raw, &class) != nil || class != "STANDARD" {
+				return nil, gap("only STANDARD object storage class is supported")
+			}
 		}
-		if u.name != "" && u.name != name {
-			return nil, status.Error(codes.InvalidArgument, "Object names disagree")
+		if raw, ok := value["bucket"]; ok {
+			var bucket string
+			if json.Unmarshal(raw, &bucket) != nil || bucket != r.Path["bucket"] {
+				return nil, status.Error(codes.InvalidArgument, "Object bucket does not match the upload target")
+			}
 		}
-		u.name = name
+		if raw, ok := value["name"]; ok {
+			if json.Unmarshal(raw, &name) != nil {
+				return nil, status.Error(codes.InvalidArgument, "Invalid object name")
+			}
+			if u.name != "" && u.name != name {
+				return nil, status.Error(codes.InvalidArgument, "Object names disagree")
+			}
+			u.name = name
+		}
 		media, err := reader.NextPart()
 		if err != nil {
 			return nil, status.Error(codes.InvalidArgument, "Missing object media")
@@ -213,7 +232,10 @@ type bucketRequest struct {
 	Versioning struct {
 		Enabled bool `json:"enabled"`
 	} `json:"versioning"`
-	Hold bool `json:"defaultEventBasedHold"`
+	Hold      bool `json:"defaultEventBasedHold"`
+	Lifecycle *struct {
+		Rule []json.RawMessage `json:"rule"`
+	} `json:"lifecycle,omitempty"`
 }
 
 func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
@@ -221,6 +243,9 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	decoder := json.NewDecoder(bytes.NewReader(r.JSON))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
+		if strings.HasPrefix(err.Error(), "json: unknown field ") {
+			return nil, gap("unsupported bucket field " + strings.TrimPrefix(err.Error(), "json: unknown field "))
+		}
 		return nil, gap("unsupported bucket configuration")
 	}
 	if !request.IAM.Uniform.Enabled || request.IAM.Public != "enforced" {
@@ -231,6 +256,9 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	}
 	if request.SoftDelete.EffectiveTime != nil {
 		return nil, gap("soft-delete effective time is server-owned")
+	}
+	if request.Lifecycle != nil && len(request.Lifecycle.Rule) > 0 {
+		return nil, gap("bucket lifecycle rules")
 	}
 	if request.StorageClass == "" {
 		request.StorageClass = "STANDARD"
@@ -255,6 +283,8 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	metadata["softDeletePolicy"] = map[string]string{"retentionDurationSeconds": string(request.SoftDelete.Seconds)}
 	project, _ := p.index.Get(projectResource(scope.Project))
 	metadata["projectNumber"] = project.Number
+	metadata["metageneration"] = "1"
+	metadata["etag"] = objectETag(request.Name, "1")
 	encoded, _ := json.Marshal(metadata)
 	if err := p.catalog.PublishBucket(scope, Bucket{Name: request.Name, Location: request.Location, Metadata: string(encoded)}); err != nil {
 		// A competing project may have claimed the global name while this backend

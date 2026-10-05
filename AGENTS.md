@@ -1,6 +1,6 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The repository contains a Go runtime with shared REST/gRPC dispatch, scoped state/lifecycle, local identity, basic IAM, and an authenticated Storage provider backed by pinned fake-gcs-server. Storage has five recorded conformance scenarios; other service providers remain pending. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator. The repository contains a Go runtime with shared REST/gRPC dispatch, scoped state/lifecycle, local identity, basic IAM, and an authenticated Storage provider backed by pinned fake-gcs-server. Storage has seven recorded conformance scenarios; other service providers remain pending. Do not describe planned services as working features.
 
 ## Start here
 
@@ -27,6 +27,7 @@ gcp-local is a LocalStack-style GCP emulator. The repository contains a Go runti
 - Use deterministic local tests for normal development. Real-GCP recording requires an authorized sandbox and explicit live-cloud scope; permission to edit a provider does not authorize cloud spending. Never fall back to real GCP when local emulation is missing.
 - Preserve observed cloud fixtures; update them through the recorder rather than editing expected results to match the emulator. Keep credentials and sensitive payloads out of fixtures, logs, and Git.
 - Run `sh scripts/check_storage.sh` inside moo/Linux when changing Storage. It tests production ADC and the real backend against committed cloud recordings without egress. Its synthetic credential adapter is test-only.
+- Run `sh scripts/check_terraform.sh` inside moo/Linux for the pinned acceptance slice after installing `scripts/install_terraform.py`. It includes a negative control and never executes Terraform against GCP.
 - Update the relevant coverage notes when adding behavior. Run the checks appropriate to the change and report what was actually verified.
 
 ## Commands

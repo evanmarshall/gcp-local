@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.request import urlopen
 
 
@@ -27,7 +28,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--child", action="store_true")
     parser.add_argument("--probe", action="store_true")
+    parser.add_argument("--detached-probe")
     args = parser.parse_args()
+    if args.detached_probe:
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"],
+                         start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        Path(args.detached_probe).write_text(os.readlink("/proc/self/ns/pid"))
+        time.sleep(60)
+        return
     if args.probe:
         probe()
         return
@@ -47,10 +55,18 @@ def main():
             "--ready-url", "http://127.0.0.1:18463/", "--timeout", "20", "--", sys.executable, __file__, "--child"],
             env=env, check=True, timeout=35)
         # The runner must bound a hanging test process too.
+        namespace_file = Path(directory) / "namespace"
         result = subprocess.run([sys.executable, str(root / "scripts/run_isolated.py"), "--timeout", "1", "--",
-            sys.executable, "-c", "import time; time.sleep(60)"], timeout=10)
+            sys.executable, __file__, "--detached-probe", str(namespace_file)], timeout=10)
         assert result.returncode == 124
-        print("Isolation smoke passed: hung child terminated within the runner deadline.")
+        namespace = namespace_file.read_text()
+        for path in Path("/proc").glob("[0-9]*/ns/pid"):
+            try:
+                current = os.readlink(path)
+            except (FileNotFoundError, PermissionError):
+                continue
+            assert current != namespace, "A detached test descendant survived its runner"
+        print("Isolation smoke passed: timeout removed hung and detached descendants.")
 
 
 if __name__ == "__main__":

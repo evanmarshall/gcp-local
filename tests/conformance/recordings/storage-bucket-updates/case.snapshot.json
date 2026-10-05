@@ -1,0 +1,78 @@
+{
+  "storage-bucket-updates": {
+    "recorded-date": "05-10-2026, 18:13:36",
+    "recorded-content": {
+      "initial-metadata": {
+        "etag": "<bucket-etag-1>",
+        "labels": {},
+        "metageneration": "<bucket-metageneration-1>",
+        "project_number": "<project-number>",
+        "rpo": null,
+        "timestamps_present_and_ordered": true
+      },
+      "labels-added": {
+        "etag": "<bucket-etag-2>",
+        "labels": {
+          "tf-test-one": "first",
+          "tf-test-two": "second"
+        },
+        "metageneration": "<bucket-metageneration-2>",
+        "project_number": "<project-number>",
+        "rpo": null,
+        "timestamps_present_and_ordered": true
+      },
+      "label-removed": {
+        "etag": "<bucket-etag-3>",
+        "labels": {
+          "tf-test-one": "changed"
+        },
+        "metageneration": "<bucket-metageneration-3>",
+        "project_number": "<project-number>",
+        "rpo": null,
+        "timestamps_present_and_ordered": true
+      },
+      "stale-update": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "At least one of the pre-conditions you specified did not hold.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "denied-update": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.buckets.update access to the Google Cloud Storage bucket. Permission 'storage.buckets.update' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unchanged-after-failures": {
+        "etag": "<bucket-etag-3>",
+        "labels": {
+          "tf-test-one": "changed"
+        },
+        "metageneration": "<bucket-metageneration-3>",
+        "project_number": "<project-number>",
+        "rpo": null,
+        "timestamps_present_and_ordered": true
+      },
+      "labels-restored": {
+        "etag": "<bucket-etag-4>",
+        "labels": {},
+        "metageneration": "<bucket-metageneration-4>",
+        "project_number": "<project-number>",
+        "rpo": null,
+        "timestamps_present_and_ordered": true
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

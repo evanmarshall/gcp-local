@@ -1,5 +1,5 @@
 {
-  "status": "selected-not-executable",
+  "status": "passing-local-adapted",
   "repository": "https://github.com/hashicorp/terraform-provider-google",
   "revision": "70539b4b7bb9ea096987422d9596186417b73f51",
   "provider_version": "8.5.0",
@@ -21,29 +21,25 @@
     "google/acctest/vcr_utils.go": "a1a6d72eb90e40f0c8a3e38d3da3716f5dfee1f9b623a023db6ba78e215b4802",
     "google/envvar/envvar_utils.go": "6387dbbdfbde0269715b8e08a4777c12cb0fe03ebff5b657afe6b4ba34728b40",
     "go.mod": "86a1735a71cca27b124814f9d1852e0a38665bdd798cec31dfb2c62af31e05a5",
-    "LICENSE": "588768dc819dc773d6914c22df7de8932cc7899c24188f5b09b013d86457e115"
+    "LICENSE": "588768dc819dc773d6914c22df7de8932cc7899c24188f5b09b013d86457e115",
+    "google/services/storage/resource_storage_bucket.go": "7949c4ba71651f1e2752d5aa71dec31d3f9ac90a6221e297c33f46ba29de1609",
+    "google/services/storage/resource_storage_bucket_object.go": "9c310ed3d180b368eb8d3b6849394340078f1aedb7d2b318964f7cd8879f228a",
+    "google/services/storage/client.go": "aab6fddc8b5567511719882142236183743262af3a76c451e2cec5111414b875"
   },
-  "required_adapter_changes": [
-    "Replace multi-region US fixtures with us-central1, UBLA, enforced public access prevention, zero soft-delete retention, no versioning or retention.",
-    "Run exact tests serially with -parallel=1 and an owned-resource cleanup manifest, not global sweepers.",
-    "Inject explicit synthetic local project/access_token and Storage custom endpoint into provider factories and destroy-check clients.",
-    "Replace ambient credential/project prechecks for the selected local runner only; preserve upstream resource assertions.",
-    "Add an unchanged second plan and machine-readable results; disable provider VCR and raw HTTP logs."
-  ],
   "required_local_apis": [
     "storage.buckets.insert/get/patch/delete",
     "storage.objects.insert/get/list/delete",
     "Storage generation/metageneration, etag, hashes, timestamps and defaults"
   ],
-  "pending": [
-    "Complete transitive helper/client audit and adapter patch",
-    "Pin and cache Terraform CLI and Go module artifacts before isolating the run",
-    "Run against #8 local provider within the Linux namespace and prove incorrect responses fail",
-    "Record required additional real-GCP behavior within the approved sandbox scope"
-  ],
   "coverage": {
-    "local": "unverified",
-    "real_gcp": "not-run",
-    "second_plan": "not-run"
-  }
+    "local": "three adapted cases pass in Linux network/PID namespace",
+    "real_gcp": "Terraform not run; Storage outcomes compared with separate recorded scenarios",
+    "second_plan": "empty after each configuration and refresh",
+    "negative_control": "incorrect bucket RPO fails upstream assertion",
+    "import": "project-qualified IDs only",
+    "polling": "not applicable to selected synchronous mutations",
+    "stale_etag": "separate storage-bucket-updates cloud recording"
+  },
+  "terraform_version": "1.16.5",
+  "adapter_audit": "audit.md"
 }

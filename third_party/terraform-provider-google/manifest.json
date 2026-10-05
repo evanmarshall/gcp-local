@@ -1,0 +1,20 @@
+{
+  "repository": "https://github.com/hashicorp/terraform-provider-google",
+  "revision": "70539b4b7bb9ea096987422d9596186417b73f51",
+  "license": "MPL-2.0",
+  "functions_sha256": "9a121f98d50b35a18b8f407d789e70331e752be6b56952cfe804e8f62485b684",
+  "source_files": {
+    "google/services/storage/resource_storage_bucket_test.go": "48ea2846c87a7d2ad42d047e8f5e2df2e7079a897c79114f7f8ad1088f60022a",
+    "google/services/storage/resource_storage_bucket_object_test.go": "f36225775a0cd4f15d2e126e358aece96f918b87b4a1ad1e346db586d5742835"
+  },
+  "functions": [
+    "TestAccStorageBucket_basic",
+    "TestAccStorageBucket_labels",
+    "TestAccStorageObject_recreate",
+    "calculateCrc32cHash",
+    "testAccStorageBucket_basic",
+    "testAccStorageBucket_labels",
+    "testAccStorageBucket_updateLabels",
+    "testGoogleStorageBucketsObjectBasic"
+  ]
+}

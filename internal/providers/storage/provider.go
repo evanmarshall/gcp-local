@@ -27,7 +27,7 @@ type Provider struct {
 	manager *backend.Manager
 }
 
-var methods = []string{"storage.buckets.insert", "storage.buckets.list", "storage.buckets.get", "storage.buckets.delete", "storage.buckets.getIamPolicy", "storage.buckets.setIamPolicy", "storage.objects.insert", "storage.objects.list", "storage.objects.get", "storage.objects.delete"}
+var methods = []string{"storage.buckets.insert", "storage.buckets.list", "storage.buckets.get", "storage.buckets.patch", "storage.buckets.delete", "storage.buckets.getIamPolicy", "storage.buckets.setIamPolicy", "storage.objects.insert", "storage.objects.list", "storage.objects.get", "storage.objects.delete"}
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
@@ -295,6 +295,8 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 	switch call.Method {
 	case "storage.buckets.insert":
 		return p.createBucket(ctx, b, r, scope)
+	case "storage.buckets.patch":
+		return p.patchBucket(ctx, b, r, scope, bucket)
 	case "storage.buckets.getIamPolicy":
 		policy, err := p.iam.GetPolicy(BucketResource(bucket))
 		return &gateway.RESTResponse{JSON: policy}, err

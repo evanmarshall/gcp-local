@@ -1,0 +1,51 @@
+{
+  "storage-multipart-query-name": {
+    "recorded-date": "05-10-2026, 18:32:58",
+    "recorded-content": {
+      "query-name-upload": {
+        "bucket": "<bucket>",
+        "contentType": "text/plain",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "Kx7zkoyF24hcaP9PR/6bMw==",
+        "metageneration": "<metageneration-1>",
+        "name": "terraform-multipart.txt",
+        "size": "14"
+      },
+      "query-name-upload-read": {
+        "bucket": "<bucket>",
+        "contentType": "text/plain",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "Kx7zkoyF24hcaP9PR/6bMw==",
+        "metageneration": "<metageneration-1>",
+        "name": "terraform-multipart.txt",
+        "size": "14"
+      },
+      "standard-replacement": {
+        "bucket": "<bucket>",
+        "contentType": "text/plain",
+        "etag": "<etag-2>",
+        "generation": "<generation-2>",
+        "md5Hash": "MUlsUkj/QTvWIs9LL8VQIg==",
+        "metageneration": "<metageneration-1>",
+        "name": "terraform-multipart.txt",
+        "size": "5"
+      },
+      "standard-replacement-read": {
+        "bucket": "<bucket>",
+        "contentType": "text/plain",
+        "etag": "<etag-2>",
+        "generation": "<generation-2>",
+        "md5Hash": "MUlsUkj/QTvWIs9LL8VQIg==",
+        "metageneration": "<metageneration-1>",
+        "name": "terraform-multipart.txt",
+        "size": "5"
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

@@ -8,6 +8,35 @@ permissions:
   contents: read
 
 jobs:
+  terraform-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python scripts/install_go.py
+      - run: python scripts/install_terraform.py
+      - name: Warm pinned module and build dependencies before isolation
+        run: |
+          sh scripts/go.sh -C tests/terraform/runner test -c -o "$PWD/bin/terraform-tests" .
+          sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance
+      - name: Run upstream acceptance cases and the metadata negative control without egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            sh scripts/check_terraform.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: terraform-acceptance
+          include-hidden-files: true
+          path: |
+            .artifacts/terraform/*.json
+            .artifacts/terraform-fault/*.json
+
   runtime:
     runs-on: ubuntu-latest
     steps:

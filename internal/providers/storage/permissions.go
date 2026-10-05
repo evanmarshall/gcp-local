@@ -10,6 +10,7 @@ func RegisterPermissions(engine *iam.Engine) error {
 		"storage.buckets.insert":       {Baseline: []string{"storage.buckets.create"}},
 		"storage.buckets.get":          {Baseline: []string{"storage.buckets.get"}},
 		"storage.buckets.delete":       {Baseline: []string{"storage.buckets.delete"}},
+		"storage.buckets.patch":        {Baseline: []string{"storage.buckets.update"}},
 		"storage.buckets.getIamPolicy": {Baseline: []string{"storage.buckets.getIamPolicy"}},
 		"storage.buckets.setIamPolicy": {Baseline: []string{"storage.buckets.setIamPolicy"}},
 		"storage.objects.list":         {Baseline: []string{"storage.objects.list"}},
