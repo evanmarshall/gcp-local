@@ -1,6 +1,6 @@
 # Contributing
 
-Start with an issue in the [backlog](https://github.com/evanmarshall/gcp-local/issues) and the [design](docs/design.md). Keep changes focused on the stated acceptance criteria. The runtime language and build tooling are not selected yet; Python below is only repository tooling.
+Start with an issue in the [backlog](https://github.com/evanmarshall/gcp-local/issues) and the [design](docs/design.md). Keep changes focused on the stated acceptance criteria. The runtime uses Go; Python supplies repository tooling and conformance runners. [The runtime guide](docs/runtime.md) covers the pinned toolchain, build, tests, and process lifecycle.
 
 ## Local setup
 
@@ -49,7 +49,7 @@ The setup script configures `.gitmessage` as the local commit template. There is
 
 ## Fast-forward-only integration
 
-Review work in a feature branch or PR. Once the work is ready and integration is authorized, use the command line to advance `main` without changing the feature commits:
+Prepare work in a feature branch or PR. Once the work is ready and integration is authorized, use the command line to advance `main` without changing the feature commits:
 
 ```sh
 git fetch origin

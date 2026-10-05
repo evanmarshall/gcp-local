@@ -1,0 +1,26 @@
+{
+  "version": "go1.26.8",
+  "files": [
+    {
+      "filename": "go1.26.8.darwin-arm64.tar.gz",
+      "os": "darwin",
+      "arch": "arm64",
+      "sha256": "a012b25b571bd0138a03dcd25375ceba866fe5ca822f426d2c66a4de56fd3f4b",
+      "size": 64626620
+    },
+    {
+      "filename": "go1.26.8.linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "sha256": "d0f743b33e8d8945e6b1f432edd15785c70507121d6e2a723b21285eddf8b57b",
+      "size": 66897291
+    },
+    {
+      "filename": "go1.26.8.linux-arm64.tar.gz",
+      "os": "linux",
+      "arch": "arm64",
+      "sha256": "211ffced9dcb9633a55eac6364816ec0ddd951389a740e88fa8b3337971bdda0",
+      "size": 63811405
+    }
+  ]
+}

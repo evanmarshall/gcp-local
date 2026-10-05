@@ -1,12 +1,12 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The repository currently contains the design, backlog, contributor tooling, and validation foundation; an emulator runtime has not been implemented. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator. The repository contains the validation foundation and a Go core process with health and diagnostics; service providers are not implemented yet. Do not describe planned services as working features.
 
 ## Start here
 
 - Read [the design](docs/design.md), [the LocalStack comparison](docs/localstack-comparison.md), and the issue being implemented. GitHub issues track scope and dependencies.
 - Follow LocalStack's gateway, generated API, provider, scoped-store, and reusable-backend patterns. The reference checkout is optional at `../localstack`, pinned to `8b9a79f05846835cf4dff63ab7eefdde9df83783`; the comparison links to the same source online. Do not edit or vendor that checkout as part of ordinary gcp-local work.
-- Implement the smallest useful behavior covered by the issue. A new framework, service rewrite, or runtime dependency needs a concrete benefit over the existing approach. The implementation language is still an open backlog decision.
+- Implement the smallest useful behavior covered by the issue. A new framework, service rewrite, or runtime dependency needs a concrete benefit over the existing approach. Use Go for the runtime and Python/pytest for conformance; see [the runtime decision](docs/decisions/0001-runtime.md).
 
 ## Skills
 
@@ -32,11 +32,13 @@ sh scripts/setup_git.sh
 uv run --with 'PyYAML==6.0.3' python scripts/check_repo.py
 python3 -m unittest discover -s tests/tooling -v
 python3 scripts/check_history.py HEAD
+python3 scripts/install_go.py
+sh scripts/check_go.sh
 ```
 
-The history check needs an existing commit. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup without `uv`. Add runtime build/test commands here when the stack is selected; do not invent commands for software that is not present.
+The history check needs an existing commit. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup without `uv`. See [runtime.md](docs/runtime.md) for the server. Format with `sh scripts/go.sh fmt ./...`; run focused tests with `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`. Use the pinned worktree toolchain instead of an ambient Go installation.
 
-After installing `requirements-validation.txt` in the tooling environment, run `.venv-tools/bin/python -m pytest`. It defaults to offline harness checks and writes separate harness/conformance results. Read [the validation guide](docs/validation.md) before writing a scenario. `.env` holds sandbox setup inputs described in [the sandbox guide](docs/gcp-sandbox.md); it is not automatically loaded by tests.
+After installing `requirements-sdk.txt` and `requirements-tools.txt` in the tooling environment, run `.venv-tools/bin/python -m pytest`. It defaults to offline harness checks and writes separate harness/conformance results. Read [the validation guide](docs/validation.md) before writing a scenario. `.env` holds sandbox setup inputs described in [the sandbox guide](docs/gcp-sandbox.md); it is not automatically loaded by tests.
 
 For moo setup, run `sh scripts/setup_moo.sh`. Run tooling tests inside the task machine with `moo run task-name -- 'cd /srv/app && python3 -m unittest discover -s tests/tooling -v'`. Keep the repository and history checks above on the host: moo syncs source files, not `.git`.
 
