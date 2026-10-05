@@ -28,6 +28,14 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             sh scripts/check_terraform.sh
+      - name: Hand private reports back to the artifact uploader
+        if: always()
+        run: |
+          for directory in .artifacts/terraform .artifacts/terraform-fault; do
+            if [ -d "$directory" ]; then
+              sudo chown -R "$(id -u):$(id -g)" "$directory"
+            fi
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
