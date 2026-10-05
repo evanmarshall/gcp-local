@@ -7,8 +7,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func start(t *testing.T, s *Server) (string, context.CancelFunc, <-chan error) {
@@ -17,9 +23,14 @@ func start(t *testing.T, s *Server) (string, context.CancelFunc, <-chan error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		listener.Close()
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
-	go func() { result <- s.Serve(ctx, listener) }()
+	go func() { result <- s.Serve(ctx, listener, grpcListener) }()
 	t.Cleanup(cancel)
 	return "http://" + listener.Addr().String(), cancel, result
 }
@@ -118,4 +129,112 @@ func TestShutdownDeadlineClosesBlockedRequest(t *testing.T) {
 		t.Fatalf("expected deadline, got %v", err)
 	}
 	<-completed
+}
+
+func TestDiagnosticsDoNotDispatchProviders(t *testing.T) {
+	registry := gateway.NewRegistry()
+	var calls atomic.Int32
+	err := registry.Register("storage.buckets.list", func(gateway.Call, any) (any, error) {
+		calls.Add(1)
+		return nil, errors.New("diagnostics reached provider")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := WithGateway("test", time.Second, gateway.New(registry, nil))
+	url, cancel, result := start(t, s)
+	for _, path := range []string{"/_local/health", "/_local/diagnostics", "/_local/unknown"} {
+		response, err := http.Get(url + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+	}
+	if calls.Load() != 0 {
+		t.Fatal("diagnostics reached provider")
+	}
+	cancel()
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(map[bool]string{false: "drain", true: "force"}[force], func(t *testing.T) {
+			registry := gateway.NewRegistry()
+			entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			if err := registry.Register("/google.pubsub.v1.Publisher/GetTopic", func(call gateway.Call, input any) (any, error) {
+				close(entered)
+				defer close(done)
+				select {
+				case <-release:
+					return &pb.Topic{Name: input.(*pb.GetTopicRequest).Topic}, nil
+				case <-call.Context.Done():
+					return nil, call.Context.Err()
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			timeout := time.Second
+			if force {
+				timeout = 30 * time.Millisecond
+			}
+			s := WithGateway("test", timeout, gateway.New(registry, nil))
+			httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				httpListener.Close()
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { result <- s.Serve(ctx, httpListener, grpcListener) }()
+			connection, err := grpc.NewClient("passthrough:///"+grpcListener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer connection.Close()
+			response := make(chan error, 1)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				_, err := pb.NewPublisherClient(connection).GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/synthetic/topics/topic"})
+				response <- err
+			}()
+			<-entered
+			cancel()
+			if !force {
+				select {
+				case err := <-result:
+					t.Fatalf("shutdown skipped active RPC: %v", err)
+				case <-time.After(20 * time.Millisecond):
+				}
+				close(release)
+			}
+			err = <-result
+			if force && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expected forced shutdown, got %v", err)
+			}
+			if !force && err != nil {
+				t.Fatal(err)
+			}
+			if err := <-response; !force && err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("RPC context not cancelled")
+			}
+			if next, err := net.DialTimeout("tcp", grpcListener.Addr().String(), time.Second); err == nil {
+				next.Close()
+				t.Fatal("gRPC listener remained open")
+			}
+		})
+	}
 }

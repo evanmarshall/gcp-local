@@ -6,4 +6,5 @@ if [ ! -x .tools/go/bin/go ]; then
     exit 1
 fi
 export GOTOOLCHAIN=local
+export PATH="$(pwd)/.tools/go/bin:$PATH"
 exec .tools/go/bin/go "$@"

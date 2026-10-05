@@ -1,4 +1,4 @@
-// Package runtime owns the core listener and its shutdown lifecycle.
+// Package runtime owns listeners and their shutdown lifecycle.
 package runtime
 
 import (
@@ -10,76 +10,98 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
+
+	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"google.golang.org/grpc"
 )
 
-// Server is a local core process. Service providers are added by later slices.
 type Server struct {
 	HTTP            *http.Server
+	GRPC            *grpc.Server
 	ShutdownTimeout time.Duration
 	ready           atomic.Bool
 }
 
 func New(version string, shutdownTimeout time.Duration) *Server {
-	s := &Server{ShutdownTimeout: shutdownTimeout}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /_local/health", func(w http.ResponseWriter, r *http.Request) {
-		code := http.StatusOK
-		if !s.ready.Load() {
-			code = http.StatusServiceUnavailable
+	return WithGateway(version, shutdownTimeout, gateway.New(nil, nil))
+}
+func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gateway) *Server {
+	s := &Server{ShutdownTimeout: shutdownTimeout, GRPC: g.NewGRPCServer()}
+	s.HTTP = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Dispatch directly, preserving escaped object paths without ServeMux redirects.
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/_local/health":
+			ready := s.ready.Load()
+			code := http.StatusOK
+			if !ready {
+				code = http.StatusServiceUnavailable
+			}
+			writeJSON(w, code, map[string]any{"service": "gcp-local", "version": version, "ready": ready, "providers": g.Registry.Providers()})
+		case r.Method == "GET" && r.URL.Path == "/_local/diagnostics":
+			writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers()})
+		default:
+			g.ServeHTTP(w, r)
 		}
-		writeJSON(w, code, map[string]any{"service": "gcp-local", "version": version, "ready": s.ready.Load(), "providers": []string{}})
-	})
-	mux.HandleFunc("GET /_local/diagnostics", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": []string{}})
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusNotImplemented, map[string]any{"error": map[string]any{"code": 501, "status": "UNIMPLEMENTED", "message": "No provider implements this API method"}})
-	})
-	s.HTTP = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
-		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	return s
 }
 
-// Serve accepts an already-bound listener so callers can report its actual port.
-// On cancellation it drains existing requests before forcing the listener closed.
-func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+// Serve binds neither listener itself. Cancellation drains both transports under
+// a shared deadline, then forcibly closes remaining HTTP requests/gRPC streams.
+func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Listener) error {
 	if s.ShutdownTimeout <= 0 {
-		listener.Close()
+		httpListener.Close()
+		grpcListener.Close()
 		return errors.New("shutdown timeout must be positive")
 	}
 	if ctx.Err() != nil {
-		listener.Close()
+		httpListener.Close()
+		grpcListener.Close()
 		return nil
 	}
 	s.ready.Store(true)
-	served := make(chan error, 1)
-	go func() { served <- s.HTTP.Serve(listener) }()
+	served := make(chan error, 2)
+	go func() { served <- s.HTTP.Serve(httpListener) }()
+	go func() { served <- s.GRPC.Serve(grpcListener) }()
+	var serveErr error
+	remaining := 2
 	select {
-	case err := <-served:
-		s.ready.Store(false)
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
+	case serveErr = <-served:
+		remaining--
 	case <-ctx.Done():
-		s.ready.Store(false)
-		deadline, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
-		defer cancel()
-		err := s.HTTP.Shutdown(deadline)
-		if err != nil {
-			_ = s.HTTP.Close()
+	}
+	s.ready.Store(false)
+	deadline, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
+	defer cancel()
+	httpDone := make(chan error, 1)
+	grpcDone := make(chan struct{})
+	go func() { httpDone <- s.HTTP.Shutdown(deadline) }()
+	go func() { s.GRPC.GracefulStop(); close(grpcDone) }()
+	var shutdownErr error
+	select {
+	case <-grpcDone:
+	case <-deadline.Done():
+		shutdownErr = deadline.Err()
+		s.GRPC.Stop()
+		<-grpcDone
+	}
+	if err := <-httpDone; err != nil {
+		shutdownErr = err
+		_ = s.HTTP.Close()
+	}
+	for i := 0; i < remaining; i++ {
+		if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, grpc.ErrServerStopped) {
+			serveErr = err
 		}
-		serveErr := <-served
-		if err != nil {
-			return err
-		}
-		if !errors.Is(serveErr, http.ErrServerClosed) {
-			return serveErr
-		}
+	}
+	if shutdownErr != nil {
+		return shutdownErr
+	}
+	if errors.Is(serveErr, http.ErrServerClosed) || errors.Is(serveErr, grpc.ErrServerStopped) {
 		return nil
 	}
+	return serveErr
 }
-
 func writeJSON(w http.ResponseWriter, code int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

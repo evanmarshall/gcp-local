@@ -1,0 +1,9 @@
+{
+  "source": "https://raw.githubusercontent.com/googleapis/discovery-artifact-manager/216801337c83bb5a81d5e31ec2e62850910c8fd5/discoveries/storage.v1.json",
+  "revision": "20260930",
+  "retrieved_at": "2026-10-05",
+  "sha256": "88df0e5198c49e475af1e8e472d50189b6035d9c1a9161fface135b6ad26cee1",
+  "license": "Apache-2.0",
+  "scope": "Storage v1 REST route descriptors; no claim of provider support",
+  "commit": "216801337c83bb5a81d5e31ec2e62850910c8fd5"
+}

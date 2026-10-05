@@ -21,6 +21,7 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	flags := flag.NewFlagSet("gcp-local", flag.ContinueOnError)
 	flags.SetOutput(errors)
 	address := flags.String("listen", "127.0.0.1:4566", "HTTP listen address")
+	grpcAddress := flags.String("grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	shutdown := flags.Duration("shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	showVersion := flags.Bool("version", false, "print the build version")
 	if err := flags.Parse(args); err != nil {
@@ -39,9 +40,15 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 		fmt.Fprintln(errors, "Unable to bind the requested HTTP listener:", err)
 		return 1
 	}
+	grpcListener, err := net.Listen("tcp", *grpcAddress)
+	if err != nil {
+		listener.Close()
+		fmt.Fprintln(errors, "Unable to bind the requested gRPC listener:", err)
+		return 1
+	}
 	logger := slog.New(slog.NewJSONHandler(output, nil))
-	logger.Info("gcp-local listening", "address", listener.Addr().String(), "version", version)
-	if err := core.New(version, *shutdown).Serve(ctx, listener); err != nil {
+	logger.Info("gcp-local listening", "address", listener.Addr().String(), "grpc_address", grpcListener.Addr().String(), "version", version)
+	if err := core.New(version, *shutdown).Serve(ctx, listener, grpcListener); err != nil {
 		logger.Error("gcp-local stopped with an error", "error", err.Error())
 		return 1
 	}

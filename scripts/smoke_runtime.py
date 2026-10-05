@@ -12,7 +12,7 @@ from urllib.request import ProxyHandler, build_opener
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    with subprocess.Popen([str(root / "bin/gcp-local"), "-listen", "127.0.0.1:0"],
+    with subprocess.Popen([str(root / "bin/gcp-local"), "-listen", "127.0.0.1:0", "-grpc-listen", "127.0.0.1:0"],
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as process:
         try:
             if not select.select([process.stdout], [], [], 10)[0]:
