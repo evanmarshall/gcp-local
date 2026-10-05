@@ -1,0 +1,49 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-05T16:41:00.790399+00:00",
+  "scenario": {
+    "id": "storage-cross-project",
+    "service": "storage",
+    "transport": "rest-json-v1",
+    "revision": "f0f2d6e2cac047e2d3ff2c2af0debe36fb1b544911ddd575da4e33744132b917",
+    "versions": {
+      "sdk": "stdlib-http/3.11.12;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "0424e79ae2039bb82453b566f8c915f544cbd9edc9d11d3bf07e75bc3af8ea72",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/storage.py": "18b25751e765c562713bf2ead41e42b9d3ead111af62a2b67f771eb670ef70be",
+      "gcp_validation/normalization.py": "908078b633aeccc6cb800ee272874bd0c0c67b1d94f3e06b0d0fc3d73cac0a14",
+      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701",
+      "gcp_validation/authorization.py": "3130aa868bb6fd7ec808f1a3c0c919a387842bf3fbff2b4f1668e758fc632cc5",
+      "tests/conformance/conftest.py": "9da3bff9d53aedf7b3ebc72a5436d4a67e93bcab9a57817d0c0fad4e1d47e9ce"
+    },
+    "scope": {
+      "services": [
+        "storage"
+      ],
+      "region": "us-central1",
+      "max_buckets": 1,
+      "max_objects": 10,
+      "max_object_bytes": 1048576,
+      "cleanup_required": true,
+      "identities": [
+        "allowed",
+        "denied",
+        "fixture",
+        "peer"
+      ]
+    }
+  }
+}

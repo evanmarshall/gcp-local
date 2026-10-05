@@ -2,7 +2,7 @@
 
 A local GCP emulator following LocalStack's architecture: generated API contracts, service providers, reusable emulator backends, and cloud-recorded conformance tests. GCP identity, IAM enforcement, and analytical networking are core design goals.
 
-**Status:** offline validation runners, manual keyless cloud CI, and three real-GCP baselines covering Storage lifecycle, same-project authorization, and selected upstream Python SDK assertions. Local comparison is tested against a controlled protocol server; no emulator runtime or supported-service release is available yet. Cross-project recording awaits authorization for a second unbilled identity project.
+**Status:** offline validation runners, manual keyless cloud CI, and four real-GCP baselines covering Storage lifecycle, same- and cross-project authorization, and selected upstream Python SDK assertions. Local comparison is tested against a controlled protocol server; no emulator runtime or supported-service release is available yet. The validation prerequisites for runtime implementation are complete.
 
 - [Design and architecture diagram](docs/design.md)
 - [Direct comparison with archived LocalStack](docs/localstack-comparison.md)

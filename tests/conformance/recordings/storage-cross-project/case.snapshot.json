@@ -1,0 +1,96 @@
+{
+  "storage-cross-project": {
+    "recorded-date": "05-10-2026, 16:41:00",
+    "recorded-content": {
+      "initial-object": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "fPXpt6O5IfxptWl4qtFlug==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "33"
+      },
+      "project-relationship": {
+        "caller": "peer",
+        "caller_project": "<peer-project>",
+        "resource_project": "<project>",
+        "same_project": false
+      },
+      "foreign-read-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<peer> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/object.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "foreign-write-denied": {
+        "code": 403,
+        "content_type": "text/html",
+        "format": "json",
+        "message": "<peer> does not have storage.objects.create access to the Google Cloud Storage object. Permission 'storage.objects.create' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/foreign.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unchanged-after-foreign-write": [
+        {
+          "name": "object.txt",
+          "size": "33",
+          "contentType": "application/octet-stream",
+          "md5Hash": "fPXpt6O5IfxptWl4qtFlug==",
+          "bucket": "<bucket>",
+          "generation": "<generation-1>",
+          "metageneration": "<metageneration-1>",
+          "etag": "<etag-1>"
+        }
+      ],
+      "foreign-bucket-grant": {
+        "actor": "peer",
+        "attachment": "bucket",
+        "roles": [
+          "roles/storage.objectViewer"
+        ]
+      },
+      "foreign-read-granted": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "fPXpt6O5IfxptWl4qtFlug==",
+        "metageneration": "<metageneration-1>",
+        "name": "object.txt",
+        "size": "33"
+      },
+      "foreign-download": {
+        "bytes": 33,
+        "sha256": "7ee4870e4d71734610c826f552e01cbbae123a2c987045fb7019d8f6bf90077c",
+        "status": 200
+      },
+      "foreign-bucket-revocation": {
+        "actor": "peer",
+        "attachment": "bucket",
+        "roles": []
+      },
+      "foreign-read-revoked": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<peer> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/object.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}
