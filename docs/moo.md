@@ -49,13 +49,13 @@ Snapshots survive `moo drop`; add `--snapshots` only when intentionally discardi
 
 Port 8080 is available for a development smoke server, not a shipped emulator endpoint. Services must bind `0.0.0.0` to use host forwarding. `moo ls` shows each machine's host port. Private VM loopback does not imply blocked internet access or isolation of remote GCP projects.
 
-The integration smoke check forks two temporary worktrees/machines, exercises independent files and the same guest HTTP port, checks ignored credential-file exclusion, and restores a saved state. It removes only its temporary machines and worktrees:
+The initial integration smoke check forks two temporary worktrees/machines, exercises independent files and the same guest HTTP port, checks ignored credential-file exclusion, and restores a saved state. It removes only its temporary machines and worktrees:
 
 ```sh
 python3 scripts/smoke_moo.py
 ```
 
-Run it after committing the setup, because temporary worktrees start at `HEAD`. The shared baseline must exist first. The baseline includes only current contributor tools; Docker/Compose backend support and gRPC streaming/cancellation remain in [#25](https://github.com/evanmarshall/gcp-local/issues/25) until a representative runtime exists. Moo documents a TCP half-close forwarding limitation, so host-forwarded and guest-internal protocol tests must eventually be checked separately.
+Run it after committing the setup, because temporary worktrees start at `HEAD`. The shared baseline must exist first. Follow-up [runtime probes](moo-runtime.md) now verify official Pub/Sub gRPC separately inside the isolated guest and through host forwarding, plus native arm64 Docker/Compose execution with no container network. The measured guest lacks the NAT support needed by Docker's default bridge, so the packaged multi-network workflow and Cloud Run network acceptance still belong on host Docker or ordinary Linux CI. The TCP half-close limitation documented upstream did not reproduce in the measured probe; it is not assumed away for other binaries or workloads.
 
 ## Agent skills
 

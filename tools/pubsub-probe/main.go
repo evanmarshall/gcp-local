@@ -29,15 +29,19 @@ const peer = "projects/backend-peer/topics/topic"
 func main() {
 	endpoint := flag.String("endpoint", "127.0.0.1:8085", "isolated loopback backend")
 	empty := flag.Bool("expect-empty", false, "check state loss after restart")
+	forwarded := flag.Bool("moo-forwarded", false, "explicit host loopback probe of a disposable Moo backend; not isolated conformance")
 	flag.Parse()
 	host, _, err := net.SplitHostPort(*endpoint)
 	must(err)
 	interfaces, err := net.Interfaces()
 	must(err)
-	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() || len(interfaces) != 1 || interfaces[0].Name != "lo" || os.Getenv("GCP_LOCAL_ISOLATED") != "1" {
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		panic("Backend probes require an explicit numeric loopback target")
+	}
+	if !*forwarded && (len(interfaces) != 1 || interfaces[0].Name != "lo" || os.Getenv("GCP_LOCAL_ISOLATED") != "1") {
 		panic("Run this backend-only probe in the isolated local runner")
 	}
-	connection, err := grpc.NewClient(*endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpc.NewClient(*endpoint, grpc.WithNoProxy(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	must(err)
 	defer connection.Close()
 	publisher, subscriber := pb.NewPublisherClient(connection), pb.NewSubscriberClient(connection)
@@ -97,7 +101,7 @@ func main() {
 	check(status.Code(iamErr) == codes.Unimplemented, "unexpected upstream IAM behavior")
 	// Retain one owned topic/subscription for the external restart check.
 	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"kind": "backend-only", "create_publish_pull_ack": true,
-		"streaming": true, "half_close": true, "cancellation": true, "iam": "not-enforced", "cloud_fidelity": "unverified"})
+		"streaming": true, "half_close": true, "cancellation": true, "iam": "not-enforced", "cloud_fidelity": "unverified", "moo_forwarded": *forwarded})
 }
 
 func must(err error) {

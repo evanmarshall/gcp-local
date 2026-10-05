@@ -82,7 +82,7 @@ def main():
     artifacts.mkdir(parents=True, exist_ok=True)
     report = {'kind': 'backend-only', 'emulator': manifest['version'], 'jar_sha256': manifest['jar_sha256'],
               'java': java_version, 'checks': checks, 'samples': samples,
-              'network': 'loopback-only', 'gcp_execution': False, 'provider_iam': 'not-implemented'}
+              'network': 'loopback-only', 'gcp_execution': False, 'provider_iam': 'not-tested-by-backend-probe'}
     (artifacts / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
 
