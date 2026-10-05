@@ -1,0 +1,39 @@
+package main
+
+import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestWhyDeniedUsesOnlyExplicitLocalDiagnostics(t *testing.T) {
+	id := "1234567890abcdef1234567890abcdef"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_local/iam/decisions/"+id {
+			t.Error("wrong decision route")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"outcome":"deny","reason":"Missing permission: storage.objects.get"}`))
+	}))
+	defer server.Close()
+	var output bytes.Buffer
+	if code := run(t.Context(), []string{"why-denied", "-endpoint", server.URL, id}, &output, &output); code != 0 || !bytes.Contains(output.Bytes(), []byte("storage.objects.get")) {
+		t.Fatalf("%d %s", code, output.String())
+	}
+	for _, args := range [][]string{{"-endpoint", "https://iam.googleapis.com", id}, {"-endpoint", server.URL, "invalid"}, {"-endpoint", server.URL + "/other", id}} {
+		output.Reset()
+		if code := whyDenied(args, &output, &output); code != 2 {
+			t.Fatal("accepted unsafe endpoint or ID")
+		}
+	}
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://iam.googleapis.com")
+		w.WriteHeader(302)
+	}))
+	defer redirect.Close()
+	output.Reset()
+	if code := whyDenied([]string{"-endpoint", redirect.URL, id}, &output, &output); code != 1 {
+		t.Fatal("followed diagnostics redirect")
+	}
+}

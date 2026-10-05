@@ -1,0 +1,27 @@
+{
+  "source": "https://iam.googleapis.com/v1/roles/{role}",
+  "recorded_at": "2026-10-05",
+  "scope": "Read-only predefined Storage role definitions; no resource mutation or grant",
+  "roles": [
+    {
+      "file": "storage.admin.json",
+      "name": "roles/storage.admin",
+      "sha256": "dfe4cc58d8e989889be3210e0c5fe691ee15cdb7f57acb0f4eb956c29f92fa84"
+    },
+    {
+      "file": "storage.objectUser.json",
+      "name": "roles/storage.objectUser",
+      "sha256": "e9155375d0b7739a436e79ac192f621001a2c04e752022e42a03a920c6258eee"
+    },
+    {
+      "file": "storage.objectViewer.json",
+      "name": "roles/storage.objectViewer",
+      "sha256": "469367b5c8f0dbdc39bdfe23838ce33423ec473ca32db3565fa8cab611a0cca6"
+    },
+    {
+      "file": "storage.objectCreator.json",
+      "name": "roles/storage.objectCreator",
+      "sha256": "513fff80b0a597719850b948d5e33d5970f027d1db2fd34ac7d6028f6c243d1c"
+    }
+  ]
+}

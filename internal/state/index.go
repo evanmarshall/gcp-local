@@ -18,7 +18,11 @@ type Index struct {
 
 func NewIndex() *Index { return &Index{resources: map[string]Resource{}} }
 func (i *Index) Put(owner string, resource Resource) error {
-	if err := resource.Scope.Validate(); err != nil {
+	if resource.Service == "resourcemanager" && (resource.Kind == "organization" || resource.Kind == "folder") {
+		if resource.Scope.Project != "" || resource.Scope.Location != Global {
+			return errors.New("organization/folder references have global scope without a project")
+		}
+	} else if err := resource.Scope.Validate(); err != nil {
 		return err
 	}
 	if owner == "" || resource.Service != owner || resource.Kind == "" || !strings.HasPrefix(resource.Name, "//") {

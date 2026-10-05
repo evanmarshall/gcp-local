@@ -23,9 +23,10 @@ const (
 )
 
 type Principal struct {
-	State            PrincipalState
-	Subject, Project string
-	Scopes           []string
+	State   PrincipalState `json:"state"`
+	Subject string         `json:"subject,omitempty"`
+	Project string         `json:"project,omitempty"`
+	Scopes  []string       `json:"scopes,omitempty"`
 }
 
 // Call is request-scoped. Project/location are resource scope, not caller scope.

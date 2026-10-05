@@ -15,18 +15,24 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 )
 
 var version = "dev"
 
 func run(ctx context.Context, args []string, output, errors io.Writer) int {
+	if len(args) > 0 && args[0] == "why-denied" {
+		return whyDenied(args[1:], output, errors)
+	}
 	flags := flag.NewFlagSet("gcp-local", flag.ContinueOnError)
 	flags.SetOutput(errors)
 	address := flags.String("listen", "127.0.0.1:4566", "HTTP listen address")
 	grpcAddress := flags.String("grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	shutdown := flags.Duration("shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
+	iamPath := flags.String("iam-config", "", "owner-only local hierarchy and IAM policy configuration")
 	identityPath := flags.String("identity-config", "", "owner-only local identity configuration file")
 	metadataAddress := flags.String("metadata-listen", "", "optional per-workload loopback metadata listener")
 	metadataPrincipal := flags.String("metadata-principal", "", "enrolled service account bound to the metadata listener")
@@ -74,6 +80,18 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	server := core.WithGateway(version, *shutdown, gateway.New(nil, resolver))
 	if identities != nil {
 		server.Identity = identities
+	}
+	if *iamPath != "" {
+		engine, _, err := iam.Load(*iamPath)
+		if err != nil {
+			fmt.Fprintln(errors, err)
+			return 2
+		}
+		if err := storage.RegisterPermissions(engine); err != nil {
+			fmt.Fprintln(errors, err)
+			return 2
+		}
+		server.IAM = engine
 	}
 	listener, err := net.Listen("tcp", *address)
 	if err != nil {

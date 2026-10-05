@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,7 @@ type Server struct {
 	GRPC            *grpc.Server
 	Backends        *backend.Manager
 	Identity        http.Handler
+	IAM             http.Handler
 	Metadata        *http.Server
 	ShutdownTimeout time.Duration
 	ready           atomic.Bool
@@ -43,6 +45,8 @@ func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gatew
 			writeJSON(w, code, map[string]any{"service": "gcp-local", "version": version, "ready": ready, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
 		case r.Method == "GET" && r.URL.Path == "/_local/diagnostics":
 			writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
+		case s.IAM != nil && strings.HasPrefix(r.URL.Path, "/_local/iam/decisions/"):
+			s.IAM.ServeHTTP(w, r)
 		case s.Identity != nil && (r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity"):
 			s.Identity.ServeHTTP(w, r)
 		default:

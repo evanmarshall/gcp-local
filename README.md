@@ -2,7 +2,7 @@
 
 A local GCP emulator following LocalStack's architecture: generated API contracts, service providers, reusable emulator backends, and cloud-recorded conformance tests. GCP identity, IAM enforcement, and analytical networking are core design goals.
 
-**Status:** offline validation runners, manual keyless cloud CI, and four real-GCP baselines covering Storage lifecycle, same- and cross-project authorization, and selected upstream Python SDK assertions. The Go core has health/diagnostics and shared REST/gRPC dispatch, scoped stores, backend lifecycle hooks, and local ADC/metadata identity; service API providers are still pending. Local comparison is tested against a controlled protocol server; no supported-service release is available yet. The validation prerequisites for runtime implementation are complete.
+**Status:** offline validation runners, manual keyless cloud CI, and four real-GCP baselines covering Storage lifecycle, same- and cross-project authorization, and selected upstream Python SDK assertions. The Go core has health/diagnostics and shared REST/gRPC dispatch, scoped stores, backend lifecycle hooks, and local ADC/metadata identity; the baseline IAM evaluator is available, while service API integration is still pending. Local comparison is tested against a controlled protocol server; no supported-service release is available yet. The validation prerequisites for runtime implementation are complete.
 
 - [Build and run the core process](docs/runtime.md)
 - [Configure local ADC and workload identity](docs/local-identity.md)
