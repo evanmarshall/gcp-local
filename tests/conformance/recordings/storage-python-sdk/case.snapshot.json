@@ -1,6 +1,6 @@
 {
   "storage-python-sdk": {
-    "recorded-date": "03-10-2026, 07:32:04",
+    "recorded-date": "05-10-2026, 17:53:03",
     "recorded-content": {
       "upstream-tests": [
         "tests/system/test_blob.py::test_blob_direct_write_and_read_into_file",

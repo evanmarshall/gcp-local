@@ -86,3 +86,20 @@ jobs:
             GCP_LOCAL_TEST_PYTHON="$PWD/.venv-tools/bin/python" \
             .venv-tools/bin/python scripts/run_isolated.py -- \
             sh scripts/go.sh test -tags=sdkintegration -race -count=1 -timeout 60s ./internal/identity
+      - name: Warm the Storage builds before blocking network egress
+        run: |
+          sh scripts/go.sh build -o bin/gcp-local ./cmd/gcp-local
+          sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance
+      - name: Compare real Storage backend and local ADC against recorded contracts
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            GITHUB_SHA="$GITHUB_SHA" GCP_LOCAL_TEST_PYTHON="$PWD/.venv-tools/bin/python" \
+            sh scripts/check_storage.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: storage-conformance
+          include-hidden-files: true
+          path: |
+            .artifacts/storage-provider/coverage.json
+            .artifacts/storage-provider/junit.xml

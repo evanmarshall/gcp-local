@@ -1,6 +1,6 @@
 # Baseline IAM evaluator
 
-The evaluator supplies the permission layer for the first Storage provider. Its unit tests exercise inheritance, cross-project grants, revocation, composed checks, and diagnostics. #7 remains open until #8 runs the recorded authorization scenarios through actual provider/backend operations; these evaluator tests alone are not GCP service parity evidence.
+The evaluator supplies the permission layer for the first Storage provider. Its unit tests exercise inheritance, cross-project grants, revocation, composed checks, and diagnostics. The [Storage provider](storage.md) also passes the recorded authorization, cross-project, and replacement scenarios through actual backend operations.
 
 ## Permission plans and policies
 
@@ -36,7 +36,7 @@ Inspect the candidate and its permission changes before replacing committed file
 {
   "resources": [{
     "name": "//cloudresourcemanager.googleapis.com/projects/synthetic-project",
-    "service": "resourcemanager", "kind": "project", "parent": "",
+    "service": "resourcemanager", "kind": "project", "parent": "", "number": "123456",
     "scope": {"project": "synthetic-project", "location": "global"}
   }],
   "policies": {
@@ -52,4 +52,4 @@ Inspect the candidate and its permission changes before replacing committed file
 
 Each evaluation records a random decision ID distinct from the client-supplied trace ID. Records include principal state/subject, method, target, every check, considered policies, and the deciding role/binding. No bearer or subject credentials are stored. The most recent 1,000 records remain in memory; unsupported/incomplete evaluations are distinguishable from allow and deny.
 
-The runtime serves `GET /_local/iam/decisions/ID` when IAM is configured. Retrieve one with `bin/gcp-local why-denied -endpoint http://127.0.0.1:4566 ID`. The command accepts only a numeric loopback HTTP endpoint and never follows redirects or uses ambient proxies. Service providers will return the decision ID with their API responses as they integrate this evaluator. Without an implemented provider, an unimplemented API request does not fabricate an IAM decision.
+The runtime serves `GET /_local/iam/decisions/ID` when IAM is configured. Retrieve one with `bin/gcp-local why-denied -endpoint http://127.0.0.1:4566 ID`. The command accepts only a numeric loopback HTTP endpoint and never follows redirects or uses ambient proxies. Storage returns `X-Gcp-Local-Decision-Id` with supported API responses. Without an implemented provider, an unimplemented API request does not fabricate an IAM decision.

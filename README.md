@@ -2,7 +2,7 @@
 
 A local GCP emulator following LocalStack's architecture: generated API contracts, service providers, reusable emulator backends, and cloud-recorded conformance tests. GCP identity, IAM enforcement, and analytical networking are core design goals.
 
-**Status:** offline validation runners, manual keyless cloud CI, and four real-GCP baselines covering Storage lifecycle, same- and cross-project authorization, and selected upstream Python SDK assertions. The Go core has health/diagnostics and shared REST/gRPC dispatch, scoped stores, backend lifecycle hooks, and local ADC/metadata identity; the baseline IAM evaluator is available, while service API integration is still pending. Local comparison is tested against a controlled protocol server; no supported-service release is available yet. The validation prerequisites for runtime implementation are complete.
+**Status:** the first authenticated [Storage provider](docs/storage.md) runs locally with standard ADC, basic IAM, and fake-gcs-server. Five real-GCP scenarios cover lifecycle, same- and cross-project authorization, object replacement, and selected upstream Python SDK assertions. Local CI compares the actual backend with those recordings without network egress. The Go core also supplies generated REST/gRPC dispatch, scoped state, lifecycle hooks, and metadata identity. Terraform certification and a packaged setup command are next; other service providers remain pending.
 
 - [Build and run the core process](docs/runtime.md)
 - [Configure local ADC and workload identity](docs/local-identity.md)
@@ -19,4 +19,4 @@ A local GCP emulator following LocalStack's architecture: generated API contract
 
 The canonical design now lives in this repository. The original pre-review outline is retained in `docs/gcp-local.before-localstack-review.md` as historical context.
 
-The [pinned upstream SDK slice](docs/sdk-compatibility.md) and Linux isolation launcher validate client behavior before provider integration.
+The [pinned upstream SDK slice](docs/sdk-compatibility.md) and Linux isolation launcher compare the provider with recorded cloud behavior.

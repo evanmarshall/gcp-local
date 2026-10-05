@@ -33,6 +33,7 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	grpcAddress := flags.String("grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	shutdown := flags.Duration("shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	iamPath := flags.String("iam-config", "", "owner-only local hierarchy and IAM policy configuration")
+	services := flags.String("services", "", "explicit service selection: storage")
 	identityPath := flags.String("identity-config", "", "owner-only local identity configuration file")
 	metadataAddress := flags.String("metadata-listen", "", "optional per-workload loopback metadata listener")
 	metadataPrincipal := flags.String("metadata-principal", "", "enrolled service account bound to the metadata listener")
@@ -77,21 +78,32 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 			return 2
 		}
 	}
-	server := core.WithGateway(version, *shutdown, gateway.New(nil, resolver))
+	registry := gateway.NewRegistry()
+	server := core.WithGateway(version, *shutdown, gateway.New(registry, resolver))
 	if identities != nil {
 		server.Identity = identities
 	}
 	if *iamPath != "" {
-		engine, _, err := iam.Load(*iamPath)
+		engine, index, err := iam.Load(*iamPath)
 		if err != nil {
 			fmt.Fprintln(errors, err)
 			return 2
 		}
-		if err := storage.RegisterPermissions(engine); err != nil {
-			fmt.Fprintln(errors, err)
-			return 2
+		if *services == "storage" {
+			if identities == nil {
+				fmt.Fprintln(errors, "Storage requires explicit local identity configuration")
+				return 2
+			}
+			if _, err := storage.New(registry, server.Backends, index, engine); err != nil {
+				fmt.Fprintln(errors, err)
+				return 2
+			}
 		}
 		server.IAM = engine
+	}
+	if (*services != "" && *services != "storage") || (*services != "" && *iamPath == "") {
+		fmt.Fprintln(errors, "Select services=storage with explicit IAM and identity configuration")
+		return 2
 	}
 	listener, err := net.Listen("tcp", *address)
 	if err != nil {

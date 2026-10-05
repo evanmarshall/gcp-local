@@ -7,6 +7,7 @@ type Route struct {
 }
 
 var StorageRoutes = []Route{
+	{"storage.objects.get", "GET", "/download/storage/v1/b/{bucket}/o/{object}", false, false},
 	{"storage.objects.insert", "POST", "/resumable/upload/storage/v1/b/{bucket}/o", false, true},
 	{"storage.bucketAccessControls.delete", "DELETE", "/storage/v1/b/{bucket}/acl/{entity}", false, false},
 	{"storage.bucketAccessControls.get", "GET", "/storage/v1/b/{bucket}/acl/{entity}", false, false},

@@ -15,6 +15,11 @@ class StorageObservations:
                                 for alias, identity in fixture.sandbox.identities.items()})
         if fixture.sandbox and fixture.sandbox.peer_project:
             self.aliases[fixture.sandbox.peer_project] = "<peer-project>"
+        if not fixture.sandbox:
+            for actor in ("fixture", "allowed", "denied", "peer"):
+                project = "synthetic-peer" if actor == "peer" else fixture.project
+                self.aliases[actor + "@" + project + ".iam.gserviceaccount.com"] = "<" + actor + ">"
+            self.aliases["synthetic-peer"] = "<peer-project>"
         self.references = {}
 
     def reference(self, kind, value):

@@ -9,6 +9,7 @@ import (
 // Resource is a cross-service reference, not a second copy of backend data/IAM.
 type Resource struct {
 	Name, Service, Kind, Parent string
+	Number                      string `json:"number,omitempty"`
 	Scope                       Scope
 }
 type Index struct {
@@ -30,7 +31,7 @@ func (i *Index) Put(owner string, resource Resource) error {
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if existing, ok := i.resources[resource.Name]; ok && (existing.Service != owner || existing.Scope != resource.Scope || existing.Kind != resource.Kind || existing.Parent != resource.Parent) {
+	if existing, ok := i.resources[resource.Name]; ok && (existing.Service != owner || existing.Scope != resource.Scope || existing.Kind != resource.Kind || existing.Parent != resource.Parent || existing.Number != resource.Number) {
 		return errors.New("resource already belongs to another owner or hierarchy")
 	}
 	i.resources[resource.Name] = resource

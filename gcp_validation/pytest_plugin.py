@@ -32,6 +32,8 @@ def pytest_addoption(parser):
     group.addoption("--gcp-allow-live", action="store_true")
     group.addoption("--gcp-baselines", default="tests/conformance/recordings")
     group.addoption("--gcp-artifacts", default=".artifacts/validation")
+    group.addoption("--gcp-provider-version", help="Explicit local implementation version for reports")
+    group.addoption("--gcp-backend-version", help="Explicit local backend version for reports")
 
 
 def network_policy(config, *, loopback=False):
@@ -65,6 +67,9 @@ def pytest_configure(config):
             live_scope=config.getoption("gcp_live_scope") or (profile.live_scope if profile else None),
             allow_live=config.getoption("gcp_allow_live"),
         )
+        versions = [config.getoption("gcp_provider_version"), config.getoption("gcp_backend_version")]
+        if any(versions) and (config.gcp_target.mode != "local" or not all(value and value.strip() for value in versions)):
+            raise ValueError("Supply both implementation versions in local mode only")
         if any(config.getoption(option, default=False) for option in (
             "force_enable_socket", "allow_hosts", "allow_unix_socket",
         )):
@@ -99,6 +104,9 @@ def pytest_collection_modifyitems(config, items):
                 raise pytest.UsageError("Cloud scenarios cannot be labeled as synthetic harness tests")
             try:
                 metadata = dict(marker.kwargs)
+                if config.getoption("gcp_provider_version"):
+                    metadata["versions"] = dict(metadata["versions"],
+                        provider=config.getoption("gcp_provider_version"), backend=config.getoption("gcp_backend_version"))
                 files = metadata.pop("contract_files", ())
                 revision = sha256(item.path)
                 if files:

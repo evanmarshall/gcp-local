@@ -150,7 +150,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.Copy(w, response.Body)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "application/json")
+		}
 		w.WriteHeader(code)
 		if response.JSON != nil {
 			_ = json.NewEncoder(w).Encode(response.JSON)

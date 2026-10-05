@@ -1,6 +1,6 @@
 # Core runtime
 
-The core process serves health/diagnostics and the [REST/gRPC dispatch layer](gateway.md). It has no service providers; GCP API requests return an explicit `501 UNIMPLEMENTED` response. This is the process foundation for #4–#8, not an application-compatible Storage emulator.
+The core process serves health/diagnostics and the [REST/gRPC dispatch layer](gateway.md). Enable the [Storage provider](storage.md) with `-services storage` and explicit local identity/IAM configuration. Unregistered methods return `501 UNIMPLEMENTED`.
 
 ## Build and run
 
@@ -31,4 +31,4 @@ In the task worktree, use the machine setup in [moo.md](moo.md), then:
 moo run task-name -- 'cd /srv/app && python3 scripts/install_go.py && sh scripts/check_go.sh'
 ```
 
-For an existing baseline created before the runtime, install `build-essential` inside the task machine first (`moo run task-name -- 'apt-get update && apt-get install -y --no-install-recommends build-essential'`). Build outputs and the Go toolchain stay inside the guest. Tests use ephemeral loopback ports. To use the existing moo HTTP forwarding interactively, start `bin/gcp-local -listen 0.0.0.0:8080` inside that machine and use its configured host port. Moo currently forwards HTTP only; gRPC transport tests use loopback inside the guest. The core owns [scoped backend lifecycle hooks](state-and-backends.md); concrete backend adapters and the packaged `up` workflow arrive in subsequent issues.
+For an existing baseline created before the runtime, install `build-essential` inside the task machine first (`moo run task-name -- 'apt-get update && apt-get install -y --no-install-recommends build-essential'`). Build outputs and the Go toolchain stay inside the guest. Tests use ephemeral loopback ports. To use the existing moo HTTP forwarding interactively, start `bin/gcp-local -listen 0.0.0.0:8080` inside that machine and use its configured host port. Moo currently forwards HTTP only; gRPC transport tests use loopback inside the guest. The core owns [scoped backend lifecycle hooks](state-and-backends.md); Storage uses a pinned in-process backend; the packaged `up` workflow remains #11.

@@ -78,6 +78,16 @@ def test_cloud():
     assert report["conformance"]["outcomes"] == {"unverified": 1}
 
 
+def test_local_versions_report_without_inventing_verification(tmp_path):
+    result, report = run_suite(tmp_path, "import pytest\n" + SCENARIO + '\ndef test_cloud(): pass\n',
+        "--gcp-mode", "local", "--gcp-project", "local-test", "--gcp-endpoint", "http://127.0.0.1:8080",
+        "--gcp-provider-version", "test-provider/1", "--gcp-backend-version", "test-backend/2")
+    assert result.returncode != 0  # Still refuses the missing baseline.
+    assert report["conformance"]["verified"] == 0
+    assert report["results"][0]["scenario"]["versions"] == {
+        "sdk": "synthetic", "provider": "test-provider/1", "backend": "test-backend/2"}
+
+
 def test_incomplete_live_config_fails_before_test_import(tmp_path):
     result, report = run_suite(tmp_path, '''
         from pathlib import Path

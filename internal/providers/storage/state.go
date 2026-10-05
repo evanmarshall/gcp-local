@@ -1,5 +1,4 @@
-// Package storage owns Storage control-plane metadata. No API provider is
-// registered until identity, IAM, and backend conformance are implemented.
+// Package storage owns Storage control-plane metadata and authorization.
 package storage
 
 import (
@@ -12,7 +11,7 @@ import (
 // Bucket placement belongs to this provider, while object bytes and wire object
 // metadata belong to the backend. Bucket names are globally unique; placement is
 // an attribute, not a second store key for the same bucket.
-type Bucket struct{ Name, Location string }
+type Bucket struct{ Name, Location, Metadata string }
 type projectState struct{ Buckets map[string]Bucket }
 type Catalog struct {
 	// Serialize publication/reset across provider store and shared index. Backend

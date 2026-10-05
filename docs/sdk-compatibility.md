@@ -10,7 +10,7 @@ The first upstream slice uses `google-cloud-storage==3.10.1` at [Google's source
 
 The wrapper additionally lists two objects with page size one, deletes them with generation guards, and confirms an empty list. It uses one private bucket, two names mapped to `mybuffer` and `smallfile`, and payloads of 11 and 34 bytes. The bucket proxy records names in the interrupted-run manifest **before** returning native SDK Blob objects. The allowed caller has the scenario's bucket Object User grant; the fixture administrator owns cleanup. No JSON key or upstream service-account fixture is required.
 
-The selected assertions passed against real GCP on 2026-10-03 UTC. Their reviewed recording includes source/adapter hashes, exact SDK versions, selected IDs, stable object metadata, and cleanup. This establishes client behavior for this slice. The local provider is not implemented, so local service compatibility remains unverified. IAM fidelity comes from the separate authorization baseline. Other languages, resumable uploads, retries under transient failures, ACLs, retention, and the rest of Google's system suite are not certified. Storage testbench does not replace the real IAM oracle.
+The selected assertions were re-recorded and revalidated against real GCP on 2026-10-05 UTC. Their reviewed recording includes source/adapter hashes, exact SDK versions, selected IDs, stable object metadata, and cleanup. This establishes client behavior for this slice. The actual [Storage provider](storage.md) now matches this recording inside a loopback-only namespace. IAM fidelity comes from the separate authorization baseline. Other languages, resumable uploads, retries under transient failures, ACLs, retention, and the rest of Google's system suite are not certified. Storage testbench does not replace the real IAM oracle.
 
 ## Explicit targets
 
@@ -18,9 +18,9 @@ Install `requirements-sdk.txt` plus `requirements-tools.txt`. Use the common [va
 
 For local SDK conformance, run the provider and test process together inside a Linux network namespace with only loopback. `scripts/run_isolated.py` starts the selected provider, waits up to 20 seconds for its explicit loopback readiness URL, runs the test command with a deadline, and terminates both process groups. It strips ambient cloud credential/proxy variables and provides no networked fallback. Missing local methods fail without reaching Google. Subprocesses inherit the namespace; the smoke test verifies IPv4/IPv6 egress denial, working loopback, and timeout termination. This guards accidental egress from selected, inspected tests; it is not a sandbox for hostile privileged code.
 
-The launcher requires Linux, `unshare`, `iproute2`, and permission to create a network namespace. Moo's root guest supports this; Linux CI uses `sudo` with the selected virtualenv. macOS runs must use moo instead of weakening isolation. Once #8 provides a runtime, supply its actual argv as `--server-json` and its health URL as `--ready-url`, then place the explicit local pytest command after `--`. No server command is advertised yet because no emulator is shipped.
+The launcher requires Linux, `unshare`, `iproute2`, and permission to create a network namespace. Moo's root guest supports this; Linux CI uses `sudo` with the selected virtualenv. macOS runs must use moo instead of weakening isolation. `sh scripts/check_storage.sh` builds the production binary and a credential-fixture binary, runs real local ADC operations, and compares the provider with all committed Storage scenarios. The credential fixture uses the production gateway/IAM/provider/backend; only token resolution adapts the runner identities.
 
-Developer checks that work now:
+Additional runner-only checks:
 
 ```sh
 moo run issue-23 -- 'cd /srv/app && .venv-tools/bin/python scripts/smoke_isolation.py'

@@ -22,11 +22,12 @@ import (
 )
 
 type method struct {
-	ID      string         `json:"id"`
-	Verb    string         `json:"httpMethod"`
-	Path    string         `json:"path"`
-	Request map[string]any `json:"request"`
-	Media   *struct {
+	ID       string         `json:"id"`
+	Verb     string         `json:"httpMethod"`
+	Path     string         `json:"path"`
+	Request  map[string]any `json:"request"`
+	Download bool           `json:"supportsMediaDownload"`
+	Media    *struct {
 		Protocols map[string]struct {
 			Path string `json:"path"`
 		} `json:"protocols"`
@@ -61,6 +62,9 @@ func main() {
 	walk = func(r resource) {
 		for _, m := range r.Methods {
 			routes = append(routes, route{m.ID, m.Verb, "/storage/v1/" + m.Path, len(m.Request) > 0, false})
+			if m.Download {
+				routes = append(routes, route{m.ID, m.Verb, "/download/storage/v1/" + m.Path, false, false})
+			}
 			if m.Media != nil {
 				for _, p := range m.Media.Protocols {
 					routes = append(routes, route{m.ID, m.Verb, p.Path, false, true})

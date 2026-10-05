@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/fsouza/fake-gcs-server",
+  "version": "v1.56.1",
+  "revision": "896ece51e49eed0946089f3089f6343855c0d106",
+  "license": "BSD-2-Clause",
+  "integration": "fakestorage.NewServerWithOptions(NoListener=true), in-memory, no notifications",
+  "integrity": "Go module checksum in go.sum"
+}

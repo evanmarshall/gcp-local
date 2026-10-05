@@ -1,0 +1,71 @@
+{
+  "storage-object-replacement": {
+    "recorded-date": "05-10-2026, 18:00:25",
+    "recorded-content": {
+      "creator-created": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "uNl3nqiFwvB+MCD70NS67A==",
+        "metageneration": "<metageneration-1>",
+        "name": "creator.txt",
+        "size": "16"
+      },
+      "creator-replacement-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.delete access to the Google Cloud Storage object.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unchanged-after-denial": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "uNl3nqiFwvB+MCD70NS67A==",
+        "metageneration": "<metageneration-1>",
+        "name": "creator.txt",
+        "size": "16"
+      },
+      "object-user-replaced": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-2>",
+        "generation": "<generation-2>",
+        "md5Hash": "4u4/ye6aV2bEzE2JJnb5Zg==",
+        "metageneration": "<metageneration-1>",
+        "name": "creator.txt",
+        "size": "19"
+      },
+      "same-payload-replaced": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-3>",
+        "generation": "<generation-3>",
+        "md5Hash": "4u4/ye6aV2bEzE2JJnb5Zg==",
+        "metageneration": "<metageneration-1>",
+        "name": "creator.txt",
+        "size": "19"
+      },
+      "stale-generation-denied": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "At least one of the pre-conditions you specified did not hold.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}
