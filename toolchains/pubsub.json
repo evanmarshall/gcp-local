@@ -1,0 +1,15 @@
+{
+  "name": "Google Cloud Pub/Sub emulator",
+  "version": "0.8.36",
+  "sdk_version": "587.0.0",
+  "source_manifest": "https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json",
+  "retrieved_at": "2026-10-05",
+  "url": "https://dl.google.com/dl/cloudsdk/channels/rapid/components/google-cloud-sdk-pubsub-emulator-20260920154507.tar.gz",
+  "size": 53018423,
+  "sha256": "cecdba7a47f302de548d02fd26dd878b62d279c50eeff4c731ed24a682fbbfee",
+  "jar": "platform/pubsub-emulator/lib/cloud-pubsub-emulator-0.8.36-all.jar",
+  "jar_sha256": "51f87210e624d28d7473f3cfa6eb2d4538a7362c8c4948ef08498cdd7595d25a",
+  "java_minimum": 11,
+  "documentation": "https://docs.cloud.google.com/pubsub/docs/emulator",
+  "distribution": "Downloaded development/runtime component; binaries are not vendored"
+}

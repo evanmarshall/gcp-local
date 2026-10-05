@@ -8,6 +8,28 @@ permissions:
   contents: read
 
 jobs:
+  pubsub-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 scripts/install_go.py
+      - run: python3 scripts/install_pubsub.py
+      - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
+      - run: sh scripts/go.sh build -tags=backendprobe -o bin/pubsub-probe ./tools/pubsub-probe
+      - name: Check official emulator protocols and lifecycle without egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_pubsub_backend.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: pubsub-backend
+          include-hidden-files: true
+          path: .artifacts/pubsub-backend/results.json
+
   packaged-environment:
     runs-on: ubuntu-latest
     timeout-minutes: 15
