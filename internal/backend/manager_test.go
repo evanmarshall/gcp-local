@@ -432,3 +432,83 @@ func TestResetWaitsForProviderMutationAndShutdownCancelsUse(t *testing.T) {
 	}
 	stopped(t, fixture)
 }
+
+func TestSessionsAllowPublishingAndDrainBeforeReset(t *testing.T) {
+	manager := backend.NewManager(time.Second, time.Second)
+	f := newFixture(t, "ready")
+	var ended atomic.Bool
+	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return f.process, nil }, AfterReset: func(state.Scope) error {
+		if !ended.Load() {
+			return errors.New("reset crossed active session")
+		}
+		return nil
+	}})
+	entered, published := make(chan struct{}), make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- manager.Session(context.Background(), key("project-a"), func(ctx context.Context, _ backend.Backend) error {
+			close(entered)
+			select {
+			case <-published:
+			case <-ctx.Done():
+				return errors.New("publisher was blocked by the session")
+			}
+			<-ctx.Done()
+			ended.Store(true)
+			return ctx.Err()
+		})
+	}()
+	<-entered
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := manager.Use(ctx, key("project-a"), func(context.Context, backend.Backend) error { close(published); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Reset(ctx, key("project-a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	stopped(t, f)
+	// Reset permits new sessions; listener draining permanently rejects them.
+	if err := manager.Session(ctx, key("project-a"), func(context.Context, backend.Backend) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	manager.DrainSessions()
+	if err := manager.Session(ctx, key("project-a"), func(context.Context, backend.Backend) error { t.Fatal("session started after drain"); return nil }); !errors.Is(err, backend.ErrClosed) {
+		t.Fatal(err)
+	}
+	if err := manager.Use(ctx, key("project-a"), func(context.Context, backend.Backend) error { return nil }); err != nil {
+		t.Fatal("ordinary request lost its drain period", err)
+	}
+	shutdown(t, manager)
+}
+
+func TestSessionResetTimeoutRetainsMetadataAndAllowsRetry(t *testing.T) {
+	manager := backend.NewManager(time.Second, 50*time.Millisecond)
+	f := newFixture(t, "ready")
+	var resets atomic.Int32
+	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return f.process, nil }, AfterReset: func(state.Scope) error { resets.Add(1); return nil }})
+	entered, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- manager.Session(context.Background(), key("project-a"), func(context.Context, backend.Backend) error { close(entered); <-release; return nil })
+	}()
+	<-entered
+	if err := manager.Reset(context.Background(), key("project-a")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if resets.Load() != 0 || manager.Status()[0].Phase != backend.Failed {
+		t.Fatal("failed reset discarded metadata or remained usable")
+	}
+	close(release)
+	<-done
+	if err := manager.Reset(context.Background(), key("project-a")); err != nil {
+		t.Fatal(err)
+	}
+	if resets.Load() != 1 {
+		t.Fatal("retry did not reset")
+	}
+	shutdown(t, manager)
+}

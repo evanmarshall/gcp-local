@@ -65,6 +65,11 @@ func NewRegistry() *Registry {
 	for _, rpc := range generated.PubSubMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "pubsub", streaming: rpc.Streaming}
 	}
+	// Pub/Sub is the current implementation owner for IAMPolicy gRPC. Its
+	// handler rejects other service resource names instead of forwarding them.
+	for _, rpc := range generated.IAMMethods {
+		r.contracts[rpc.Method] = methodInfo{service: "pubsub"}
+	}
 	return r
 }
 func (r *Registry) Register(method string, handler Handler) error {

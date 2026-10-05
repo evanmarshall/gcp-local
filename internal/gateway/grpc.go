@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/evanmarshall/gcp-local/api/generated"
 	"google.golang.org/grpc"
@@ -19,6 +20,7 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(2 << 20))
 	pb.RegisterPublisherServer(server, &generated.PublisherServer{Dispatch: g})
 	pb.RegisterSubscriberServer(server, &generated.SubscriberServer{Dispatch: g})
+	iampb.RegisterIAMPolicyServer(server, &generated.IAMPolicyServer{Dispatch: g})
 	return server
 }
 func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Message) (Call, error) {
@@ -36,6 +38,12 @@ func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Mess
 		return call, err
 	}
 	parts, pattern := strings.Split(resource, "/"), strings.Split(info.ResourcePattern, "/")
+	if info.ResourcePattern == "**" {
+		pattern = make([]string, len(parts))
+		for i := range pattern {
+			pattern[i] = "*"
+		}
+	}
 	if len(parts) != len(pattern) {
 		return call, status.Error(codes.InvalidArgument, "Malformed resource name")
 	}

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 )
@@ -36,7 +38,9 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	grpcAddress := flags.String("grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	shutdown := flags.Duration("shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	iamPath := flags.String("iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	services := flags.String("services", "", "explicit service selection: storage")
+	services := flags.String("services", "", "comma-separated explicit services: storage,pubsub")
+	pubsubJava := flags.String("pubsub-java", "", "absolute Java executable for the official emulator")
+	pubsubJAR := flags.String("pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	identityPath := flags.String("identity-config", "", "owner-only local identity configuration file")
 	metadataAddress := flags.String("metadata-listen", "", "optional per-workload loopback metadata listener")
 	metadataPrincipal := flags.String("metadata-principal", "", "enrolled service account bound to the metadata listener")
@@ -82,6 +86,20 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 		}
 	}
 	registry := gateway.NewRegistry()
+	selected := map[string]bool{}
+	if *services != "" {
+		for _, service := range strings.Split(*services, ",") {
+			if (service != "storage" && service != "pubsub") || selected[service] {
+				fmt.Fprintln(errors, "Select distinct services from storage,pubsub")
+				return 2
+			}
+			selected[service] = true
+		}
+		if *iamPath == "" || identities == nil {
+			fmt.Fprintln(errors, "Services require explicit IAM and local identity configuration")
+			return 2
+		}
+	}
 	server := core.WithGateway(version, *shutdown, gateway.New(registry, resolver))
 	if identities != nil {
 		server.Identity = identities
@@ -92,21 +110,19 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 			fmt.Fprintln(errors, err)
 			return 2
 		}
-		if *services == "storage" {
-			if identities == nil {
-				fmt.Fprintln(errors, "Storage requires explicit local identity configuration")
-				return 2
-			}
+		if selected["storage"] {
 			if _, err := storage.New(registry, server.Backends, index, engine); err != nil {
 				fmt.Fprintln(errors, err)
 				return 2
 			}
 		}
+		if selected["pubsub"] {
+			if _, err := pubsub.New(registry, server.Backends, index, engine, pubsub.Config{Java: *pubsubJava, JAR: *pubsubJAR}); err != nil {
+				fmt.Fprintln(errors, err)
+				return 2
+			}
+		}
 		server.IAM = engine
-	}
-	if (*services != "" && *services != "storage") || (*services != "" && *iamPath == "") {
-		fmt.Fprintln(errors, "Select services=storage with explicit IAM and identity configuration")
-		return 2
 	}
 	listener, err := net.Listen("tcp", *address)
 	if err != nil {

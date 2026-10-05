@@ -1,4 +1,6 @@
-# Python Storage SDK conformance
+# Python SDK compatibility
+
+## Storage conformance
 
 The first upstream slice uses `google-cloud-storage==3.10.1` at [Google's source revision fce6a6b](https://github.com/googleapis/python-storage/tree/fce6a6bf4561eabc939c972bb92282be86fb6aec), under Apache-2.0. The [vendored manifest](../third_party/python-storage/manifest.json) pins the complete original file hash, unchanged selected function bodies, license, dependencies, and fixture adaptations. Full upstream fixtures are not loaded: their ambient `Client()` construction, versioned/shared buckets, larger payloads, and other services exceed this slice's explicit scope.
 
@@ -30,3 +32,7 @@ moo run issue-23 -- 'cd /srv/app && .venv-tools/bin/python scripts/run_isolated.
 These checks exercise a controlled protocol stub and deliberately corrupt download/precondition responses. They test the runner and upstream assertions; they do not certify an emulator. Ordinary CI runs both these checks and the complete offline suite. Live CI currently selects the original lifecycle/authorization cases; run the SDK scenario explicitly until it is added to that manual allowlist.
 
 The SDK lockfile includes Apache-2.0 Google packages, Apache-2.0 OpenTelemetry, BSD-3-Clause protobuf, and PSF-2.0 typing-extensions. All source/license provenance stays separate from the emulator implementation.
+
+## Pub/Sub local integration
+
+The [Pub/Sub provider](pubsub.md) adds a separate pinned `requirements-pubsub.txt` and `scripts/check_pubsub.sh` runner. It executes the actual Python PublisherClient/SubscriberClient with local ADC refresh over a numeric loopback gRPC channel, tests denied and anonymous calls, publish/pull/ack, streaming callbacks/cancellation, and cleanup. These are repository-owned integration tests, not vendored upstream acceptance cases or GCP recordings. `PUBSUB_EMULATOR_HOST` stays unset because the SDK otherwise selects anonymous credentials. See the provider guide for the verified transport configuration and explicit gaps.

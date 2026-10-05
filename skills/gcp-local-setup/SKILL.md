@@ -5,7 +5,7 @@ description: Set up an existing GCP application repository for local Storage tes
 
 # GCP application setup
 
-Connect this application to gcp-local while preserving its tools and instructions. The current runtime supports a recorded slice of private Cloud Storage, local ADC, and basic IAM. Pub/Sub, Cloud Run, other service providers, and broader Storage operations remain unsupported; inspect the application's actual operations before claiming compatibility.
+Connect this application to gcp-local while preserving its tools and instructions. The packaged workflow supports a recorded slice of private Cloud Storage, local ADC, and basic IAM. The runtime also has a local-only Pub/Sub pull slice requiring separate Java/JAR configuration; it has no cloud-recorded fidelity claim or packaged setup yet. Push, Cloud Run, other providers, and broader Storage operations remain unsupported; inspect the application's actual operations before claiming compatibility.
 
 ## Inspect the application
 
@@ -32,6 +32,8 @@ python3 /path/to/gcp-local/scripts/local_env.py --directory "$PWD/.gcp-local/env
 Replace the checkout path with its actual location. Initial `up` accepts `--port` and `--project` before the action; separate applications need separate directories and ports. `env` emits JSON with the generated ADC path, synthetic project, and endpoint. Apply these values only to the application's local test process, preserving credentials in its SDK. Override the Storage API endpoint explicitly; avoid switches that replace credentials with anonymous ones. The verified Python lane uses standard local ADC and `client_options={"api_endpoint": endpoint}`. Native Terraform ADC remains unverified despite the passing test-only acceptance slice.
 
 Buckets require an explicit location, uniform access, enforced public access prevention, and zero soft-delete duration. The generated developer identity has an explicit local Storage Admin grant. Read the checkout's `docs/storage.md` for operation limits and `docs/quickstart.md` for an SDK example. Keep `.gcp-local/` ignored; never copy generated credentials or server configuration into this skill.
+
+For applications using Pub/Sub, read that checkout's `docs/pubsub.md` before setup. Its current lane needs a separate runtime process or a combined `-services storage,pubsub` process, Java 17, the pinned emulator JAR, and explicit local Pub/Sub grants. The verified Python transport preserves ADC using loopback gRPC call credentials; keep `PUBSUB_EMULATOR_HOST` unset. Do not claim that the Storage Compose workflow starts Pub/Sub, or that a detected publish/subscribe dependency proves push delivery compatibility.
 
 Use `logs` for startup failures. `reset` recreates only this environment and discards its in-memory resources and bucket grants; use it when the task calls for a clean environment. `down` removes its containers/networks while retaining private local credentials for reuse. Do not reset another application's directory.
 

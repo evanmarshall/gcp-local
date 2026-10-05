@@ -1,7 +1,7 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
   "recorded_at": "2026-10-05",
-  "scope": "Read-only predefined Storage role definitions; no resource mutation or grant",
+  "scope": "Read-only predefined Storage and Pub/Sub role definitions; no resource mutation or grant",
   "roles": [
     {
       "file": "storage.admin.json",
@@ -22,6 +22,26 @@
       "file": "storage.objectCreator.json",
       "name": "roles/storage.objectCreator",
       "sha256": "513fff80b0a597719850b948d5e33d5970f027d1db2fd34ac7d6028f6c243d1c"
+    },
+    {
+      "file": "pubsub.admin.json",
+      "name": "roles/pubsub.admin",
+      "sha256": "3a938305bb99c1ca1b70b7c93183f15bbed3f43dcc987279c73447a73f0cb6a7"
+    },
+    {
+      "file": "pubsub.publisher.json",
+      "name": "roles/pubsub.publisher",
+      "sha256": "9a6d023589cc824dd059d3b3899c3447b91d0737b39dd5de11432064daba61ab"
+    },
+    {
+      "file": "pubsub.subscriber.json",
+      "name": "roles/pubsub.subscriber",
+      "sha256": "6de29ead3b21468492b39620d0f5e3d51e44938197436bc818743917157e7eb2"
+    },
+    {
+      "file": "pubsub.viewer.json",
+      "name": "roles/pubsub.viewer",
+      "sha256": "ff3decd54fae7f9e17ddd08dcfedbcf146cb660b18a68032c790df8517608400"
     }
   ]
 }

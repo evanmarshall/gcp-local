@@ -90,7 +90,7 @@ def inspect(root):
             "files_inspected": count, "truncated": truncated, "languages": sorted(languages),
             "sdk_references": sorted(sdk_references),
             "services": [{"name": name, "detected_from": sorted(paths),
-                          "local_support": "partial-recorded-slice" if name == "storage" else "not-implemented"}
+                          "local_support": {"storage": "partial-recorded-slice", "pubsub": "local-only-pull-slice"}.get(name, "not-implemented")}
                          for name, paths in sorted(services.items())],
             "terraform_resource_types": sorted(resources), "endpoint_variable_references": sorted(endpoints),
             "test_command_candidates": [{"cwd": cwd, "command": command, "execution": "not-run"}
@@ -101,7 +101,7 @@ def inspect(root):
                          "live": {"status": "requires-explicit-sandbox", "credentials": "external file paths only"}},
             "next_actions": ["Review detected services and test commands; detection is heuristic, not compatibility certification.",
                              "Keep local endpoints and real-GCP credential profiles separate.",
-                             "Use the pinned runtime checkout to start Storage; other services remain unsupported.",
+                             "Use the pinned runtime checkout to start Storage; Pub/Sub needs separate setup and has local-only pull coverage.",
                              "For approved live tests, configure the explicit sandbox profile and Google Cloud CLI."]}
 
 

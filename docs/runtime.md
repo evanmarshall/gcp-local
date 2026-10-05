@@ -1,6 +1,6 @@
 # Core runtime
 
-The core process serves health/diagnostics and the [REST/gRPC dispatch layer](gateway.md). Enable the [Storage provider](storage.md) with `-services storage` and explicit local identity/IAM configuration. Unregistered methods return `501 UNIMPLEMENTED`.
+The core process serves health/diagnostics and the [REST/gRPC dispatch layer](gateway.md). Enable [Storage](storage.md), [Pub/Sub](pubsub.md), or both with `-services storage,pubsub` and explicit local identity/IAM configuration. Pub/Sub additionally requires absolute Java and pinned emulator JAR paths. Unregistered methods return `501 UNIMPLEMENTED` or the corresponding gRPC status.
 
 ## Build and run
 
@@ -31,4 +31,4 @@ In the task worktree, use the machine setup in [moo.md](moo.md), then:
 moo run task-name -- 'cd /srv/app && python3 scripts/install_go.py && sh scripts/check_go.sh'
 ```
 
-For an existing baseline created before the runtime, install `build-essential` inside the task machine first (`moo run task-name -- 'apt-get update && apt-get install -y --no-install-recommends build-essential'`). Build outputs and the Go toolchain stay inside the guest. Tests use ephemeral loopback ports. To use the existing moo HTTP forwarding interactively, start `bin/gcp-local -listen 0.0.0.0:8080` inside that machine and use its configured host port. Moo currently forwards HTTP only; gRPC transport tests use loopback inside the guest. The core owns [scoped backend lifecycle hooks](state-and-backends.md); Storage uses a pinned in-process backend; the packaged `up` workflow remains #11.
+For an existing baseline created before the runtime, install `build-essential` inside the task machine first (`moo run task-name -- 'apt-get update && apt-get install -y --no-install-recommends build-essential'`). Build outputs and the Go toolchain stay inside the guest. Tests use ephemeral loopback ports. To use the existing moo HTTP forwarding interactively, start `bin/gcp-local -listen 0.0.0.0:8080` inside that machine and use its configured host port. Host-forwarded gRPC remains unverified; current Pub/Sub transport tests use loopback inside the guest. The core owns [scoped backend lifecycle hooks](state-and-backends.md). The [packaged workflow](quickstart.md) currently includes Storage only.

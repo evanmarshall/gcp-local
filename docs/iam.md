@@ -1,6 +1,6 @@
 # Baseline IAM evaluator
 
-The evaluator supplies the permission layer for the first Storage provider. Its unit tests exercise inheritance, cross-project grants, revocation, composed checks, and diagnostics. The [Storage provider](storage.md) also passes the recorded authorization, cross-project, and replacement scenarios through actual backend operations.
+The evaluator supplies the permission layer for Storage and the initial [Pub/Sub provider](pubsub.md). Its unit tests exercise inheritance, cross-project grants, revocation, composed checks, and diagnostics. The [Storage provider](storage.md) also passes recorded authorization, cross-project, and replacement scenarios through actual backend operations. Pub/Sub has local tests but no cloud-recorded permission baseline yet.
 
 ## Permission plans and policies
 
@@ -8,7 +8,7 @@ Storage registers each supported method's baseline permissions in `internal/prov
 
 The shared resource index supplies ownership and ancestry. Evaluation walks the target resource or its validated bucket anchor through project, folder, and organization. Storage objects remain in the backend rather than being duplicated into the index. A caller's project is separate from the resource project: a role granted in the caller's project does not grant access to a foreign bucket, while an explicit binding for that foreign caller can. Missing parents, cycles, conflicting project ownership, and unverified target shapes fail closed.
 
-The first policy set supports unconditional version-1 allow bindings for exact user/service-account members, `allUsers`, and `allAuthenticatedUsers`. No absent credential becomes an administrator; unknown/expired credentials remain unauthenticated. A public binding is an explicit grant and still needs the provider's public-access controls. Cloud-platform and Storage full-control OAuth scope sets are supported; narrower-scope enforcement is explicitly unverified and fails rather than being treated as full access.
+The first policy set supports unconditional version-1 allow bindings for exact user/service-account members, `allUsers`, and `allAuthenticatedUsers`. No absent credential becomes an administrator; unknown/expired credentials remain unauthenticated. A public binding is an explicit grant and still needs the provider's public-access controls; the Pub/Sub slice requires named callers. Cloud-platform covers both current providers; Storage full-control and Pub/Sub scopes are restricted to their respective permission plans. Other narrower-scope enforcement is explicitly unverified and fails rather than being treated as full access.
 
 The engine stores each policy once, with its owning service/scope, returns copies, and checks supplied etags on replacement. Storage API handlers own authorization and wire-format validation around policy operations. Service reset removes that service's resource policies/coverage markers for the selected scope while retaining project/organization policy configuration. Persistence remains unsupported.
 
@@ -16,7 +16,7 @@ Conditions, groups, custom roles, unpinned roles, and advanced deny/PAB/org-poli
 
 ## Role snapshots
 
-Four complete predefined roles were read from GCP on 2026-10-05: Storage Admin, Object User, Object Viewer, and Object Creator. `internal/iam/roles/manifest.json` records their source and hashes, verified when the evaluator loads. Role permissions are data; they do not expand the registered method/request coverage. Ordinary builds/tests never fetch roles or credentials.
+Eight complete predefined roles were read from GCP on 2026-10-05: Storage Admin, Object User, Object Viewer, and Object Creator, plus Pub/Sub Admin, Publisher, Subscriber, and Viewer. `internal/iam/roles/manifest.json` records their source and hashes, verified when the evaluator loads. Role permissions are data; they do not expand the registered method/request coverage. Ordinary builds/tests never fetch roles or credentials. The recorder defaults to Storage; select `--service pubsub` for the additional set.
 
 To propose a later read-only refresh under an authorized account/quota project:
 

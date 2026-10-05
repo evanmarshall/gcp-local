@@ -6,7 +6,7 @@ Use the application's own test tooling. This bundle does not contain an emulator
 
 Existing unit tests can remain offline. Inspect their setup and subprocesses before running them; a test command's name does not establish that it avoids GCP.
 
-Start a private Storage environment with the runtime checkout's `scripts/local_env.py up`, then obtain its ADC/project/endpoint values with `env`. The [local template](local.env.example) shows those fields; do not copy its placeholder credential path verbatim. Keep generated local settings separate from existing application and live-cloud configuration. Only the recorded Storage slice is implemented. Do not repoint missing local APIs at production or use real credentials as a workaround.
+Start a private Storage environment with the runtime checkout's `scripts/local_env.py up`, then obtain its ADC/project/endpoint values with `env`. The [local template](local.env.example) shows those fields; do not copy its placeholder credential path verbatim. Keep generated local settings separate from existing application and live-cloud configuration. Storage has a recorded slice; Pub/Sub has separate setup and local-only pull coverage described in the runtime's `docs/pubsub.md`. Do not repoint missing local APIs at production or use real credentials as a workaround.
 
 ## Explicit live sandbox
 

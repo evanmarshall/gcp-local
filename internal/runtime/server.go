@@ -107,6 +107,7 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 	case <-ctx.Done():
 	}
 	s.ready.Store(false)
+	s.Backends.DrainSessions()
 	deadline, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
 	defer cancel()
 	httpCount := 1

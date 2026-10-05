@@ -17,18 +17,28 @@ jobs:
           persist-credentials: false
       - run: python3 scripts/install_go.py
       - run: python3 scripts/install_pubsub.py
+      - run: python3 -m venv .venv-tools
+      - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt
+      - run: .venv-tools/bin/python -m pip check
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - run: sh scripts/go.sh build -tags=backendprobe -o bin/pubsub-probe ./tools/pubsub-probe
       - name: Check official emulator protocols and lifecycle without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_pubsub_backend.sh
+      - run: sh scripts/go.sh test -c -tags=pubsubintegration -race -o bin/pubsub-integration ./internal/providers/pubsub
+      - name: Verify provider IAM, streams, lifecycle, and real Python SDK with local ADC
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_pubsub.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: pubsub-backend
           include-hidden-files: true
-          path: .artifacts/pubsub-backend/results.json
+          path: |
+            .artifacts/pubsub-backend/results.json
+            .artifacts/pubsub-provider/results.json
 
   packaged-environment:
     runs-on: ubuntu-latest

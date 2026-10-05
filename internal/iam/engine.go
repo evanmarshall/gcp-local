@@ -151,8 +151,27 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 		}
 		supported := false
 		for _, scope := range principal.Scopes {
-			if scope == "https://www.googleapis.com/auth/cloud-platform" || scope == "https://www.googleapis.com/auth/devstorage.full_control" {
+			if scope == "https://www.googleapis.com/auth/cloud-platform" {
 				supported = true
+			}
+			service := ""
+			if scope == "https://www.googleapis.com/auth/devstorage.full_control" {
+				service = "storage."
+			}
+			if scope == "https://www.googleapis.com/auth/pubsub" {
+				service = "pubsub."
+			}
+			if service != "" {
+				matches := true
+				for _, permission := range rule.Baseline {
+					matches = matches && strings.HasPrefix(permission, service)
+				}
+				for _, permissions := range rule.When {
+					for _, permission := range permissions {
+						matches = matches && strings.HasPrefix(permission, service)
+					}
+				}
+				supported = supported || matches
 			}
 		}
 		if !supported {

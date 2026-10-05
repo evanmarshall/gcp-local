@@ -1,6 +1,6 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The repository contains a Go runtime with shared REST/gRPC dispatch, scoped state/lifecycle, local identity, basic IAM, and an authenticated Storage provider backed by pinned fake-gcs-server. Storage has seven recorded conformance scenarios; other service providers remain pending. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRPC dispatch, scoped state/lifecycle, local identity, basic IAM, authenticated Storage, and an initial Pub/Sub pull provider backed by Google's official emulator. Storage has seven cloud-recorded scenarios; Pub/Sub has local SDK/IAM/stream tests with no cloud fidelity claim. Push and other service providers remain pending. Do not describe planned services as working features.
 
 ## Start here
 
@@ -27,6 +27,7 @@ gcp-local is a LocalStack-style GCP emulator. The repository contains a Go runti
 - Use deterministic local tests for normal development. Real-GCP recording requires an authorized sandbox and explicit live-cloud scope; permission to edit a provider does not authorize cloud spending. Never fall back to real GCP when local emulation is missing.
 - Preserve observed cloud fixtures; update them through the recorder rather than editing expected results to match the emulator. Keep credentials and sensitive payloads out of fixtures, logs, and Git.
 - Run `sh scripts/check_storage.sh` inside moo/Linux when changing Storage. It tests production ADC and the real backend against committed cloud recordings without egress. Its synthetic credential adapter is test-only.
+- For Pub/Sub, install Java 17, `scripts/install_pubsub.py`, and `requirements-pubsub.txt` in the task guest, then run `sh scripts/check_pubsub.sh`. It exercises the real backend and SDK with local ADC in isolation. See [coverage and configuration](docs/pubsub.md); never use anonymous emulator SDK mode to claim IAM support.
 - Run `sh scripts/check_terraform.sh` inside moo/Linux for the pinned acceptance slice after installing `scripts/install_terraform.py`. It includes a negative control and never executes Terraform against GCP.
 - For packaged setup changes, run `.venv-tools/bin/python scripts/smoke_environment.py` with Docker and pinned SDK dependencies. Read [the quickstart](docs/quickstart.md); reset/down apply only to the selected private environment directory.
 - Update the relevant coverage notes when adding behavior. Run the checks appropriate to the change and report what was actually verified.

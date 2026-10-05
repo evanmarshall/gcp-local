@@ -56,6 +56,33 @@ type instance struct {
 	status     Status
 	backend    Backend
 	definition Definition
+	sessionsMu sync.Mutex
+	sessions   map[*session]struct{}
+}
+
+type session struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// The instance gate excludes new sessions while lifecycle work drains them.
+// Completion never acquires that gate, so a reset cannot deadlock a reader.
+func (i *instance) drainSessions(ctx context.Context) error {
+	i.sessionsMu.Lock()
+	active := make([]*session, 0, len(i.sessions))
+	for s := range i.sessions {
+		s.cancel()
+		active = append(active, s)
+	}
+	i.sessionsMu.Unlock()
+	for _, s := range active {
+		select {
+		case <-s.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func (i *instance) phase(phase Phase, failure string) {
@@ -82,13 +109,61 @@ type Manager struct {
 	closed                    bool
 	lifetime                  context.Context
 	cancel                    context.CancelFunc
+	sessionLifetime           context.Context
+	cancelSessions            context.CancelFunc
 	startTimeout, stopTimeout time.Duration
 }
 
 func NewManager(startTimeout, stopTimeout time.Duration) *Manager {
 	lifetime, cancel := context.WithCancel(context.Background())
-	return &Manager{definitions: map[string]Definition{}, instances: map[Key]*instance{}, startTimeout: startTimeout, stopTimeout: stopTimeout, lifetime: lifetime, cancel: cancel}
+	sessions, cancelSessions := context.WithCancel(lifetime)
+	return &Manager{definitions: map[string]Definition{}, instances: map[Key]*instance{}, startTimeout: startTimeout, stopTimeout: stopTimeout, lifetime: lifetime, cancel: cancel, sessionLifetime: sessions, cancelSessions: cancelSessions}
 }
+
+// Session permits blocking pulls/streams alongside Use operations on a backend
+// whose client supports concurrency. It must not publish provider/index state
+// or re-enter this instance. Reset cancels and drains sessions before stopping
+// the backend. Providers still authorize before entering and before forwarding.
+func (m *Manager) Session(ctx context.Context, key Key, operation func(context.Context, Backend) error) error {
+	i, err := m.get(key)
+	if err != nil {
+		return err
+	}
+	if err := i.acquire(ctx); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	stopCancel := context.AfterFunc(m.sessionLifetime, cancel)
+	defer func() { stopCancel(); cancel() }()
+	if m.sessionLifetime.Err() != nil {
+		i.release()
+		return ErrClosed
+	}
+	active, err := m.require(ctx, key, i)
+	if err != nil {
+		i.release()
+		return err
+	}
+	s := &session{cancel: cancel, done: make(chan struct{})}
+	i.sessionsMu.Lock()
+	if i.sessions == nil {
+		i.sessions = map[*session]struct{}{}
+	}
+	i.sessions[s] = struct{}{}
+	i.sessionsMu.Unlock()
+	i.release()
+	defer func() {
+		i.sessionsMu.Lock()
+		delete(i.sessions, s)
+		close(s.done)
+		i.sessionsMu.Unlock()
+	}()
+	return operation(ctx, active)
+}
+
+// DrainSessions cancels long-lived requests when listeners begin draining.
+// It prevents new sessions, while ordinary Use calls retain their drain period.
+func (m *Manager) DrainSessions() { m.cancelSessions() }
 func (m *Manager) Register(service string, definition Definition) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -236,6 +311,9 @@ func (m *Manager) fail(instance *instance, operation string) {
 	// A cancelled request must not cancel cleanup of its partially started child.
 	ctx, cancel := context.WithTimeout(context.Background(), m.stopTimeout)
 	defer cancel()
+	if err := instance.drainSessions(ctx); err != nil {
+		operation += "; session cleanup incomplete"
+	}
 	if instance.backend != nil {
 		if err := instance.backend.Stop(ctx); err != nil {
 			operation += "; cleanup incomplete"
@@ -274,6 +352,10 @@ func (m *Manager) Reset(ctx context.Context, key Key) error {
 		return ErrClosed
 	}
 	instance.phase(Resetting, "")
+	if err := instance.drainSessions(ctx); err != nil {
+		instance.phase(Failed, "reset sessions")
+		return err
+	}
 	if instance.backend != nil {
 		if err := instance.backend.Stop(ctx); err != nil {
 			instance.phase(Failed, "reset stop")
@@ -312,6 +394,11 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 			}
 			defer instance.release()
 			instance.phase(Stopping, "")
+			if err := instance.drainSessions(ctx); err != nil {
+				instance.phase(Failed, "shutdown sessions")
+				result <- err
+				return
+			}
 			if instance.backend != nil {
 				if err := instance.backend.Stop(ctx); err != nil {
 					instance.phase(Failed, "shutdown")
