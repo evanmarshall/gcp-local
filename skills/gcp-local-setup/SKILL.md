@@ -1,32 +1,46 @@
 ---
 name: gcp-local-setup
-description: Prepare an existing GCP application repository for gcp-local validation by inspecting SDKs, services, test commands, and explicit local or sandbox profiles. Use for application onboarding, not emulator provider implementation.
+description: Set up an existing GCP application repository for local Storage testing with gcp-local, including SDK inspection, startup, readiness, credentials, and cleanup. Use for application onboarding, not emulator provider implementation.
 ---
 
 # GCP application setup
 
-Help an agent prepare this application for isolated validation while preserving its existing tools and instructions. The current gcp-local release has validation tooling and a reviewed Storage baseline, but no emulator runtime or supported local services. Do not claim a working local environment or invent a `gcp-local up` command.
+Connect this application to gcp-local while preserving its tools and instructions. The current runtime supports a recorded slice of private Cloud Storage, local ADC, and basic IAM. Pub/Sub, Cloud Run, other service providers, and broader Storage operations remain unsupported; inspect the application's actual operations before claiming compatibility.
 
 ## Inspect the application
 
-Run the bundled helper from its installed location, substituting the application path:
+Run the portable inspector from its installed location:
 
 ```sh
 python3 .agents/skills/gcp-local-setup/scripts/inspect_repo.py --repo .
 ```
 
-The helper reads selected source/manifests, recognizes common Python/Node/Go/Java/.NET GCP SDK references and Terraform resource types, and reports candidate test commands and endpoint variable references. It does not execute application code, read credential files, or contact GCP. Treat its findings as a starting point; inspect unfamiliar dependencies and omitted files when the report is truncated.
+It recognizes common SDK references, Terraform resource types, candidate test commands, and endpoint variables. It never executes application code or reads credential files. Treat discovery as a starting point; inspect unfamiliar dependencies or omitted files if the report is truncated. Add `--output .gcp-local/compatibility.json` to save a report.
 
-For a saved report, add `--output .gcp-local/compatibility.json`. For readiness diagnostics, add `--doctor`; exit code 2 currently means local emulation is unavailable, not that inspection failed. Missing tools are reported separately for the lane where they are needed.
+Inspection alone never contacts a service. Add `--doctor --endpoint http://127.0.0.1:4566` to explicitly check one numeric loopback endpoint. Exit code 2 means the runtime is unavailable or a detected service is unsupported. Readiness does not verify credentials, SDK compatibility, or application behavior.
 
-## Prepare the appropriate profile
+## Start and connect the runtime
 
-Read [the profile guide](references/profiles.md) when configuring execution. Keep existing offline tests usable, keep synthetic local settings separate from live settings, and preserve the application's existing AGENTS.md, test runner, and credentials. The adjacent templates contain no real identity or credential data.
+Use an available committed gcp-local checkout matching this bundle's recorded source revision, or obtain it when needed. Startup needs Python 3.11+ and a running Docker engine with Compose; no GCP account, global Go installation, or real ADC is needed. From the application:
 
-Inspect candidate test commands before executing them; discovery is not a network-isolation guarantee. Use existing authorization for the task. Live work needs an explicitly designated sandbox and allowed resource scope; request only missing inputs. A local feature gap must remain unsupported or unverified rather than falling back to real GCP.
+```sh
+python3 /path/to/gcp-local/scripts/local_env.py --directory "$PWD/.gcp-local/environment" up
+python3 /path/to/gcp-local/scripts/local_env.py --directory "$PWD/.gcp-local/environment" status
+python3 /path/to/gcp-local/scripts/local_env.py --directory "$PWD/.gcp-local/environment" env
+```
 
-Report the detected services, existing test entry points, missing prerequisites, and which setup steps were actually completed. Distinguish successful inspection/profile preparation from a working emulator or verified SDK/IAM compatibility. Runtime startup and supported-service checks will arrive through gcp-local issue #11; this bundle deliberately contains no startup wrapper.
+Replace the checkout path with its actual location. Initial `up` accepts `--port` and `--project` before the action; separate applications need separate directories and ports. `env` emits JSON with the generated ADC path, synthetic project, and endpoint. Apply these values only to the application's local test process, preserving credentials in its SDK. Override the Storage API endpoint explicitly; avoid switches that replace credentials with anonymous ones. The verified Python lane uses standard local ADC and `client_options={"api_endpoint": endpoint}`. Native Terraform ADC remains unverified despite the passing test-only acceptance slice.
+
+Buckets require an explicit location, uniform access, enforced public access prevention, and zero soft-delete duration. The generated developer identity has an explicit local Storage Admin grant. Read the checkout's `docs/storage.md` for operation limits and `docs/quickstart.md` for an SDK example. Keep `.gcp-local/` ignored; never copy generated credentials or server configuration into this skill.
+
+Use `logs` for startup failures. `reset` recreates only this environment and discards its in-memory resources and bucket grants; use it when the task calls for a clean environment. `down` removes its containers/networks while retaining private local credentials for reuse. Do not reset another application's directory.
+
+## Select the validation lane
+
+Read [the profile guide](references/profiles.md) for local versus explicitly authorized live execution. Preserve existing offline tests and the application's AGENTS.md. Inspect discovered commands before execution; the runtime's isolated backend network does not isolate host application subprocesses. Live work needs a designated sandbox and allowed resource scope; reuse existing authorization and request only missing inputs. A local feature gap must stay unsupported or unverified instead of falling back to GCP.
+
+Report detected services, selected directory/endpoint, readiness, tests actually run, and remaining unsupported operations. A running provider does not establish application or IAM compatibility.
 
 ## Portability and updates
 
-All scripts and references needed for inspection travel with this folder. Agents without automatic skill discovery can read this SKILL.md directly. `.install.json` records the source revision and hashes of copied files. The source installer's default mode previews an update and refuses to overwrite local modifications; reconcile those changes explicitly before installing a new version.
+Inspection scripts and references travel with this folder. Runtime execution separately needs its checkout and Docker. Agents without automatic discovery can read this SKILL.md directly. `.install.json` records the source revision and managed hashes; the source installer previews updates and refuses to overwrite local modifications. Reconcile edited files explicitly before installing an update.

@@ -1,0 +1,21 @@
+{
+  "builder": {
+    "image": "python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3",
+    "purpose": "Download the checksum-pinned Go toolchain and build a static runtime; absent from the final image"
+  },
+  "entrypoint": {
+    "image": "haproxy:3.2-alpine@sha256:5d97434a423c2533cfeb42874d45cf6d69a840b60334582dfbfd5008e94c80be",
+    "version": "3.2.25-70469d3",
+    "source": "https://github.com/haproxy/haproxy/tree/v3.2.25",
+    "license": "https://github.com/haproxy/haproxy/blob/v3.2.25/LICENSE",
+    "purpose": "Fixed TCP forwarding from the published loopback port to the gateway on its internal network"
+  },
+  "runtime": {
+    "base": "scratch",
+    "toolchain": "toolchains/go.json",
+    "modules": "go.sum",
+    "backend": "third_party/fake-gcs-server/manifest.json",
+    "storage_contract": "api/discovery/manifest.json",
+    "state": "in-memory; reset recreates this Compose project"
+  }
+}

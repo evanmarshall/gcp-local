@@ -2,11 +2,13 @@
 """Inspect an application's GCP dependencies without executing its code or contacting GCP."""
 
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+from urllib.parse import urlsplit
 
 
 IGNORE = {".git", ".agents", ".codex", ".terraform", ".venv", ".venv-tools", "venv",
@@ -87,19 +89,59 @@ def inspect(root):
     return {"generator": "gcp-local-setup", "schema_version": 1, "inspection_only": True,
             "files_inspected": count, "truncated": truncated, "languages": sorted(languages),
             "sdk_references": sorted(sdk_references),
-            "services": [{"name": name, "detected_from": sorted(paths), "local_support": "not-implemented"}
+            "services": [{"name": name, "detected_from": sorted(paths),
+                          "local_support": "partial-recorded-slice" if name == "storage" else "not-implemented"}
                          for name, paths in sorted(services.items())],
             "terraform_resource_types": sorted(resources), "endpoint_variable_references": sorted(endpoints),
             "test_command_candidates": [{"cwd": cwd, "command": command, "execution": "not-run"}
                                         for cwd, command in sorted(commands)],
             "prerequisites": {name: bool(shutil.which(name)) for name in ("python3", "gcloud", "docker", "terraform")},
             "profiles": {"offline": {"cloud_credentials": False, "action": "Inspect and run existing offline tests"},
-                         "local": {"status": "unavailable", "reason": "gcp-local emulator runtime is not implemented"},
+                         "local": {"status": "unavailable", "reason": "No explicit running endpoint was checked"},
                          "live": {"status": "requires-explicit-sandbox", "credentials": "external file paths only"}},
             "next_actions": ["Review detected services and test commands; detection is heuristic, not compatibility certification.",
                              "Keep local endpoints and real-GCP credential profiles separate.",
-                             "Local emulator execution is unavailable; do not redirect local tests to GCP.",
+                             "Use the pinned runtime checkout to start Storage; other services remain unsupported.",
                              "For approved live tests, configure the explicit sandbox profile and Google Cloud CLI."]}
+
+
+def doctor(report, endpoint):
+    from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
+    parsed = urlsplit(endpoint)
+    try:
+        local = ipaddress.ip_address(parsed.hostname or '').is_loopback and parsed.port
+    except ValueError:
+        local = False
+    if not (local and parsed.scheme == 'http' and parsed.path in {'', '/'}
+            and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment):
+        raise ValueError('Select a numeric loopback HTTP endpoint and explicit port')
+
+    class NoRedirects(HTTPRedirectHandler):
+        def redirect_request(self, request, fp, code, message, headers, newurl):
+            return None
+
+    profile = report['profiles']['local']
+    profile['endpoint'] = endpoint.rstrip('/')
+    try:
+        with build_opener(ProxyHandler({}), NoRedirects()).open(profile['endpoint'] + '/_local/health', timeout=3) as response:
+            raw = response.read(1048577)
+            if len(raw) > 1048576:
+                raise ValueError('Health response exceeded the supported size')
+            value = json.loads(raw)
+            providers = value.get('providers')
+            if (response.status != 200 or value.get('service') != 'gcp-local' or value.get('ready') is not True
+                    or not isinstance(providers, list) or not all(isinstance(item, str) for item in providers)):
+                raise ValueError('Endpoint did not report a ready gcp-local runtime')
+        required = {item['name'] for item in report['services']}
+        missing = sorted(required - set(providers))
+        profile.update(status='ready' if not missing else 'unsupported-services',
+                       providers=providers, missing_services=missing, version=value.get('version'),
+                       application_tests='not-run', credentials='not-tested',
+                       reason='Readiness and provider availability only; inspect operation/SDK coverage before testing')
+        return not missing
+    except (OSError, ValueError, AttributeError):
+        profile.update(status='unavailable', reason='The selected local runtime is unavailable or returned invalid health data')
+        return False
 
 
 def write_report(root, relative, report):
@@ -127,18 +169,27 @@ def main(argv=None):
     parser.add_argument("--repo", default=".")
     parser.add_argument("--output", help="Optional repository-relative JSON report")
     parser.add_argument("--doctor", action="store_true", help="Exit 2 when local emulation is unavailable")
+    parser.add_argument("--endpoint", help="With --doctor, check one explicit numeric loopback HTTP endpoint")
     args = parser.parse_args(argv)
     root = Path(args.repo).resolve()
     if not root.is_dir():
         parser.error("Select an existing application directory")
     report = inspect(root)
+    if args.endpoint and not args.doctor:
+        parser.error('--endpoint requires --doctor; ordinary inspection does not use the network')
+    ready = False
+    if args.endpoint:
+        try:
+            ready = doctor(report, args.endpoint)
+        except ValueError as error:
+            parser.error(str(error))
     if args.output:
         try:
             write_report(root, args.output, report)
         except (OSError, ValueError) as error:
             parser.exit(1, str(error) + "\n")
     print(json.dumps(report, indent=2))
-    return 2 if args.doctor else 0
+    return 2 if args.doctor and not ready else 0
 
 
 if __name__ == "__main__":

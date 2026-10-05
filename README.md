@@ -2,8 +2,9 @@
 
 A local GCP emulator following LocalStack's architecture: generated API contracts, service providers, reusable emulator backends, and cloud-recorded conformance tests. GCP identity, IAM enforcement, and analytical networking are core design goals.
 
-**Status:** the first authenticated [Storage provider](docs/storage.md) runs locally with standard ADC, basic IAM, and fake-gcs-server. Five real-GCP scenarios cover lifecycle, same- and cross-project authorization, object replacement, and selected upstream Python SDK assertions. Local CI compares the actual backend with those recordings without network egress. The Go core also supplies generated REST/gRPC dispatch, scoped state, lifecycle hooks, and metadata identity. Terraform certification and a packaged setup command are next; other service providers remain pending.
+**Status:** authenticated [Cloud Storage](docs/storage.md) runs with local ADC and basic IAM. Seven real-GCP recordings and three adapted upstream Terraform acceptance cases pass against the actual backend. The [packaged quickstart](docs/quickstart.md) starts, resets, and tears down a private environment without production credentials. Agent setup can inspect applications and verify local readiness. Other service providers remain pending.
 
+- [Start local Storage](docs/quickstart.md)
 - [Build and run the core process](docs/runtime.md)
 - [Configure local ADC and workload identity](docs/local-identity.md)
 - [Design and architecture diagram](docs/design.md)

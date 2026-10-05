@@ -12,7 +12,7 @@ bin/gcp-local -services storage \
   -iam-config .gcp-local/iam.json
 ```
 
-Point the SDK's `api_endpoint` at `http://127.0.0.1:4566` and use the generated local ADC file. Do not use the real-cloud sandbox profile. The service flag requires both configurations; missing credentials never become an administrator. The default invocation remains a core-only process. A packaged setup command is tracked in #11.
+Point the SDK's `api_endpoint` at `http://127.0.0.1:4566` and use the generated local ADC file. Do not use the real-cloud sandbox profile. The service flag requires both configurations; missing credentials never become an administrator. The default invocation remains a core-only process. Use the [packaged quickstart](quickstart.md) to generate the configurations and start Docker automatically.
 
 Bucket creation explicitly sets `location`, `iamConfiguration.uniformBucketLevelAccess.enabled: true`, `iamConfiguration.publicAccessPrevention: enforced`, and `softDeletePolicy.retentionDurationSeconds: "0"`. Storage class defaults to `STANDARD`; versioning and default holds remain disabled. The Python SDK's numeric zero and null effective-time field are accepted. See [the production SDK smoke](../scripts/smoke_storage.py) for a complete fixture with ordinary `google.auth.default()` credentials, bucket creation, policy updates, upload/download, replacement, revocation, and cleanup.
 

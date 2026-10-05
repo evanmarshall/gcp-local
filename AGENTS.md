@@ -28,6 +28,7 @@ gcp-local is a LocalStack-style GCP emulator. The repository contains a Go runti
 - Preserve observed cloud fixtures; update them through the recorder rather than editing expected results to match the emulator. Keep credentials and sensitive payloads out of fixtures, logs, and Git.
 - Run `sh scripts/check_storage.sh` inside moo/Linux when changing Storage. It tests production ADC and the real backend against committed cloud recordings without egress. Its synthetic credential adapter is test-only.
 - Run `sh scripts/check_terraform.sh` inside moo/Linux for the pinned acceptance slice after installing `scripts/install_terraform.py`. It includes a negative control and never executes Terraform against GCP.
+- For packaged setup changes, run `.venv-tools/bin/python scripts/smoke_environment.py` with Docker and pinned SDK dependencies. Read [the quickstart](docs/quickstart.md); reset/down apply only to the selected private environment directory.
 - Update the relevant coverage notes when adding behavior. Run the checks appropriate to the change and report what was actually verified.
 
 ## Commands

@@ -24,7 +24,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="$PWD/.gcp-local/identity/adc.json"
 export GOOGLE_CLOUD_PROJECT=synthetic-project
 ```
 
-Preserve the application's normal SDK credentials and override the API endpoint to `http://127.0.0.1:4566`. Do not enable an emulator switch that disables credentials. The real-GCP `.env`, gcloud configuration, and sandbox ADC files are separate and are not read by the runtime or this generator. The portable application skill is connected to the complete service workflow in #11.
+Preserve the application's normal SDK credentials and override the API endpoint to `http://127.0.0.1:4566`. Do not enable an emulator switch that disables credentials. The real-GCP `.env`, gcloud configuration, and sandbox ADC files are separate and are not read by the runtime or this generator. The [portable application skill](agent-setup.md) connects this credential flow to the [packaged Storage workflow](quickstart.md).
 
 The ADC profile uses `external_account`, a private file-sourced local subject access token, the local audience `//gcp-local/identity`, and `http://127.0.0.1:4566/v1/token`. This audience deliberately has no GCP project number, so the pinned auth library does not perform cloud project discovery. The project is supplied explicitly. A principal name alone is insufficient to mint a token: the subject credential must match its enrollment. The standard Google auth library performs the token exchange; this local issuer does not validate upstream GCP federation JWT/SAML assertions.
 

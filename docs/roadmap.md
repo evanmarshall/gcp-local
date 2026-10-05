@@ -2,7 +2,7 @@
 
 The [GitHub roadmap tracker](https://github.com/evanmarshall/gcp-local/issues/1) and linked issues are the source of truth for status. This table records the validation-first sequencing; completed work and scope changes are tracked on GitHub.
 
-Build on LocalStack's existing patterns and prove useful workflows before broadening coverage. The emulator runtime language is selected in the first implementation decision.
+Build on LocalStack's existing patterns and prove useful workflows before broadening coverage. The Go runtime follows the [recorded implementation decision](decisions/0001-runtime.md).
 
 ## Milestones
 
@@ -11,7 +11,9 @@ Build on LocalStack's existing patterns and prove useful workflows before broade
 - **M2: Cloud Run and Pub/Sub.** Run a container under its assigned identity and process Pub/Sub messages with verified service-to-service authorization.
 - **M3: IAM and networking fidelity.** Expand permission probes, networking resources and analysis, advanced policies, and service coverage from recorded scenarios.
 
-The runtime entry gate is #20 + #9 + #24. Runner implementation needs no cloud account; real recordings require the sandbox from #21. The runner foundation, first Storage baseline, and portable agent setup are merged through PRs #26–#28, and local sandbox credentials are verified. The authorization/isolation baseline (#24), including the unbilled peer identity, is recorded and revalidated; the runtime entry gate is complete. The Go core (#3), generated REST/gRPC dispatch (#4), and scoped state/backend lifecycle (#5) are implemented. Local ADC/STS and workload metadata identity (#6) are implemented and SDK-tested. Baseline IAM (#7) and the Storage integration (#8) pass five recorded cloud scenarios, including authorization, cross-project grants, replacement, and the upstream SDK slice (#23). Production local ADC also passes actual Storage operations. The next M1 work is Terraform certification (#10) and packaged setup (#11); other service API providers remain pending. Agent setup can now use the explicit credential-profile contract with manual CI OIDC recording and revalidation now working. [Moo setup](moo.md) is available; backend/protocol checks remain in [#25](https://github.com/evanmarshall/gcp-local/issues/25).
+The runtime entry gate (#20 + #9 + #24) is complete. The Go core, generated REST/gRPC dispatch, scoped state, local ADC/STS/metadata, basic IAM, and actual Storage backend are implemented. Seven cloud-recorded Storage scenarios pass without egress, and three adapted upstream Terraform cases cover create/read/update/refresh/import/destroy and unchanged plans. The [packaged workflow](quickstart.md) adds private startup, reset, teardown, and application-agent readiness checks. M1 remains limited to the documented Storage and credential slices; it is not broad GCP or Terraform certification.
+
+The next service work is Pub/Sub (#12), followed by Cloud Run (#13) and the combined workflow (#14). Broader live-cloud execution needs its own authorized scope; current authorization remains bounded Storage testing. [Moo setup](moo.md) is available, with additional backend/protocol checks in [#25](https://github.com/evanmarshall/gcp-local/issues/25).
 
 ## Issues and dependencies
 

@@ -1,0 +1,14 @@
+**
+!Dockerfile
+!go.mod
+!go.sum
+!scripts
+!scripts/install_go.py
+!toolchains
+!toolchains/go.json
+!api
+!api/**
+!cmd
+!cmd/**
+!internal
+!internal/**
