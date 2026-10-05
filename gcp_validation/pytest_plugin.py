@@ -34,6 +34,8 @@ def pytest_addoption(parser):
     group.addoption("--gcp-artifacts", default=".artifacts/validation")
     group.addoption("--gcp-provider-version", help="Explicit local implementation version for reports")
     group.addoption("--gcp-backend-version", help="Explicit local backend version for reports")
+    group.addoption("--gcp-pubsub-scope", help="Separately approved bounded Pub/Sub scope JSON; live modes only")
+    group.addoption("--gcp-pubsub-identities", help="Explicit synthetic ADC bundle for isolated local Pub/Sub")
 
 
 def network_policy(config, *, loopback=False):
@@ -68,6 +70,10 @@ def pytest_configure(config):
             allow_live=config.getoption("gcp_allow_live"),
         )
         versions = [config.getoption("gcp_provider_version"), config.getoption("gcp_backend_version")]
+        if config.getoption("gcp_pubsub_scope") and config.gcp_target.mode not in {"record", "revalidate"}:
+            raise ValueError("Pub/Sub cloud scope is only valid in explicit live modes")
+        if config.getoption("gcp_pubsub_identities") and config.gcp_target.mode != "local":
+            raise ValueError("Synthetic Pub/Sub identities are only valid in local mode")
         if any(versions) and (config.gcp_target.mode != "local" or not all(value and value.strip() for value in versions)):
             raise ValueError("Supply both implementation versions in local mode only")
         if any(config.getoption(option, default=False) for option in (

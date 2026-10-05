@@ -41,7 +41,7 @@ type integration struct {
 	stop           func()
 }
 
-func running(t *testing.T) *integration {
+func running(t *testing.T, extra ...identity.Enrollment) *integration {
 	t.Helper()
 	interfaces, err := net.Interfaces()
 	must(t, err)
@@ -60,10 +60,10 @@ func running(t *testing.T) *integration {
 		_, err = engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{actor}}}})
 		must(t, err)
 	}
-	identities, err := identity.New(identity.Config{Principals: []identity.Enrollment{
+	identities, err := identity.New(identity.Config{Principals: append([]identity.Enrollment{
 		{Subject: owner, Project: "project-a", SubjectToken: subjectSecret},
 		{Subject: other, Project: "project-b", SubjectToken: subjectSecret + "-peer"},
-	}}, nil)
+	}, extra...)}, nil)
 	must(t, err)
 	server := core.WithGateway("pubsub-integration", 5*time.Second, gateway.New(registry, identities.Resolve))
 	config.IDTokens, err = identity.NewIDTokens(engine, index)

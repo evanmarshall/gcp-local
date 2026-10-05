@@ -1,0 +1,16 @@
+"""This scenario remains unverified until an authorized GCP recording exists."""
+
+import pytest
+
+from gcp_validation.pubsub import run_scenario
+
+
+@pytest.mark.gcp_scenario(
+    id='pubsub-pull-authorization', service='pubsub', transport='grpc-v1',
+    versions={'sdk': 'google-cloud-pubsub/2.42.0;grpcio/1.84.0;google-auth/2.56.2',
+              'provider': 'not-applicable', 'backend': 'not-applicable'},
+    contract_files=('gcp_validation/pubsub.py', 'gcp_validation/pubsub_scope.py', 'gcp_validation/sandbox.py',
+                    'gcp_validation/federation.py', 'tests/conformance/pubsub/conftest.py'),
+)
+def test_pull_authorization(pubsub, gcp_snapshot):
+    run_scenario(pubsub, gcp_snapshot)

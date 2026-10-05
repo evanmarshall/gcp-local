@@ -29,7 +29,10 @@ def main():
         for path in sorted((root / directory).rglob('*.go')):
             source.update(str(path.relative_to(root)).encode())
             source.update(path.read_bytes())
-    source.update((root / 'internal/providers/pubsub/testdata/sdk.py').read_bytes())
+    for path in sorted((root / 'internal/providers/pubsub/testdata').glob('*.py')):
+        source.update(path.read_bytes())
+    for name in ('pubsub.py', 'pubsub_scope.py'):
+        source.update((root / 'gcp_validation' / name).read_bytes())
     versions = subprocess.check_output([os.environ['GCP_LOCAL_TEST_PYTHON'], '-c',
         'import importlib.metadata,json; print(json.dumps({n:importlib.metadata.version(n) for n in ("google-cloud-pubsub","grpcio","google-auth")}))'], text=True)
     report = {'kind': 'local-provider', 'service': 'pubsub', 'gcp_execution': False,

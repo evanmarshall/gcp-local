@@ -39,6 +39,8 @@ jobs:
           path: |
             .artifacts/pubsub-backend/results.json
             .artifacts/pubsub-provider/results.json
+            .artifacts/pubsub-conformance/coverage.json
+            .artifacts/pubsub-conformance/junit.xml
 
   packaged-environment:
     runs-on: ubuntu-latest

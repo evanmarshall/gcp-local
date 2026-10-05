@@ -1,6 +1,6 @@
 # Pub/Sub
 
-Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) is in progress. A gRPC provider wraps the official emulator with local ADC, basic IAM, pull/stream delivery, and authenticated local HTTP push. No Pub/Sub scenario has been recorded against GCP. The packaged Storage environment does not yet include Java or Pub/Sub.
+Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) implements the initial local slice. A gRPC provider wraps the official emulator with local ADC, basic IAM, pull/stream delivery, and authenticated local HTTP push. No Pub/Sub scenario has been recorded against GCP; the [prepared recorder and approval plan](pubsub-validation.md) are tracked in [#29](https://github.com/evanmarshall/gcp-local/issues/29). The packaged Storage environment does not yet include Java or Pub/Sub; the combined workflow in #14 includes that setup.
 
 ## Supported local slice
 
