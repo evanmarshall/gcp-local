@@ -28,10 +28,12 @@ The live credential file is selected explicitly. The Storage adapter loads only 
 Example local invocation, once a matching service and baseline exist:
 
 ```sh
-.venv-tools/bin/python -m pytest tests/conformance \
+.venv-tools/bin/python -m pytest tests/conformance/test_storage*.py \
   --gcp-mode local --gcp-project gcp-local-test \
   --gcp-endpoint http://127.0.0.1:4566
 ```
+
+Select scenarios for the service and transport at the chosen endpoint. The Storage runner selects only `test_storage*.py`; the separate [Pub/Sub recorder](pubsub-validation.md) uses its own gRPC endpoint and explicit identities. Collecting the entire conformance tree against a single service is not a valid comparison.
 
 Live invocations add `--gcp-mode record` or `revalidate`, the dedicated sandbox project, an explicit ADC file, a description of the approved resource/cost scope, and `--gcp-allow-live`. A flag is not a spending cap. Do not run live until the sandbox scope is authorized. Credentials stay out of the moo baseline, test parameters, logs, and Git.
 
