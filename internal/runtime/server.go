@@ -47,7 +47,7 @@ func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gatew
 			writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
 		case s.IAM != nil && strings.HasPrefix(r.URL.Path, "/_local/iam/decisions/"):
 			s.IAM.ServeHTTP(w, r)
-		case s.Identity != nil && (r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity"):
+		case s.Identity != nil && (r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs"):
 			s.Identity.ServeHTTP(w, r)
 		default:
 			g.ServeHTTP(w, r)

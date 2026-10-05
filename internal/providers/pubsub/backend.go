@@ -13,6 +13,7 @@ import (
 
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -23,7 +24,10 @@ import (
 const EmulatorVersion = "0.8.36"
 const EmulatorSHA256 = "51f87210e624d28d7473f3cfa6eb2d4538a7362c8c4948ef08498cdd7595d25a"
 
-type Config struct{ Java, JAR string }
+type Config struct {
+	Java, JAR string
+	IDTokens  *identity.IDTokens
+}
 
 func (c Config) validate() error {
 	if !filepath.IsAbs(c.Java) || !filepath.IsAbs(c.JAR) {

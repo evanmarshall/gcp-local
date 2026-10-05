@@ -51,7 +51,8 @@ func running(t *testing.T) *integration {
 	config := Config{Java: os.Getenv("GCP_LOCAL_JAVA"), JAR: os.Getenv("GCP_LOCAL_PUBSUB_JAR")}
 	registry, index := gateway.NewRegistry(), state.NewIndex()
 	for _, project := range []string{"project-a", "project-b"} {
-		must(t, index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Scope: state.Scope{Project: project, Location: state.Global}}))
+		number := map[string]string{"project-a": "123456", "project-b": "654321"}[project]
+		must(t, index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: number, Scope: state.Scope{Project: project, Location: state.Global}}))
 	}
 	engine, err := iam.New(index)
 	must(t, err)
@@ -65,6 +66,9 @@ func running(t *testing.T) *integration {
 	}}, nil)
 	must(t, err)
 	server := core.WithGateway("pubsub-integration", 5*time.Second, gateway.New(registry, identities.Resolve))
+	config.IDTokens, err = identity.NewIDTokens(engine, index)
+	must(t, err)
+	identities.IDTokens = config.IDTokens
 	server.Identity, server.IAM = identities, engine
 	p, err := New(registry, server.Backends, index, engine, config)
 	must(t, err)

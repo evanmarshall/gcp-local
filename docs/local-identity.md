@@ -46,7 +46,7 @@ For the workload's metadata-based ADC lane, leave `GOOGLE_APPLICATION_CREDENTIAL
 
 The handler exposes project ID, service-account email/scopes, account info, and access tokens. It requires `Metadata-Flavor: Google` and rejects forwarded requests. `default` and the configured account's own email resolve to the same account; other emails and attempts to choose another account through query parameters fail. Every handler is bound at creation, never from a caller-provided identity. The current CLI exposes one such listener; #13 must attach separate handlers to isolated workload networks. Account binding alone is not container network isolation.
 
-Metadata ID tokens, service-account impersonation, signing, service-account JSON keys, and federated JWT/SAML validation remain unsupported. The metadata identity-token path explicitly returns 501. Other service contracts remain gated by their provider coverage.
+Metadata ID tokens, general service-account impersonation/signing APIs, service-account JSON keys, and federated JWT/SAML validation remain unsupported. The metadata identity-token path explicitly returns 501. The [Pub/Sub push provider](pubsub.md) can mint short-lived, locally signed ID tokens internally after checking the acting service agent's permission on an explicitly declared local account. It exposes only public certificates at `/_local/identity/certs`; there is no public ID-token mint endpoint. These tokens use a separate local issuer and cannot authenticate to Google. Other service contracts remain gated by their provider coverage.
 
 ## Verified SDK matrix
 

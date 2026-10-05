@@ -2,7 +2,7 @@
 
 A local GCP emulator following LocalStack's architecture: generated API contracts, service providers, reusable emulator backends, and cloud-recorded conformance tests. GCP identity, IAM enforcement, and analytical networking are core design goals.
 
-**Status:** authenticated [Cloud Storage](docs/storage.md) runs with local ADC and basic IAM. Seven real-GCP recordings and three adapted upstream Terraform acceptance cases pass against the actual backend. The [packaged quickstart](docs/quickstart.md) starts, resets, and tears down a private environment without production credentials. An initial [Pub/Sub pull provider](docs/pubsub.md) passes local SDK, IAM, streaming, and lifecycle tests; it has no cloud-recorded fidelity claim or packaged setup yet. Push and other service providers remain pending.
+**Status:** authenticated [Cloud Storage](docs/storage.md) runs with local ADC and basic IAM. Seven real-GCP recordings and three adapted upstream Terraform acceptance cases pass against the actual backend. The [packaged quickstart](docs/quickstart.md) starts, resets, and tears down a private environment without production credentials. An initial [Pub/Sub provider](docs/pubsub.md) passes local SDK, IAM, streaming, authenticated push, and lifecycle tests; it has no cloud-recorded fidelity claim or packaged setup yet. Other service providers remain pending.
 
 - [Start local Storage](docs/quickstart.md)
 - [Build and run the core process](docs/runtime.md)

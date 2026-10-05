@@ -11,14 +11,16 @@ import (
 )
 
 type Config struct {
-	Resources   []state.Resource    `json:"resources"`
-	Policies    map[string]Policy   `json:"policies"`
-	Unsupported map[string][]string `json:"unsupported,omitempty"`
+	Resources       []state.Resource    `json:"resources"`
+	Policies        map[string]Policy   `json:"policies"`
+	Unsupported     map[string][]string `json:"unsupported,omitempty"`
+	ServiceAccounts []ServiceAccount    `json:"service_accounts,omitempty"`
 }
 
 // Load creates a fresh index/engine so a rejected bootstrap cannot publish a
-// partial hierarchy to a running provider. Only hierarchy roots are bootstrapped;
-// service resources are published by their owning providers after backend success.
+// partial hierarchy to a running provider. Hierarchy roots and explicitly
+// declared local service accounts are bootstrapped. Other service resources are
+// published by their owning providers after backend success.
 func Load(path string) (*Engine, *state.Index, error) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
@@ -72,6 +74,23 @@ func Load(path string) (*Engine, *state.Index, error) {
 		}
 	}
 	for _, resource := range config.Resources {
+		if _, err := engine.ancestry(Target{Name: resource.Name}); err != nil {
+			return nil, nil, err
+		}
+	}
+	accountIDs := map[string]bool{}
+	for _, account := range config.ServiceAccounts {
+		resource, err := account.resource()
+		if err != nil {
+			return nil, nil, err
+		}
+		if seen[resource.Name] || accountIDs[account.UniqueID] {
+			return nil, nil, errors.New("Duplicate local service account name or unique ID")
+		}
+		seen[resource.Name], accountIDs[account.UniqueID] = true, true
+		if err := index.Put("iam", resource); err != nil {
+			return nil, nil, err
+		}
 		if _, err := engine.ancestry(Target{Name: resource.Name}); err != nil {
 			return nil, nil, err
 		}

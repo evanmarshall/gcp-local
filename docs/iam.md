@@ -16,7 +16,7 @@ Conditions, groups, custom roles, unpinned roles, and advanced deny/PAB/org-poli
 
 ## Role snapshots
 
-Eight complete predefined roles were read from GCP on 2026-10-05: Storage Admin, Object User, Object Viewer, and Object Creator, plus Pub/Sub Admin, Publisher, Subscriber, and Viewer. `internal/iam/roles/manifest.json` records their source and hashes, verified when the evaluator loads. Role permissions are data; they do not expand the registered method/request coverage. Ordinary builds/tests never fetch roles or credentials. The recorder defaults to Storage; select `--service pubsub` for the additional set.
+Ten complete predefined roles were read from GCP on 2026-10-05: Storage Admin, Object User, Object Viewer, and Object Creator; Pub/Sub Admin, Publisher, Subscriber, and Viewer; Service Account User and Service Account Token Creator. `internal/iam/roles/manifest.json` records their source and hashes, verified when the evaluator loads. Role permissions are data; they do not expand the registered method/request coverage. Ordinary builds/tests never fetch roles or credentials. The recorder defaults to Storage; select `--service pubsub` or `--service identity` for the additional sets.
 
 To propose a later read-only refresh under an authorized account/quota project:
 
@@ -30,7 +30,7 @@ Inspect the candidate and its permission changes before replacing committed file
 
 ## Bootstrap and diagnostics
 
-`-iam-config` loads an explicit owner-only JSON file. It contains `resources` (canonical resource-manager organization/folder/project references with `service`, `kind`, `parent`, and `scope`), `policies` keyed by resource name, and optional `unsupported` feature markers. A project may be an explicit local hierarchy root. Service resources cannot be bootstrapped through this path; their providers publish them after backend success. A failed load discards the entire new model. Example single-project bootstrap:
+`-iam-config` loads an explicit owner-only JSON file. It contains `resources` (canonical resource-manager organization/folder/project references with `service`, `kind`, `parent`, and `scope`), `policies` keyed by resource name, and optional `unsupported` feature markers. A project may be an explicit local hierarchy root. Optional `service_accounts` explicitly declares local account email, project, and numeric unique ID for [push token authorization](pubsub.md); duplicate IDs and mismatched ownership are rejected. This is synthetic bootstrap data, not a cloud import or service-account credential. Other service resources are published by their providers after backend success. A failed load discards the entire new model. Example single-project bootstrap:
 
 ```json
 {

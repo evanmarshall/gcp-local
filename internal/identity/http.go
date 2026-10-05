@@ -22,6 +22,8 @@ func oauthError(w http.ResponseWriter, code int, name, description string) {
 }
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.URL.Path == "/_local/identity/certs" && r.Method == http.MethodGet && s.IDTokens != nil:
+		writeJSON(w, 200, s.IDTokens.Certificates())
 	case r.URL.Path == "/v1/token" && r.Method == http.MethodPost:
 		s.exchange(w, r)
 	case r.URL.Path == "/_local/identity" && r.Method == http.MethodGet:

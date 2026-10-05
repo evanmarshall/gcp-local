@@ -1,7 +1,7 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
   "recorded_at": "2026-10-05",
-  "scope": "Read-only predefined Storage and Pub/Sub role definitions; no resource mutation or grant",
+  "scope": "Read-only predefined Storage, Pub/Sub, and service-account role definitions; no resource mutation or grant",
   "roles": [
     {
       "file": "storage.admin.json",
@@ -42,6 +42,16 @@
       "file": "pubsub.viewer.json",
       "name": "roles/pubsub.viewer",
       "sha256": "ff3decd54fae7f9e17ddd08dcfedbcf146cb660b18a68032c790df8517608400"
+    },
+    {
+      "file": "iam.serviceAccountUser.json",
+      "name": "roles/iam.serviceAccountUser",
+      "sha256": "d3a8433206951eb861c3c4740685dd37e996b6af325daf27f29e24274624523e"
+    },
+    {
+      "file": "iam.serviceAccountTokenCreator.json",
+      "name": "roles/iam.serviceAccountTokenCreator",
+      "sha256": "64dc45c85e756f2f0bd4f90ae12b342ca845c4a4d33b0a153e5b56c36fc284e9"
     }
   ]
 }

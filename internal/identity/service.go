@@ -45,6 +45,9 @@ type token struct {
 	expires   time.Time
 }
 type Service struct {
+	// Configure before serving. Public keys are readable; minting remains an
+	// internal provider operation guarded by the shared IAM evaluator.
+	IDTokens   *IDTokens
 	mu         sync.Mutex
 	subjects   map[[32]byte]principal
 	principals map[string]principal

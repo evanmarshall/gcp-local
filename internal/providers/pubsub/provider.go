@@ -13,6 +13,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -26,15 +27,21 @@ type Provider struct {
 	index    *state.Index
 	iam      *iam.Engine
 	poisoned sync.Map // unresolved control-plane mutations, cleared only on reset
+	tokens   *identity.IDTokens
+	pushes   sync.Map // canonical subscription -> provider-owned immutable config and worker
 }
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, config Config) (*Provider, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	return newProvider(registry, manager, index, engine, func(scope state.Scope) (backend.Backend, error) {
+	p, err := newProvider(registry, manager, index, engine, func(scope state.Scope) (backend.Backend, error) {
 		return &emulator{config: config, scope: scope}, nil
 	})
+	if err == nil {
+		p.tokens = config.IDTokens
+	}
+	return p, err
 }
 func newProvider(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, factory func(state.Scope) (backend.Backend, error)) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
@@ -45,6 +52,9 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		return nil, err
 	}
 	if err := manager.Register("pubsub", backend.Definition{Validate: state.GlobalScope, New: factory, AfterReset: func(scope state.Scope) error {
+		if err := p.resetPush(scope); err != nil {
+			return err
+		}
 		engine.ClearScope("pubsub", scope)
 		index.RemoveScope("pubsub", scope)
 		p.poisoned.Delete(scope)
@@ -128,6 +138,16 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 		if err != nil {
 			return err
 		}
+		if subscription.PushConfig != nil {
+			if err := p.authorizePush(call, subscription.PushConfig); err != nil {
+				return err
+			}
+		}
+	}
+	if call.Method == subscriber+"Pull" || call.Method == subscriber+"StreamingPull" {
+		if _, push := p.pushes.Load(canonical(call.Resource)); push {
+			return status.Error(codes.FailedPrecondition, "Cannot pull from a push subscription")
+		}
 	}
 	if !projectMethod(call.Method) {
 		if _, found := p.index.Get(canonical(call.Resource)); !found {
@@ -176,20 +196,47 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 			}
 		}
 		var err error
-		response, err = invoke(ctx, b, call.Method, request)
+		forwarded := request
+		var push *pb.PushConfig
+		if subscription, ok := request.(*pb.Subscription); ok && subscription.PushConfig != nil {
+			if p.pushCount(scopeOf(call)) >= 32 {
+				return status.Error(codes.ResourceExhausted, "Local limit is 32 push subscriptions per project")
+			}
+			push = proto.Clone(subscription.PushConfig).(*pb.PushConfig)
+			copy := proto.Clone(subscription).(*pb.Subscription)
+			copy.PushConfig = nil // The unauthenticated emulator must never make HTTP deliveries.
+			forwarded = copy
+		}
+		response, err = invoke(ctx, b, call.Method, forwarded)
 		if err == nil && call.Method == subscriber+"Pull" {
 			err = p.authorize(call, request)
 		}
 		if creating || deleting {
 			if err == nil {
 				if creating {
-					return p.publish(call)
+					if err := p.publish(call); err != nil {
+						return err
+					}
+					if push != nil {
+						p.startPush(call, push)
+					}
+					p.restorePush(response)
+					return nil
 				}
 				return p.forget(call)
 			}
 			if ambiguous(err) {
 				p.reconcile(b, call)
+				if creating && push != nil {
+					_, failed := p.poisoned.Load(scopeOf(call))
+					if _, found := p.index.Get(canonical(call.Resource)); found && !failed {
+						p.startPush(call, push)
+					}
+				}
 			}
+		}
+		if err == nil {
+			p.restorePush(response)
 		}
 		return err
 	})
@@ -219,6 +266,10 @@ func (p *Provider) publish(call gateway.Call) error {
 	return nil
 }
 func (p *Provider) forget(call gateway.Call) error {
+	if err := p.stopPush(canonical(call.Resource)); err != nil {
+		p.poisoned.Store(scopeOf(call), true)
+		return err
+	}
 	if err := p.index.Remove("pubsub", scopeOf(call), canonical(call.Resource)); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return status.Error(codes.FailedPrecondition, "Backend deletion could not be indexed; reset this scope")

@@ -1,6 +1,6 @@
 # Pub/Sub
 
-Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) is in progress. A gRPC provider now wraps the official emulator with local ADC, basic IAM, pull delivery, and managed streams. No Pub/Sub scenario has been recorded against GCP. Authenticated push remains pending; the packaged Storage environment does not yet include Java or Pub/Sub.
+Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) is in progress. A gRPC provider wraps the official emulator with local ADC, basic IAM, pull/stream delivery, and authenticated local HTTP push. No Pub/Sub scenario has been recorded against GCP. The packaged Storage environment does not yet include Java or Pub/Sub.
 
 ## Supported local slice
 
@@ -12,12 +12,35 @@ Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) is in progress.
 | IAM | Project inheritance and resource grants; get/set unconditional v1 policies with etag checks; separate subscription-create and topic-attachment checks |
 | Python SDK | Pinned 2.42.0, grpcio 1.84.0; local ADC refresh, publish/pull/ack, streaming callback/cancel, denial, cleanup |
 | Retry | Local nack (`ModifyAckDeadline=0`) redelivers the same message ID through the official backend; no retry timing or exactly-once claim |
+| Authenticated push | Same-project service account; caller `actAs`; service-agent ID-token permission; signed local token; wrapped JSON body; HTTP success acknowledgement, retry after failure, delete/reset/shutdown cancellation |
 
 Permission plans follow [Google's access-control table](https://docs.cloud.google.com/pubsub/docs/access-control). Pub/Sub Admin, Publisher, Subscriber, and Viewer role definitions were read and pinned on 2026-10-05; reading roles made no grants or service resources. Local tests show denied calls never reach or start the backend. An existing stream checks authorization again before forwarding acknowledgements or delivering messages, so revocation prevents subsequent delivery. These are implementation tests, not recorded GCP authorization evidence.
 
 Each resource project owns one lazy JVM restricted to that project. The emulator owns configurations and queues; the shared index owns resource references; IAM owns policies. Control-plane writes publish index changes only after backend success. An uncertain create/delete is reconciled by reading the backend; an unresolved result blocks the scope until reset. Reset cancels sessions, stops the child, then clears only that project's Pub/Sub resources and policies. Project bootstrap policies survive. Sessions allow a publisher to proceed while a pull/stream waits.
 
-Push, cross-project subscriptions, ordering, exactly-once delivery, schemas, KMS, filters, dead-letter policies, configurable retries, retention/expiry fidelity, snapshots/seek, updates, and unknown protobuf fields return explicit coverage errors. Topic/subscription `testIamPermissions` and REST transport are not registered. Only named local callers are supported. Publication requests have a 1 MiB local limit. JVMs use a 256 MiB heap and additional native memory; the runtime is process-local and does not persist messages.
+Anonymous push, remote/HTTPS push endpoints, cross-project subscriptions or push accounts, ordering, exactly-once delivery, schemas, KMS, filters, dead-letter policies, configurable retries, retention/expiry fidelity, snapshots/seek, updates, and unknown protobuf fields return explicit coverage errors. Topic/subscription `testIamPermissions` and REST transport are not registered. Only named local callers are supported. Publication requests have a 1 MiB local limit. JVMs use a 256 MiB heap and additional native memory; the runtime is process-local and does not persist messages.
+
+## Authenticated local push
+
+The provider owns push configuration and workers. The emulator receives a **pull-only** subscription and never sees the push URL. Create a subscription with `push_config.push_endpoint` set to an explicit numeric loopback HTTP URL and `push_config.oidc_token.service_account_email` set to a declared local service account. Optional `audience` defaults to the endpoint. A pull or streaming request on this push subscription fails rather than competing with its delivery worker. Get/list responses restore the provider-owned push configuration.
+
+Declare the account in the private IAM bootstrap (alongside the existing project resource, whose `number` is required):
+
+```json
+"service_accounts": [{
+  "project": "project-a",
+  "email": "push-worker@project-a.iam.gserviceaccount.com",
+  "unique_id": "123456789012345678901"
+}]
+```
+
+Attach a `roles/iam.serviceAccountUser` binding for the subscription creator and a `roles/iam.serviceAccountTokenCreator` binding for `serviceAccount:service-123456@gcp-sa-pubsub.iam.gserviceaccount.com` to the account's canonical policy resource `//iam.googleapis.com/projects/project-a/serviceAccounts/push-worker@project-a.iam.gserviceaccount.com`. Replace `123456` with the declared project number. These are explicit **local** grants; this configuration does not change GCP. The creator separately needs the ordinary subscription-create and topic-attachment permissions.
+
+Creation checks `iam.serviceAccounts.actAs`. Each delivery checks the service agent's `iam.serviceAccounts.getOpenIdToken` on the configured account. A missing/revoked agent grant leaves messages pending and sends no HTTP request. Tokens are signed with the runtime's ephemeral RS256 key, carry the account email/unique ID and requested audience, expire after five minutes, and use `https://identity.gcp-local.invalid` as issuer. Fetch the runtime's public PEM key map from `GET /_local/identity/certs`; validate signature, expiry, audience, issuer, and expected email. The integration runner additionally verifies the token with Google's Python JWT verifier. Tokens cannot authenticate to real GCP and are not claimed to be Google-signed.
+
+Workers send wrapped Pub/Sub JSON, acknowledge final HTTP responses 200/201/202/204, and nack failures for redelivery. Receivers that send only an informational 102 response are outside this slice: the Go HTTP client waits for a final response, so that case times out and retries. The local implementation retries after one second with a three-second HTTP timeout, one outstanding message per worker, and at most 32 push subscriptions per project. This bounds local work; it does not reproduce GCP's adaptive push backoff, token reuse, delivery timing, or retry-policy semantics. Redirects and ambient proxies are disabled. Delete/reset cancels and drains workers and HTTP requests before returning. Reset preserves separately owned local service accounts and their IAM policies.
+
+The split between caller and service-agent checks follows [Google's push authentication documentation](https://docs.cloud.google.com/pubsub/docs/authenticate-push-subscriptions); acknowledgement behavior follows [the push delivery guide](https://docs.cloud.google.com/pubsub/docs/push). It remains locally tested, without recorded GCP push evidence.
 
 ## Run the provider
 
@@ -65,7 +88,7 @@ Use `SubscriberGrpcTransport(channel=channel)` for the subscriber. Set `GOOGLE_A
 sh scripts/check_pubsub.sh
 ```
 
-The race-enabled Go suite and real Python SDK run with only loopback available. Tests exercise resource grants and stale policy etags, grant revocation during an active stream, project isolation, nack/redelivery, half-close, client cancellation, reset, shutdown, and uncertain control-plane responses. The runner writes `.artifacts/pubsub-provider/results.json` with test outcomes, source/backend hashes, SDK versions, and an explicit **unverified** cloud-fidelity status. CI also reruns the existing Storage recordings and broader core tests. No Pub/Sub project provisioning, API enablement, grants, or real-GCP service execution has occurred.
+The race-enabled Go suite and real Python SDK run with only loopback available. Tests exercise resource grants and stale policy etags, grant revocation during an active stream, project isolation, nack/redelivery, half-close, client cancellation, reset, shutdown, and uncertain control-plane responses. Push tests verify `actAs` denial before backend access, separate service-agent grants/revocation, independently verified JWTs, retry message identity, redirect rejection, and cancellation of an active receiver. The runner writes `.artifacts/pubsub-provider/results.json` with test outcomes, source/backend hashes, SDK versions, and an explicit **unverified** cloud-fidelity status. CI also reruns the existing Storage recordings and broader core tests. No Pub/Sub project provisioning, API enablement, grants, or real-GCP service execution has occurred.
 
 ## Backend verification
 

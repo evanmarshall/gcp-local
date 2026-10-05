@@ -56,8 +56,13 @@ func validate(request proto.Message) error {
 	case *pb.Topic:
 		return fields(r, "name", "labels")
 	case *pb.Subscription:
-		if err := fields(r, "name", "topic", "labels", "ack_deadline_seconds"); err != nil {
+		if err := fields(r, "name", "topic", "labels", "ack_deadline_seconds", "push_config"); err != nil {
 			return err
+		}
+		if r.PushConfig != nil {
+			if err := validatePush(r.PushConfig); err != nil {
+				return err
+			}
 		}
 		if _, err := resourceName(r.Topic, "topics"); err != nil {
 			return err

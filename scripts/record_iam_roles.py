@@ -9,7 +9,8 @@ import subprocess
 from datetime import datetime, timezone
 
 ROLES = {'storage': ('storage.admin', 'storage.objectUser', 'storage.objectViewer', 'storage.objectCreator'),
-         'pubsub': ('pubsub.admin', 'pubsub.publisher', 'pubsub.subscriber', 'pubsub.viewer')}
+         'pubsub': ('pubsub.admin', 'pubsub.publisher', 'pubsub.subscriber', 'pubsub.viewer'),
+         'identity': ('iam.serviceAccountUser', 'iam.serviceAccountTokenCreator')}
 
 
 def main():

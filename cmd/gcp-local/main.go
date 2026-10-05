@@ -117,7 +117,13 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 			}
 		}
 		if selected["pubsub"] {
-			if _, err := pubsub.New(registry, server.Backends, index, engine, pubsub.Config{Java: *pubsubJava, JAR: *pubsubJAR}); err != nil {
+			tokens, err := identity.NewIDTokens(engine, index)
+			if err != nil {
+				fmt.Fprintln(errors, err)
+				return 2
+			}
+			identities.IDTokens = tokens
+			if _, err := pubsub.New(registry, server.Backends, index, engine, pubsub.Config{Java: *pubsubJava, JAR: *pubsubJAR, IDTokens: tokens}); err != nil {
 				fmt.Fprintln(errors, err)
 				return 2
 			}

@@ -28,6 +28,7 @@ var permissions = map[string]string{
 	"pubsub.topics.setIamPolicy":        "pubsub.topics.setIamPolicy",
 	"pubsub.subscriptions.getIamPolicy": "pubsub.subscriptions.getIamPolicy",
 	"pubsub.subscriptions.setIamPolicy": "pubsub.subscriptions.setIamPolicy",
+	"pubsub.push.actAs":                 "iam.serviceAccounts.actAs",
 }
 
 func registerPermissions(engine *iam.Engine) error {

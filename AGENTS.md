@@ -1,6 +1,6 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRPC dispatch, scoped state/lifecycle, local identity, basic IAM, authenticated Storage, and an initial Pub/Sub pull provider backed by Google's official emulator. Storage has seven cloud-recorded scenarios; Pub/Sub has local SDK/IAM/stream tests with no cloud fidelity claim. Push and other service providers remain pending. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRPC dispatch, scoped state/lifecycle, local identity, basic IAM, authenticated Storage, and an initial Pub/Sub provider backed by Google's official emulator. Storage has seven cloud-recorded scenarios; Pub/Sub has local SDK/IAM/stream/authenticated-push tests with no cloud fidelity claim. Other service providers remain pending. Do not describe planned services as working features.
 
 ## Start here
 

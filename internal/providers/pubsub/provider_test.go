@@ -11,6 +11,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -52,7 +53,7 @@ func fixture(t *testing.T) (*Provider, *gateway.Registry, *faultDriver) {
 	t.Helper()
 	index := state.NewIndex()
 	for _, project := range []string{"project-a", "project-b"} {
-		must(t, index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Scope: state.Scope{Project: project, Location: state.Global}}))
+		must(t, index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: state.Scope{Project: project, Location: state.Global}}))
 	}
 	engine, err := iam.New(index)
 	must(t, err)
@@ -198,5 +199,20 @@ func TestEmulatorPinMatchesInstaller(t *testing.T) {
 	must(t, json.Unmarshal(raw, &pin))
 	if pin.Version != EmulatorVersion || pin.SHA256 != EmulatorSHA256 {
 		t.Fatal("runtime and installer emulator pins differ")
+	}
+}
+
+func TestPushActAsDeniedBeforeAnyBackendAccess(t *testing.T) {
+	p, registry, b := fixture(t)
+	var err error
+	p.tokens, err = identity.NewIDTokens(p.iam, p.index)
+	must(t, err)
+	must(t, p.publish(call(publisher+"CreateTopic", testTopic, owner)))
+	email := "push-worker@project-a.iam.gserviceaccount.com"
+	must(t, p.index.Put("iam", state.Resource{Name: iam.AccountResource("project-a", email), Service: "iam", Kind: "serviceAccount", Number: "123456789012345678901", Parent: projectResource("project-a"), Scope: state.Scope{Project: "project-a", Location: state.Global}}))
+	request := &pb.Subscription{Name: testSub, Topic: testTopic, PushConfig: &pb.PushConfig{PushEndpoint: "http://127.0.0.1:8888/receive", AuthenticationMethod: &pb.PushConfig_OidcToken_{OidcToken: &pb.PushConfig_OidcToken{ServiceAccountEmail: email}}}}
+	_, err = registry.Invoke(call(subscriber+"CreateSubscription", testSub, owner), request)
+	if status.Code(err) != codes.PermissionDenied || b.calls != 0 || b.starts != 0 {
+		t.Fatal("missing actAs reached backend", err)
 	}
 }
