@@ -20,6 +20,8 @@ type Server struct {
 	HTTP            *http.Server
 	GRPC            *grpc.Server
 	Backends        *backend.Manager
+	Identity        http.Handler
+	Metadata        *http.Server
 	ShutdownTimeout time.Duration
 	ready           atomic.Bool
 }
@@ -41,6 +43,8 @@ func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gatew
 			writeJSON(w, code, map[string]any{"service": "gcp-local", "version": version, "ready": ready, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
 		case r.Method == "GET" && r.URL.Path == "/_local/diagnostics":
 			writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
+		case s.Identity != nil && (r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity"):
+			s.Identity.ServeHTTP(w, r)
 		default:
 			g.ServeHTTP(w, r)
 		}
@@ -50,25 +54,49 @@ func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gatew
 
 // Serve binds neither listener itself. Cancellation drains both transports under
 // a shared deadline, then forcibly closes remaining HTTP requests/gRPC streams.
-func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Listener) error {
-	if s.ShutdownTimeout <= 0 {
+type Listeners struct{ HTTP, GRPC, Metadata net.Listener }
+
+func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
+	httpListener, grpcListener := listeners.HTTP, listeners.GRPC
+	if httpListener == nil || grpcListener == nil || (s.Metadata == nil) != (listeners.Metadata == nil) {
+		for _, listener := range []net.Listener{httpListener, grpcListener, listeners.Metadata} {
+			if listener != nil {
+				listener.Close()
+			}
+		}
+		return errors.New("supply HTTP/gRPC listeners and pair the metadata handler/listener")
+	}
+	closeListeners := func() {
 		httpListener.Close()
 		grpcListener.Close()
+		if listeners.Metadata != nil {
+			listeners.Metadata.Close()
+		}
+	}
+
+	if s.ShutdownTimeout <= 0 {
+		closeListeners()
 		return errors.New("shutdown timeout must be positive")
 	}
 	if ctx.Err() != nil {
-		httpListener.Close()
-		grpcListener.Close()
+		closeListeners()
 		cleanup, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
 		defer cancel()
 		return s.Backends.Shutdown(cleanup)
 	}
 	s.ready.Store(true)
-	served := make(chan error, 2)
+	count := 2
+	if listeners.Metadata != nil {
+		count++
+	}
+	served := make(chan error, count)
 	go func() { served <- s.HTTP.Serve(httpListener) }()
 	go func() { served <- s.GRPC.Serve(grpcListener) }()
+	if listeners.Metadata != nil {
+		go func() { served <- s.Metadata.Serve(listeners.Metadata) }()
+	}
 	var serveErr error
-	remaining := 2
+	remaining := count
 	select {
 	case serveErr = <-served:
 		remaining--
@@ -77,9 +105,16 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	s.ready.Store(false)
 	deadline, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
 	defer cancel()
-	httpDone := make(chan error, 1)
+	httpCount := 1
+	if listeners.Metadata != nil {
+		httpCount++
+	}
+	httpDone := make(chan error, httpCount)
 	grpcDone := make(chan struct{})
 	go func() { httpDone <- s.HTTP.Shutdown(deadline) }()
+	if s.Metadata != nil {
+		go func() { httpDone <- s.Metadata.Shutdown(deadline) }()
+	}
 	go func() { s.GRPC.GracefulStop(); close(grpcDone) }()
 	var shutdownErr error
 	select {
@@ -89,9 +124,14 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 		s.GRPC.Stop()
 		<-grpcDone
 	}
-	if err := <-httpDone; err != nil {
-		shutdownErr = err
-		_ = s.HTTP.Close()
+	for range httpCount {
+		if err := <-httpDone; err != nil {
+			shutdownErr = errors.Join(shutdownErr, err)
+			_ = s.HTTP.Close()
+			if s.Metadata != nil {
+				_ = s.Metadata.Close()
+			}
+		}
 	}
 	for i := 0; i < remaining; i++ {
 		if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, grpc.ErrServerStopped) {

@@ -1,6 +1,6 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The repository contains the validation foundation and a Go core process with health/diagnostics and shared REST/gRPC dispatch; scoped state and backend lifecycle hooks are available, while service API providers are not implemented yet. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator. The repository contains the validation foundation and a Go core process with health/diagnostics and shared REST/gRPC dispatch; scoped state, backend lifecycle hooks, and local identity are available, while service API providers are not implemented yet. Do not describe planned services as working features.
 
 ## Start here
 
@@ -21,6 +21,7 @@ gcp-local is a LocalStack-style GCP emulator. The repository contains the valida
 - Start from the issue's acceptance criteria and identify the provider, backend, and state owner. Preserve the established architecture unless evidence supports a change.
 - Authenticate and authorize before side effects. Unsupported authorization decisions must not silently become allowed requests. Functional support, IAM verification, and analytical reachability are separate claims.
 - Keep generated API contracts separate from handwritten provider semantics. Fix the generator or input definition when generated output is wrong. See [the contract guide](api/README.md); `sh scripts/go.sh run ./tools/genapi -check` verifies committed outputs.
+- Use [local ADC/metadata identity](docs/local-identity.md) for local SDK setup. Runtime identity configuration is explicit and private; never load the real-cloud `.env` or ambient ADC into an emulator.
 - Use [scoped state and lifecycle hooks](docs/state-and-backends.md). Run provider/backend mutations inside `Manager.Use` after authorization; publish index changes after backend success and clear state only after backend reset succeeds.
 - Use deterministic local tests for normal development. Real-GCP recording requires an authorized sandbox and explicit live-cloud scope; permission to edit a provider does not authorize cloud spending. Never fall back to real GCP when local emulation is missing.
 - Preserve observed cloud fixtures; update them through the recorder rather than editing expected results to match the emulator. Keep credentials and sensitive payloads out of fixtures, logs, and Git.

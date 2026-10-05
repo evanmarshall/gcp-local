@@ -78,3 +78,11 @@ jobs:
       - run: .venv-tools/bin/python -m pip install -r requirements-sdk.txt -r requirements-tools.txt
       - run: sudo .venv-tools/bin/python scripts/smoke_isolation.py
       - run: sudo .venv-tools/bin/python scripts/run_isolated.py -- .venv-tools/bin/python -m pytest tests/validation/test_sdk_runner.py -q
+      - run: python scripts/install_go.py
+      - run: sh scripts/go.sh test -tags=sdkintegration -run '^$' ./internal/identity
+      - name: Verify standard ADC and metadata refresh without cloud egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            GCP_LOCAL_TEST_PYTHON="$PWD/.venv-tools/bin/python" \
+            .venv-tools/bin/python scripts/run_isolated.py -- \
+            sh scripts/go.sh test -tags=sdkintegration -race -count=1 -timeout 60s ./internal/identity

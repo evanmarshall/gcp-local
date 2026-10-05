@@ -4,7 +4,7 @@ The core process serves health/diagnostics and the [REST/gRPC dispatch layer](ga
 
 ## Build and run
 
-Python 3.11+ installs the checksum-pinned Go toolchain into this checkout on macOS arm64 or Linux arm64/amd64. No global Go installation or cloud credentials are needed. Race-enabled tests require a C compiler: Xcode Command Line Tools on macOS, or `build-essential` on Debian/Ubuntu.
+Python 3.11+ installs the checksum-pinned Go toolchain into this checkout on macOS arm64 or Linux arm64/amd64. No global Go installation or cloud credentials are needed. [Local identity setup](local-identity.md) supplies optional private ADC and workload metadata configuration. Race-enabled tests require a C compiler: Xcode Command Line Tools on macOS, or `build-essential` on Debian/Ubuntu.
 
 ```sh
 python3 scripts/install_go.py
@@ -19,7 +19,7 @@ curl --fail http://127.0.0.1:4566/_local/health
 curl --fail http://127.0.0.1:4566/_local/diagnostics
 ```
 
-Health reports process readiness, registered providers, and observed backend states. The default process has no service providers or backend instances. Diagnostics reports Go/platform versions and never forwards to a backend. SIGINT or SIGTERM closes both listeners, drains active HTTP requests and gRPC calls, and exits successfully. `-shutdown-timeout` defaults to ten seconds; expiration forces connections closed and reports a nonzero exit. A bind failure on either listener also exits nonzero. Logs are JSON on stdout and omit request credentials. The default listener is loopback; binding another interface explicitly exposes the local process on that interface.
+Health reports process readiness, registered providers, and observed backend states. The default process has no service providers or backend instances. Diagnostics reports Go/platform versions and never forwards to a backend. SIGINT or SIGTERM closes the API listeners and any configured metadata listener, drains active HTTP requests and gRPC calls, and exits successfully. `-shutdown-timeout` defaults to ten seconds; expiration forces connections closed and reports a nonzero exit. A bind failure on either listener also exits nonzero. Logs are JSON on stdout and omit request credentials. The default listener is loopback; binding another interface explicitly exposes the local process on that interface.
 
 For focused development, run `sh scripts/go.sh fmt ./...` and `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`. `check_go.sh` checks formatting, vets, runs race-enabled tests, builds, and exercises actual process startup/SIGTERM. CI runs it on Linux amd64; moo development runs it on Linux arm64. Toolchain and dependency choices are recorded in [the runtime decision](decisions/0001-runtime.md). The binary defaults to version `dev`; release builds can set `-ldflags '-X main.version=VERSION'`.
 

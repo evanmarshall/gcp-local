@@ -32,7 +32,7 @@ func start(t *testing.T, s *Server) (string, context.CancelFunc, <-chan error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
-	go func() { result <- s.Serve(ctx, listener, grpcListener) }()
+	go func() { result <- s.Serve(ctx, Listeners{HTTP: listener, GRPC: grpcListener}) }()
 	t.Cleanup(cancel)
 	return "http://" + listener.Addr().String(), cancel, result
 }
@@ -195,7 +195,7 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			result := make(chan error, 1)
-			go func() { result <- s.Serve(ctx, httpListener, grpcListener) }()
+			go func() { result <- s.Serve(ctx, Listeners{HTTP: httpListener, GRPC: grpcListener}) }()
 			connection, err := grpc.NewClient("passthrough:///"+grpcListener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 			if err != nil {
 				t.Fatal(err)

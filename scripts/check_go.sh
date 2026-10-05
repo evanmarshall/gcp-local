@@ -12,3 +12,4 @@ sh scripts/go.sh test -race -timeout 60s ./...
 mkdir -p bin
 sh scripts/go.sh build -trimpath -o bin/gcp-local ./cmd/gcp-local
 python3 scripts/smoke_runtime.py
+python3 scripts/smoke_identity.py

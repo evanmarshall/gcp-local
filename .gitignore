@@ -22,3 +22,5 @@ gha-creds-*.json
 
 .tools/
 bin/
+
+.gcp-local/

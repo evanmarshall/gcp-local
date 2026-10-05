@@ -7,11 +7,15 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
+
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 )
 
@@ -23,6 +27,9 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	address := flags.String("listen", "127.0.0.1:4566", "HTTP listen address")
 	grpcAddress := flags.String("grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	shutdown := flags.Duration("shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
+	identityPath := flags.String("identity-config", "", "owner-only local identity configuration file")
+	metadataAddress := flags.String("metadata-listen", "", "optional per-workload loopback metadata listener")
+	metadataPrincipal := flags.String("metadata-principal", "", "enrolled service account bound to the metadata listener")
 	showVersion := flags.Bool("version", false, "print the build version")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -35,6 +42,39 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 		fmt.Fprintln(output, version)
 		return 0
 	}
+	var resolver gateway.Resolver
+	var identities *identity.Service
+	var metadataHandler http.Handler
+	if *identityPath != "" {
+		config, err := identity.Load(*identityPath)
+		if err != nil {
+			fmt.Fprintln(errors, err)
+			return 2
+		}
+		identities, err = identity.New(config, nil)
+		if err != nil {
+			fmt.Fprintln(errors, err)
+			return 2
+		}
+		resolver = identities.Resolve
+	}
+	if *metadataAddress != "" || *metadataPrincipal != "" {
+		host, _, err := net.SplitHostPort(*metadataAddress)
+		ip := net.ParseIP(host)
+		if err != nil || ip == nil || !ip.IsLoopback() || identities == nil || *metadataPrincipal == "" {
+			fmt.Fprintln(errors, "Metadata requires a loopback address, identity config, and an enrolled service account")
+			return 2
+		}
+		metadataHandler, err = identities.Metadata(*metadataPrincipal)
+		if err != nil {
+			fmt.Fprintln(errors, err)
+			return 2
+		}
+	}
+	server := core.WithGateway(version, *shutdown, gateway.New(nil, resolver))
+	if identities != nil {
+		server.Identity = identities
+	}
 	listener, err := net.Listen("tcp", *address)
 	if err != nil {
 		fmt.Fprintln(errors, "Unable to bind the requested HTTP listener:", err)
@@ -46,9 +86,23 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 		fmt.Fprintln(errors, "Unable to bind the requested gRPC listener:", err)
 		return 1
 	}
+	listeners := core.Listeners{HTTP: listener, GRPC: grpcListener}
+	if metadataHandler != nil {
+		listeners.Metadata, err = net.Listen("tcp", *metadataAddress)
+		if err != nil {
+			listener.Close()
+			grpcListener.Close()
+			fmt.Fprintln(errors, "Unable to bind the requested metadata listener:", err)
+			return 1
+		}
+		server.Metadata = &http.Server{Handler: metadataHandler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
+	}
 	logger := slog.New(slog.NewJSONHandler(output, nil))
 	logger.Info("gcp-local listening", "address", listener.Addr().String(), "grpc_address", grpcListener.Addr().String(), "version", version)
-	if err := core.New(version, *shutdown).Serve(ctx, listener, grpcListener); err != nil {
+	if listeners.Metadata != nil {
+		logger.Info("workload metadata listening", "address", listeners.Metadata.Addr().String())
+	}
+	if err := server.Serve(ctx, listeners); err != nil {
 		logger.Error("gcp-local stopped with an error", "error", err.Error())
 		return 1
 	}
