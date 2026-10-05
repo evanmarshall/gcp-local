@@ -1,0 +1,434 @@
+package backend_test
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/providers/storage"
+	"github.com/evanmarshall/gcp-local/internal/state"
+)
+
+// The test executable doubles as a real child backend, avoiding an installed
+// emulator or shell. It never loads credentials and listens on loopback only.
+func TestProcessFixture(t *testing.T) {
+	if os.Getenv("GCP_LOCAL_PROCESS_FIXTURE") != "1" {
+		return
+	}
+	if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" || os.Getenv("HTTPS_PROXY") != "" {
+		os.Exit(42)
+	}
+	mode := os.Getenv("GCP_LOCAL_FIXTURE_MODE")
+	if mode == "exit" {
+		os.Exit(23)
+	}
+	if mode == "ignore-term" {
+		signal.Ignore(syscall.SIGTERM)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		os.Exit(24)
+	}
+	directory := os.Getenv("GCP_LOCAL_FIXTURE_DIR")
+	if os.WriteFile(filepath.Join(directory, "address"), []byte(listener.Addr().String()), 0600) != nil {
+		os.Exit(25)
+	}
+	if os.WriteFile(filepath.Join(directory, "payload"), []byte("owned data"), 0600) != nil {
+		os.Exit(26)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/exit" {
+			os.Exit(27)
+		}
+		if mode == "unready" {
+			w.WriteHeader(503)
+			return
+		}
+		w.WriteHeader(200)
+	})}
+	signals := []os.Signal{os.Interrupt}
+	if mode != "ignore-term" {
+		signals = append(signals, syscall.SIGTERM)
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), signals...)
+	defer cancel()
+	go func() { <-ctx.Done(); _ = server.Close() }()
+	_ = server.Serve(listener)
+	os.Exit(0)
+}
+
+type fixture struct {
+	process    *backend.Process
+	directory  string
+	failReset  atomic.Bool
+	blockProbe atomic.Bool
+	resets     atomic.Int32
+}
+
+func newFixture(t *testing.T, mode string) *fixture {
+	t.Helper()
+	directory := t.TempDir()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &fixture{directory: directory}
+	result.process, err = backend.NewProcess(backend.ProcessConfig{
+		Command:     []string{executable, "-test.run=^TestProcessFixture$"},
+		Environment: []string{"GCP_LOCAL_PROCESS_FIXTURE=1", "GCP_LOCAL_FIXTURE_MODE=" + mode, "GCP_LOCAL_FIXTURE_DIR=" + directory, "GORACE=atexit_sleep_ms=0"},
+		Probe: func(ctx context.Context) error {
+			if result.blockProbe.Load() {
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			address, err := os.ReadFile(filepath.Join(directory, "address"))
+			if err != nil {
+				return err
+			}
+			probe, err := backend.HTTPProbe("http://" + string(address) + "/health")
+			if err != nil {
+				return err
+			}
+			return probe(ctx)
+		},
+		ResetAssets: func(ctx context.Context) error {
+			if result.failReset.Load() {
+				return errors.New("injected asset reset failure")
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			for _, name := range []string{"payload", "address"} {
+				if err := os.Remove(filepath.Join(directory, name)); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+			}
+			result.resets.Add(1)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = result.process.Stop(ctx)
+	})
+	return result
+}
+func key(project string) backend.Key {
+	return backend.Key{Service: "storage", Scope: state.Scope{Project: project, Location: state.Global}}
+}
+func shutdown(t *testing.T, manager *backend.Manager) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := manager.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+func stopped(t *testing.T, fixture *fixture) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if !errors.Is(fixture.process.Ready(ctx), backend.ErrProcessExited) {
+		t.Fatal("backend process remained alive")
+	}
+}
+
+func TestLazyStartIsConcurrentAndDoesNotInheritCredentials(t *testing.T) {
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "must-not-reach-backend")
+	t.Setenv("HTTPS_PROXY", "must-not-reach-backend")
+	manager := backend.NewManager(2*time.Second, time.Second)
+	fixture := newFixture(t, "ready")
+	var creates atomic.Int32
+	if err := manager.Register("storage", backend.Definition{Validate: state.GlobalScope, New: func(state.Scope) (backend.Backend, error) { creates.Add(1); return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.Status()) != 0 || creates.Load() != 0 {
+		t.Fatal("backend started eagerly")
+	}
+	var group sync.WaitGroup
+	failures := make(chan error, 16)
+	for range 16 {
+		group.Go(func() { _, err := manager.Require(context.Background(), key("project-a")); failures <- err })
+	}
+	group.Wait()
+	close(failures)
+	for err := range failures {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if creates.Load() != 1 || manager.Status()[0].Phase != backend.Ready {
+		t.Fatal("lazy start ran more than once")
+	}
+	if err := manager.Snapshot(context.Background()); !errors.Is(err, backend.ErrPersistenceUnsupported) {
+		t.Fatal(err)
+	}
+	if err := manager.Restore(context.Background()); !errors.Is(err, backend.ErrPersistenceUnsupported) {
+		t.Fatal(err)
+	}
+	if manager.Status()[0].Snapshot || manager.Status()[0].Restore {
+		t.Fatal("claimed persistence")
+	}
+	shutdown(t, manager)
+	stopped(t, fixture)
+	if _, err := manager.Require(context.Background(), key("project-a")); !errors.Is(err, backend.ErrClosed) {
+		t.Fatal("restarted a shut down manager")
+	}
+}
+func TestResetFailurePreservesMetadataUntilAssetsAreClean(t *testing.T) {
+	index := state.NewIndex()
+	catalog := storage.NewCatalog(index)
+	manager := backend.NewManager(2*time.Second, time.Second)
+	fixtures := map[state.Scope]*fixture{}
+	var mu sync.Mutex
+	if err := manager.Register("storage", backend.Definition{Validate: state.GlobalScope, New: func(scope state.Scope) (backend.Backend, error) {
+		f := newFixture(t, "ready")
+		mu.Lock()
+		fixtures[scope] = f
+		mu.Unlock()
+		return f.process, nil
+	}, AfterReset: catalog.Reset}); err != nil {
+		t.Fatal(err)
+	}
+	a, b := key("project-a"), key("project-b")
+	if err := manager.Preload(context.Background(), []backend.Key{a, b}); err != nil {
+		t.Fatal(err)
+	}
+	for scope, name := range map[state.Scope]string{a.Scope: "bucket-a", b.Scope: "bucket-b"} {
+		if err := catalog.PublishBucket(scope, storage.Bucket{Name: name, Location: "us-central1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixtures[a.Scope].failReset.Store(true)
+	if manager.Reset(context.Background(), a) == nil {
+		t.Fatal("reset ignored backend failure")
+	}
+	stopped(t, fixtures[a.Scope])
+	if _, found, _ := catalog.Bucket(a.Scope, "bucket-a"); !found {
+		t.Fatal("failed reset discarded provider metadata")
+	}
+	if _, found := index.Get(storage.BucketResource("bucket-a")); !found {
+		t.Fatal("failed reset discarded index")
+	}
+	if _, err := manager.Require(context.Background(), a); !errors.Is(err, backend.ErrFailed) {
+		t.Fatalf("failed backend served requests: %v", err)
+	}
+	fixtures[a.Scope].failReset.Store(false)
+	if err := manager.Reset(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := catalog.Bucket(a.Scope, "bucket-a"); found {
+		t.Fatal("successful reset retained metadata")
+	}
+	if _, found := index.Get(storage.BucketResource("bucket-a")); found {
+		t.Fatal("successful reset retained index")
+	}
+	if _, found, _ := catalog.Bucket(b.Scope, "bucket-b"); !found {
+		t.Fatal("reset crossed scope")
+	}
+	if err := fixtures[b.Scope].process.Ready(context.Background()); err != nil {
+		t.Fatal("reset stopped other project")
+	}
+	if _, err := manager.Require(context.Background(), a); err != nil {
+		t.Fatal("reset did not allow lazy restart:", err)
+	}
+	if _, found, _ := catalog.Bucket(a.Scope, "bucket-a"); found {
+		t.Fatal("restart restored discarded metadata")
+	}
+	shutdown(t, manager)
+	for _, f := range fixtures {
+		stopped(t, f)
+	}
+}
+func TestStartupAndReadinessFailuresAreCleanedAndReported(t *testing.T) {
+	for _, mode := range []string{"exit", "unready"} {
+		t.Run(mode, func(t *testing.T) {
+			manager := backend.NewManager(200*time.Millisecond, time.Second)
+			fixture := newFixture(t, mode)
+			manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+			if _, err := manager.Require(context.Background(), key("project-a")); err == nil {
+				t.Fatal("failed process reported ready")
+			}
+			status := manager.Status()[0]
+			if status.Phase != backend.Failed || status.Failure == "" {
+				t.Fatal(status)
+			}
+			stopped(t, fixture)
+			if err := manager.Reset(context.Background(), key("project-a")); err != nil {
+				t.Fatal(err)
+			}
+			if fixture.resets.Load() != 1 {
+				t.Fatal("assets not reset")
+			}
+			shutdown(t, manager)
+		})
+	}
+}
+func TestReadinessDetectsUnexpectedExit(t *testing.T) {
+	manager := backend.NewManager(2*time.Second, time.Second)
+	fixture := newFixture(t, "ready")
+	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+	if _, err := manager.Require(context.Background(), key("project-a")); err != nil {
+		t.Fatal(err)
+	}
+	address, _ := os.ReadFile(filepath.Join(fixture.directory, "address"))
+	client := http.Client{Timeout: time.Second}
+	response, _ := client.Get("http://" + string(address) + "/exit")
+	if response != nil {
+		response.Body.Close()
+	}
+	if _, err := manager.Require(context.Background(), key("project-a")); err == nil {
+		t.Fatal("crashed backend remained ready")
+	}
+	if manager.Status()[0].Phase != backend.Failed {
+		t.Fatal(manager.Status())
+	}
+	shutdown(t, manager)
+	stopped(t, fixture)
+}
+func TestShutdownCancelsStartingBackend(t *testing.T) {
+	manager := backend.NewManager(10*time.Second, time.Second)
+	fixture := newFixture(t, "unready")
+	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+	result := make(chan error, 1)
+	go func() { _, err := manager.Require(context.Background(), key("project-a")); result <- err }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(fixture.directory, "address")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fixture did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	shutdown(t, manager)
+	if err := <-result; err == nil {
+		t.Fatal("cancelled startup succeeded")
+	}
+	stopped(t, fixture)
+}
+func TestProcessDeadlineForcesTermination(t *testing.T) {
+	fixture := newFixture(t, "ignore-term")
+	manager := backend.NewManager(2*time.Second, 30*time.Millisecond)
+	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+	if _, err := manager.Require(context.Background(), key("project-a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.process.Reset(context.Background()); err == nil {
+		t.Fatal("reset running process")
+	}
+	if err := manager.Shutdown(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	stopped(t, fixture)
+}
+func TestHTTPProbeRejectsExternalOrRedirectedReadiness(t *testing.T) {
+	for _, endpoint := range []string{"https://storage.googleapis.com/", "http://localhost:123/", "http://127.0.0.1/", "http://user:secret@127.0.0.1:123/"} {
+		if _, err := backend.HTTPProbe(endpoint); err == nil {
+			t.Fatalf("accepted %q", endpoint)
+		}
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://storage.googleapis.com/")
+		w.WriteHeader(302)
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+	probe, err := backend.HTTPProbe("http://" + listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := probe(context.Background()); err == nil {
+		t.Fatal("followed redirect or accepted 302 readiness")
+	}
+}
+
+func TestCancelledProbeKeepsHealthyBackend(t *testing.T) {
+	manager := backend.NewManager(time.Second, time.Second)
+	fixture := newFixture(t, "ready")
+	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+	if _, err := manager.Require(context.Background(), key("project-a")); err != nil {
+		t.Fatal(err)
+	}
+	fixture.blockProbe.Store(true)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if _, err := manager.Require(ctx, key("project-a")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if manager.Status()[0].Phase != backend.Ready {
+		t.Fatal("cancelled caller marked backend failed")
+	}
+	fixture.blockProbe.Store(false)
+	if _, err := manager.Require(context.Background(), key("project-a")); err != nil {
+		t.Fatal(err)
+	}
+	shutdown(t, manager)
+}
+func TestResetWaitsForProviderMutationAndShutdownCancelsUse(t *testing.T) {
+	index := state.NewIndex()
+	catalog := storage.NewCatalog(index)
+	manager := backend.NewManager(time.Second, time.Second)
+	fixture := newFixture(t, "ready")
+	scope := key("project-a")
+	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: catalog.Reset})
+	entered, release := make(chan struct{}), make(chan struct{})
+	operation := make(chan error, 1)
+	go func() {
+		operation <- manager.Use(context.Background(), scope, func(ctx context.Context, _ backend.Backend) error {
+			close(entered)
+			<-release
+			return catalog.PublishBucket(scope.Scope, storage.Bucket{Name: "bucket", Location: "us-central1"})
+		})
+	}()
+	<-entered
+	reset := make(chan error, 1)
+	go func() { reset <- manager.Reset(context.Background(), scope) }()
+	select {
+	case err := <-reset:
+		t.Fatalf("reset crossed an active mutation: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(release)
+	if err := <-operation; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reset; err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := catalog.Bucket(scope.Scope, "bucket"); found {
+		t.Fatal("in-flight write escaped reset")
+	}
+	if _, found := index.Get(storage.BucketResource("bucket")); found {
+		t.Fatal("in-flight index publication escaped reset")
+	}
+	entered = make(chan struct{})
+	go func() {
+		operation <- manager.Use(context.Background(), scope, func(ctx context.Context, _ backend.Backend) error { close(entered); <-ctx.Done(); return ctx.Err() })
+	}()
+	<-entered
+	shutdown(t, manager)
+	if err := <-operation; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	stopped(t, fixture)
+}

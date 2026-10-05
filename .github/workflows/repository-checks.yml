@@ -19,6 +19,11 @@ jobs:
           python-version: '3.12'
       - run: python scripts/install_go.py
       - run: sh scripts/check_go.sh
+      - name: Exercise runtime and child backends without cloud egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            "$(command -v python)" scripts/run_isolated.py -- \
+            sh scripts/go.sh test -race -count=1 -timeout 60s ./internal/...
 
   repository-checks:
     runs-on: ubuntu-latest

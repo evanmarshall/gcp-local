@@ -12,7 +12,9 @@ import (
 	"time"
 
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -236,5 +238,43 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 				t.Fatal("gRPC listener remained open")
 			}
 		})
+	}
+}
+
+type managedBackend struct{ stopped atomic.Bool }
+
+func (b *managedBackend) Start(context.Context) error { return nil }
+func (b *managedBackend) Ready(context.Context) error { return nil }
+func (b *managedBackend) Stop(context.Context) error  { b.stopped.Store(true); return nil }
+func (b *managedBackend) Reset(context.Context) error { return nil }
+func TestRuntimeShutdownStopsManagedBackends(t *testing.T) {
+	s := New("test", time.Second)
+	child := &managedBackend{}
+	if err := s.Backends.Register("fixture", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return child, nil }, AfterReset: func(state.Scope) error { return nil }}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Backends.Preload(context.Background(), []backend.Key{{Service: "fixture", Scope: state.Scope{Project: "project-a", Location: state.Global}}}); err != nil {
+		t.Fatal(err)
+	}
+	url, cancel, result := start(t, s)
+	response, err := http.Get(url + "/_local/diagnostics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct{ Backends []backend.Status }
+	err = json.NewDecoder(response.Body).Decode(&body)
+	response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Backends) != 1 || body.Backends[0].Phase != backend.Ready {
+		t.Fatal(body)
+	}
+	cancel()
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	if !child.stopped.Load() {
+		t.Fatal("core left backend running")
 	}
 }

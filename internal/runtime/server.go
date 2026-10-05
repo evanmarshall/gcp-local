@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"google.golang.org/grpc"
 )
@@ -18,6 +19,7 @@ import (
 type Server struct {
 	HTTP            *http.Server
 	GRPC            *grpc.Server
+	Backends        *backend.Manager
 	ShutdownTimeout time.Duration
 	ready           atomic.Bool
 }
@@ -26,7 +28,7 @@ func New(version string, shutdownTimeout time.Duration) *Server {
 	return WithGateway(version, shutdownTimeout, gateway.New(nil, nil))
 }
 func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gateway) *Server {
-	s := &Server{ShutdownTimeout: shutdownTimeout, GRPC: g.NewGRPCServer()}
+	s := &Server{ShutdownTimeout: shutdownTimeout, GRPC: g.NewGRPCServer(), Backends: backend.NewManager(30*time.Second, shutdownTimeout)}
 	s.HTTP = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Dispatch directly, preserving escaped object paths without ServeMux redirects.
 		switch {
@@ -36,9 +38,9 @@ func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gatew
 			if !ready {
 				code = http.StatusServiceUnavailable
 			}
-			writeJSON(w, code, map[string]any{"service": "gcp-local", "version": version, "ready": ready, "providers": g.Registry.Providers()})
+			writeJSON(w, code, map[string]any{"service": "gcp-local", "version": version, "ready": ready, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
 		case r.Method == "GET" && r.URL.Path == "/_local/diagnostics":
-			writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers()})
+			writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
 		default:
 			g.ServeHTTP(w, r)
 		}
@@ -57,7 +59,9 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 	if ctx.Err() != nil {
 		httpListener.Close()
 		grpcListener.Close()
-		return nil
+		cleanup, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
+		defer cancel()
+		return s.Backends.Shutdown(cleanup)
 	}
 	s.ready.Store(true)
 	served := make(chan error, 2)
@@ -93,6 +97,9 @@ func (s *Server) Serve(ctx context.Context, httpListener, grpcListener net.Liste
 		if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, grpc.ErrServerStopped) {
 			serveErr = err
 		}
+	}
+	if err := s.Backends.Shutdown(deadline); err != nil {
+		shutdownErr = errors.Join(shutdownErr, err)
 	}
 	if shutdownErr != nil {
 		return shutdownErr
