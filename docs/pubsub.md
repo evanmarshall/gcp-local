@@ -1,6 +1,6 @@
 # Pub/Sub
 
-Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) implements the initial local slice. A gRPC provider wraps the official emulator with local ADC, basic IAM, pull/stream delivery, and authenticated local HTTP push. One Pub/Sub scenario, the [bounded pull and authorization recording](pubsub-validation.md), was captured and revalidated against real GCP on 2026-10-09 UTC, and the local provider matches it in comparison mode. Broader Pub/Sub fidelity and packaged setup remain tracked in [#29](https://github.com/evanmarshall/gcp-local/issues/29). The packaged Storage environment does not yet include Java or Pub/Sub; the combined workflow in #14 includes that setup.
+Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) implements the initial local slice. A gRPC provider wraps the official emulator with local ADC, basic IAM, pull/stream delivery, and authenticated local HTTP push. One Pub/Sub scenario, the [bounded pull and authorization recording](pubsub-validation.md), was captured and revalidated against real GCP on 2026-10-09 UTC, and the local provider matches it in comparison mode. Broader Pub/Sub fidelity remains tracked in [#29](https://github.com/evanmarshall/gcp-local/issues/29). The [packaged environment](quickstart.md) now carries a pinned Java 17 runtime and the emulator JAR and starts Storage and Pub/Sub together; extending it to the full combined workflow remains part of #14.
 
 ## Supported local slice
 
@@ -44,7 +44,9 @@ The split between caller and service-agent checks follows [Google's push authent
 
 ## Run the provider
 
-Use a private runtime checkout or Moo machine with Java 17, the pinned Go toolchain, and `python3 scripts/install_pubsub.py`. Generate an identity bundle with `scripts/create_local_identity.py`; configure the corresponding project and a `roles/pubsub.admin` grant to that named local principal in an owner-only IAM file, following [the bootstrap format](iam.md). Then:
+Use `python3 scripts/local_env.py up` for the [packaged environment](quickstart.md) with Storage and Pub/Sub, or follow the manual instructions below for a private runtime checkout or Moo machine.
+
+The manual path uses Java 17, the pinned Go toolchain, and `python3 scripts/install_pubsub.py`. Generate an identity bundle with `scripts/create_local_identity.py`; configure the corresponding project and a `roles/pubsub.admin` grant to that named local principal in an owner-only IAM file, following [the bootstrap format](iam.md). Then:
 
 ```sh
 sh scripts/go.sh build -o bin/gcp-local ./cmd/gcp-local
@@ -55,7 +57,7 @@ bin/gcp-local -services pubsub \
   -pubsub-jar "$PWD/.tools/pubsub/emulator.jar"
 ```
 
-Select `-services storage,pubsub` to enable both. HTTP identity/diagnostics uses loopback port 4566 and gRPC uses loopback port 4567. Emulator ports are random and private implementation details. A process running on the same host can access loopback; run untrusted applications in a separate network namespace/container that exposes only the gateway. The child inherits no ADC, cloud credentials, proxies, or push endpoints. Core process shutdown removes its temporary directories and processes. Reset is currently an internal lifecycle operation; restarting the core resets all its in-memory state.
+Select `-services storage,pubsub` to enable both. HTTP identity/diagnostics uses loopback port 4566 and gRPC uses loopback port 4567; the packaged environment publishes the same pair on host loopback through its HAProxy entry point and adds `roles/pubsub.admin` to the generated developer identity. Emulator ports are random and private implementation details. A process running on the same host can access loopback; run untrusted applications in a separate network namespace/container that exposes only the gateway. The child inherits no ADC, cloud credentials, proxies, or push endpoints. Core process shutdown removes its temporary directories and processes. Reset is currently an internal lifecycle operation; restarting the core resets all its in-memory state.
 
 For Python install `requirements-pubsub.txt` and use an explicit local ADC file. Keep `PUBSUB_EMULATOR_HOST` unset: that mode selects anonymous credentials. The verified transport configuration is:
 

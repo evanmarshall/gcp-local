@@ -15,6 +15,7 @@ import time
 from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
+SERVICES = ['pubsub', 'storage']
 
 
 def private_json(path, value):
@@ -26,8 +27,9 @@ def private_json(path, value):
 
 
 def source_version():
-    files = [ROOT / name for name in ('Dockerfile', '.dockerignore', 'go.mod', 'go.sum',
-                                     'scripts/install_go.py', 'toolchains/go.json')]
+    files = [ROOT / name for name in ('Dockerfile', '.dockerignore', 'compose.yaml', 'go.mod', 'go.sum',
+                                     'scripts/install_go.py', 'toolchains/go.json',
+                                     'scripts/install_pubsub.py', 'toolchains/pubsub.json')]
     for directory in ('api', 'cmd', 'internal'):
         files.extend(path for path in (ROOT / directory).rglob('*') if path.is_file())
     digest = hashlib.sha256()
@@ -41,6 +43,9 @@ def initialize(directory, port, project):
         raise ValueError('Select a synthetic project ID and port between 1024 and 65535')
     if any(path.name != '.lock' for path in directory.iterdir()):
         raise ValueError('An uninitialized environment directory must be empty')
+    grpc_port = port + 1
+    if grpc_port > 65535:
+        raise ValueError('Select a base port that leaves room for the gRPC gateway')
     principal = 'serviceAccount:developer@' + project + '.iam.gserviceaccount.com'
     subprocess.run([sys.executable, str(ROOT / 'scripts/create_local_identity.py'),
                     '--directory', str(directory / 'identity'), '--project', project,
@@ -50,8 +55,11 @@ def initialize(directory, port, project):
     private_json(directory / 'iam.json', {
         'resources': [{'name': resource, 'service': 'resourcemanager', 'kind': 'project',
                        'number': '000000000001', 'scope': {'project': project, 'location': 'global'}}],
-        'policies': {resource: {'bindings': [{'role': 'roles/storage.admin', 'members': [principal]}]}}})
+        'policies': {resource: {'bindings': [
+            {'role': 'roles/storage.admin', 'members': [principal]},
+            {'role': 'roles/pubsub.admin', 'members': [principal]}]}}})
     value = {'owner': 'gcp-local', 'schema': 1, 'directory': str(directory), 'port': port,
+             'grpc_port': grpc_port,
              'project': project, 'compose_project': 'gcp-local-' + hashlib.sha256(str(directory).encode()).hexdigest()[:16],
              'version': source_version(), 'uid': os.getuid(), 'gid': os.getgid()}
     private_json(directory / 'environment.json', value)
@@ -73,7 +81,12 @@ def load(directory, check_credentials=True):
             or value.get('directory') != str(directory) or value.get('compose_project') != expected
             or value.get('uid') != os.getuid() or value.get('gid') != os.getgid()):
         raise ValueError('Environment ownership/path changed; select its original directory and user')
-    if (type(value.get('port')) is not int or not 1024 <= value['port'] <= 65535
+    port = value.get('port')
+    if type(port) is not int:
+        raise ValueError('Invalid environment port, project, or source version')
+    value['grpc_port'] = value.get('grpc_port', port + 1)
+    if (not 1024 <= port <= 65535
+            or type(value.get('grpc_port')) is not int or not port < value['grpc_port'] <= 65535
             or not isinstance(value.get('project'), str) or not re.fullmatch(r'[a-z][a-z0-9-]{4,60}', value['project'])
             or not isinstance(value.get('version'), str) or not re.fullmatch(r'source-[0-9a-f]{16}', value['version'])):
         raise ValueError('Invalid environment port, project, or source version')
@@ -85,6 +98,7 @@ def compose(value, *arguments, check=True, capture=False):
            if key in {'PATH', 'HOME', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG',
                       'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH', 'SSH_AUTH_SOCK'}}
     env.update({'GCP_LOCAL_DIRECTORY': value['directory'], 'GCP_LOCAL_PORT': str(value['port']),
+                'GCP_LOCAL_GRPC_PORT': str(value['grpc_port']),
                 'GCP_LOCAL_UID': str(value['uid']), 'GCP_LOCAL_GID': str(value['gid']),
                 'GCP_LOCAL_VERSION': value['version'], 'GCP_LOCAL_IMAGE': 'gcp-local:' + value['version']})
     return subprocess.run(['docker', 'compose', '--env-file', os.devnull, '--project-name', value['compose_project'],
@@ -94,7 +108,8 @@ def compose(value, *arguments, check=True, capture=False):
 
 def application_env(value):
     return {'GOOGLE_APPLICATION_CREDENTIALS': str(Path(value['directory']) / 'identity/adc.json'),
-            'GOOGLE_CLOUD_PROJECT': value['project'], 'GCP_LOCAL_ENDPOINT': f'http://127.0.0.1:{value["port"]}'}
+            'GOOGLE_CLOUD_PROJECT': value['project'], 'GCP_LOCAL_ENDPOINT': f'http://127.0.0.1:{value["port"]}',
+            'GCP_LOCAL_GRPC_ENDPOINT': f'127.0.0.1:{value["grpc_port"]}'}
 
 
 def ready(value):
@@ -104,8 +119,8 @@ def ready(value):
     with build_opener(ProxyHandler({}), NoRedirects()).open(application_env(value)['GCP_LOCAL_ENDPOINT'] + '/_local/health', timeout=3) as response:
         health = json.loads(response.read(1 << 20))
         if (response.status != 200 or health.get('service') != 'gcp-local' or health.get('ready') is not True
-                or health.get('version') != value['version'] or health.get('providers') != ['storage']):
-            raise ValueError('The published endpoint did not report the expected ready Storage runtime')
+                or health.get('version') != value['version'] or health.get('providers') != SERVICES):
+            raise ValueError('The published endpoint did not report the expected ready runtime')
     return health
 
 
@@ -160,8 +175,9 @@ def main(argv=None):
                         if time.monotonic() >= deadline:
                             raise ValueError('The host endpoint is unavailable; inspect logs before retrying') from None
                         time.sleep(0.1)
-                print(json.dumps({'ready': True, 'environment': str(directory), 'services': ['storage'],
-                                  'endpoint': application_env(value)['GCP_LOCAL_ENDPOINT']}))
+                print(json.dumps({'ready': True, 'environment': str(directory), 'services': SERVICES,
+                                  'endpoint': application_env(value)['GCP_LOCAL_ENDPOINT'],
+                                  'grpc_endpoint': application_env(value)['GCP_LOCAL_GRPC_ENDPOINT']}))
             elif args.action == 'down':
                 compose(value, 'down', '--timeout', '15')
                 print('Environment stopped; in-memory service state is discarded. Local credentials are retained.')

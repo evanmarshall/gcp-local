@@ -8,10 +8,12 @@ services:
     user: "${GCP_LOCAL_UID:?Use scripts/local_env.py}:${GCP_LOCAL_GID:?Use scripts/local_env.py}"
     command:
       - -listen=0.0.0.0:4566
-      - -grpc-listen=127.0.0.1:4567
-      - -services=storage
+      - -grpc-listen=0.0.0.0:4567
+      - -services=storage,pubsub
       - -identity-config=/config/identity.json
       - -iam-config=/config/iam.json
+      - -pubsub-java=/usr/bin/java
+      - -pubsub-jar=/opt/pubsub/emulator.jar
     networks: [backend]
     volumes:
       - type: bind
@@ -30,6 +32,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 15s
+    tmpfs:
+      - /tmp:size=256m,mode=1777
     healthcheck:
       test: [CMD, /gcp-local, health]
       interval: 1s
@@ -44,6 +48,7 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:${GCP_LOCAL_PORT:?Use scripts/local_env.py}:4566"
+      - "127.0.0.1:${GCP_LOCAL_GRPC_PORT:?Use scripts/local_env.py}:4567"
     volumes:
       - ./packaging/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     networks: [frontend, backend]

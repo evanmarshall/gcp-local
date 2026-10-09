@@ -52,9 +52,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-sdk.txt
+      - run: python -m pip install -r requirements-sdk.txt -r requirements-pubsub.txt
       - run: docker compose version
-      - name: Verify startup, local ADC and Storage, isolated reset, failure, and teardown
+      - name: Verify startup, local ADC Storage and Pub/Sub, isolated reset, failure, and teardown
         run: python scripts/smoke_environment.py
 
   terraform-acceptance:
