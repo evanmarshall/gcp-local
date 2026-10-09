@@ -11,11 +11,20 @@
     "purpose": "Fixed TCP forwarding from the published loopback port to the gateway on its internal network"
   },
   "runtime": {
-    "base": "scratch",
+    "base": "eclipse-temurin:17-jre-jammy@sha256:8993f1aed8b25fcea7a7047a7949c1866fa558fc6830d938c22c4f13b26be9d7",
     "toolchain": "toolchains/go.json",
     "modules": "go.sum",
     "backend": "third_party/fake-gcs-server/manifest.json",
     "storage_contract": "api/discovery/manifest.json",
-    "state": "in-memory; reset recreates this Compose project"
+    "state": "in-memory; reset recreates this Compose project",
+    "pubsub_backend": "toolchains/pubsub.json"
+  },
+  "pubsub": {
+    "image": "eclipse-temurin:17-jre-jammy@sha256:8993f1aed8b25fcea7a7047a7949c1866fa558fc6830d938c22c4f13b26be9d7",
+    "version": "Java 17 (Temurin JRE)",
+    "source": "https://hub.docker.com/_/eclipse-temurin",
+    "license": "https://github.com/adoptium/temurin17-binaries/blob/master/LICENSE",
+    "emulator": "toolchains/pubsub.json",
+    "purpose": "JRE that runs the checksum-pinned official Pub/Sub emulator the provider starts lazily"
   }
 }

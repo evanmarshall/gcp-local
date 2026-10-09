@@ -101,7 +101,7 @@ def inspect(root):
                          "live": {"status": "requires-explicit-sandbox", "credentials": "external file paths only"}},
             "next_actions": ["Review detected services and test commands; detection is heuristic, not compatibility certification.",
                              "Keep local endpoints and real-GCP credential profiles separate.",
-                             "Use the pinned runtime checkout to start Storage; Pub/Sub needs separate setup and has local-only coverage.",
+                             "Start the pinned packaged runtime for Storage and Pub/Sub; Pub/Sub push and broader operations still have no cloud-recorded coverage.",
                              "For approved live tests, configure the explicit sandbox profile and Google Cloud CLI."]}
 
 

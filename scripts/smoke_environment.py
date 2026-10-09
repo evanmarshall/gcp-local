@@ -89,7 +89,7 @@ def main():
             for directory in directories[:2]:
                 cli(directory, 'up', '--port', str(unused_port()))
                 status = json.loads(cli(directory, 'status').stdout)
-                assert status['ready'] and status['providers'] == ['storage'] and status['backends'] == []
+                assert status['ready'] and status['providers'] == ['pubsub', 'storage'] and status['backends'] == []
                 # This is a private, synthetic file only. Source credentials are never copied.
                 assert (directory / 'identity/adc.json').stat().st_mode & 0o077 == 0
                 client, session, transport = client_for(directory)
@@ -113,9 +113,11 @@ for family,address in ((socket.AF_INET,('192.0.2.1',443)),(socket.AF_INET6,('200
                 container = configuration['compose_project'] + '-gcp-local-1'
                 state = json.loads(subprocess.check_output(['docker', 'inspect', container], text=True))[0]
                 assert state['HostConfig']['ReadonlyRootfs'] and state['Config']['User'] == f'{os.getuid()}:{os.getgid()}'
+                assert state['HostConfig']['Tmpfs'].get('/tmp')
                 assert len(state['NetworkSettings']['Networks']) == 1
                 entrypoint = json.loads(subprocess.check_output(['docker', 'inspect', configuration['compose_project'] + '-entrypoint-1'], text=True))[0]
                 assert entrypoint['NetworkSettings']['Ports']['4566/tcp'][0]['HostIp'] == '127.0.0.1'
+                assert entrypoint['NetworkSettings']['Ports']['4567/tcp'][0]['HostIp'] == '127.0.0.1'
             first, second = directories[:2]
             cli(first, 'reset')
             fresh, session, transport = client_for(first)
@@ -135,6 +137,10 @@ for family,address in ((socket.AF_INET,('192.0.2.1',443)),(socket.AF_INET6,('200
             assert example.returncode == 0, example.stderr
             assert 'Hello from local GCP.' in example.stdout
             assert list(fresh.list_buckets(retry=None, timeout=5)) == []
+            second_example = subprocess.run([sys.executable, str(ROOT / 'examples/pubsub.py'), '--directory', str(first)],
+                                            capture_output=True, text=True, timeout=60)
+            assert second_example.returncode == 0, second_example.stderr
+            assert 'Hello from local Pub/Sub.' in second_example.stdout
             # Bind a port to require a visible startup failure without affecting the working environment.
             with socket.socket() as occupied:
                 occupied.bind(('127.0.0.1', 0))
@@ -150,9 +156,13 @@ for family,address in ((socket.AF_INET,('192.0.2.1',443)),(socket.AF_INET6,('200
                       '--repo', str(app), '--doctor', '--endpoint', endpoint]
             assert subprocess.run(doctor, capture_output=True, timeout=10).returncode == 0
             (app / 'requirements.txt').write_text('google-cloud-storage==3.10.1\ngoogle-cloud-pubsub\n')
+            served = subprocess.run(doctor, capture_output=True, text=True, timeout=10)
+            assert served.returncode == 0, served.stdout + served.stderr
+            assert json.loads(served.stdout)['profiles']['local']['missing_services'] == []
+            (app / 'requirements.txt').write_text('google-cloud-storage==3.10.1\ngoogle-cloud-bigquery\n')
             result = subprocess.run(doctor, capture_output=True, text=True, timeout=10)
             assert result.returncode == 2
-            assert json.loads(result.stdout)['profiles']['local']['missing_services'] == ['pubsub']
+            assert json.loads(result.stdout)['profiles']['local']['missing_services'] == ['bigquery']
         finally:
             for resource in resources:
                 resource.close()
@@ -167,7 +177,7 @@ for family,address in ((socket.AF_INET,('192.0.2.1',443)),(socket.AF_INET6,('200
                     networks = subprocess.check_output(['docker', 'network', 'ls', '-q', '--filter', 'label=com.docker.compose.project=' + project], text=True)
                     assert networks.strip() == '', 'Packaged teardown left an owned network'
             assert not failures, 'Teardown failed for: ' + ', '.join(failures)
-    print('Packaged workflow passed: local ADC/Storage, isolated reset, failed startup, portable doctor, and teardown.')
+    print('Packaged workflow passed: local ADC/Storage and Pub/Sub, isolated reset, failed startup, portable doctor, and teardown.')
 
 
 if __name__ == '__main__':

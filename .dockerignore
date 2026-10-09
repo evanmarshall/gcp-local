@@ -4,8 +4,10 @@
 !go.sum
 !scripts
 !scripts/install_go.py
+!scripts/install_pubsub.py
 !toolchains
 !toolchains/go.json
+!toolchains/pubsub.json
 !api
 !api/**
 !cmd

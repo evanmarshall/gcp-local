@@ -5,7 +5,7 @@ description: Set up an existing GCP application repository for local Storage tes
 
 # GCP application setup
 
-Connect this application to gcp-local while preserving its tools and instructions. The packaged workflow supports a recorded slice of private Cloud Storage, local ADC, and basic IAM. The runtime also has a local-only Pub/Sub slice requiring separate Java/JAR configuration; it has no cloud-recorded fidelity claim or packaged setup yet. Cloud Run, other providers, and broader Storage operations remain unsupported; inspect the application's actual operations before claiming compatibility.
+Connect this application to gcp-local while preserving its tools and instructions. The packaged workflow supports a recorded slice of private Cloud Storage, an initial Pub/Sub slice, local ADC, and basic IAM. The Pub/Sub slice carries cloud-recorded pull and authorization evidence only; push, streaming, and broader operations have no recorded fidelity claim. Cloud Run, other providers, and broader Storage operations remain unsupported; inspect the application's actual operations before claiming compatibility.
 
 ## Inspect the application
 
@@ -33,7 +33,7 @@ Replace the checkout path with its actual location. Initial `up` accepts `--port
 
 Buckets require an explicit location, uniform access, enforced public access prevention, and zero soft-delete duration. The generated developer identity has an explicit local Storage Admin grant. Read the checkout's `docs/storage.md` for operation limits and `docs/quickstart.md` for an SDK example. Keep `.gcp-local/` ignored; never copy generated credentials or server configuration into this skill.
 
-For applications using Pub/Sub, read that checkout's `docs/pubsub.md` before setup. Its current lane needs a separate runtime process or a combined `-services storage,pubsub` process, Java 17, the pinned emulator JAR, and explicit local Pub/Sub grants. The verified Python transport preserves ADC using loopback gRPC call credentials; keep `PUBSUB_EMULATOR_HOST` unset. Do not claim that the Storage Compose workflow starts Pub/Sub, or that a detected publish/subscribe dependency proves push compatibility: current push supports authenticated, same-project, numeric loopback HTTP receivers only.
+For applications using Pub/Sub, read that checkout's `docs/pubsub.md` before setup. The packaged Compose workflow starts it with a pinned Java 17 runtime, the emulator JAR, and explicit local Pub/Sub grants, and publishes its gRPC gateway on loopback. The verified Python transport preserves ADC using loopback gRPC call credentials; keep `PUBSUB_EMULATOR_HOST` unset. A detected publish/subscribe dependency does not prove push compatibility: current push supports authenticated, same-project, numeric loopback HTTP receivers only.
 
 Use `logs` for startup failures. `reset` recreates only this environment and discards its in-memory resources and bucket grants; use it when the task calls for a clean environment. `down` removes its containers/networks while retaining private local credentials for reuse. Do not reset another application's directory.
 

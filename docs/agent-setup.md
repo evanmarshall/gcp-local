@@ -1,6 +1,6 @@
 # Agent setup for GCP application repositories
 
-The portable [gcp-local-setup skill](../skills/gcp-local-setup/SKILL.md) is for application onboarding. It is separate from the contributor skills used to implement gcp-local providers. The bundle inspects an application, checks explicit local readiness, and guides agents through the [packaged Storage workflow](quickstart.md). Runtime execution uses a separate gcp-local checkout and Docker.
+The portable [gcp-local-setup skill](../skills/gcp-local-setup/SKILL.md) is for application onboarding. It is separate from the contributor skills used to implement gcp-local providers. The bundle inspects an application, checks explicit local readiness, and guides agents through the [packaged Storage and Pub/Sub workflow](quickstart.md). Runtime execution uses a separate gcp-local checkout and Docker.
 
 From a clean, committed gcp-local checkout, preview the installation into an existing application repository:
 
