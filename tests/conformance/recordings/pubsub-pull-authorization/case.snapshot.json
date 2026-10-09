@@ -1,0 +1,41 @@
+{
+  "pubsub-pull-authorization": {
+    "recorded-date": "09-10-2026, 22:18:34",
+    "recorded-content": {
+      "created": {
+        "ack_deadline_seconds": 10,
+        "subscription": "<subscription:1>",
+        "subscription_topic": "<topic:1>",
+        "topic": "<topic:1>"
+      },
+      "denied-publication": {
+        "grpc_status": "PERMISSION_DENIED"
+      },
+      "published": {
+        "message_ids": [
+          "<message:1>"
+        ]
+      },
+      "denied-consumption": {
+        "grpc_status": "PERMISSION_DENIED"
+      },
+      "pulled": {
+        "attributes": {
+          "source": "gcp-local-conformance"
+        },
+        "data": "gcp-local bounded Pub/Sub conformance",
+        "message_id": "<message:1>"
+      },
+      "acknowledged": {
+        "grpc_status": "OK"
+      },
+      "no-unexpected-delivery-observed": {
+        "bounded_observation_seconds": 2
+      },
+      "cleanup": {
+        "subscription_absent": true,
+        "topic_absent": true
+      }
+    }
+  }
+}

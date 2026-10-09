@@ -1,6 +1,6 @@
 # Validation runners
 
-The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain; Go is the runtime. Seven Storage scenarios were recorded and revalidated against real GCP on 2026-10-05 UTC, then matched by the actual emulator without egress. See [Storage evidence](storage.md) and the [authorization matrix](authorization-baseline.md) for the exact scope. Ordinary offline harness checks do not execute those scenarios and cannot count as service coverage.
+The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain; Go is the runtime. Seven Storage scenarios were recorded and revalidated against real GCP on 2026-10-05 UTC, then matched by the actual emulator without egress. The Pub/Sub `pubsub-pull-authorization` scenario was recorded and revalidated the same way on 2026-10-09 UTC. See [Storage evidence](storage.md) and the [authorization matrix](authorization-baseline.md) for the exact scope. Ordinary offline harness checks do not execute those scenarios and cannot count as service coverage.
 
 ## Run offline checks
 

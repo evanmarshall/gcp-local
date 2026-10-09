@@ -1,6 +1,6 @@
 # Pub/Sub
 
-Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) implements the initial local slice. A gRPC provider wraps the official emulator with local ADC, basic IAM, pull/stream delivery, and authenticated local HTTP push. No Pub/Sub scenario has been recorded against GCP; the [prepared recorder and approval plan](pubsub-validation.md) are tracked in [#29](https://github.com/evanmarshall/gcp-local/issues/29). The packaged Storage environment does not yet include Java or Pub/Sub; the combined workflow in #14 includes that setup.
+Issue [#12](https://github.com/evanmarshall/gcp-local/issues/12) implements the initial local slice. A gRPC provider wraps the official emulator with local ADC, basic IAM, pull/stream delivery, and authenticated local HTTP push. One Pub/Sub scenario, the [bounded pull and authorization recording](pubsub-validation.md), was captured and revalidated against real GCP on 2026-10-09 UTC, and the local provider matches it in comparison mode. Broader Pub/Sub fidelity and packaged setup remain tracked in [#29](https://github.com/evanmarshall/gcp-local/issues/29). The packaged Storage environment does not yet include Java or Pub/Sub; the combined workflow in #14 includes that setup.
 
 ## Supported local slice
 
@@ -88,7 +88,7 @@ Use `SubscriberGrpcTransport(channel=channel)` for the subscriber. Set `GOOGLE_A
 sh scripts/check_pubsub.sh
 ```
 
-The race-enabled Go suite and real Python SDK run with only loopback available. Tests exercise resource grants and stale policy etags, grant revocation during an active stream, project isolation, nack/redelivery, half-close, client cancellation, reset, shutdown, and uncertain control-plane responses. Push tests verify `actAs` denial before backend access, separate service-agent grants/revocation, independently verified JWTs, retry message identity, redirect rejection, and cancellation of an active receiver. The runner writes `.artifacts/pubsub-provider/results.json` with test outcomes, source/backend hashes, SDK versions, and an explicit **unverified** cloud-fidelity status. CI also reruns the existing Storage recordings and broader core tests. No Pub/Sub project provisioning, API enablement, grants, or real-GCP service execution has occurred.
+The race-enabled Go suite and real Python SDK run with only loopback available. Tests exercise resource grants and stale policy etags, grant revocation during an active stream, project isolation, nack/redelivery, half-close, client cancellation, reset, shutdown, and uncertain control-plane responses. Push tests verify `actAs` denial before backend access, separate service-agent grants/revocation, independently verified JWTs, retry message identity, redirect rejection, and cancellation of an active receiver. The runner writes `.artifacts/pubsub-provider/results.json` with test outcomes, source/backend hashes, SDK versions, and an explicit **unverified** cloud-fidelity status. CI also reruns the existing Storage recordings and broader core tests. Project provisioning already existed; the 2026-10-09 pull/authorization session enabled `pubsub.googleapis.com`, added one temporary fixture grant, recorded and revalidated, then removed that grant. No other real-GCP Pub/Sub execution has occurred.
 
 ## Backend verification
 
