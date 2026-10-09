@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -194,7 +195,7 @@ func preconditions(r *gateway.RESTRequest, current map[string]any, method string
 		etag, _ = current["etag"].(string)
 	}
 	matches := func(header string) bool {
-		for _, value := range strings.Split(header, ",") {
+		for value := range strings.SplitSeq(header, ",") {
 			value = strings.TrimSpace(value)
 			if value == "*" && current != nil || strings.Trim(value, `"`) == etag && etag != "" {
 				return true
@@ -243,8 +244,8 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	decoder := json.NewDecoder(bytes.NewReader(r.JSON))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		if strings.HasPrefix(err.Error(), "json: unknown field ") {
-			return nil, gap("unsupported bucket field " + strings.TrimPrefix(err.Error(), "json: unknown field "))
+		if after, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+			return nil, gap("unsupported bucket field " + after)
 		}
 		return nil, gap("unsupported bucket configuration")
 	}
@@ -308,9 +309,7 @@ func (p *Provider) bucketMetadata(scope state.Scope, value map[string]any) {
 	}
 	var metadata map[string]any
 	_ = json.Unmarshal([]byte(bucket.Metadata), &metadata)
-	for key, field := range metadata {
-		value[key] = field
-	}
+	maps.Copy(value, metadata)
 	value["id"] = name
 	value["kind"] = "storage#bucket"
 }

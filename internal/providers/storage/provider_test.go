@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -155,7 +156,7 @@ func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 		go func(project string) {
 			defer group.Done()
 			body := `{"name":"contended-bucket","location":"US-CENTRAL1","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0"}}`
-			r := httptest.NewRequest("POST", "/storage/v1/b?project="+project, strings.NewReader(body))
+			r := httptest.NewRequest(http.MethodPost, "/storage/v1/b?project="+project, strings.NewReader(body))
 			r.Header.Set("Authorization", "Bearer admin@"+project+".test")
 			w := httptest.NewRecorder()
 			f.g.ServeHTTP(w, r)

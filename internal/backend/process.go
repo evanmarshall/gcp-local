@@ -151,7 +151,7 @@ func HTTPProbe(endpoint string) (func(context.Context) error, error) {
 	}
 	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return func(ctx context.Context) error {
-		request, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return err
 		}
@@ -160,7 +160,7 @@ func HTTPProbe(endpoint string) (func(context.Context) error, error) {
 			return err
 		}
 		defer response.Body.Close()
-		if response.StatusCode != 200 {
+		if response.StatusCode != http.StatusOK {
 			return fmt.Errorf("backend readiness HTTP %d", response.StatusCode)
 		}
 		return nil

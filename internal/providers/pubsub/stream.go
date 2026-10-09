@@ -16,24 +16,24 @@ func validateStream(request *pb.StreamingPullRequest, first bool) error {
 		return err
 	}
 	if first {
-		if _, err := resourceName(request.Subscription, "subscriptions"); err != nil {
+		if _, err := resourceName(request.GetSubscription(), "subscriptions"); err != nil {
 			return err
 		}
-		if request.StreamAckDeadlineSeconds < 10 || request.StreamAckDeadlineSeconds > 600 {
+		if request.GetStreamAckDeadlineSeconds() < 10 || request.GetStreamAckDeadlineSeconds() > 600 {
 			return invalid("Stream ack deadline must be 10 through 600 seconds")
 		}
-	} else if request.Subscription != "" || request.ClientId != "" || request.MaxOutstandingMessages != 0 || request.MaxOutstandingBytes != 0 {
+	} else if request.GetSubscription() != "" || request.GetClientId() != "" || request.GetMaxOutstandingMessages() != 0 || request.GetMaxOutstandingBytes() != 0 {
 		return invalid("Subscription, client ID, and flow control belong only in the first request")
 	}
-	if request.MaxOutstandingMessages < 0 || request.MaxOutstandingBytes < 0 || len(request.ModifyDeadlineSeconds) != len(request.ModifyDeadlineAckIds) {
+	if request.GetMaxOutstandingMessages() < 0 || request.GetMaxOutstandingBytes() < 0 || len(request.GetModifyDeadlineSeconds()) != len(request.GetModifyDeadlineAckIds()) {
 		return invalid("Invalid streaming flow control or ack deadlines")
 	}
-	for _, seconds := range request.ModifyDeadlineSeconds {
+	for _, seconds := range request.GetModifyDeadlineSeconds() {
 		if seconds < 0 || seconds > 600 {
 			return invalid("Ack deadline must be zero through 600 seconds")
 		}
 	}
-	if request.StreamAckDeadlineSeconds != 0 && (request.StreamAckDeadlineSeconds < 10 || request.StreamAckDeadlineSeconds > 600) {
+	if request.GetStreamAckDeadlineSeconds() != 0 && (request.GetStreamAckDeadlineSeconds() < 10 || request.GetStreamAckDeadlineSeconds() > 600) {
 		return invalid("Stream ack deadline must be 10 through 600 seconds")
 	}
 	return nil
@@ -47,7 +47,7 @@ func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 	if err := validateStream(first, true); err != nil {
 		return err
 	}
-	if first.Subscription != call.Resource {
+	if first.GetSubscription() != call.Resource {
 		return invalid("Stream subscription disagrees with request scope")
 	}
 	if err := p.authorize(call, first); err != nil {

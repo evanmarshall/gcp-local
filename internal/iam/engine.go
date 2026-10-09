@@ -3,6 +3,7 @@ package iam
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -54,7 +55,7 @@ type Engine struct {
 
 func New(index *state.Index) (*Engine, error) {
 	if index == nil {
-		return nil, fmt.Errorf("resource index is required")
+		return nil, errors.New("resource index is required")
 	}
 	roles, err := loadRoles()
 	if err != nil {
@@ -64,7 +65,7 @@ func New(index *state.Index) (*Engine, error) {
 }
 func (e *Engine) Register(method string, rule Rule) error {
 	if method == "" || len(rule.Baseline) == 0 {
-		return fmt.Errorf("method and baseline permissions are required")
+		return errors.New("method and baseline permissions are required")
 	}
 	known := func(permission string) bool {
 		for _, role := range e.roles {
@@ -82,7 +83,7 @@ func (e *Engine) Register(method string, rule Rule) error {
 	}
 	for feature, permissions := range rule.When {
 		if feature == "" || len(permissions) == 0 {
-			return fmt.Errorf("feature and additional permissions are required")
+			return errors.New("feature and additional permissions are required")
 		}
 		for _, permission := range permissions {
 			if !known(permission) {
@@ -94,7 +95,7 @@ func (e *Engine) Register(method string, rule Rule) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if _, ok := e.rules[method]; ok {
-		return fmt.Errorf("method already has a permission plan")
+		return errors.New("method already has a permission plan")
 	}
 	e.rules[method] = copy
 	return nil
@@ -256,12 +257,12 @@ func (e *Engine) ancestry(target Target) ([]state.Resource, error) {
 	resource, found := e.index.Get(target.Name)
 	if found {
 		if target.Parent != "" && target.Parent != resource.Parent {
-			return nil, fmt.Errorf("Target parent disagrees with the resource index")
+			return nil, errors.New("Target parent disagrees with the resource index")
 		}
 	} else {
 		parent, ok := e.index.Get(target.Parent)
 		if !ok || parent.Service != "storage" || parent.Kind != "bucket" || !strings.HasPrefix(target.Name, parent.Name+"/objects/") || target.Name == parent.Name+"/objects/" {
-			return nil, fmt.Errorf("Resource ownership or target shape is unverified")
+			return nil, errors.New("Resource ownership or target shape is unverified")
 		}
 		resource = parent // Object data stays in the backend; bucket anchors its IAM.
 	}
@@ -270,25 +271,25 @@ func (e *Engine) ancestry(target Target) ([]state.Resource, error) {
 	var result []state.Resource
 	for len(result) < 128 {
 		if seen[resource.Name] {
-			return nil, fmt.Errorf("Resource hierarchy contains a cycle")
+			return nil, errors.New("Resource hierarchy contains a cycle")
 		}
 		seen[resource.Name] = true
 		if resource.Scope.Project != "" && resource.Scope.Project != project {
-			return nil, fmt.Errorf("Resource hierarchy crosses project ownership")
+			return nil, errors.New("Resource hierarchy crosses project ownership")
 		}
 		result = append(result, resource)
 		if resource.Parent == "" {
 			if resource.Kind != "project" && resource.Kind != "organization" {
-				return nil, fmt.Errorf("Resource hierarchy has no known root")
+				return nil, errors.New("Resource hierarchy has no known root")
 			}
 			return result, nil
 		}
 		resource, found = e.index.Get(resource.Parent)
 		if !found {
-			return nil, fmt.Errorf("Resource hierarchy is incomplete")
+			return nil, errors.New("Resource hierarchy is incomplete")
 		}
 	}
-	return nil, fmt.Errorf("Resource hierarchy exceeds the supported depth")
+	return nil, errors.New("Resource hierarchy exceeds the supported depth")
 }
 func cloneDecision(value Decision) Decision {
 	value.Principal.Scopes = append([]string(nil), value.Principal.Scopes...)

@@ -1,0 +1,27 @@
+{
+  "golangci_lint": {
+    "version": "2.14.0",
+    "release_url": "https://github.com/golangci/golangci-lint/releases/download/v2.14.0",
+    "archive": "golangci-lint-2.14.0-{os}-{arch}.tar.gz",
+    "sha256": {
+      "linux-amd64": "ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab",
+      "linux-arm64": "ee7ec5f3453d15ddf106fae5a4d6c71737712348a979d1fe9cd52ec7ea299bae",
+      "darwin-amd64": "a5667c1c3536be1740133213e1e822bfb8f0d98ea12903174d6d5f635e4ed68d",
+      "darwin-arm64": "5ef5f36a7147e91dc58ef9ef4d11bb7bad5ead0c76eb6c01327a73c641d1dcc3"
+    }
+  },
+  "staticcheck": {
+    "version": "2026.2.1",
+    "module": "honnef.co/go/tools/cmd/staticcheck"
+  },
+  "deadcode": {
+    "version": "v0.51.0",
+    "module": "golang.org/x/tools/cmd/deadcode"
+  },
+  "ruff": {
+    "version": "0.17.0"
+  },
+  "vulture": {
+    "version": "2.16"
+  }
+}

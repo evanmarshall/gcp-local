@@ -17,7 +17,7 @@ func (s *Service) Metadata(subject string) (http.Handler, error) {
 	email := strings.TrimPrefix(subject, "serviceAccount:")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.Header.Get("Metadata-Flavor") != "Google" || len(r.Header.Values("Metadata-Flavor")) != 1 || len(r.Header.Values("X-Forwarded-For")) != 0 {
-			http.Error(w, "Metadata request denied", 403)
+			http.Error(w, "Metadata request denied", http.StatusForbidden)
 			return
 		}
 		w.Header().Set("Metadata-Flavor", "Google")
@@ -59,11 +59,11 @@ func (s *Service) Metadata(subject string) (http.Handler, error) {
 		case "scopes":
 			text(strings.Join(p.scopes, "\n") + "\n")
 		case "identity":
-			http.Error(w, "Local ID tokens are unimplemented", 501)
+			http.Error(w, "Local ID tokens are unimplemented", http.StatusNotImplemented)
 		case "token":
 			query, err := parseMetadataQuery(r)
 			if err != nil {
-				http.Error(w, "Unsupported metadata token request", 400)
+				http.Error(w, "Unsupported metadata token request", http.StatusBadRequest)
 				return
 			}
 			scopes := p.scopes
@@ -72,7 +72,7 @@ func (s *Service) Metadata(subject string) (http.Handler, error) {
 			}
 			value, lifetime, err := s.mint(p, scopes)
 			if err != nil {
-				http.Error(w, "Unsupported metadata token scope or capacity", 400)
+				http.Error(w, "Unsupported metadata token scope or capacity", http.StatusBadRequest)
 				return
 			}
 			writeJSON(w, 200, map[string]any{"access_token": value, "expires_in": lifetime, "token_type": "Bearer"})

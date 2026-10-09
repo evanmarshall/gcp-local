@@ -28,22 +28,25 @@ type Server struct {
 	ready           atomic.Bool
 }
 
+// New builds a Server with an empty gateway. Tests use it to exercise listener and
+// shutdown behavior without registering providers; production uses WithGateway.
 func New(version string, shutdownTimeout time.Duration) *Server {
 	return WithGateway(version, shutdownTimeout, gateway.New(nil, nil))
 }
+
 func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gateway) *Server {
 	s := &Server{ShutdownTimeout: shutdownTimeout, GRPC: g.NewGRPCServer(), Backends: backend.NewManager(30*time.Second, shutdownTimeout)}
 	s.HTTP = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Dispatch directly, preserving escaped object paths without ServeMux redirects.
 		switch {
-		case r.Method == "GET" && r.URL.Path == "/_local/health":
+		case r.Method == http.MethodGet && r.URL.Path == "/_local/health":
 			ready := s.ready.Load()
 			code := http.StatusOK
 			if !ready {
 				code = http.StatusServiceUnavailable
 			}
 			writeJSON(w, code, map[string]any{"service": "gcp-local", "version": version, "ready": ready, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
-		case r.Method == "GET" && r.URL.Path == "/_local/diagnostics":
+		case r.Method == http.MethodGet && r.URL.Path == "/_local/diagnostics":
 			writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
 		case s.IAM != nil && strings.HasPrefix(r.URL.Path, "/_local/iam/decisions/"):
 			s.IAM.ServeHTTP(w, r)
@@ -138,7 +141,7 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 			}
 		}
 	}
-	for i := 0; i < remaining; i++ {
+	for range remaining {
 		if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, grpc.ErrServerStopped) {
 			serveErr = err
 		}

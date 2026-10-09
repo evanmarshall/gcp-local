@@ -3,7 +3,7 @@ package iam
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -80,7 +80,7 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 			if member == "allUsers" || member == "allAuthenticatedUsers" {
 				continue
 			}
-			if !(strings.HasPrefix(member, "user:") || strings.HasPrefix(member, "serviceAccount:")) || !strings.Contains(member, "@") || strings.ContainsAny(member, " \r\n\t") {
+			if (!strings.HasPrefix(member, "user:") && !strings.HasPrefix(member, "serviceAccount:")) || !strings.Contains(member, "@") || strings.ContainsAny(member, " \r\n\t") {
 				return Policy{}, status.Error(codes.Unimplemented, "IAM member type is unsupported")
 			}
 		}
@@ -97,7 +97,7 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	e.revision++
 	policy = clonePolicy(policy)
 	policy.Version = 1
-	policy.ETag = base64.StdEncoding.EncodeToString([]byte(fmt.Sprint(e.revision)))
+	policy.ETag = base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(e.revision, 10)))
 	e.policies[resource] = storedPolicy{policy: policy, owner: owner.Service, scope: owner.Scope}
 	return clonePolicy(policy), nil
 }

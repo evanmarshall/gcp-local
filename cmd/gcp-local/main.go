@@ -88,7 +88,7 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	registry := gateway.NewRegistry()
 	selected := map[string]bool{}
 	if *services != "" {
-		for _, service := range strings.Split(*services, ",") {
+		for service := range strings.SplitSeq(*services, ",") {
 			if (service != "storage" && service != "pubsub") || selected[service] {
 				fmt.Fprintln(errors, "Select distinct services from storage,pubsub")
 				return 2

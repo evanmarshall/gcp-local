@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -138,9 +139,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, status.Error(codes.Internal, "Provider returned an invalid response type"))
 			return
 		}
-		for key, values := range response.Headers {
-			w.Header()[key] = values
-		}
+		maps.Copy(w.Header(), response.Headers)
 		code := response.Status
 		if code == 0 {
 			code = 200

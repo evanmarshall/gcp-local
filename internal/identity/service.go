@@ -94,7 +94,7 @@ func New(config Config, now func() time.Time) (*Service, error) {
 	}
 	s := &Service{subjects: map[[32]byte]principal{}, principals: map[string]principal{}, tokens: map[[32]byte]token{}, lifetime: time.Duration(lifetime) * time.Second, now: now}
 	for _, entry := range config.Principals {
-		if !(strings.HasPrefix(entry.Subject, "user:") || strings.HasPrefix(entry.Subject, "serviceAccount:")) || !strings.Contains(entry.Subject, "@") || strings.ContainsAny(entry.Subject, "\r\n \t") {
+		if (!strings.HasPrefix(entry.Subject, "user:") && !strings.HasPrefix(entry.Subject, "serviceAccount:")) || !strings.Contains(entry.Subject, "@") || strings.ContainsAny(entry.Subject, "\r\n \t") {
 			return nil, errors.New("enroll an explicit user or service-account subject")
 		}
 		if err := (state.Scope{Project: entry.Project, Location: state.Global}).Validate(); err != nil {

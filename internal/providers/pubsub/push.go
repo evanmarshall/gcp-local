@@ -41,7 +41,7 @@ func validatePush(config *pb.PushConfig) error {
 	if err := fields(config.GetOidcToken(), "service_account_email", "audience"); err != nil {
 		return err
 	}
-	endpoint, err := url.Parse(config.PushEndpoint)
+	endpoint, err := url.Parse(config.GetPushEndpoint())
 	if err != nil {
 		return invalid("Invalid push endpoint")
 	}
@@ -49,7 +49,7 @@ func validatePush(config *pb.PushConfig) error {
 	if endpoint.Scheme != "http" || ip == nil || !ip.IsLoopback() || endpoint.Port() == "" || endpoint.User != nil || endpoint.Fragment != "" {
 		return gap("push endpoints currently require numeric loopback HTTP and an explicit port")
 	}
-	if config.GetOidcToken().ServiceAccountEmail == "" || len(config.GetOidcToken().Audience) > 2048 || strings.ContainsAny(config.GetOidcToken().Audience, "\r\n") {
+	if config.GetOidcToken().GetServiceAccountEmail() == "" || len(config.GetOidcToken().GetAudience()) > 2048 || strings.ContainsAny(config.GetOidcToken().GetAudience(), "\r\n") {
 		return invalid("Invalid push account or audience")
 	}
 	return nil
@@ -59,7 +59,7 @@ func (p *Provider) authorizePush(call gateway.Call, config *pb.PushConfig) error
 	if p.tokens == nil {
 		return gap("local ID-token issuer is not configured")
 	}
-	account := iam.AccountResource(call.Project, config.GetOidcToken().ServiceAccountEmail)
+	account := iam.AccountResource(call.Project, config.GetOidcToken().GetServiceAccountEmail())
 	resource, found := p.index.Get(account)
 	if !found || resource.Service != "iam" || resource.Kind != "serviceAccount" || resource.Scope != scopeOf(call) {
 		return gap("configure a same-project push service account")
@@ -128,7 +128,7 @@ func (p *Provider) restorePush(response proto.Message) {
 		if subscription == nil {
 			return
 		}
-		if value, ok := p.pushes.Load(canonical(subscription.Name)); ok {
+		if value, ok := p.pushes.Load(canonical(subscription.GetName())); ok {
 			subscription.PushConfig = proto.Clone(value.(*pushSubscription).config).(*pb.PushConfig)
 		}
 	}
@@ -136,7 +136,7 @@ func (p *Provider) restorePush(response proto.Message) {
 	case *pb.Subscription:
 		decorate(response)
 	case *pb.ListSubscriptionsResponse:
-		for _, subscription := range response.Subscriptions {
+		for _, subscription := range response.GetSubscriptions() {
 			decorate(subscription)
 		}
 	}
@@ -152,15 +152,15 @@ func (p *Provider) pushToken(ctx context.Context, call gateway.Call, config *pb.
 	}
 	call.Context = ctx
 	call.Principal = gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:service-" + project.Number + "@gcp-sa-pubsub.iam.gserviceaccount.com", Project: call.Project, Scopes: []string{identity.CloudPlatform}}
-	audience := config.GetOidcToken().Audience
+	audience := config.GetOidcToken().GetAudience()
 	if audience == "" {
-		audience = config.PushEndpoint
+		audience = config.GetPushEndpoint()
 	}
-	return p.tokens.Mint(call, iam.AccountResource(call.Project, config.GetOidcToken().ServiceAccountEmail), audience)
+	return p.tokens.Mint(call, iam.AccountResource(call.Project, config.GetOidcToken().GetServiceAccountEmail()), audience)
 }
 
 func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, config *pb.PushConfig) {
-	endpoint, _ := url.Parse(config.PushEndpoint)
+	endpoint, _ := url.Parse(config.GetPushEndpoint())
 	transport := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		if address != endpoint.Host {
 			return nil, gap("push dial target changed")
@@ -198,7 +198,7 @@ func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, con
 			}
 			continue
 		}
-		messages := result.(*pb.PullResponse).ReceivedMessages
+		messages := result.(*pb.PullResponse).GetReceivedMessages()
 		if len(messages) == 0 {
 			if !pause() {
 				return
@@ -212,10 +212,10 @@ func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, con
 			token, err := p.pushToken(ctx, call, config)
 			accepted := false
 			if err == nil {
-				encoded, err := protojson.Marshal(message.Message)
+				encoded, err := protojson.Marshal(message.GetMessage())
 				if err == nil {
 					body, _ := json.Marshal(map[string]any{"message": json.RawMessage(encoded), "subscription": call.Resource})
-					request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.PushEndpoint, bytes.NewReader(body))
+					request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.GetPushEndpoint(), bytes.NewReader(body))
 					if err == nil {
 						request.Header.Set("Content-Type", "application/json")
 						request.Header.Set("Authorization", "Bearer "+token)
@@ -224,7 +224,7 @@ func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, con
 							_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 							response.Body.Close()
 							switch response.StatusCode {
-							case 200, 201, 202, 204:
+							case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
 								accepted = true
 							}
 						}
@@ -233,9 +233,9 @@ func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, con
 			}
 			ackCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			if accepted {
-				_, err = invoke(ackCtx, b, subscriber+"Acknowledge", &pb.AcknowledgeRequest{Subscription: call.Resource, AckIds: []string{message.AckId}})
+				_, err = invoke(ackCtx, b, subscriber+"Acknowledge", &pb.AcknowledgeRequest{Subscription: call.Resource, AckIds: []string{message.GetAckId()}})
 			} else {
-				_, err = invoke(ackCtx, b, subscriber+"ModifyAckDeadline", &pb.ModifyAckDeadlineRequest{Subscription: call.Resource, AckIds: []string{message.AckId}, AckDeadlineSeconds: 0})
+				_, err = invoke(ackCtx, b, subscriber+"ModifyAckDeadline", &pb.ModifyAckDeadlineRequest{Subscription: call.Resource, AckIds: []string{message.GetAckId()}, AckDeadlineSeconds: 0})
 			}
 			cancel()
 			if (!accepted || err != nil) && !pause() {
