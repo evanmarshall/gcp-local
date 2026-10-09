@@ -7,13 +7,13 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import google.auth
+import grpc
+import requests
 from google.auth.transport.grpc import secure_authorized_channel
 from google.auth.transport.requests import Request
 from google.cloud import pubsub_v1
 from google.pubsub_v1.services.publisher.transports.grpc import PublisherGrpcTransport
 from google.pubsub_v1.services.subscriber.transports.grpc import SubscriberGrpcTransport
-import grpc
-import requests
 
 
 def main():

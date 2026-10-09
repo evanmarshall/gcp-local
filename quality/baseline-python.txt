@@ -5,8 +5,10 @@
 1	ANN002	scripts/check_history.py
 1	ANN002	scripts/local_env.py
 1	ANN002	scripts/smoke_environment.py
+1	ANN003	examples/pubsub.py
 1	ANN003	gcp_validation/pubsub.py
 1	ANN003	scripts/smoke_storage.py
+1	ANN201	examples/pubsub.py
 1	ANN201	examples/storage.py
 1	ANN201	gcp_validation/federation.py
 1	ANN201	scripts/check_repo.py
@@ -25,6 +27,7 @@
 1	ANN201	scripts/smoke_identity.py
 1	ANN201	scripts/smoke_moo_docker.py
 1	ANN201	scripts/smoke_runtime.py
+1	ANN202	examples/pubsub.py
 1	ANN202	gcp_validation/pubsub.py
 1	ANN202	gcp_validation/sandbox.py
 1	ANN202	gcp_validation/sdk_storage.py
@@ -35,6 +38,7 @@
 1	ANN202	scripts/smoke_moo_docker.py
 1	ANN202	scripts/smoke_moo_protocols.py
 1	ANN202	skills/gcp-local-setup/scripts/inspect_repo.py
+1	ANN204	examples/pubsub.py
 1	ANN204	examples/storage.py
 1	ANN204	gcp_validation/authorization.py
 1	ANN204	gcp_validation/normalization.py
@@ -92,6 +96,7 @@
 1	D102	gcp_validation/config.py
 1	D102	gcp_validation/evidence.py
 1	D102	gcp_validation/sdk_storage.py
+1	D103	examples/pubsub.py
 1	D103	examples/storage.py
 1	D103	gcp_validation/federation.py
 1	D103	gcp_validation/pubsub.py
@@ -321,6 +326,7 @@
 1	S105	tests/validation/test_sandbox.py
 1	S106	gcp_validation/sdk_storage.py
 1	S108	scripts/moo_protocol_guest.py
+1	S108	scripts/smoke_environment.py
 1	S108	scripts/smoke_moo_docker.py
 1	S202	scripts/install_go.py
 1	S310	gcp_validation/storage.py
@@ -380,10 +386,7 @@
 11	E501	scripts/smoke_storage.py
 11	E501	tests/validation/test_storage_runner.py
 11	EM101	gcp_validation/pytest_plugin.py
-11	EM101	scripts/local_env.py
 11	PLC0415	gcp_validation/pubsub.py
-11	S603	scripts/smoke_environment.py
-11	TRY003	scripts/local_env.py
 12	ANN001	scripts/check_quality.py
 12	ANN201	scripts/check_quality.py
 12	D102	tests/tooling/test_history.py
@@ -399,6 +402,9 @@
 12	TRY003	scripts/install_agent_skill.py
 13	ANN001	skills/gcp-local-setup/scripts/inspect_repo.py
 13	D102	gcp_validation/pubsub.py
+13	EM101	scripts/local_env.py
+13	S603	scripts/smoke_environment.py
+13	TRY003	scripts/local_env.py
 14	D103	tests/validation/test_plugin.py
 14	E501	tests/validation/storage_server.py
 14	S101	scripts/smoke_storage.py
@@ -414,7 +420,7 @@
 18	E501	scripts/smoke_moo_docker.py
 19	ANN001	scripts/local_env.py
 19	EM101	gcp_validation/evidence.py
-19	S101	scripts/smoke_environment.py
+2	ANN001	examples/pubsub.py
 2	ANN002	gcp_validation/sdk_storage.py
 2	ANN003	examples/storage.py
 2	ANN003	gcp_validation/sdk_storage.py
@@ -434,6 +440,7 @@
 2	ANN204	gcp_validation/storage.py
 2	ARG001	scripts/run_isolated.py
 2	ARG001	tests/conformance/conftest.py
+2	BLE001	examples/pubsub.py
 2	BLE001	scripts/smoke_moo.py
 2	C901	gcp_validation/pubsub.py
 2	C901	gcp_validation/pytest_plugin.py
@@ -490,6 +497,7 @@
 2	S101	scripts/run_terraform.py
 2	S104	scripts/moo_protocol_guest.py
 2	S105	tests/validation/test_federation.py
+2	S110	examples/pubsub.py
 2	S310	scripts/smoke_identity.py
 2	S603	scripts/check_history.py
 2	S603	scripts/install_agent_skill.py
@@ -500,6 +508,7 @@
 2	S603	tests/tooling/test_history.py
 2	S607	scripts/check_history.py
 2	S607	scripts/run_isolated.py
+2	SIM105	examples/pubsub.py
 2	SIM105	internal/providers/pubsub/testdata/sdk.py
 2	SLF001	gcp_validation/evidence.py
 2	SLF001	scripts/smoke_storage.py
@@ -513,12 +522,13 @@
 2	TRY301	gcp_validation/evidence.py
 2	TRY301	skills/gcp-local-setup/scripts/inspect_repo.py
 20	E501	scripts/plan_sandbox.py
-20	E501	scripts/smoke_environment.py
 20	E501	tests/validation/test_federation.py
 20	TRY003	gcp_validation/evidence.py
 21	E501	scripts/local_env.py
 23	E501	gcp_validation/pytest_plugin.py
+24	E501	scripts/smoke_environment.py
 25	E501	skills/gcp-local-setup/scripts/inspect_repo.py
+25	S101	scripts/smoke_environment.py
 3	ANN001	gcp_validation/federation.py
 3	ANN001	scripts/check_history.py
 3	ANN001	scripts/plan_pubsub.py
@@ -537,6 +547,7 @@
 3	D103	tests/validation/test_environment_config.py
 3	D103	tests/validation/test_local_identity_setup.py
 3	D107	gcp_validation/pubsub.py
+3	E501	examples/pubsub.py
 3	E501	examples/storage.py
 3	E501	gcp_validation/authorization.py
 3	E501	gcp_validation/sdk_storage.py
@@ -547,6 +558,7 @@
 3	E501	tests/conformance/conftest.py
 3	E501	tests/conformance/test_storage.py
 3	E501	tests/conformance/test_storage_isolation.py
+3	EM101	examples/pubsub.py
 3	EM101	examples/storage.py
 3	EM101	gcp_validation/federation.py
 3	EM101	scripts/install_moo_compose.py
@@ -565,6 +577,7 @@
 3	S603	scripts/smoke_isolation.py
 3	S603	tests/validation/test_local_identity_setup.py
 3	S607	tests/tooling/test_history.py
+3	TRY003	examples/pubsub.py
 3	TRY003	examples/storage.py
 3	TRY003	gcp_validation/federation.py
 3	TRY003	scripts/install_moo_compose.py
@@ -608,7 +621,6 @@
 4	N815	tests/validation/storage_server.py
 4	N818	gcp_validation/evidence.py
 4	PLC0415	tests/conformance/conftest.py
-4	PLW1510	scripts/smoke_environment.py
 4	S603	tests/validation/test_agent_setup.py
 4	S607	scripts/install_agent_skill.py
 4	TRY003	gcp_validation/authorization.py
@@ -649,6 +661,7 @@
 6	EM101	scripts/install_go.py
 6	EM101	scripts/probe_pubsub_backend.py
 6	EM101	skills/gcp-local-setup/scripts/inspect_repo.py
+6	PLW1510	scripts/smoke_environment.py
 6	PT018	internal/identity/testdata/sdk.py
 6	S101	gcp_validation/pubsub.py
 6	S101	scripts/smoke_identity.py
