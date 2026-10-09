@@ -36,7 +36,7 @@ func health(args []string, output, errors io.Writer) int {
 	}
 	defer response.Body.Close()
 	var result map[string]any
-	if response.StatusCode != 200 || json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result) != nil || result["service"] != "gcp-local" || result["ready"] != true {
+	if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result) != nil || result["service"] != "gcp-local" || result["ready"] != true {
 		fmt.Fprintln(errors, "gcp-local is not ready")
 		return 1
 	}

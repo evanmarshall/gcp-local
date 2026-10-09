@@ -53,10 +53,10 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 			t.Fatal(err)
 		}
 		if path == "/storage/v1/b" {
-			if response.StatusCode != 501 || body["error"].(map[string]any)["status"] != "UNIMPLEMENTED" {
+			if response.StatusCode != http.StatusNotImplemented || body["error"].(map[string]any)["status"] != "UNIMPLEMENTED" {
 				t.Fatalf("unexpected API response: %v", body)
 			}
-		} else if response.StatusCode != 200 {
+		} else if response.StatusCode != http.StatusOK {
 			t.Fatalf("diagnostics status %d", response.StatusCode)
 		}
 		if path == "/_local/health" && (body["ready"] != true || body["version"] != "test-version") {
@@ -171,7 +171,7 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 				defer close(done)
 				select {
 				case <-release:
-					return &pb.Topic{Name: input.(*pb.GetTopicRequest).Topic}, nil
+					return &pb.Topic{Name: input.(*pb.GetTopicRequest).GetTopic()}, nil
 				case <-call.Context.Done():
 					return nil, call.Context.Err()
 				}

@@ -1,0 +1,45 @@
+# Strict Python analysis. Ruff runs every rule family except the ones the
+# formatter owns and the ones that contradict a deliberate repository decision.
+target-version = "py311"
+line-length = 100
+
+extend-exclude = [
+  ".tools",
+  ".venv-tools",
+  "third_party",
+]
+
+[lint]
+select = ["ALL"]
+ignore = [
+  "COM",   # trailing commas: formatter-owned
+  "CPY",   # copyright headers: repository uses a single LICENSE
+  "D203",  # conflicts with D211
+  "D213",  # conflicts with D212
+  "ERA",   # commented-out code is often a deliberate park, not an accident
+  "ISC",   # implicit string concatenation: formatter-owned
+  "Q",     # quotes: formatter-owned
+  "TD",    # TODO style: the repository links issues instead
+]
+
+[lint.per-file-ignores]
+# Tests assert aggressively and use fixtures with framework-mandated signatures.
+"tests/**" = ["ANN", "S101", "SLF001", "T20"]
+"**/testdata/**" = ["ANN", "D", "S", "T20", "INP"]
+# The skill scripts and the validation harness are executed as standalone CLIs.
+"scripts/**" = ["INP", "T20"]
+"skills/**" = ["INP", "T20"]
+"examples/**" = ["INP", "T20"]
+"conftest.py" = ["INP"]
+# The vulture whitelist is a declaration file: bare names are undefined loads on purpose.
+"quality/vulture-whitelist.py" = ["ALL"]
+
+[lint.mccabe]
+max-complexity = 10
+
+[lint.pylint]
+max-args = 8
+max-positional-args = 8
+max-statements = 60
+max-branches = 15
+allow-magic-value-types = ["bytes", "float", "int", "str"]

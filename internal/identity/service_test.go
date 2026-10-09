@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -33,7 +34,7 @@ func form() url.Values {
 func exchange(t *testing.T, s *Service, values url.Values) (int, map[string]any) {
 	t.Helper()
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest("POST", "/v1/token", strings.NewReader(values.Encode()))
+	request := httptest.NewRequest(http.MethodPost, "/v1/token", strings.NewReader(values.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	s.ServeHTTP(recorder, request)
 	var body map[string]any
@@ -123,7 +124,7 @@ func TestMetadataIsBoundToOnePrincipal(t *testing.T) {
 		{"/computeMetadata/v1/instance/service-accounts/default/identity", true, 501},
 	} {
 		response := httptest.NewRecorder()
-		request := httptest.NewRequest("GET", tc.path, nil)
+		request := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		if tc.header {
 			request.Header.Set("Metadata-Flavor", "Google")
 		}
@@ -141,7 +142,7 @@ func TestMetadataIsBoundToOnePrincipal(t *testing.T) {
 		}
 	}
 	response := httptest.NewRecorder()
-	request := httptest.NewRequest("GET", "/", nil)
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.Header.Set("Metadata-Flavor", "Google")
 	request.Header.Set("X-Forwarded-For", "127.0.0.1")
 	handler.ServeHTTP(response, request)
@@ -159,7 +160,7 @@ func TestInspectionDoesNotExposeTokensAndInvalidTokensStayUnauthenticated(t *tes
 		state  gateway.PrincipalState
 	}{{"", 200, gateway.Anonymous}, {"unknown", 401, gateway.Unknown}, {token, 200, gateway.Authenticated}} {
 		response := httptest.NewRecorder()
-		request := httptest.NewRequest("GET", "/_local/identity", nil)
+		request := httptest.NewRequest(http.MethodGet, "/_local/identity", nil)
 		if tc.token != "" {
 			request.Header.Set("Authorization", "Bearer "+tc.token)
 		}
@@ -175,7 +176,7 @@ func TestInspectionDoesNotExposeTokensAndInvalidTokensStayUnauthenticated(t *tes
 	}
 	clock.Store(600)
 	response := httptest.NewRecorder()
-	request := httptest.NewRequest("GET", "/_local/identity", nil)
+	request := httptest.NewRequest(http.MethodGet, "/_local/identity", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	s.ServeHTTP(response, request)
 	if response.Code != 401 {

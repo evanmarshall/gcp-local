@@ -56,9 +56,9 @@ func writeError(w http.ResponseWriter, err error) {
 		name = strings.ToUpper(s.Code().String())
 	}
 	body := map[string]any{"code": code, "status": name, "message": s.Message()}
-	if len(s.Proto().Details) > 0 {
+	if len(s.Proto().GetDetails()) > 0 {
 		var details []json.RawMessage
-		for _, detail := range s.Proto().Details {
+		for _, detail := range s.Proto().GetDetails() {
 			encoded, e := protojson.Marshal(detail)
 			if e == nil {
 				details = append(details, encoded)

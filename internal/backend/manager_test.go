@@ -51,10 +51,10 @@ func TestProcessFixture(t *testing.T) {
 			os.Exit(27)
 		}
 		if mode == "unready" {
-			w.WriteHeader(503)
+			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 	})}
 	signals := []os.Signal{os.Interrupt}
 	if mode != "ignore-term" {
@@ -349,7 +349,7 @@ func TestHTTPProbeRejectsExternalOrRedirectedReadiness(t *testing.T) {
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "https://storage.googleapis.com/")
-		w.WriteHeader(302)
+		w.WriteHeader(http.StatusFound)
 	})}
 	go server.Serve(listener)
 	defer server.Close()

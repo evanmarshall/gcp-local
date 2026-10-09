@@ -5,7 +5,6 @@ package identity_test
 import (
 	"context"
 	"encoding/json"
-	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	core "github.com/evanmarshall/gcp-local/internal/runtime"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/identity"

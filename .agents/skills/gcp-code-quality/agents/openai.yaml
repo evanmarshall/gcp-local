@@ -1,0 +1,4 @@
+interface:
+  display_name: "GCP Code Quality"
+  short_description: "Find dead code and reject over-abstraction"
+  default_prompt: "Use $gcp-code-quality to review this change for dead code and over-abstraction."

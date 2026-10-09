@@ -122,7 +122,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-tools.txt
+      - run: python -m pip install -r requirements-tools.txt -r requirements-quality.txt
+      - run: python scripts/install_go.py
+      - run: python scripts/install_quality_tools.py
+      - name: Lint Go and Python and reject unbudgeted dead code
+        run: python scripts/check_quality.py
       - run: python scripts/check_repo.py
       - run: python -m unittest discover -s tests/tooling -v
       - run: python scripts/check_history.py HEAD

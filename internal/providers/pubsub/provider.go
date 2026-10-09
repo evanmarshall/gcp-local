@@ -117,14 +117,14 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 		return err
 	}
 	if subscription, ok := request.(*pb.Subscription); ok {
-		project, err := resourceName(subscription.Topic, "topics")
+		project, err := resourceName(subscription.GetTopic(), "topics")
 		if err != nil {
 			return err
 		}
 		if project != call.Project {
 			return gap("cross-project subscriptions")
 		}
-		topic, found := p.index.Get(canonical(subscription.Topic))
+		topic, found := p.index.Get(canonical(subscription.GetTopic()))
 		if !found {
 			return status.Error(codes.NotFound, "Topic does not exist")
 		}
@@ -132,14 +132,14 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 			return gap("topic ownership disagrees with the index")
 		}
 		attachment := call
-		attachment.Method, attachment.Resource = attach, subscription.Topic
+		attachment.Method, attachment.Resource = attach, subscription.GetTopic()
 		decision, err := p.iam.Authorize(attachment, iam.Target{Name: topic.Name}, nil)
 		_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-attachment-decision-id", decision.ID))
 		if err != nil {
 			return err
 		}
-		if subscription.PushConfig != nil {
-			if err := p.authorizePush(call, subscription.PushConfig); err != nil {
+		if subscription.GetPushConfig() != nil {
+			if err := p.authorizePush(call, subscription.GetPushConfig()); err != nil {
 				return err
 			}
 		}
@@ -198,11 +198,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		var err error
 		forwarded := request
 		var push *pb.PushConfig
-		if subscription, ok := request.(*pb.Subscription); ok && subscription.PushConfig != nil {
+		if subscription, ok := request.(*pb.Subscription); ok && subscription.GetPushConfig() != nil {
 			if p.pushCount(scopeOf(call)) >= 32 {
 				return status.Error(codes.ResourceExhausted, "Local limit is 32 push subscriptions per project")
 			}
-			push = proto.Clone(subscription.PushConfig).(*pb.PushConfig)
+			push = proto.Clone(subscription.GetPushConfig()).(*pb.PushConfig)
 			copy := proto.Clone(subscription).(*pb.Subscription)
 			copy.PushConfig = nil // The unauthenticated emulator must never make HTTP deliveries.
 			forwarded = copy

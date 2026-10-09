@@ -1,8 +1,9 @@
 package storage
 
 import (
-	"github.com/evanmarshall/gcp-local/internal/state"
 	"testing"
+
+	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
 func TestBucketProjectOwnershipAndGlobalNamespace(t *testing.T) {

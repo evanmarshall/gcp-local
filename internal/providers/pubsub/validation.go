@@ -59,32 +59,32 @@ func validate(request proto.Message) error {
 		if err := fields(r, "name", "topic", "labels", "ack_deadline_seconds", "push_config"); err != nil {
 			return err
 		}
-		if r.PushConfig != nil {
-			if err := validatePush(r.PushConfig); err != nil {
+		if r.GetPushConfig() != nil {
+			if err := validatePush(r.GetPushConfig()); err != nil {
 				return err
 			}
 		}
-		if _, err := resourceName(r.Topic, "topics"); err != nil {
+		if _, err := resourceName(r.GetTopic(), "topics"); err != nil {
 			return err
 		}
-		if r.AckDeadlineSeconds != 0 && (r.AckDeadlineSeconds < 10 || r.AckDeadlineSeconds > 600) {
+		if r.GetAckDeadlineSeconds() != 0 && (r.GetAckDeadlineSeconds() < 10 || r.GetAckDeadlineSeconds() > 600) {
 			return invalid("Ack deadline must be 10 through 600 seconds")
 		}
 	case *pb.PublishRequest:
 		if err := fields(r, "topic", "messages"); err != nil {
 			return err
 		}
-		if len(r.Messages) == 0 || len(r.Messages) > 1000 {
+		if len(r.GetMessages()) == 0 || len(r.GetMessages()) > 1000 {
 			return invalid("Supply one through 1000 messages")
 		}
-		for _, m := range r.Messages {
+		for _, m := range r.GetMessages() {
 			if m == nil {
 				return invalid("Missing message")
 			}
 			if err := fields(m, "data", "attributes"); err != nil {
 				return err
 			}
-			if len(m.Data) == 0 && len(m.Attributes) == 0 {
+			if len(m.GetData()) == 0 && len(m.GetAttributes()) == 0 {
 				return invalid("Messages need data or attributes")
 			}
 		}
@@ -95,7 +95,7 @@ func validate(request proto.Message) error {
 		if err := fields(r, "subscription", "max_messages", "return_immediately"); err != nil {
 			return err
 		}
-		if r.MaxMessages < 1 || r.MaxMessages > 1000 {
+		if r.GetMaxMessages() < 1 || r.GetMaxMessages() > 1000 {
 			return invalid("Max messages must be one through 1000")
 		}
 	case *pb.AcknowledgeRequest:
@@ -106,7 +106,7 @@ func validate(request proto.Message) error {
 		if err := fields(r, "subscription", "ack_ids", "ack_deadline_seconds"); err != nil {
 			return err
 		}
-		if r.AckDeadlineSeconds < 0 || r.AckDeadlineSeconds > 600 {
+		if r.GetAckDeadlineSeconds() < 0 || r.GetAckDeadlineSeconds() > 600 {
 			return invalid("Ack deadline must be zero through 600 seconds")
 		}
 	default:

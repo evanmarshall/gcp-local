@@ -29,7 +29,7 @@ func TestWhyDeniedUsesOnlyExplicitLocalDiagnostics(t *testing.T) {
 	}
 	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "https://iam.googleapis.com")
-		w.WriteHeader(302)
+		w.WriteHeader(http.StatusFound)
 	}))
 	defer redirect.Close()
 	output.Reset()

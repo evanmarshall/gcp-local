@@ -14,13 +14,16 @@ Run repository checks with Python 3.11 or newer:
 
 ```sh
 python3 -m venv .venv-tools
-.venv-tools/bin/python -m pip install -r requirements-tools.txt
+.venv-tools/bin/python -m pip install -r requirements-tools.txt -r requirements-quality.txt
+python3 scripts/install_go.py
+python3 scripts/install_quality_tools.py
+.venv-tools/bin/python scripts/check_quality.py
 .venv-tools/bin/python scripts/check_repo.py
 python3 -m unittest discover -s tests/tooling -v
 python3 scripts/check_history.py HEAD
 ```
 
-Alternatively, `uv run --with 'PyYAML==6.0.3' python scripts/check_repo.py` supplies the YAML parser without installing it globally. Normal checks do not require GCP credentials, Docker, or the sibling LocalStack checkout.
+Alternatively, `uv run --with 'PyYAML==6.0.3' python scripts/check_repo.py` supplies the YAML parser without installing it globally. [The quality gate](.agents/skills/gcp-code-quality/SKILL.md) runs pinned golangci-lint, Staticcheck, Ruff, and dead-code analysis, and blocks new findings against the reviewed baselines in `quality/`. Normal checks do not require GCP credentials, Docker, or the sibling LocalStack checkout.
 
 Install `requirements-sdk.txt` in the same environment (it includes the runner and keyless-auth dependencies) and run `.venv-tools/bin/python -m pytest` for the offline validation harness and existing tooling tests. [The validation guide](docs/validation.md) documents explicit local/live modes and reports. Prepare real-cloud project inputs in the ignored `.env` using [the sandbox guide](docs/gcp-sandbox.md); ordinary tests do not load it or discover ambient credentials.
 

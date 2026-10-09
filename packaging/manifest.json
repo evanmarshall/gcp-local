@@ -26,5 +26,17 @@
     "license": "https://github.com/adoptium/temurin17-binaries/blob/master/LICENSE",
     "emulator": "toolchains/pubsub.json",
     "purpose": "JRE that runs the checksum-pinned official Pub/Sub emulator the provider starts lazily"
+  },
+  "quality": {
+    "tools": "toolchains/quality.json",
+    "python_tools": "requirements-quality.txt",
+    "go_config": ".golangci.yml",
+    "python_config": "ruff.toml",
+    "baselines": "quality/",
+    "dead_code_allowlists": [
+      "quality/dead-code-go.txt",
+      "quality/vulture-whitelist.py"
+    ],
+    "policy_skill": ".agents/skills/gcp-code-quality/SKILL.md"
   }
 }

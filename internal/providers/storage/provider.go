@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +32,7 @@ var methods = []string{"storage.buckets.insert", "storage.buckets.list", "storag
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
-		return nil, fmt.Errorf("Storage requires registry, lifecycle, index, and IAM")
+		return nil, errors.New("Storage requires registry, lifecycle, index, and IAM")
 	}
 	p := &Provider{index: index, catalog: NewCatalog(index), iam: engine, manager: manager}
 	if err := RegisterPermissions(engine); err != nil {
@@ -110,7 +111,7 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 	}
 	message := fmt.Sprintf("%s does not have %s access to the Google Cloud Storage %s. Permission '%s' denied on resource '%s' (or it may not exist).", actor, permission, kind, permission, target.Name)
 	if call.Method == "storage.objects.insert" && permission == "storage.objects.delete" {
-		message = fmt.Sprintf("%s does not have storage.objects.delete access to the Google Cloud Storage object.", actor)
+		message = actor + " does not have storage.objects.delete access to the Google Cloud Storage object."
 	}
 	response := wireError(httpCode, reason, message)
 	response.Headers = http.Header{"X-Gcp-Local-Decision-Id": {d.ID}}
@@ -185,12 +186,13 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 			if err != nil {
 				return err
 			}
-			if result.Status == 200 {
+			switch result.Status {
+			case 200:
 				current = result.JSON.(map[string]any)
 				features["object_exists"] = true
-			} else if result.Status == 404 {
+			case 404:
 				features["object_exists"] = false
-			} else {
+			default:
 				return status.Error(codes.Unavailable, "Unable to resolve existing object before authorization")
 			}
 		}
@@ -243,7 +245,7 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 	}
 	response := &gateway.RESTResponse{Status: result.StatusCode, Headers: result.Header.Clone()}
 	response.Headers.Del("Content-Length")
-	if strings.Contains(result.Header.Get("Content-Type"), "application/json") && !(result.StatusCode < 300 && query.Get("alt") == "media") {
+	if strings.Contains(result.Header.Get("Content-Type"), "application/json") && (result.StatusCode >= 300 || query.Get("alt") != "media") {
 		var value map[string]any
 		if len(payload) > 0 && json.Unmarshal(payload, &value) != nil {
 			return nil, status.Error(codes.Internal, "Invalid backend JSON")

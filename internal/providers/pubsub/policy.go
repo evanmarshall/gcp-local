@@ -31,11 +31,11 @@ func (p *Provider) policy(call gateway.Call, raw any) (any, error) {
 		if err := fields(r, "resource", "options"); err != nil {
 			return nil, err
 		}
-		if r.Options != nil {
-			if err := fields(r.Options, "requested_policy_version"); err != nil {
+		if r.GetOptions() != nil {
+			if err := fields(r.GetOptions(), "requested_policy_version"); err != nil {
 				return nil, err
 			}
-			if r.Options.RequestedPolicyVersion != 0 && r.Options.RequestedPolicyVersion != 1 {
+			if r.GetOptions().GetRequestedPolicyVersion() != 0 && r.GetOptions().GetRequestedPolicyVersion() != 1 {
 				return nil, gap("requested IAM policy version")
 			}
 		}
@@ -44,24 +44,24 @@ func (p *Provider) policy(call gateway.Call, raw any) (any, error) {
 		if err := fields(r, "resource", "policy", "update_mask"); err != nil {
 			return nil, err
 		}
-		if r.UpdateMask != nil {
+		if r.GetUpdateMask() != nil {
 			return nil, gap("partial IAM policy updates")
 		}
-		if r.Policy == nil {
+		if r.GetPolicy() == nil {
 			return nil, invalid("Missing IAM policy")
 		}
-		if err := fields(r.Policy, "version", "bindings", "etag"); err != nil {
+		if err := fields(r.GetPolicy(), "version", "bindings", "etag"); err != nil {
 			return nil, err
 		}
-		policy := iam.Policy{Version: int(r.Policy.Version), ETag: base64.StdEncoding.EncodeToString(r.Policy.Etag)}
-		for _, binding := range r.Policy.Bindings {
+		policy := iam.Policy{Version: int(r.GetPolicy().GetVersion()), ETag: base64.StdEncoding.EncodeToString(r.GetPolicy().GetEtag())}
+		for _, binding := range r.GetPolicy().GetBindings() {
 			if binding == nil {
 				return nil, invalid("Missing IAM binding")
 			}
 			if err := fields(binding, "role", "members"); err != nil {
 				return nil, err
 			}
-			policy.Bindings = append(policy.Bindings, iam.Binding{Role: binding.Role, Members: append([]string(nil), binding.Members...)})
+			policy.Bindings = append(policy.Bindings, iam.Binding{Role: binding.GetRole(), Members: append([]string(nil), binding.GetMembers()...)})
 		}
 		update = &policy
 		call.Method = "pubsub." + kind + ".setIamPolicy"

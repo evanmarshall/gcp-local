@@ -9,7 +9,7 @@ import (
 
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	const prefix = "/_local/iam/decisions/"
-	if r.Method != "GET" || !strings.HasPrefix(r.URL.Path, prefix) {
+	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, prefix) {
 		http.NotFound(w, r)
 		return
 	}

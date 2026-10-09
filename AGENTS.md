@@ -41,11 +41,13 @@ python3 -m unittest discover -s tests/tooling -v
 python3 scripts/check_history.py HEAD
 python3 scripts/install_go.py
 sh scripts/check_go.sh
+python3 scripts/install_quality_tools.py
+.venv-tools/bin/python scripts/check_quality.py
 ```
 
 The history check needs an existing commit. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup without `uv`. See [runtime.md](docs/runtime.md) for the server. Format with `sh scripts/go.sh fmt ./...`; run focused tests with `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`. Use the pinned worktree toolchain instead of an ambient Go installation.
 
-After installing `requirements-sdk.txt` and `requirements-tools.txt` in the tooling environment, run `.venv-tools/bin/python -m pytest`. It defaults to offline harness checks and writes separate harness/conformance results. Read [the validation guide](docs/validation.md) before writing a scenario. `.env` holds sandbox setup inputs described in [the sandbox guide](docs/gcp-sandbox.md); it is not automatically loaded by tests.
+After installing `requirements-sdk.txt`, `requirements-tools.txt`, and `requirements-quality.txt` in the tooling environment, run `.venv-tools/bin/python -m pytest` and `.venv-tools/bin/python scripts/check_quality.py`. It defaults to offline harness checks and writes separate harness/conformance results. Read [the validation guide](docs/validation.md) before writing a scenario. `.env` holds sandbox setup inputs described in [the sandbox guide](docs/gcp-sandbox.md); it is not automatically loaded by tests.
 
 For moo setup, run `sh scripts/setup_moo.sh`. Run tooling tests inside the task machine with `moo run task-name -- 'cd /srv/app && python3 -m unittest discover -s tests/tooling -v'`. Keep the repository and history checks above on the host: moo syncs source files, not `.git`.
 

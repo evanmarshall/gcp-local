@@ -42,7 +42,7 @@ func whyDenied(args []string, output, errors io.Writer) int {
 		return 1
 	}
 	defer response.Body.Close()
-	if response.StatusCode != 200 {
+	if response.StatusCode != http.StatusOK {
 		fmt.Fprintln(errors, "Decision unavailable; it may be unknown or evicted")
 		return 1
 	}

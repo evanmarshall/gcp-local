@@ -173,7 +173,7 @@ func TestRESTCancellationReachesProvider(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", server.URL+"/storage/v1/b", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/storage/v1/b", nil)
 	completed := make(chan struct{})
 	go func() {
 		defer close(completed)
@@ -210,7 +210,7 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 			return nil, permissionError()
 		}
 		calls <- call
-		return &pb.Topic{Name: input.(*pb.GetTopicRequest).Topic}, nil
+		return &pb.Topic{Name: input.(*pb.GetTopicRequest).GetTopic()}, nil
 	})
 	client := pb.NewPublisherClient(grpcClient(t, New(r, nil)))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -222,7 +222,7 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := <-calls
-	if response.Name != call.Resource || call.Project != "synthetic" || call.Location != "global" || call.Principal.State != Unknown || len(call.TraceID) != 32 || header.Get("x-gcp-local-trace-id")[0] != call.TraceID {
+	if response.GetName() != call.Resource || call.Project != "synthetic" || call.Location != "global" || call.Principal.State != Unknown || len(call.TraceID) != 32 || header.Get("x-gcp-local-trace-id")[0] != call.TraceID {
 		t.Fatalf("%+v %v", call, header)
 	}
 	_, err = client.GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/wrong/subscriptions/topic"})
@@ -231,7 +231,7 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 	}
 	_, err = client.GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/synthetic/topics/denied"})
 	s := status.Convert(err)
-	if s.Code() != codes.PermissionDenied || s.Details()[0].(*errdetails.ErrorInfo).Reason != "IAM_PERMISSION_DENIED" {
+	if s.Code() != codes.PermissionDenied || s.Details()[0].(*errdetails.ErrorInfo).GetReason() != "IAM_PERMISSION_DENIED" {
 		t.Fatal(s)
 	}
 	_, err = client.ListTopics(ctx, &pb.ListTopicsRequest{Project: "projects/synthetic"})
@@ -250,7 +250,7 @@ func TestStreamingPullBidirectionalDeliveryAndCancellation(t *testing.T) {
 				if err := stream.Recv(&first); err != nil {
 					return err
 				}
-				if first.Subscription != "projects/synthetic/subscriptions/sub" || call.Project != "synthetic" || call.Resource != first.Subscription {
+				if first.GetSubscription() != "projects/synthetic/subscriptions/sub" || call.Project != "synthetic" || call.Resource != first.GetSubscription() {
 					return errors.New("missing first request context")
 				}
 				if err := stream.Send(&pb.StreamingPullResponse{ReceivedMessages: []*pb.ReceivedMessage{{AckId: "ack", Message: &pb.PubsubMessage{Data: []byte("payload")}}}}); err != nil {
@@ -260,7 +260,7 @@ func TestStreamingPullBidirectionalDeliveryAndCancellation(t *testing.T) {
 				if err := stream.Recv(&second); err != nil {
 					return err
 				}
-				if len(second.AckIds) != 1 || second.AckIds[0] != "ack" {
+				if len(second.GetAckIds()) != 1 || second.GetAckIds()[0] != "ack" {
 					return errors.New("missing acknowledgement")
 				}
 				close(received)
@@ -284,7 +284,7 @@ func TestStreamingPullBidirectionalDeliveryAndCancellation(t *testing.T) {
 				t.Fatal(err)
 			}
 			response, err := stream.Recv()
-			if err != nil || string(response.ReceivedMessages[0].Message.Data) != "payload" {
+			if err != nil || string(response.GetReceivedMessages()[0].GetMessage().GetData()) != "payload" {
 				t.Fatalf("%v %v", response, err)
 			}
 			if err := stream.Send(&pb.StreamingPullRequest{AckIds: []string{"ack"}}); err != nil {

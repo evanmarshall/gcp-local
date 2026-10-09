@@ -1,0 +1,76 @@
+# Strict Go analysis. Every enabled linter is a defect or dead-code detector;
+# the disabled list below is limited to rules whose only output is whitespace,
+# naming, or layout taste, which gofmt and review already own.
+version: "2"
+
+run:
+  tests: true
+
+linters:
+  default: all
+  disable:
+    # Layout and naming taste. These produce churn-only diffs and do not find defects.
+    - funcorder
+    - lll
+    - nlreturn
+    - tagliatelle
+    - varnamelen
+    - wsl
+    - wsl_v5
+    # Structural preferences that conflict with deliberate decisions in this repository.
+    - depguard # no dependency allow-list policy exists yet; added deliberately, not silently
+    - embeddedstructfieldcheck
+    - exhaustruct # protobuf-backed and fixture structs are legitimately sparse
+    - exhaustruct_v5
+    - gochecknoglobals # sentinel errors and pinned tables are package-level on purpose
+    - inamedparam # interface method signatures stay terse
+    - mnd # wire codes and protocol bounds are self-describing literals
+    - noinlineerr # inline error handling is clearer for guard clauses
+    - paralleltest # parallelism is chosen per test; the suite runs under -race
+    - testpackage # tests share the package to exercise unexported behavior
+    - thelper
+
+  settings:
+    cyclop:
+      max-complexity: 10
+    dupl:
+      threshold: 100
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    funlen:
+      lines: 70
+      statements: 45
+    gocognit:
+      min-complexity: 15
+    gosec:
+      excludes:
+        - G404 # math/rand is not used for secrets in this emulator
+    maintidx:
+      under: 20
+    nestif:
+      min-complexity: 4
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithMessagef(
+        - .WithStack(
+      ignore-interface-regexps:
+        - ^context\.Context\.Err$
+        - ^context\.Context\.Deadline$
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
