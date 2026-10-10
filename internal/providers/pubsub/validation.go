@@ -60,29 +60,39 @@ func validate(request proto.Message) error {
 	case *pb.PublishRequest:
 		return validatePublish(r)
 	case *pb.PullRequest:
-		if err := fields(r, "subscription", "max_messages", "return_immediately"); err != nil {
-			return err
-		}
-		if r.GetMaxMessages() < 1 || r.GetMaxMessages() > 1000 {
-			return invalid("Max messages must be one through 1000")
-		}
-		return nil
+		return validatePull(r)
 	case *pb.AcknowledgeRequest:
 		return fields(r, "subscription", "ack_ids")
 	case *pb.ModifyAckDeadlineRequest:
-		if err := fields(r, "subscription", "ack_ids", "ack_deadline_seconds"); err != nil {
-			return err
-		}
-		if r.GetAckDeadlineSeconds() < 0 || r.GetAckDeadlineSeconds() > 600 {
-			return invalid("Ack deadline must be zero through 600 seconds")
-		}
-		return nil
+		return validateModifyAckDeadline(r)
 	default:
 		if len(request.ProtoReflect().GetUnknown()) > 0 {
 			return gap("unknown protobuf fields")
 		}
 		return nil
 	}
+}
+
+// validatePull bounds a pull to one thousand messages.
+func validatePull(r *pb.PullRequest) error {
+	if err := fields(r, "subscription", "max_messages", "return_immediately"); err != nil {
+		return err
+	}
+	if r.GetMaxMessages() < 1 || r.GetMaxMessages() > 1000 {
+		return invalid("Max messages must be one through 1000")
+	}
+	return nil
+}
+
+// validateModifyAckDeadline bounds the ack deadline the client resets.
+func validateModifyAckDeadline(r *pb.ModifyAckDeadlineRequest) error {
+	if err := fields(r, "subscription", "ack_ids", "ack_deadline_seconds"); err != nil {
+		return err
+	}
+	if r.GetAckDeadlineSeconds() < 0 || r.GetAckDeadlineSeconds() > 600 {
+		return invalid("Ack deadline must be zero through 600 seconds")
+	}
+	return nil
 }
 
 // validateSubscription checks the subscription fields and its push configuration.

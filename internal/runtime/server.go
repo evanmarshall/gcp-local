@@ -55,14 +55,30 @@ func (s *Server) adminRoute(w http.ResponseWriter, r *http.Request, g *gateway.G
 		writeJSON(w, s.healthCode(), map[string]any{"service": "gcp-local", "version": version, "ready": s.ready.Load(), "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
 	case r.Method == http.MethodGet && r.URL.Path == "/_local/diagnostics":
 		writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
-	case s.IAM != nil && strings.HasPrefix(r.URL.Path, "/_local/iam/decisions/"):
-		s.IAM.ServeHTTP(w, r)
-	case s.Identity != nil && (r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs"):
-		s.Identity.ServeHTTP(w, r)
+	case strings.HasPrefix(r.URL.Path, "/_local/iam/decisions/"):
+		s.serveIAM(w, r)
+	case r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs":
+		s.serveIdentity(w, r)
 	default:
 		return false
 	}
 	return true
+}
+
+// serveIAM answers the decision-diagnostics route when the engine is mounted.
+func (s *Server) serveIAM(w http.ResponseWriter, r *http.Request) {
+	if s.IAM == nil {
+		return
+	}
+	s.IAM.ServeHTTP(w, r)
+}
+
+// serveIdentity answers the identity routes when the service is mounted.
+func (s *Server) serveIdentity(w http.ResponseWriter, r *http.Request) {
+	if s.Identity == nil {
+		return
+	}
+	s.Identity.ServeHTTP(w, r)
 }
 
 // healthCode is 200 once startup work completes, 503 before that.
