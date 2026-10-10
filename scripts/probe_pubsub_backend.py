@@ -125,7 +125,7 @@ def main() -> int:
     checks, samples = [], []
     with tempfile.TemporaryDirectory(prefix="gcp-local-pubsub-") as directory:
         for restart in (False, True):
-            check, sample = probe_once(command, Path(directory), root, port, restart)
+            check, sample = probe_once(command, Path(directory), root, port, restart=restart)
             checks.append(check)
             samples.append(sample)
     artifacts = root / ".artifacts/pubsub-backend"

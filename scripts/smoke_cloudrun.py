@@ -90,9 +90,10 @@ def start_core(binary: Path) -> subprocess.Popen:
     process = subprocess.Popen(
         [
             str(binary),
-            "serve",
             "--listen",
             "127.0.0.1:" + str(SERVE_SOCKET),
+            "--grpc-listen",
+            "127.0.0.1:" + str(SERVE_SOCKET + 1),
             "--services",
             "run",
             "--run-docker-socket",
