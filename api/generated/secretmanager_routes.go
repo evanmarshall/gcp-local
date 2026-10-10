@@ -14,8 +14,8 @@ var SecretManagerRoutes = []Route{
 	{"secretmanager.versions.list", "GET", "/v1/projects/{project}/secrets/{secret}/versions", false, false},
 	{"secretmanager.versions.get", "GET", "/v1/projects/{project}/secrets/{secret}/versions/{version}", false, false},
 	{"secretmanager.versions.access", "GET", "/v1/projects/{project}/secrets/{secret}/versions/{version}:access", false, false},
-	{"secretmanager.versions.destroy", "POST", "/v1/projects/{project}/secrets/{secret}/versions/{version}:destroy", true, false},
-	{"secretmanager.versions.disable", "POST", "/v1/projects/{project}/secrets/{secret}/versions/{version}:disable", true, false},
-	{"secretmanager.versions.enable", "POST", "/v1/projects/{project}/secrets/{secret}/versions/{version}:enable", true, false},
+	{"secretmanager.versions.destroy", "POST", "/v1/projects/{project}/secrets/{secret}/versions/{version}:destroy", false, false},
+	{"secretmanager.versions.disable", "POST", "/v1/projects/{project}/secrets/{secret}/versions/{version}:disable", false, false},
+	{"secretmanager.versions.enable", "POST", "/v1/projects/{project}/secrets/{secret}/versions/{version}:enable", false, false},
 	{"secretmanager.locations.list", "GET", "/v1/projects/{project}/locations", false, false},
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
+	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -49,6 +50,7 @@ func main() {
 			// The KMS acceptance case drives key rings and crypto keys with
 			// the same fixture principal.
 			{Role: "roles/cloudkms.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/secretmanager.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}
@@ -70,6 +72,8 @@ func main() {
 	_, err = storage.New(registry, server.Backends, index, engine)
 	must(err)
 	_, err = cloudkms.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
+	_, err = secretmanager.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	if *trace || *fault {
 		handler := server.HTTP.Handler

@@ -118,7 +118,7 @@ func secretDocument(project string, record *secretRecord) map[string]any {
 	labels := map[string]string{}
 	maps.Copy(labels, record.Labels)
 	return map[string]any{
-		keyName:       secretResource(project, record.Name),
+		keyName:       secretWireName(project, record.Name),
 		"replication": record.Replication,
 		"labels":      labels,
 		"createTime":  stamp(record.CreatedAt),
@@ -128,7 +128,7 @@ func secretDocument(project string, record *secretRecord) map[string]any {
 // versionDocument renders one version wire shape without its payload.
 func versionDocument(project string, record *secretRecord, version *versionRecord) map[string]any {
 	return map[string]any{
-		"name":              versionResource(project, record.Name, version.Number),
+		"name":              versionWireName(project, record.Name, version.Number),
 		"state":             version.State,
 		"replicationStatus": map[string]any{},
 	}
@@ -154,12 +154,9 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gat
 	if err != nil {
 		return nil, err
 	}
-	id := request.Path["secret"]
-	if id == "" {
-		id = idOfName(textOf(body["name"]))
-	}
-	if !uidPattern.MatchString(id) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid secret name %q", id)
+	id, idErr := secretID(request, body)
+	if idErr != nil {
+		return nil, idErr
 	}
 	replication, ok := body["replication"].(map[string]any)
 	if !ok || len(replication) == 0 {
@@ -330,7 +327,7 @@ func (p *Provider) versionAccess(request *gateway.RESTRequest, scope state.Scope
 		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is disabled", version.Number)
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{
-		"name": versionResource(scope.Project, record.Name, version.Number),
+		"name": versionWireName(scope.Project, record.Name, version.Number),
 		"payload": map[string]any{
 			"data": base64Encode(version.Payload),
 		},
@@ -388,4 +385,19 @@ func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Sco
 	}
 	version.State = state
 	return &gateway.RESTResponse{JSON: versionDocument(scope.Project, record, version)}, nil
+}
+
+// secretID resolves the secret id from the path, the body name, or the query.
+func secretID(request *gateway.RESTRequest, body map[string]any) (string, error) {
+	id := request.Path["secret"]
+	if id == "" {
+		id = idOfName(textOf(body["name"]))
+	}
+	if id == "" {
+		id = request.Query.Get("secretId")
+	}
+	if !uidPattern.MatchString(id) {
+		return "", status.Errorf(codes.InvalidArgument, "Invalid secret name %q", id)
+	}
+	return id, nil
 }

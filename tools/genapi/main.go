@@ -383,9 +383,10 @@ func secretManagerRoutes(_ bool) []byte {
 		{"secretmanager.versions.list", verbGET, base + "/secrets/{secret}/versions", false, false},
 		{"secretmanager.versions.get", verbGET, base + "/secrets/{secret}/versions/{version}", false, false},
 		{"secretmanager.versions.access", verbGET, base + "/secrets/{secret}/versions/{version}:access", false, false},
-		{"secretmanager.versions.destroy", verbPOST, base + "/secrets/{secret}/versions/{version}:destroy", true, false},
-		{"secretmanager.versions.disable", verbPOST, base + "/secrets/{secret}/versions/{version}:disable", true, false},
-		{"secretmanager.versions.enable", verbPOST, base + "/secrets/{secret}/versions/{version}:enable", true, false},
+		// The real destroy/disable/enable read no request body.
+		{"secretmanager.versions.destroy", verbPOST, base + "/secrets/{secret}/versions/{version}:destroy", false, false},
+		{"secretmanager.versions.disable", verbPOST, base + "/secrets/{secret}/versions/{version}:disable", false, false},
+		{"secretmanager.versions.enable", verbPOST, base + "/secrets/{secret}/versions/{version}:enable", false, false},
 		{"secretmanager.locations.list", verbGET, base + "/locations", false, false},
 	}
 	var body strings.Builder

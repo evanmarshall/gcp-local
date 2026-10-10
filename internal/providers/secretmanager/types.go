@@ -22,7 +22,8 @@ func scopeOf(project string) state.Scope {
 	return state.Scope{Project: project, Location: state.Global}
 }
 
-// wirePrefix is the canonical resource prefix.
+// secretResource builds the canonical secret name: the "//" form the IAM
+// index requires.
 const wirePrefix = "//secretmanager.googleapis.com/"
 
 // secretResource builds the canonical secret name.
@@ -30,9 +31,15 @@ func secretResource(project, id string) string {
 	return wirePrefix + "projects/" + url.PathEscape(project) + "/secrets/" + url.PathEscape(id)
 }
 
-// versionResource builds the canonical version name.
-func versionResource(project, id, version string) string {
-	return secretResource(project, id) + "/versions/" + url.PathEscape(version)
+// secretWireName builds the document name: the relative form the real API
+// returns, without the index's "//host" prefix.
+func secretWireName(project, id string) string {
+	return "projects/" + url.PathEscape(project) + "/secrets/" + url.PathEscape(id)
+}
+
+// versionWireName builds the document name of one version.
+func versionWireName(project, id, version string) string {
+	return secretWireName(project, id) + "/versions/" + url.PathEscape(version)
 }
 
 // stamp renders the Secret Manager timestamp shape.
