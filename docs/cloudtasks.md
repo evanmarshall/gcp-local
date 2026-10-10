@@ -22,8 +22,15 @@ child issue.
 - Queue pause stops nothing in-flight in this slice; scheduling of future
   dispatch times is a listed gap.
 
+## Scheduling and IAM
+
+- Tasks accept an RFC 3339 `scheduleTime`; the dispatcher waits until the
+  scheduled time before the first attempt, and a past or absent value
+  schedules immediately.
+- Queues carry getIamPolicy/setIamPolicy backed by the resource index and the
+  pinned Cloud Tasks roles.
+
 ## Explicit gaps
 
-Scheduling with scheduleTime, App Engine targets, IAM policy per queue,
-update of rate limits, and recorded dispatch/retry scenarios are gaps; no
-"supported" claim without a recording.
+App Engine targets, rate-limit updates, and recorded dispatch/retry scenarios
+are gaps; no "supported" claim without a recording.
