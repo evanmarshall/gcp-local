@@ -30,6 +30,8 @@ ROLES = {
     ),
     "cloudtasks": ("cloudtasks.admin", "cloudtasks.enqueuer"),
     "networkmanagement": ("networkmanagement.viewer",),
+    "kms": ("cloudkms.admin", "cloudkms.cryptoKeyEncrypterDecrypter", "cloudkms.viewer"),
+    "firestore": ("datastore.user", "datastore.viewer"),
 }
 
 
