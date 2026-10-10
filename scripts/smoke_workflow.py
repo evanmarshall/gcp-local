@@ -217,12 +217,13 @@ def main() -> int:
         check=True, capture_output=True)
     build_image(WORKER_IMAGE)
     java = install_java()
+    jar = str(REPO / ".tools/pubsub/emulator.jar")
     docker = os.environ.get("DOCKER", "docker")
     before = subprocess.check_output([docker, "ps", "-aq"], text=True)
     iam_path = write_configs(PROJECT, ["roles/pubsub.admin"])
     identity_path = write_identity(PROJECT)
     core = start_core(binary, iam_path, identity_path, port=SERVE_SOCKET,
-                      services="storage,pubsub,run", pubsub_java=java)
+                      services="storage,pubsub,run", pubsub_java=java, pubsub_jar=jar)
     try:
         bucket = deploy_worker()
         publish(bucket, "workflow-payload", "wf-msg-1")
