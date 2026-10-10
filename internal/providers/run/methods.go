@@ -44,6 +44,7 @@ type revisionRecord struct {
 	Container       string
 	Address         string
 	releaseMetadata func()
+	lastActivity    time.Time
 }
 
 // serviceRecord is one stored service of a scope.
@@ -279,7 +280,58 @@ func (p *Provider) startRevision(record *serviceRecord, revision *revisionRecord
 	}
 	revision.Container = started.Container
 	revision.Address = started.Address
+	revision.lastActivity = p.clock()
 	return nil
+}
+
+// idleTimeout is how long a revision container may sit without an invocation
+// before the provider stops it; the next invocation cold-starts it again.
+const idleTimeout = 5 * time.Minute
+
+// startReaper schedules the idle reaper for a service once.
+func (p *Provider) startReaper(scope state.Scope, id string) {
+	go func() {
+		base := context.WithoutCancel(context.Background())
+		for range time.Tick(time.Minute) {
+			select {
+			case <-base.Done():
+				return
+			default:
+			}
+			if reaped := p.reap(base, scope, id); reaped {
+				return
+			}
+		}
+	}()
+}
+
+// reap stops the service's container when it has been idle past the timeout.
+func (p *Provider) reap(ctx context.Context, scope state.Scope, id string) bool {
+	p.recordMu.RLock()
+	record, refused, err := p.serviceRecordLookUp(scope, id)
+	if err != nil || refused != nil {
+		p.recordMu.RUnlock()
+		return false
+	}
+	revision := latestRevision(record)
+	if revision == nil || revision.Container == "" {
+		p.recordMu.RUnlock()
+		return true
+	}
+	idle := p.clock().Sub(revision.lastActivity)
+	p.recordMu.RUnlock()
+	if idle < idleTimeout {
+		return false
+	}
+	if stopErr := p.runtime.Stop(ctx, revision.Container); stopErr == nil {
+		p.recordMu.Lock()
+		revision.Container = ""
+		revision.Address = ""
+		releaseMetadata(revision)
+		p.recordMu.Unlock()
+		return true
+	}
+	return false
 }
 
 // workloadEnv builds the workload environment: service identity variables plus
@@ -426,6 +478,7 @@ func (p *Provider) launchOperation(scope state.Scope, id string) *gateway.RESTRe
 		return nil
 	})
 	p.indexHost(scope, id)
+	p.startReaper(scope, id)
 	p.watch(scope, id, operationName)
 	return &gateway.RESTResponse{JSON: operationDocument(p.operation(scope, operationName))}
 }

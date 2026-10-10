@@ -1,6 +1,7 @@
 package run
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -50,6 +51,14 @@ func (p *Provider) Invocation() http.Handler {
 			writeInvocationError(w, err)
 			return
 		}
+		p.touchActivity(serving)
+		if restarted := p.coldStart(r.Context(), serving); restarted {
+			serving, err = p.lookupServing(host)
+			if err != nil {
+				writeInvocationError(w, err)
+				return
+			}
+		}
 		if err := p.authorizeInvocation(r, serving); err != nil {
 			writeInvocationError(w, err)
 			return
@@ -79,6 +88,7 @@ type servingRef struct {
 	project  string
 	location string
 	id       string
+	revision string
 	address  string
 }
 
@@ -92,7 +102,10 @@ func (p *Provider) lookupServing(host string) (servingRef, error) {
 	if latest == nil || latest.Address == "" {
 		return servingRef{}, status.Error(codes.Unavailable, "No ready revision is serving traffic")
 	}
-	return servingRef{project: scope.Project, location: scope.Location, id: record.Name, address: latest.Address}, nil
+	return servingRef{
+		project: scope.Project, location: scope.Location, id: record.Name,
+		revision: latest.ID, address: latest.Address,
+	}, nil
 }
 
 // forward proxies the request to the revision container. Only the method,
@@ -276,4 +289,49 @@ func loopback(address string) bool {
 		return false
 	}
 	return net.ParseIP(host).IsLoopback()
+}
+
+// touchActivity records one invocation against the revision's idle clock.
+func (p *Provider) touchActivity(serving servingRef) {
+	scope := state.Scope{Project: serving.project, Location: serving.location}
+	p.recordMu.Lock()
+	defer p.recordMu.Unlock()
+	var record *serviceRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		record = s.services[serving.id]
+		return nil
+	})
+	if record == nil {
+		return
+	}
+	if revision := record.Revisions[serving.revision]; revision != nil {
+		revision.lastActivity = p.clock()
+	}
+}
+
+// coldStart restarts a reaped revision's container for its next invocation;
+// it reports whether the serving address may have changed.
+func (p *Provider) coldStart(_ context.Context, serving servingRef) bool {
+	scope := state.Scope{Project: serving.project, Location: serving.location}
+	p.recordMu.Lock()
+	defer p.recordMu.Unlock()
+	var record *serviceRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		record = s.services[serving.id]
+		return nil
+	})
+	if record == nil {
+		return false
+	}
+	revision := record.Revisions[serving.revision]
+	if revision == nil || revision.Container != "" {
+		return false
+	}
+	revision.lastActivity = p.clock()
+	// The launch outlives the invoking request's context; startRevision
+	// already runs its work detached.
+	if err := p.startRevision(record, revision); err != nil { //nolint:contextcheck // startRevision launches detached by design
+		return false
+	}
+	return true
 }
