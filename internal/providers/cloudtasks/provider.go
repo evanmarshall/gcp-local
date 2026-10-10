@@ -23,6 +23,7 @@ const (
 	methodQueuesGet     = "cloudtasks.queues.get"
 	methodQueuesList    = "cloudtasks.queues.list"
 	methodQueuesDelete  = "cloudtasks.queues.delete"
+	methodQueuesUpdate  = "cloudtasks.queues.update"
 	methodQueuesPause   = "cloudtasks.queues.pause"
 	methodQueuesResume  = "cloudtasks.queues.resume"
 	methodQueuesPurge   = "cloudtasks.queues.purge"
@@ -42,6 +43,7 @@ var permissions = map[string]string{
 	methodQueuesGet:     "cloudtasks.queues.get",
 	methodQueuesList:    "cloudtasks.queues.list",
 	methodQueuesDelete:  "cloudtasks.queues.delete",
+	methodQueuesUpdate:  "cloudtasks.queues.update",
 	methodQueuesPause:   "cloudtasks.queues.pause",
 	methodQueuesResume:  "cloudtasks.queues.resume",
 	methodQueuesPurge:   "cloudtasks.queues.purge",

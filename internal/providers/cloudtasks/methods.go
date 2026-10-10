@@ -21,7 +21,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	switch call.Method {
 	case methodQueuesCreate, methodQueuesGet, methodQueuesList, methodQueuesDelete,
 		methodQueuesPause, methodQueuesResume, methodQueuesPurge,
-		methodQueuesGetIam, methodQueuesSetIam:
+		methodQueuesGetIam, methodQueuesSetIam, methodQueuesUpdate:
 		return p.executeQueue(call, request, scope)
 	case methodTasksCreate, methodTasksGet, methodTasksList, methodTasksDelete, methodTasksRun:
 		return p.executeTask(call, request, scope)
@@ -45,6 +45,8 @@ func (p *Provider) executeQueue(call gateway.Call, request *gateway.RESTRequest,
 		return p.listQueues(scope)
 	case methodQueuesDelete:
 		return p.deleteQueue(request, scope)
+	case methodQueuesUpdate:
+		return p.updateQueue(request, scope)
 	case methodQueuesGetIam:
 		return p.getQueueIam(scope, request)
 	case methodQueuesSetIam:
@@ -304,4 +306,21 @@ func (p *Provider) setQueueIam(request *gateway.RESTRequest, scope state.Scope) 
 		return nil, fmt.Errorf("write queue policy: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: policy}, nil
+}
+
+// updateQueue replaces one queue's rate limits.
+func (p *Provider) updateQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	body, err := parseBody(request.JSON)
+	if err != nil {
+		return nil, err
+	}
+	id := request.Path["queue"]
+	record := p.mustQueue(scope, id)
+	if record == nil {
+		return nil, notFound("queues", id)
+	}
+	if rate, ok := body["rateLimits"].(map[string]any); ok {
+		record.Rate = rate
+	}
+	return &gateway.RESTResponse{JSON: queueDocument(scope.Project, request.Path["location"], record)}, nil
 }

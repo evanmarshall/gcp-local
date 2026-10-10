@@ -238,3 +238,27 @@ func TestInvalidScheduleTimeIsRefused(t *testing.T) {
 		t.Fatalf("invalid schedule status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestQueueUpdateReplacesRateLimits(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
+	recorder := h.invoke(http.MethodPatch, basePrefix+"/queues/"+testQueue, map[string]any{
+		"rateLimits": map[string]any{"maxDispatchesPerSecond": 5},
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("queue update status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var queue struct {
+		RateLimits map[string]any `json:"rateLimits"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &queue); err != nil {
+		t.Fatalf("decode queue: %v", err)
+	}
+	if queue.RateLimits["maxDispatchesPerSecond"] == nil {
+		t.Fatalf("rate limits = %v", queue.RateLimits)
+	}
+	recorder = h.invoke(http.MethodPatch, basePrefix+"/queues/missing", map[string]any{})
+	if recorder.Code != 404 {
+		t.Fatalf("missing queue update status = %d", recorder.Code)
+	}
+}
