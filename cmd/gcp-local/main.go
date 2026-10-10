@@ -22,6 +22,7 @@ import (
 	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
+	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
@@ -112,7 +113,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcListen, "grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore")
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
@@ -271,6 +272,9 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleCloudKMS(ctx, selected, registry, server, index, engine); err != nil {
 		return err
 	}
+	if err := assembleFirestore(ctx, selected, registry, server, index, engine); err != nil {
+		return err
+	}
 	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
 }
 
@@ -337,6 +341,17 @@ func assembleCloudKMS(ctx context.Context, selected map[string]bool, registry *g
 	}
 	if _, err := cloudkmsprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Cloud KMS provider: %w", err)
+	}
+	return nil
+}
+
+// assembleFirestore registers the Firestore documents provider.
+func assembleFirestore(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["firestore"] {
+		return nil
+	}
+	if _, err := firestoreprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Firestore provider: %w", err)
 	}
 	return nil
 }

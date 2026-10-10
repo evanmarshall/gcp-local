@@ -1,0 +1,12 @@
+{
+ "description": "Read Cloud Firestore documents and metadata.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "datastore.entities.get",
+  "datastore.entities.list",
+  "datastore.indexes.get",
+  "datastore.indexes.list"
+ ],
+ "name": "roles/datastore.viewer",
+ "stage": "GA"
+}

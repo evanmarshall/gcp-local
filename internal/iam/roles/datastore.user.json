@@ -1,0 +1,14 @@
+{
+ "description": "Read and write Cloud Firestore documents.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "datastore.entities.create",
+  "datastore.entities.delete",
+  "datastore.entities.get",
+  "datastore.entities.list",
+  "datastore.entities.update",
+  "datastore.indexes.list"
+ ],
+ "name": "roles/datastore.user",
+ "stage": "GA"
+}

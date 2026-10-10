@@ -82,6 +82,9 @@ func NewRegistry() *Registry {
 	for _, route := range generated.CloudKMSRoutes {
 		r.contracts[route.Method] = methodInfo{service: "cloudkms"}
 	}
+	for _, route := range generated.FirestoreRoutes {
+		r.contracts[route.Method] = methodInfo{service: "firestore"}
+	}
 	for _, route := range generated.CloudTasksRoutes {
 		r.contracts[route.Method] = methodInfo{service: "cloudtasks"}
 	}

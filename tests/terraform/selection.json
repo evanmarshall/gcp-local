@@ -13,7 +13,8 @@
     "TestAccStorageObject_recreate",
     "TestAccKMSKeyRingCryptoKey",
     "TestAccSecretManagerSecretAndVersion",
-    "TestAccCloudTasksQueueLifecycle"
+    "TestAccCloudTasksQueueLifecycle",
+    "TestAccFirestoreDocument"
   ],
   "source_files": {
     "google/services/storage/resource_storage_bucket_test.go": "48ea2846c87a7d2ad42d047e8f5e2df2e7079a897c79114f7f8ad1088f60022a",

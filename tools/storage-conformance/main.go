@@ -22,6 +22,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
+	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -54,6 +55,7 @@ func main() {
 			{Role: "roles/cloudkms.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/secretmanager.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/cloudtasks.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/datastore.user", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}
@@ -77,6 +79,8 @@ func main() {
 	_, err = cloudkms.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = secretmanager.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
+	_, err = firestoreprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	tokens, tokenErr := identity.NewIDTokens(engine, index)
 	must(tokenErr)

@@ -132,6 +132,16 @@
    "file": "cloudkms.viewer.json",
    "name": "roles/cloudkms.viewer",
    "sha256": "2cbdf41ba6e287fc38bdca18378fdc4bd4a0869a0580dae83301bcc71ab203d2"
+  },
+  {
+   "file": "datastore.user.json",
+   "name": "roles/datastore.user",
+   "sha256": "6c90a8d7b2b04f5785b4cbb26084df075ad94f7c9bc879b9785615663ffcd379"
+  },
+  {
+   "file": "datastore.viewer.json",
+   "name": "roles/datastore.viewer",
+   "sha256": "c262ee7529751d4c877ebe5e4c5f5e0249fea94cc3c21bcc9ef6462d2e5e729a"
   }
  ]
 }
