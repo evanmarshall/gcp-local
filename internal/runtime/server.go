@@ -25,6 +25,7 @@ type Server struct {
 	Identity        http.Handler
 	IAM             http.Handler
 	Run             http.Handler
+	Analyzer        http.Handler
 	Metadata        *http.Server
 	ShutdownTimeout time.Duration
 	ready           atomic.Bool
@@ -69,12 +70,23 @@ func (s *Server) adminSubroutes(w http.ResponseWriter, r *http.Request) bool {
 		s.serveIAM(w, r)
 	case strings.HasPrefix(r.URL.Path, "/_run/"):
 		s.serveRun(w, r)
+	case strings.HasPrefix(r.URL.Path, "/_local/networking/"):
+		s.serveAnalyzer(w, r)
 	case r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs":
 		s.serveIdentity(w, r)
 	default:
 		return false
 	}
 	return true
+}
+
+// serveAnalyzer answers the local reachability surface when mounted.
+func (s *Server) serveAnalyzer(w http.ResponseWriter, r *http.Request) {
+	if s.Analyzer == nil {
+		writeJSON(w, 501, map[string]any{"error": map[string]any{"code": 501, "message": "The networking provider is not selected"}})
+		return
+	}
+	s.Analyzer.ServeHTTP(w, r)
 }
 
 // serveRun answers the local Cloud Run invocation surface when mounted.
