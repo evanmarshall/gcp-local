@@ -266,7 +266,6 @@ def main() -> int:
     docker = os.environ.get("DOCKER", "docker")
     before = subprocess.check_output([docker, "ps", "-aq"], text=True)
     iam_path = write_configs(PROJECT, ["roles/pubsub.admin", "roles/storage.admin"])
-    identity_path = write_identity(PROJECT)
     identity_path, developer_token = write_identity(PROJECT)
     adc = write_adc(PROJECT, developer_token)
     core = start_core(binary, iam_path, identity_path, port=SERVE_SOCKET,
