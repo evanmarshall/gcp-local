@@ -21,8 +21,15 @@ a cloud-fidelity claim (issue #16 tracks the recording work).
   `roles/compute.admin`, `roles/compute.networkAdmin`, and `roles/compute.viewer`
   snapshots.
 
+## Peerings
+
+Networks carry peerings (addPeering/removePeering). The reachability analyzer
+resolves cross-network flows through a directed peering and records it in the
+trace; without a peering the flow reports unsupported.
+
 ## Explicit gaps
 
-Routers, Cloud NAT, peering, PSA/PSC, and Cloud SQL configuration are not
-implemented and are never reported as reachable; the reachability analyzer
-(#17) must list them as unknown rather than approximating them.
+Routers, Cloud NAT, PSA/PSC, and Cloud SQL configuration are not implemented
+and are never reported as reachable; the reachability analyzer (#17) lists
+them as unsupported rather than approximating them. Recorded Connectivity
+Tests scenarios remain pending (#35).
