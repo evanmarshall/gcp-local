@@ -19,6 +19,7 @@ result = subprocess.run(
     capture_output=True,
     text=True,
     timeout=220,
+    check=False,
 )
 print(result.stdout, end="")
 print(result.stderr, end="", file=sys.stderr)

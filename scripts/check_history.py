@@ -9,7 +9,7 @@ GIT = shutil.which("git") or "git"
 
 
 def git(*args):
-    result = subprocess.run([GIT, *args], capture_output=True, text=True)
+    result = subprocess.run([GIT, *args], capture_output=True, text=True, check=False)
     if result.returncode:
         raise ValueError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()
@@ -47,6 +47,7 @@ def check_push(lines):
                 [GIT, "merge-base", "--is-ancestor", remote_oid, local_oid],
                 capture_output=True,
                 text=True,
+                check=False,
             )
             if result.returncode:
                 raise ValueError("main must advance by fast-forward; fetch and update your branch.")

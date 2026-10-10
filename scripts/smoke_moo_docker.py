@@ -61,7 +61,7 @@ def main():
 
     def command(args, *, check=True, timeout=60):
         result = subprocess.run(
-            args, env=env, cwd=ROOT, capture_output=True, text=True, timeout=timeout
+            args, env=env, cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False
         )
         if check and result.returncode:
             raise RuntimeError(result.stdout + result.stderr)

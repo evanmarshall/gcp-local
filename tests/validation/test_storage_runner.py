@@ -243,6 +243,7 @@ def test_local_cli_uses_committed_cloud_contract_and_detects_corruption(tmp_path
                 text=True,
                 capture_output=True,
                 timeout=30,
+                check=False,
             )
             report = json.loads((artifacts / "coverage.json").read_text())
             if corrupted:

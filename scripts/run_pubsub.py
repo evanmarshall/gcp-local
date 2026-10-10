@@ -27,7 +27,7 @@ def main():
         "-test.timeout=100s",
     ]
     result = subprocess.run(
-        command, cwd=root / "internal/providers/pubsub", capture_output=True, text=True
+        command, cwd=root / "internal/providers/pubsub", capture_output=True, text=True, check=False
     )
     tests, output = {}, []
     for line in result.stdout.splitlines():

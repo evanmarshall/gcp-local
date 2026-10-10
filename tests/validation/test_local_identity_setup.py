@@ -28,7 +28,7 @@ def command(destination, endpoint="http://127.0.0.1:4566"):
 
 def test_private_local_bundle_and_no_overwrite(tmp_path):
     destination = tmp_path / "identity"
-    result = subprocess.run(command(destination), text=True, capture_output=True)
+    result = subprocess.run(command(destination), text=True, capture_output=True, check=False)
     assert result.returncode == 0, result.stderr
     config = json.loads((destination / "server.json").read_text())
     adc = json.loads((destination / "adc.json").read_text())
@@ -40,7 +40,7 @@ def test_private_local_bundle_and_no_overwrite(tmp_path):
     assert stat.S_IMODE(destination.stat().st_mode) == 0o700
     before = {path.name: path.read_bytes() for path in destination.iterdir()}
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in destination.iterdir())
-    result = subprocess.run(command(destination), capture_output=True)
+    result = subprocess.run(command(destination), capture_output=True, check=False)
     assert result.returncode != 0
     assert before == {path.name: path.read_bytes() for path in destination.iterdir()}
 
@@ -56,5 +56,5 @@ def test_private_local_bundle_and_no_overwrite(tmp_path):
 )
 def test_rejects_nonlocal_or_ambiguous_endpoint(tmp_path, endpoint):
     destination = tmp_path / "identity"
-    result = subprocess.run(command(destination, endpoint), capture_output=True)
+    result = subprocess.run(command(destination, endpoint), capture_output=True, check=False)
     assert result.returncode != 0 and not destination.exists()

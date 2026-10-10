@@ -35,6 +35,7 @@ def cli(directory, action, *options, check=True):
         capture_output=True,
         text=True,
         timeout=600,
+        check=False,
     )
     if check and result.returncode:
         raise AssertionError(result.stdout + result.stderr)
@@ -203,6 +204,7 @@ for family,address in ((socket.AF_INET,('192.0.2.1',443)),(socket.AF_INET6,('200
                 capture_output=True,
                 text=True,
                 timeout=15,
+                check=False,
             )
             assert example.returncode == 0, example.stderr
             assert "Hello from local GCP." in example.stdout
@@ -212,6 +214,7 @@ for family,address in ((socket.AF_INET,('192.0.2.1',443)),(socket.AF_INET6,('200
                 capture_output=True,
                 text=True,
                 timeout=60,
+                check=False,
             )
             assert second_example.returncode == 0, second_example.stderr
             assert "Hello from local Pub/Sub." in second_example.stdout
@@ -238,17 +241,19 @@ for family,address in ((socket.AF_INET,('192.0.2.1',443)),(socket.AF_INET6,('200
                 "--endpoint",
                 endpoint,
             ]
-            assert subprocess.run(doctor, capture_output=True, timeout=10).returncode == 0
+            assert (
+                subprocess.run(doctor, capture_output=True, timeout=10, check=False).returncode == 0
+            )
             (app / "requirements.txt").write_text(
                 "google-cloud-storage==3.10.1\ngoogle-cloud-pubsub\n"
             )
-            served = subprocess.run(doctor, capture_output=True, text=True, timeout=10)
+            served = subprocess.run(doctor, capture_output=True, text=True, timeout=10, check=False)
             assert served.returncode == 0, served.stdout + served.stderr
             assert json.loads(served.stdout)["profiles"]["local"]["missing_services"] == []
             (app / "requirements.txt").write_text(
                 "google-cloud-storage==3.10.1\ngoogle-cloud-bigquery\n"
             )
-            result = subprocess.run(doctor, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(doctor, capture_output=True, text=True, timeout=10, check=False)
             assert result.returncode == 2
             assert json.loads(result.stdout)["profiles"]["local"]["missing_services"] == [
                 "bigquery"

@@ -194,7 +194,7 @@ def test_bundle_operates_after_source_checkout_is_removed(repos, tmp_path):
         ".gcp-local/compatibility.json",
         "--doctor",
     ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
     assert result.returncode == 2, result.stderr
     report = json.loads(result.stdout)
     assert report == json.loads((moved / ".gcp-local/compatibility.json").read_text())
@@ -224,6 +224,7 @@ def test_inspector_does_not_follow_links_or_overwrite_unrelated_reports(repos, t
         capture_output=True,
         text=True,
         timeout=10,
+        check=False,
     )
     assert result.returncode == 1 and "unrelated report" in result.stderr
     assert output.read_text() == '{"user":"data"}'
@@ -232,5 +233,6 @@ def test_inspector_does_not_follow_links_or_overwrite_unrelated_reports(repos, t
         capture_output=True,
         text=True,
         timeout=10,
+        check=False,
     )
     assert json.loads(result.stdout)["services"] == []

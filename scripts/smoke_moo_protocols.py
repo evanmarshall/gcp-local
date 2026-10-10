@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(command, timeout=60):
-    result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
+    result = subprocess.run(
+        command, cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False
+    )
     if result.returncode:
         raise RuntimeError(result.stdout + result.stderr)
     return result.stdout

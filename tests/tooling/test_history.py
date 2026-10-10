@@ -43,6 +43,7 @@ class HistoryPolicyTests(unittest.TestCase):
             input=f"refs/heads/feature {local} {ref} {remote}\n",
             text=True,
             capture_output=True,
+            check=False,
         )
 
     def test_fast_forward_is_allowed(self):
@@ -99,6 +100,7 @@ class HistoryPolicyTests(unittest.TestCase):
             cwd=self.repo,
             text=True,
             capture_output=True,
+            check=False,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Deleting main", result.stderr)

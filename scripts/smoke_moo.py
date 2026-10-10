@@ -14,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(args, cwd=ROOT, timeout=120):
-    result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=timeout)
+    result = subprocess.run(
+        args, cwd=cwd, text=True, capture_output=True, timeout=timeout, check=False
+    )
     if result.returncode:
         raise RuntimeError(f"{args[0]} failed: {result.stdout}\n{result.stderr}")
     return result.stdout

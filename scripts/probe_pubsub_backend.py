@@ -77,7 +77,9 @@ def main():
                 args = [str(root / "bin/pubsub-probe"), "-endpoint", f"127.0.0.1:{port}"]
                 if restart:
                     args.append("-expect-empty")
-                result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+                result = subprocess.run(
+                    args, capture_output=True, text=True, timeout=30, check=False
+                )
                 if result.returncode:
                     raise RuntimeError(result.stdout + result.stderr + log.read_text()[-4000:])
                 checks.append(json.loads(result.stdout))

@@ -112,6 +112,7 @@ def main():
                 str(namespace_file),
             ],
             timeout=10,
+            check=False,
         )
         assert result.returncode == 124
         namespace = namespace_file.read_text()

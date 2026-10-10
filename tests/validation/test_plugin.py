@@ -50,6 +50,7 @@ plugin.SnapshotCase = partial(plugin.SnapshotCase, source="synthetic")
         text=True,
         capture_output=True,
         timeout=30,
+        check=False,
     )
     path = tmp_path / "artifacts/coverage.json"
     report = json.loads(path.read_text()) if path.exists() else None
