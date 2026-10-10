@@ -20,6 +20,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
+	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -256,6 +257,9 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleCompute(ctx, selected, registry, server, index, engine); err != nil {
 		return err
 	}
+	if err := assembleSecretManager(ctx, selected, registry, server, index, engine); err != nil {
+		return err
+	}
 	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
 }
 
@@ -286,6 +290,17 @@ func assembleCompute(ctx context.Context, selected map[string]bool, registry *ga
 		return fmt.Errorf("register the Compute provider: %w", err)
 	}
 	server.Analyzer = provider.Analyzer()
+	return nil
+}
+
+// assembleSecretManager registers the Secret Manager provider.
+func assembleSecretManager(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["secretmanager"] {
+		return nil
+	}
+	if _, err := secretmanagerprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Secret Manager provider: %w", err)
+	}
 	return nil
 }
 

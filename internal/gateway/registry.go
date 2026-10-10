@@ -76,6 +76,9 @@ func NewRegistry() *Registry {
 	for _, route := range generated.ComputeRoutes {
 		r.contracts[route.Method] = methodInfo{service: "compute"}
 	}
+	for _, route := range generated.SecretManagerRoutes {
+		r.contracts[route.Method] = methodInfo{service: "secretmanager"}
+	}
 	for _, rpc := range generated.PubSubMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "pubsub", streaming: rpc.Streaming}
 	}

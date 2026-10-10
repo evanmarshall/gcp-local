@@ -1,7 +1,7 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
   "recorded_at": "2026-10-05",
-  "scope": "Read-only predefined Storage, Pub/Sub, service-account, and Cloud Run, and Compute Engine networking role definitions; no resource mutation or grant",
+  "scope": "Read-only predefined Storage, Pub/Sub, service-account, and Cloud Run, Compute Engine networking, and Secret Manager role definitions; no resource mutation or grant",
   "roles": [
     {
       "file": "storage.admin.json",
@@ -87,6 +87,21 @@
       "file": "compute.viewer.json",
       "name": "roles/compute.viewer",
       "sha256": "4dd540cf796f2e9d900d6140883cf4c176951632651bca535c35d2aa30b8a9aa"
+    },
+    {
+      "file": "secretmanager.admin.json",
+      "name": "roles/secretmanager.admin",
+      "sha256": "07c4b78cd9588198a2635eb5307a3ec3c4a498253affeaed9e8746596758dc90"
+    },
+    {
+      "file": "secretmanager.secretAccessor.json",
+      "name": "roles/secretmanager.secretAccessor",
+      "sha256": "d3c35c282f8db6a20ff99fe056bff65ed8678bd6f4a51d7836ecbaa40ac19354"
+    },
+    {
+      "file": "secretmanager.viewer.json",
+      "name": "roles/secretmanager.viewer",
+      "sha256": "2b0d58eb9b8b0b8151890fb8ab1c8de729337be537235b1c1f92c3a7d44e563c"
     }
   ]
 }
