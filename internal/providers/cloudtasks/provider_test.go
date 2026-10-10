@@ -262,3 +262,36 @@ func TestQueueUpdateReplacesRateLimits(t *testing.T) {
 		t.Fatalf("missing queue update status = %d", recorder.Code)
 	}
 }
+
+func TestEveryRouteIsHandled(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
+	gap := "this method is not implemented"
+	probe := func(verb, path string) {
+		recorder := h.invoke(verb, path, nil)
+		if body := recorder.Body.String(); recorder.Code == 501 && containsString(body, gap) {
+			t.Fatalf("%s %s hit the dispatch gap", verb, path)
+		}
+	}
+	probe(http.MethodGet, basePrefix+"/queues/"+testQueue)
+	probe(http.MethodGet, basePrefix+"/queues")
+	probe(http.MethodGet, basePrefix+"/queues/"+testQueue+":getIamPolicy")
+	probe(http.MethodPost, basePrefix+"/queues/"+testQueue+":pause")
+	probe(http.MethodPost, basePrefix+"/queues/"+testQueue+":resume")
+	probe(http.MethodGet, basePrefix+"/queues/"+testQueue+"/tasks")
+	probe(http.MethodDelete, basePrefix+"/queues/"+testQueue)
+	probe(http.MethodGet, "/v2beta3/projects/"+testProject+"/locations")
+}
+
+func containsString(haystack, needle string) bool {
+	return len(needle) > 0 && len(haystack) >= len(needle) && index(haystack, needle) >= 0
+}
+
+func index(haystack, needle string) int {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return i
+		}
+	}
+	return -1
+}

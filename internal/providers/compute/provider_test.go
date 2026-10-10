@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -389,4 +390,24 @@ func TestEgressRuleAllowsUnrestricted(t *testing.T) {
 	if verdict.Result != "reachable" {
 		t.Fatalf("egress-allowed verdict = %+v", verdict)
 	}
+}
+
+func TestEveryRouteIsHandled(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testNetwork, keyAutoSubnets: false,
+	})
+	gap := "this method is not implemented"
+	probe := func(verb, path string) {
+		recorder := h.invoke(verb, path, nil)
+		if recorder.Code == 501 && strings.Contains(recorder.Body.String(), gap) {
+			t.Fatalf("%s %s hit the dispatch gap", verb, path)
+		}
+	}
+	probe(http.MethodGet, "/compute/v1/projects/demo-net/global/networks/"+testNetwork)
+	probe(http.MethodGet, "/compute/v1/projects/demo-net/global/networks")
+	probe(http.MethodGet, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks")
+	probe(http.MethodGet, "/compute/v1/projects/demo-net/global/firewalls")
+	probe(http.MethodGet, "/compute/v1/projects/demo-net/global/routes")
+	probe(http.MethodGet, "/compute/v1/projects/demo-net/global/operations")
 }

@@ -139,18 +139,22 @@ func (p *Provider) getNetwork(request *gateway.RESTRequest, scope state.Scope) (
 	if record == nil {
 		return nil, notFound(kindNetwork, name)
 	}
-	return &gateway.RESTResponse{JSON: p.networkDocument(scope.Project, record)}, nil
+	return &gateway.RESTResponse{JSON: p.networkDocument(scope.Project, record, p.subnetworksOf(scope.Project, name))}, nil
 }
 
 // listNetworks returns the scope's networks.
 func (p *Provider) listNetworks(scope state.Scope) (*gateway.RESTResponse, error) {
 	items := []any{}
+	var networks []*networkRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		for name := range s.networks {
-			items = append(items, p.networkDocument(scope.Project, s.networks[name]))
+			networks = append(networks, s.networks[name])
 		}
 		return nil
 	})
+	for _, record := range networks {
+		items = append(items, p.networkDocument(scope.Project, record, p.subnetworksOf(scope.Project, record.Name)))
+	}
 	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
 }
 

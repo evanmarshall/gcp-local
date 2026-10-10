@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,4 +265,21 @@ func TestVersionDisableBlocksAccessUntilReenabled(t *testing.T) {
 		t.Fatalf("enable status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 	assertPayloadAccess(t, h, "disable-me")
+}
+
+func TestEveryRouteIsHandled(t *testing.T) {
+	h := newHarness(t)
+	h.create(replicationAuto())
+	gap := "this method is not implemented"
+	probe := func(verb, path string) {
+		recorder := h.invoke(verb, path, nil, "actor")
+		if recorder.Code == 501 && strings.Contains(recorder.Body.String(), gap) {
+			t.Fatalf("%s %s hit the dispatch gap", verb, path)
+		}
+	}
+	probe(http.MethodGet, "/v1/projects/"+testProject+"/secrets/"+testSecret)
+	probe(http.MethodGet, "/v1/projects/"+testProject+"/secrets")
+	probe(http.MethodGet, "/v1/projects/"+testProject+"/secrets/"+testSecret+":getIamPolicy")
+	probe(http.MethodGet, "/v1/projects/"+testProject+"/secrets/"+testSecret+"/versions")
+	probe(http.MethodGet, "/v1/projects/"+testProject+"/locations")
 }

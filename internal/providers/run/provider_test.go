@@ -421,3 +421,18 @@ func TestInvocationUnknownHostIsNotFound(t *testing.T) {
 		t.Fatalf("unknown host status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestEveryRouteIsHandled(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	gap := "this method is not implemented"
+	probe := func(verb, path string) {
+		recorder := h.invoke(verb, path, nil)
+		if recorder.Code == 501 && strings.Contains(recorder.Body.String(), gap) {
+			t.Fatalf("%s %s hit the dispatch gap", verb, path)
+		}
+	}
+	probe(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/services/svc")
+	probe(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/services/svc/revisions")
+	probe(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/operations")
+}
