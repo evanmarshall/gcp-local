@@ -23,6 +23,8 @@ type Provider struct {
 	index    *state.Index
 	metadata func(subject string) (http.Handler, error)
 	metabind func(http.Handler) (string, func(), error)
+	reapers  map[string]context.CancelFunc
+	reaperMu sync.Mutex
 	recordMu sync.RWMutex
 	tokens   *identity.IDTokens
 	baseURL  string
@@ -52,8 +54,8 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 		index: index, engine: engine, runtime: runtime, tokens: config.Tokens, baseURL: config.BaseURL,
 		metadata: config.Metadata, metabind: config.MetadataBind,
 		scopes: state.NewStore(newScopeState, state.Scope.Validate),
-		hosts:  map[string]hostEntry{},
-		clock:  time.Now,
+		hosts:  map[string]hostEntry{}, reapers: map[string]context.CancelFunc{},
+		clock: time.Now,
 	}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.Scope.Validate,
@@ -98,8 +100,22 @@ func (emptyBackend) Reset(context.Context) error    { return nil }
 func (emptyBackend) Snapshot(context.Context) error { return backend.ErrPersistenceUnsupported }
 func (emptyBackend) Restore(context.Context) error  { return backend.ErrPersistenceUnsupported }
 
+// stopReapers cancels the idle reapers of one scope. Reset calls this before
+// clearing state so no reaper outlives the scope it watches.
+func (p *Provider) stopReapers(scope state.Scope) {
+	p.reaperMu.Lock()
+	for key, cancel := range p.reapers {
+		if key == scope.Project {
+			cancel()
+			delete(p.reapers, key)
+		}
+	}
+	p.reaperMu.Unlock()
+}
+
 // Reset stops every container in the scope, then clears the provider state.
 func (p *Provider) Reset(ctx context.Context, scope state.Scope) error {
+	p.stopReapers(scope)
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		for _, service := range s.services {
 			for _, revision := range service.Revisions {

@@ -288,17 +288,22 @@ func (p *Provider) startRevision(record *serviceRecord, revision *revisionRecord
 // before the provider stops it; the next invocation cold-starts it again.
 const idleTimeout = 5 * time.Minute
 
-// startReaper schedules the idle reaper for a service once.
+// startReaper schedules the idle reaper for a service once. Reset and delete
+// cancel the reaper with its scope; a reaped or missing service ends it.
 func (p *Provider) startReaper(scope state.Scope, id string) {
+	watch, cancel := context.WithCancel(context.Background())
+	p.reaperMu.Lock()
+	p.reapers[scope.Project] = cancel
+	p.reaperMu.Unlock()
 	go func() {
-		base := context.WithoutCancel(context.Background())
+		defer cancel()
 		for range time.Tick(time.Minute) {
 			select {
-			case <-base.Done():
+			case <-watch.Done():
 				return
 			default:
 			}
-			if reaped := p.reap(base, scope, id); reaped {
+			if reaped := p.reap(watch, scope, id); reaped {
 				return
 			}
 		}
@@ -639,6 +644,7 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 
 // delete stops every container, removes the service, and completes immediately.
 func (p *Provider) delete(call gateway.Call, scope state.Scope, record *serviceRecord) (*gateway.RESTResponse, error) {
+	p.stopReapers(scope)
 	p.recordMu.Lock()
 	defer p.recordMu.Unlock()
 	name := record.Name
