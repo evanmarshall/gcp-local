@@ -56,41 +56,9 @@ func validate(request proto.Message) error {
 	case *pb.Topic:
 		return fields(r, "name", "labels")
 	case *pb.Subscription:
-		if err := fields(r, "name", "topic", "labels", "ack_deadline_seconds", "push_config"); err != nil {
-			return err
-		}
-		if r.GetPushConfig() != nil {
-			if err := validatePush(r.GetPushConfig()); err != nil {
-				return err
-			}
-		}
-		if _, err := resourceName(r.GetTopic(), "topics"); err != nil {
-			return err
-		}
-		if r.GetAckDeadlineSeconds() != 0 && (r.GetAckDeadlineSeconds() < 10 || r.GetAckDeadlineSeconds() > 600) {
-			return invalid("Ack deadline must be 10 through 600 seconds")
-		}
+		return validateSubscription(r)
 	case *pb.PublishRequest:
-		if err := fields(r, "topic", "messages"); err != nil {
-			return err
-		}
-		if len(r.GetMessages()) == 0 || len(r.GetMessages()) > 1000 {
-			return invalid("Supply one through 1000 messages")
-		}
-		for _, m := range r.GetMessages() {
-			if m == nil {
-				return invalid("Missing message")
-			}
-			if err := fields(m, "data", "attributes"); err != nil {
-				return err
-			}
-			if len(m.GetData()) == 0 && len(m.GetAttributes()) == 0 {
-				return invalid("Messages need data or attributes")
-			}
-		}
-		if proto.Size(r) > 1<<20 {
-			return status.Error(codes.ResourceExhausted, "Local publication limit is 1 MiB")
-		}
+		return validatePublish(r)
 	case *pb.PullRequest:
 		if err := fields(r, "subscription", "max_messages", "return_immediately"); err != nil {
 			return err
@@ -98,10 +66,9 @@ func validate(request proto.Message) error {
 		if r.GetMaxMessages() < 1 || r.GetMaxMessages() > 1000 {
 			return invalid("Max messages must be one through 1000")
 		}
+		return nil
 	case *pb.AcknowledgeRequest:
-		if err := fields(r, "subscription", "ack_ids"); err != nil {
-			return err
-		}
+		return fields(r, "subscription", "ack_ids")
 	case *pb.ModifyAckDeadlineRequest:
 		if err := fields(r, "subscription", "ack_ids", "ack_deadline_seconds"); err != nil {
 			return err
@@ -109,10 +76,56 @@ func validate(request proto.Message) error {
 		if r.GetAckDeadlineSeconds() < 0 || r.GetAckDeadlineSeconds() > 600 {
 			return invalid("Ack deadline must be zero through 600 seconds")
 		}
+		return nil
 	default:
 		if len(request.ProtoReflect().GetUnknown()) > 0 {
 			return gap("unknown protobuf fields")
 		}
+		return nil
+	}
+}
+
+// validateSubscription checks the subscription fields and its push configuration.
+func validateSubscription(r *pb.Subscription) error {
+	if err := fields(r, "name", "topic", "labels", "ack_deadline_seconds", "push_config"); err != nil {
+		return err
+	}
+	if r.GetPushConfig() != nil {
+		if err := validatePush(r.GetPushConfig()); err != nil {
+			return err
+		}
+	}
+	if _, err := resourceName(r.GetTopic(), "topics"); err != nil {
+		return err
+	}
+	if deadline := r.GetAckDeadlineSeconds(); deadline != 0 && (deadline < 10 || deadline > 600) {
+		return invalid("Ack deadline must be 10 through 600 seconds")
+	}
+	return nil
+}
+
+// validatePublish bounds a publication to one thousand non-empty messages and
+// one MiB in total.
+func validatePublish(r *pb.PublishRequest) error {
+	if err := fields(r, "topic", "messages"); err != nil {
+		return err
+	}
+	if len(r.GetMessages()) == 0 || len(r.GetMessages()) > 1000 {
+		return invalid("Supply one through 1000 messages")
+	}
+	for _, m := range r.GetMessages() {
+		if m == nil {
+			return invalid("Missing message")
+		}
+		if err := fields(m, "data", "attributes"); err != nil {
+			return err
+		}
+		if len(m.GetData()) == 0 && len(m.GetAttributes()) == 0 {
+			return invalid("Messages need data or attributes")
+		}
+	}
+	if proto.Size(r) > 1<<20 {
+		return status.Error(codes.ResourceExhausted, "Local publication limit is 1 MiB")
 	}
 	return nil
 }

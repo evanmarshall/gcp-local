@@ -24,77 +24,116 @@ func (p *Provider) policy(call gateway.Call, raw any) (any, error) {
 	if project != call.Project {
 		return nil, invalid("Policy project mismatch")
 	}
-	kind := strings.Split(call.Resource, "/")[2]
 	request, ok := raw.(proto.Message)
 	if !ok {
 		return nil, invalid("Invalid IAM request")
 	}
-	var update *iam.Policy
+	update, err := p.policyUpdate(&call, request)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.authorize(call, request); err != nil {
+		return nil, err
+	}
+	result, err := p.applyPolicy(call, request, update)
+	if err != nil {
+		return nil, err
+	}
+	return wirePolicy(result)
+}
+
+// policyUpdate validates the IAM request and turns a SetIamPolicy into the
+// engine policy. The call method is renamed to the resolved IAM operation.
+func (p *Provider) policyUpdate(call *gateway.Call, request proto.Message) (*iam.Policy, error) {
+	kind := strings.Split(call.Resource, "/")[2]
 	switch r := request.(type) {
 	case *iampb.GetIamPolicyRequest:
 		if err := fields(r, "resource", "options"); err != nil {
 			return nil, err
 		}
-		if r.GetOptions() != nil {
-			if err := fields(r.GetOptions(), "requested_policy_version"); err != nil {
-				return nil, err
-			}
-			if r.GetOptions().GetRequestedPolicyVersion() != 0 && r.GetOptions().GetRequestedPolicyVersion() != 1 {
-				return nil, gap("requested IAM policy version")
-			}
+		if err := validatePolicyOptions(r.GetOptions()); err != nil {
+			return nil, err
 		}
 		call.Method = "pubsub." + kind + ".getIamPolicy"
+		return nil, nil
 	case *iampb.SetIamPolicyRequest:
-		if err := fields(r, "resource", "policy", "update_mask"); err != nil {
+		policy, err := decodeSetPolicy(r)
+		if err != nil {
 			return nil, err
 		}
-		if r.GetUpdateMask() != nil {
-			return nil, gap("partial IAM policy updates")
-		}
-		if r.GetPolicy() == nil {
-			return nil, invalid("Missing IAM policy")
-		}
-		if err := fields(r.GetPolicy(), "version", "bindings", "etag"); err != nil {
-			return nil, err
-		}
-		policy := iam.Policy{Version: int(r.GetPolicy().GetVersion()), ETag: base64.StdEncoding.EncodeToString(r.GetPolicy().GetEtag())}
-		for _, binding := range r.GetPolicy().GetBindings() {
-			if binding == nil {
-				return nil, invalid("Missing IAM binding")
-			}
-			if err := fields(binding, "role", "members"); err != nil {
-				return nil, err
-			}
-			policy.Bindings = append(policy.Bindings, iam.Binding{Role: binding.GetRole(), Members: append([]string(nil), binding.GetMembers()...)})
-		}
-		update = &policy
 		call.Method = "pubsub." + kind + ".setIamPolicy"
+		return policy, nil
 	default:
 		return nil, gap("IAM method")
 	}
-	if err := p.authorize(call, request); err != nil {
+}
+
+// validatePolicyOptions accepts only policy version 1, which is what the
+// emulator's conditional-policy gap already excludes.
+func validatePolicyOptions(options *iampb.GetPolicyOptions) error {
+	if options == nil {
+		return nil
+	}
+	if err := fields(options, "requested_policy_version"); err != nil {
+		return err
+	}
+	if version := options.GetRequestedPolicyVersion(); version != 0 && version != 1 {
+		return gap("requested IAM policy version")
+	}
+	return nil
+}
+
+// decodeSetPolicy converts the wire policy into the engine representation.
+func decodeSetPolicy(r *iampb.SetIamPolicyRequest) (*iam.Policy, error) {
+	if r.GetUpdateMask() != nil {
+		return nil, gap("partial IAM policy updates")
+	}
+	if r.GetPolicy() == nil {
+		return nil, invalid("Missing IAM policy")
+	}
+	if err := fields(r.GetPolicy(), "version", "bindings", "etag"); err != nil {
 		return nil, err
 	}
+	policy := iam.Policy{Version: int(r.GetPolicy().GetVersion()), ETag: base64.StdEncoding.EncodeToString(r.GetPolicy().GetEtag())}
+	for _, binding := range r.GetPolicy().GetBindings() {
+		if binding == nil {
+			return nil, invalid("Missing IAM binding")
+		}
+		if err := fields(binding, "role", "members"); err != nil {
+			return nil, err
+		}
+		policy.Bindings = append(policy.Bindings, iam.Binding{Role: binding.GetRole(), Members: append([]string(nil), binding.GetMembers()...)})
+	}
+	return &policy, nil
+}
+
+// applyPolicy runs the get or set inside one backend session.
+func (p *Provider) applyPolicy(call gateway.Call, request proto.Message, update *iam.Policy) (iam.Policy, error) {
 	var result iam.Policy
-	err = p.manager.Use(call.Context, keyOf(call), func(session context.Context, _ backend.Backend) error {
+	err := p.manager.Use(call.Context, keyOf(call), func(session context.Context, _ backend.Backend) error {
 		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
 		if err := p.authorize(call, request); err != nil {
 			return err
 		}
-		var err error
+		var policyErr error
 		if update == nil {
-			result, err = p.iam.GetPolicy(canonical(call.Resource))
+			result, policyErr = p.iam.GetPolicy(canonical(call.Resource))
 		} else {
-			result, err = p.iam.SetPolicy(canonical(call.Resource), *update)
+			result, policyErr = p.iam.SetPolicy(canonical(call.Resource), *update)
 		}
-		if err != nil {
-			return fmt.Errorf("set iam policy: %w", err)
+		if policyErr != nil {
+			return fmt.Errorf("set iam policy: %w", policyErr)
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("apply policy in the backend session: %w", err)
+		return iam.Policy{}, fmt.Errorf("apply policy in the backend session: %w", err)
 	}
+	return result, nil
+}
+
+// wirePolicy converts the engine policy back to the wire representation.
+func wirePolicy(result iam.Policy) (*iampb.Policy, error) {
 	etag, err := base64.StdEncoding.DecodeString(result.ETag)
 	if err != nil {
 		return nil, fmt.Errorf("decode policy etag: %w", err)
