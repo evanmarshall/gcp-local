@@ -574,7 +574,14 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 	record.UpdatedAt = now
 	record.Revisions[revisionID] = revision
 	record.Traffic = map[string]int{revisionID: 100}
-	return &gateway.RESTResponse{JSON: p.serviceDocument(scope, record)}, nil
+	// The real surface returns a long-running operation for the rollout.
+	operationName := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/rel-" + record.Name
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		s.operations[operationName] = &operationRecord{Name: operationName, CreatedAt: now}
+		return nil
+	})
+	p.watch(scope, record.Name, operationName)
+	return &gateway.RESTResponse{JSON: operationDocument(p.operation(scope, operationName))}, nil
 }
 
 // delete stops every container, removes the service, and completes immediately.

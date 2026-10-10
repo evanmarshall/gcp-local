@@ -276,18 +276,31 @@ func TestUpdateStartsNewRevisionAndShiftsTraffic(t *testing.T) {
 	if recorder.Code != 200 {
 		t.Fatalf("update status = %d body %s", recorder.Code, recorder.Body.String())
 	}
+	var operation struct {
+		Name string `json:"name"`
+		Done bool   `json:"done"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &operation); err != nil {
+		t.Fatalf("decode operation: %v", err)
+	}
+	if operation.Name == "" {
+		t.Fatalf("update returned no operation: %s", recorder.Body.String())
+	}
+	if len(h.runtime.started) != 2 {
+		t.Fatalf("container launches = %+v", h.runtime.started)
+	}
+	recorder = h.invoke(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/services/svc", nil)
+	if recorder.Code != 200 {
+		t.Fatalf("get after update status = %d", recorder.Code)
+	}
 	var service struct {
-		LatestCreatedRevision string `json:"latestCreatedRevision"`
-		Traffic               []struct {
+		Traffic []struct {
 			Revision string `json:"revision"`
 			Percent  int    `json:"percent"`
 		} `json:"traffic"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &service); err != nil {
 		t.Fatalf("decode service: %v", err)
-	}
-	if len(h.runtime.started) != 2 {
-		t.Fatalf("container launches = %+v", h.runtime.started)
 	}
 	if len(service.Traffic) != 1 || service.Traffic[0].Percent != 100 {
 		t.Fatalf("traffic = %+v", service.Traffic)
