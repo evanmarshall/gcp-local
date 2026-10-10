@@ -115,9 +115,9 @@ def deploy_worker() -> None:
     # Grant the worker storage.objects.create on the bucket.
     policy = {"bindings": [{"role": "roles/storage.objectUser",
                             "members": ["serviceAccount:" + WORKER_EMAIL]}],
-              "resourceId": bucket}
-    status, _ = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
-    assert status == 200, "bucket grant failed"
+              "resourceId": "/b/" + bucket, "kind": "storage#policy"}
+    status, body = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
+    assert status == 200, "bucket grant failed: " + json.dumps(body)[:200]
 
     status, _ = rest("POST", "/v1/projects/" + PROJECT + "/topics",
                      {"name": "projects/" + PROJECT + "/topics/workflow"})
@@ -188,7 +188,7 @@ def expect_object(bucket: str, message_id: str, payload: str) -> None:
 def denial_cycle(bucket: str) -> None:
     """Revoke the worker's Storage grant, expect the write to fail, then restore."""
     status, _ = rest("PUT", "/storage/v1/b/" + bucket + "/iam",
-                     {"bindings": [], "resourceId": bucket})
+                     {"bindings": [], "resourceId": "/b/" + bucket, "kind": "storage#policy"})
     assert status == 200, "revoke failed"
     publish(bucket, "denied-payload", "denied-msg")
     end = time.time() + 30
@@ -201,7 +201,7 @@ def denial_cycle(bucket: str) -> None:
         raise AssertionError("The denied worker still stored the object")
     policy = {"bindings": [{"role": "roles/storage.objectUser",
                             "members": ["serviceAccount:" + WORKER_EMAIL]}],
-              "resourceId": bucket}
+              "resourceId": "/b/" + bucket, "kind": "storage#policy"}
     status, _ = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
     assert status == 200, "restore failed"
     publish(bucket, "restored-payload", "restored-msg")
