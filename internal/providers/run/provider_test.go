@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -61,6 +64,9 @@ func (f *fakeRuntime) Stop(_ context.Context, container string) error {
 	delete(f.running, container)
 	return nil
 }
+
+// errNotEnrolled rejects unenrolled metadata subjects in tests.
+var errNotEnrolled = errors.New("the subject is not enrolled")
 
 // serviceReference is the full resource name of the test service.
 const serviceReference = "projects/demo-project/locations/us-central1/services/svc"
@@ -361,6 +367,47 @@ func TestInvocationRequiresInvokerGrant(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != 401 {
 		t.Fatalf("anonymous invocation status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestWorkloadMetadataBindsPerRevisionListener(t *testing.T) {
+	h := newHarness(t)
+	harnessBind := ""
+	h.provider.metadata = func(subject string) (http.Handler, error) {
+		if subject != "serviceAccount:worker@demo-project.iam.gserviceaccount.com" {
+			return nil, errNotEnrolled
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("metadata"))
+		}), nil
+	}
+	h.provider.metabind = func(handler http.Handler) (string, func(), error) {
+		var listen net.ListenConfig
+		listener, err := listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+		if err != nil {
+			return "", nil, fmt.Errorf("bind the test metadata listener: %w", err)
+		}
+		server := &http.Server{Handler: handler, ReadHeaderTimeout: time.Second}
+		go func() { _ = server.Serve(listener) }()
+		harnessBind = listener.Addr().String()
+		return harnessBind, func() { _ = server.Close() }, nil
+	}
+	body := map[string]any{
+		testName: serviceReference,
+		testTemplate: map[string]any{
+			testContainers:   []any{map[string]any{testImageKey: imageReference}},
+			"serviceAccount": "serviceAccount:worker@demo-project.iam.gserviceaccount.com",
+		},
+	}
+	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", body)
+	if recorder.Code != 200 {
+		t.Fatalf("create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if !containsEntry(h.runtime.started[0].Env, "GCE_METADATA_HOST="+harnessBind) {
+		t.Fatalf("env = %v", h.runtime.started[0].Env)
+	}
+	if h.runtime.started[0].Port != 8080 {
+		t.Fatalf("spec = %+v", h.runtime.started[0])
 	}
 }
 

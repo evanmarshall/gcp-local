@@ -21,6 +21,8 @@ import (
 // Provider owns the Cloud Run v2 control plane and its container lifecycle.
 type Provider struct {
 	index    *state.Index
+	metadata func(subject string) (http.Handler, error)
+	metabind func(http.Handler) (string, func(), error)
 	recordMu sync.RWMutex
 	tokens   *identity.IDTokens
 	baseURL  string
@@ -48,6 +50,7 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 	}
 	p := &Provider{
 		index: index, engine: engine, runtime: runtime, tokens: config.Tokens, baseURL: config.BaseURL,
+		metadata: config.Metadata, metabind: config.MetadataBind,
 		scopes: state.NewStore(newScopeState, state.Scope.Validate),
 		hosts:  map[string]hostEntry{},
 		clock:  time.Now,
@@ -101,6 +104,7 @@ func (p *Provider) Reset(ctx context.Context, scope state.Scope) error {
 		for _, service := range s.services {
 			for _, revision := range service.Revisions {
 				_ = p.runtime.Stop(context.WithoutCancel(ctx), revision.Container)
+				releaseMetadata(revision)
 			}
 		}
 		s.reset()

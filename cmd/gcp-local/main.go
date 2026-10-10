@@ -122,6 +122,45 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	return options, true
 }
 
+// workloadMetadataBind binds one per-workload metadata handler on the Docker
+// bridge gateway address so containers can reach it, and returns the dialable
+// host:port.
+func workloadMetadataBind(handler http.Handler) (string, func(), error) {
+	bind := "172.17.0.1"
+	if !bridgeExists(bind) {
+		return "", nil, errNoMetadataBridge
+	}
+	var listen net.ListenConfig
+	listener, err := listen.Listen(context.Background(), "tcp", net.JoinHostPort(bind, "0"))
+	if err != nil {
+		return "", nil, fmt.Errorf("bind the workload metadata listener: %w", err)
+	}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = server.Serve(listener)
+	}()
+	return listener.Addr().String(), func() { _ = server.Close(); <-done }, nil
+}
+
+// errNoMetadataBridge reports a host without a Docker bridge to bind on.
+var errNoMetadataBridge = errors.New("no Docker bridge interface for the metadata listener")
+
+// bridgeExists reports whether the interface owns the given address.
+func bridgeExists(address string) bool {
+	interfaces, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, candidate := range interfaces {
+		if ip, ok := candidate.(*net.IPNet); ok && ip.IP.String() == address {
+			return true
+		}
+	}
+	return false
+}
+
 // assemble wires identity, IAM, providers, and listeners from one options set.
 // Listeners already bound on failure are closed before returning.
 func assemble(ctx context.Context, options serveOptions) (*core.Server, core.Listeners, error) {
@@ -229,6 +268,13 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 			runtime = runprovider.NewDockerRuntime(options.runSocket)
 		}
 		config := runprovider.Config{BaseURL: "http://" + options.listen}
+		if identities != nil {
+			// Workload identity: each revision's configured service account
+			// gets its own metadata handler bound on the container-reachable
+			// bridge address. Without an identity config the feature stays off.
+			config.Metadata = identities.Metadata
+			config.MetadataBind = workloadMetadataBind
+		}
 		provider, err := runprovider.New(ctx, config, registry, server.Backends, index, engine, runtime)
 		if err != nil {
 			return fmt.Errorf("register the Cloud Run provider: %w", err)

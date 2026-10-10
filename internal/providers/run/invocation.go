@@ -23,6 +23,12 @@ type Config struct {
 	Tokens *identity.IDTokens
 	// BaseURL is the loopback base of the serving listener, for service URIs.
 	BaseURL string
+	// Metadata builds the per-subject workload metadata handler for one
+	// enrolled service account. nil disables workload identity.
+	Metadata func(subject string) (http.Handler, error)
+	// MetadataBind binds one workload metadata handler and returns the
+	// host:port the container must dial. Called only when Metadata is set.
+	MetadataBind func(handler http.Handler) (string, func(), error)
 }
 
 // invocationPath is the local serving prefix, one level below the local

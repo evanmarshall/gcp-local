@@ -38,11 +38,12 @@ func methodNames() []string {
 
 // revisionRecord is one stored revision of a service.
 type revisionRecord struct {
-	ID        string
-	Template  templateShape
-	CreatedAt time.Time
-	Container string
-	Address   string
+	ID              string
+	Template        templateShape
+	CreatedAt       time.Time
+	Container       string
+	Address         string
+	releaseMetadata func()
 }
 
 // serviceRecord is one stored service of a scope.
@@ -259,6 +260,19 @@ func (p *Provider) startRevision(record *serviceRecord, revision *revisionRecord
 		Port:  revision.Template.Container.Port,
 		Env:   workloadEnv(record, revision),
 	}
+	if revision.Template.ServiceAccount != "" && p.metadata != nil {
+		subject := revision.Template.ServiceAccount
+		handler, metadataErr := p.metadata(subject)
+		if metadataErr != nil {
+			return fmt.Errorf("enroll the workload identity %s: %w", subject, metadataErr)
+		}
+		hostPort, release, bindErr := p.metabind(handler)
+		if bindErr != nil {
+			return fmt.Errorf("bind the workload metadata listener: %w", bindErr)
+		}
+		revision.releaseMetadata = release
+		spec.Env = append(spec.Env, "GCE_METADATA_HOST="+hostPort)
+	}
 	started, err := p.runtime.Start(context.WithoutCancel(context.Background()), spec)
 	if err != nil {
 		return fmt.Errorf("start the revision container: %w", err)
@@ -438,6 +452,14 @@ func (p *Provider) operation(scope state.Scope, name string) *operationRecord {
 	return entry
 }
 
+// releaseMetadata stops the revision's private metadata listener, if one runs.
+func releaseMetadata(revision *revisionRecord) {
+	if revision.releaseMetadata != nil {
+		revision.releaseMetadata()
+		revision.releaseMetadata = nil
+	}
+}
+
 // latestRevisionOf reads the newest revision of a service. Callers hold the
 // record lock.
 func (p *Provider) latestRevisionOf(scope state.Scope, id string) *revisionRecord {
@@ -562,6 +584,7 @@ func (p *Provider) delete(call gateway.Call, scope state.Scope, record *serviceR
 	name := record.Name
 	for _, revision := range record.Revisions {
 		_ = p.runtime.Stop(call.Context, revision.Container)
+		releaseMetadata(revision)
 	}
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		delete(s.services, name)
@@ -646,6 +669,7 @@ func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTReques
 	if err := p.runtime.Stop(call.Context, revision.Container); err != nil {
 		return nil, fmt.Errorf("stop the revision container: %w", err)
 	}
+	releaseMetadata(revision)
 	delete(record.Revisions, id)
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
