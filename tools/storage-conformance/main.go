@@ -20,7 +20,9 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
+	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
@@ -51,6 +53,7 @@ func main() {
 			// the same fixture principal.
 			{Role: "roles/cloudkms.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/secretmanager.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/cloudtasks.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}
@@ -74,6 +77,10 @@ func main() {
 	_, err = cloudkms.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = secretmanager.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
+	tokens, tokenErr := identity.NewIDTokens(engine, index)
+	must(tokenErr)
+	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
 	must(err)
 	if *trace || *fault {
 		handler := server.HTTP.Handler
