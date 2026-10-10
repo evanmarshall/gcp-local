@@ -449,3 +449,16 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/services/svc/revisions")
 	probe(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/operations")
 }
+
+func TestOperationDeleteAcknowledgesTerminalOperations(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	recorder := h.invoke(http.MethodDelete, "/v2/projects/demo-project/locations/us-central1/operations/rel-svc", nil)
+	if recorder.Code != 200 {
+		t.Fatalf("operation delete status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodDelete, "/v2/projects/demo-project/locations/us-central1/operations/missing", nil)
+	if recorder.Code != 200 {
+		t.Fatalf("missing operation delete status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+}

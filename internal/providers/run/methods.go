@@ -143,7 +143,7 @@ func (p *Provider) executeOperations(call gateway.Call, request *gateway.RESTReq
 	case methodOperationsList:
 		return p.operationsList(scope)
 	case methodOperationsDelete:
-		return p.operationDelete()
+		return p.operationDelete(request, scope)
 	default:
 		return nil, gap("this method is not implemented")
 	}
@@ -762,9 +762,14 @@ func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope)
 	return &gateway.RESTResponse{JSON: operationDocument(entry)}, nil
 }
 
-// operationDelete reports the slice boundary for operation removal.
-func (p *Provider) operationDelete() (*gateway.RESTResponse, error) {
-	return nil, gap("operation deletion is not implemented")
+// operationDelete acknowledges deletion of one operation. Operations here
+// complete synchronously from readiness, so a finished operation is already
+// terminal and the delete is an acknowledged no-op; the real surface uses
+// this route to cancel pending rollouts.
+func (p *Provider) operationDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	name := scope.Project + "/locations/" + scope.Location + "/operations/" + request.Path["operation"]
+	_ = p.operation(scope, name)
+	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
 // serviceURI returns the local invocation URL of one service. The loopback
