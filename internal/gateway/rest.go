@@ -76,102 +76,128 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, route := range g.routes {
-		if r.Method != route.contract.Verb {
+		if !route.matches(r) {
 			continue
 		}
-		matches := route.expression.FindStringSubmatch(r.URL.EscapedPath())
-		if matches == nil {
-			continue
-		}
-		call, err := g.newCall(r.Context(), route.contract.Method, r.Header.Values("Authorization"), r.Header.Values("Traceparent"))
+		request, call, err := g.restRequest(r, &route)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
 		w.Header().Set("X-Gcp-Local-Trace-Id", call.TraceID)
-		query, err := url.ParseQuery(r.URL.RawQuery)
-		if err != nil {
-			writeError(w, status.Error(codes.InvalidArgument, "Malformed query string"))
-			return
-		}
-		request := &RESTRequest{Path: map[string]string{}, Query: query, Headers: r.Header.Clone()}
-		request.Headers.Del("Authorization")
-		for index, name := range route.names {
-			value, err := url.PathUnescape(matches[index+1])
-			if err != nil {
-				writeError(w, status.Error(codes.InvalidArgument, "Malformed resource path"))
-				return
-			}
-			request.Path[name] = value
-		}
-		call.Resource = r.URL.Path
-		// Bucket/object names do not encode a project. Providers resolve that owner.
-		if route.contract.Method == "storage.buckets.insert" || route.contract.Method == "storage.buckets.list" {
-			call.Project = query.Get("project")
-		}
-		if route.contract.Media {
-			request.Media = r.Body
-		} else if route.contract.JSONBody {
-			const maxJSON = 2 << 20
-			body, err := io.ReadAll(io.LimitReader(r.Body, maxJSON+1))
-			if err != nil {
-				writeError(w, status.Error(codes.InvalidArgument, "Unable to read JSON body"))
-				return
-			}
-			if len(body) > maxJSON {
-				writeError(w, status.Error(codes.ResourceExhausted, "JSON request exceeds two MiB"))
-				return
-			}
-			var object map[string]json.RawMessage
-			if json.Unmarshal(body, &object) != nil || object == nil {
-				writeError(w, status.Error(codes.InvalidArgument, "Expected a JSON object body"))
-				return
-			}
-			request.JSON = body
-		}
-		result, err := g.Registry.Invoke(call, request)
-		if err != nil {
-			writeError(w, err)
-			return
-		}
-		response, ok := result.(*RESTResponse)
-		if !ok || response == nil {
-			writeError(w, status.Error(codes.Internal, "Provider returned an invalid response type"))
-			return
-		}
-		maps.Copy(w.Header(), response.Headers)
-		code := response.Status
-		if code == 0 {
-			code = 200
-		}
-		if response.Body != nil {
-			if closer, ok := response.Body.(io.Closer); ok {
-				defer closer.Close()
-			}
-			w.WriteHeader(code)
-			if _, err := io.Copy(w, response.Body); err != nil {
-				// The status and part of the body are already committed.
-				return
-			}
-			return
-		}
-		if w.Header().Get("Content-Type") == "" {
-			w.Header().Set("Content-Type", "application/json")
-		}
-		if response.JSON != nil {
-			// Marshal before committing the status so an encoding failure is a
-			// reportable 500, not a silent truncated body.
-			encoded, err := json.Marshal(response.JSON)
-			if err != nil {
-				writeError(w, status.Error(codes.Internal, "Response encoding failed"))
-				return
-			}
-			w.WriteHeader(code)
-			_, _ = w.Write(encoded)
-			return
-		}
-		w.WriteHeader(code)
+		g.dispatchREST(w, call, request)
 		return
 	}
 	writeError(w, gap("this REST API method"))
+}
+
+// matches reports whether a request selects a route by method and path shape.
+func (route *compiledRoute) matches(r *http.Request) bool {
+	if r.Method != route.contract.Verb {
+		return false
+	}
+	return route.expression.FindStringSubmatch(r.URL.EscapedPath()) != nil
+}
+
+// restRequest builds the REST request and call for one matched route.
+func (g *Gateway) restRequest(r *http.Request, route *compiledRoute) (*RESTRequest, Call, error) {
+	matches := route.expression.FindStringSubmatch(r.URL.EscapedPath())
+	call, err := g.newCall(r.Context(), route.contract.Method, r.Header.Values("Authorization"), r.Header.Values("Traceparent"))
+	if err != nil {
+		return nil, Call{}, err
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, Call{}, status.Error(codes.InvalidArgument, "Malformed query string")
+	}
+	request := &RESTRequest{Path: map[string]string{}, Query: query, Headers: r.Header.Clone()}
+	request.Headers.Del("Authorization")
+	for index, name := range route.names {
+		value, err := url.PathUnescape(matches[index+1])
+		if err != nil {
+			return nil, Call{}, status.Error(codes.InvalidArgument, "Malformed resource path")
+		}
+		request.Path[name] = value
+	}
+	call.Resource = r.URL.Path
+	// Bucket/object names do not encode a project. Providers resolve that owner.
+	if route.contract.Method == "storage.buckets.insert" || route.contract.Method == "storage.buckets.list" {
+		call.Project = query.Get("project")
+	}
+	if err := restBody(r, route, request); err != nil {
+		return nil, Call{}, err
+	}
+	return request, call, nil
+}
+
+// restBody attaches the request body the route contract expects: streaming
+// media, a bounded JSON object, or nothing.
+func restBody(r *http.Request, route *compiledRoute, request *RESTRequest) error {
+	if route.contract.Media {
+		request.Media = r.Body
+		return nil
+	}
+	if !route.contract.JSONBody {
+		return nil
+	}
+	const maxJSON = 2 << 20
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxJSON+1))
+	if err != nil {
+		return status.Error(codes.InvalidArgument, "Unable to read JSON body")
+	}
+	if len(body) > maxJSON {
+		return status.Error(codes.ResourceExhausted, "JSON request exceeds two MiB")
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(body, &object) != nil || object == nil {
+		return status.Error(codes.InvalidArgument, "Expected a JSON object body")
+	}
+	request.JSON = body
+	return nil
+}
+
+// streamBody commits the status and copies a streaming body to the client.
+// A copy failure cannot retract the committed status.
+func streamBody(w http.ResponseWriter, code int, body io.Reader) {
+	w.WriteHeader(code)
+	_, _ = io.Copy(w, body)
+}
+
+// dispatchREST invokes the provider and writes the response body it returns.
+func (g *Gateway) dispatchREST(w http.ResponseWriter, call Call, request *RESTRequest) {
+	result, err := g.Registry.Invoke(call, request)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	response, ok := result.(*RESTResponse)
+	if !ok || response == nil {
+		writeError(w, status.Error(codes.Internal, "Provider returned an invalid response type"))
+		return
+	}
+	maps.Copy(w.Header(), response.Headers)
+	code := response.Status
+	if code == 0 {
+		code = 200
+	}
+	if response.Body != nil {
+		streamBody(w, code, response.Body)
+		return
+	}
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	if response.JSON != nil {
+		// Marshal before committing the status so an encoding failure is a
+		// reportable 500, not a silent truncated body.
+		encoded, err := json.Marshal(response.JSON)
+		if err != nil {
+			writeError(w, status.Error(codes.Internal, "Response encoding failed"))
+			return
+		}
+		w.WriteHeader(code)
+		_, _ = w.Write(encoded)
+		return
+	}
+	w.WriteHeader(code)
 }
