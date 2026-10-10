@@ -20,6 +20,14 @@ ROLES = {
     ),
     "pubsub": ("pubsub.admin", "pubsub.publisher", "pubsub.subscriber", "pubsub.viewer"),
     "identity": ("iam.serviceAccountUser", "iam.serviceAccountTokenCreator"),
+    # Candidate sets for the providers implemented without recorded role
+    # snapshots; each entry must be re-recorded read-only before its
+    # checksummed manifest snapshot is promoted.
+    "run": ("run.admin", "run.developer", "run.invoker", "run.viewer"),
+    "compute": ("compute.admin", "compute.networkAdmin", "compute.viewer"),
+    "secretmanager": ("secretmanager.admin", "secretmanager.secretAccessor", "secretmanager.viewer"),
+    "cloudtasks": ("cloudtasks.admin", "cloudtasks.enqueuer"),
+    "networkmanagement": ("networkmanagement.viewer",),
 }
 
 
@@ -29,7 +37,7 @@ def main() -> int:
     parser.add_argument("--account", required=True)
     parser.add_argument("--quota-project", required=True)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--service", choices=ROLES, default="storage")
+    parser.add_argument("--service", choices=sorted(ROLES), default="storage")
     parser.add_argument("--allow-live", action="store_true", required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
