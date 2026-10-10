@@ -53,6 +53,13 @@ func mustWriteFile(t *testing.T, path string, content []byte) {
 }
 
 const testProject = "project-a"
+
+// testViewerRole is the object-viewer role used by the condition tests.
+const testViewerRole = "roles/storage.objectViewer"
+
+// testBadCondition is a syntactically invalid CEL expression.
+const testBadCondition = `{"expression":"== bad syntax ("}`
+
 const projectA = "//cloudresourcemanager.googleapis.com/projects/project-a"
 const projectB = "//cloudresourcemanager.googleapis.com/projects/project-b"
 const org = "//cloudresourcemanager.googleapis.com/organizations/local-org"
@@ -134,7 +141,7 @@ func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 	if _, err := engine.Authorize(foreign, object(), nil); status.Code(err) != codes.PermissionDenied {
 		t.Fatal("caller-project role leaked into resource project:", err)
 	}
-	set(t, engine, object().Parent, "roles/storage.objectViewer", peer)
+	set(t, engine, object().Parent, testViewerRole, peer)
 	if result, err := engine.Authorize(foreign, object(), nil); err != nil || result.Principal.Project != projectBName || result.Checks[0].GrantPolicy != object().Parent {
 		t.Fatalf("%+v %v", result, err)
 	}
@@ -142,12 +149,12 @@ func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 	if _, err := engine.Authorize(foreign, object(), nil); status.Code(err) != codes.PermissionDenied {
 		t.Fatal("revocation did not deny:", err)
 	}
-	set(t, engine, folder, "roles/storage.objectViewer", allowed)
+	set(t, engine, folder, testViewerRole, allowed)
 	if result, err := engine.Authorize(read, object(), nil); err != nil || result.Checks[0].GrantPolicy != folder {
 		t.Fatalf("folder inheritance: %+v %v", result, err)
 	}
 	_, _ = engine.SetPolicy(folder, iam.Policy{})
-	set(t, engine, org, "roles/storage.objectViewer", allowed)
+	set(t, engine, org, testViewerRole, allowed)
 	if result, err := engine.Authorize(read, object(), nil); err != nil || result.Checks[0].GrantPolicy != org {
 		t.Fatalf("org inheritance: %+v %v", result, err)
 	}
@@ -185,7 +192,7 @@ func TestReplacementCannotOmitBaselineOrUnresolvedState(t *testing.T) {
 	if writes.Load() != 1 {
 		t.Fatal("denied or incomplete plan reached mutation")
 	}
-	set(t, engine, object().Parent, "roles/storage.objectViewer", allowed)
+	set(t, engine, object().Parent, testViewerRole, allowed)
 	denied, err = perform(map[string]bool{conditionObjectExists: true})
 	if status.Code(err) != codes.PermissionDenied || denied.Checks[0].Allowed {
 		t.Fatal("additional check displaced baseline create permission")
@@ -202,9 +209,11 @@ func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 	}
 	_ = engine.MarkUnsupported(org, nil)
 	for _, policy := range []iam.Policy{
-		{Version: 3}, {Bindings: []iam.Binding{{Role: "roles/storage.objectViewer", Members: []string{allowed}, Condition: json.RawMessage(`{"expression":"true"}`)}}},
+		{Version: 2},
+		{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{allowed}, Condition: json.RawMessage(testBadCondition)}}},
+		{Version: 3, Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{allowed}, Condition: json.RawMessage(testBadCondition)}}},
 		{Bindings: []iam.Binding{{Role: "roles/unknown", Members: []string{allowed}}}},
-		{Bindings: []iam.Binding{{Role: "roles/storage.objectViewer", Members: []string{"group:unknown@local"}}}},
+		{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{"group:unknown@local"}}}},
 	} {
 		if _, err := engine.SetPolicy(object().Parent, policy); status.Code(err) != codes.Unimplemented {
 			t.Fatal(err)
@@ -227,7 +236,7 @@ func TestAnonymousPublicBindingsAndInvalidCredentials(t *testing.T) {
 	if result, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unauthenticated || result.Principal.Subject != "" {
 		t.Fatal("anonymous caller became administrator")
 	}
-	set(t, engine, object().Parent, "roles/storage.objectViewer", "allUsers")
+	set(t, engine, object().Parent, testViewerRole, "allUsers")
 	if _, err := engine.Authorize(read, object(), nil); err != nil {
 		t.Fatal("explicit public read failed:", err)
 	}
@@ -353,5 +362,42 @@ func TestBootstrapIsExplicitAndRejectsIncompleteHierarchy(t *testing.T) {
 	mustWriteFile(t, path, raw)
 	if _, _, err := iam.Load(path); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatal("accepted missing hierarchy:", err)
+	}
+}
+
+func TestConditionalBindingsFailClosedAndGrant(t *testing.T) {
+	engine, _ := setup(t)
+	read := call("storage.objects.get", fixture, testProject)
+	// A true expression grants; a false expression fails closed with a trace.
+	conditional := func(expression string) iam.Policy {
+		condition, _ := json.Marshal(map[string]string{"title": "test", "expression": expression}) //nolint:errchkjson // plain string map
+		return iam.Policy{Version: 3, Bindings: []iam.Binding{{
+			Role: testViewerRole, Members: []string{fixture},
+			Condition: condition,
+		}}}
+	}
+	// Remove the unconditional ancestor grant so only the conditional
+	// binding decides.
+	if _, err := engine.SetPolicy(projectA, iam.Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.SetPolicy(object().Parent, conditional(`"storage.objects.get" == "storage.objects.get"`)); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := engine.Authorize(read, object(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decision.Checks[0].Allowed {
+		t.Fatalf("matching condition denied: %+v", decision.Checks[0])
+	}
+	if len(decision.Checks[0].Conditions) == 0 {
+		t.Fatalf("no condition trace: %+v", decision.Checks[0])
+	}
+	if _, err := engine.SetPolicy(object().Parent, conditional(`"1" == "2"`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("unmatched condition did not deny: %v", err)
 	}
 }

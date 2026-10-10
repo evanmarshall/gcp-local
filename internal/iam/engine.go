@@ -30,6 +30,7 @@ type Check struct {
 	GrantPolicy string   `json:"grant_policy,omitempty"`
 	Role        string   `json:"role,omitempty"`
 	Member      string   `json:"member,omitempty"`
+	Conditions  []string `json:"conditions_evaluated,omitempty"`
 }
 type Decision struct {
 	ID        string            `json:"id"`
@@ -368,19 +369,39 @@ func (e *Engine) collectChecks(decision *Decision, permissions []string, ancesto
 	return denied
 }
 
-// matchBindings records the first binding that grants one permission at one policy.
+// matchBindings records the first binding that grants one permission at one
+// policy. A binding whose condition fails closed never grants.
 func (e *Engine) matchBindings(check *Check, policyName, permission string, principal gateway.Principal) {
-	for _, binding := range e.policies[policyName].policy.Bindings {
-		for _, member := range binding.Members {
-			matches := member == "allUsers" || (principal.State == gateway.Authenticated && (member == principal.Subject || member == "allAuthenticatedUsers"))
-			if matches && e.roles[binding.Role][permission] && !check.Allowed {
-				check.Allowed = true
-				check.GrantPolicy = policyName
-				check.Role = binding.Role
-				check.Member = member
+	stored := e.policies[policyName]
+	for index, binding := range stored.policy.Bindings {
+		member := firstMember(binding, principal)
+		if member == "" || !e.roles[binding.Role][permission] {
+			continue
+		}
+		if len(binding.Condition) > 0 {
+			verdict := stored.evaluateBinding(index)
+			check.Conditions = append(check.Conditions, verdict.Reason)
+			if !verdict.Allowed {
+				continue
 			}
 		}
+		if !check.Allowed {
+			check.Allowed = true
+			check.GrantPolicy = policyName
+			check.Role = binding.Role
+			check.Member = member
+		}
 	}
+}
+
+// firstMember returns the effective member of a binding for the principal.
+func firstMember(binding Binding, principal gateway.Principal) string {
+	for _, member := range binding.Members {
+		if member == "allUsers" || (principal.State == gateway.Authenticated && (member == principal.Subject || member == "allAuthenticatedUsers")) {
+			return member
+		}
+	}
+	return ""
 }
 
 func (e *Engine) ancestry(target Target) ([]state.Resource, error) {

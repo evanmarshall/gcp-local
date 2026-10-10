@@ -28,9 +28,10 @@ type unsupportedPolicy struct {
 }
 
 type storedPolicy struct {
-	policy Policy
-	owner  string
-	scope  state.Scope
+	policy     Policy
+	owner      string
+	scope      state.Scope
+	conditions []conditionGuard
 }
 
 func clonePolicy(p Policy) Policy {
@@ -60,15 +61,29 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	if !ok {
 		return Policy{}, status.Error(codes.NotFound, "Policy resource is not registered")
 	}
-	if policy.Version != 0 && policy.Version != 1 {
-		return Policy{}, status.Error(codes.Unimplemented, "Only unconditional version-1 allow policies are supported")
+	if policy.Version != 0 && policy.Version != 1 && policy.Version != 3 {
+		return Policy{}, status.Error(codes.Unimplemented, "Unsupported policy version")
+	}
+	if policy.Version != 3 {
+		for _, binding := range policy.Bindings {
+			if len(binding.Condition) > 0 {
+				return Policy{}, status.Error(codes.Unimplemented, "Bindings with conditions require policy version 3")
+			}
+		}
 	}
 	if len(policy.Bindings) > 1000 {
 		return Policy{}, status.Error(codes.InvalidArgument, "Policy has too many bindings")
 	}
+	var compiledConditions []conditionGuard
 	for _, binding := range policy.Bindings {
 		if len(binding.Condition) > 0 {
-			return Policy{}, status.Error(codes.Unimplemented, "IAM Conditions are unsupported")
+			compiled, compileErr := compileCondition(binding.Condition)
+			if compileErr != nil {
+				return Policy{}, status.Error(codes.Unimplemented, compileErr.Error())
+			}
+			compiledConditions = append(compiledConditions, conditionGuard{
+				bindingIndex: len(compiledConditions), condition: compiled,
+			})
 		}
 		if _, ok := e.roles[binding.Role]; !ok {
 			return Policy{}, status.Error(codes.Unimplemented, "Role is outside the pinned supported role set")
@@ -96,9 +111,13 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	}
 	e.revision++
 	policy = clonePolicy(policy)
-	policy.Version = 1
+	if policy.Version == 0 {
+		policy.Version = 1
+	}
 	policy.ETag = base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(e.revision, 10)))
-	e.policies[resource] = storedPolicy{policy: policy, owner: owner.Service, scope: owner.Scope}
+	e.policies[resource] = storedPolicy{
+		policy: policy, owner: owner.Service, scope: owner.Scope, conditions: compiledConditions,
+	}
 	return clonePolicy(policy), nil
 }
 
