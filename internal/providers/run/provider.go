@@ -20,15 +20,16 @@ import (
 
 // Provider owns the Cloud Run v2 control plane and its container lifecycle.
 type Provider struct {
-	index   *state.Index
-	tokens  *identity.IDTokens
-	baseURL string
-	hosts   map[string]hostEntry
-	hostMu  sync.RWMutex
-	engine  *iam.Engine
-	runtime Runtime
-	scopes  *state.Store[scopeState]
-	clock   func() time.Time
+	index    *state.Index
+	recordMu sync.RWMutex
+	tokens   *identity.IDTokens
+	baseURL  string
+	hosts    map[string]hostEntry
+	hostMu   sync.RWMutex
+	engine   *iam.Engine
+	runtime  Runtime
+	scopes   *state.Store[scopeState]
+	clock    func() time.Time
 }
 
 // errProviderShape rejects an incomplete provider construction.
@@ -232,6 +233,8 @@ func locationTarget(scope state.Scope) string {
 
 // serviceIDs returns the sorted service identifiers of one scope.
 func (p *Provider) serviceIDs(scope state.Scope) []string {
+	p.recordMu.RLock()
+	defer p.recordMu.RUnlock()
 	var names []string
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		for id := range s.services {
@@ -243,8 +246,11 @@ func (p *Provider) serviceIDs(scope state.Scope) []string {
 	return names
 }
 
-// serviceRecordLookUp returns the live record or a not-found response.
+// serviceRecordLookUp returns the live record or a not-found response. Callers
+// must hold the provider record lock while reading or mutating the record.
 func (p *Provider) serviceRecordLookUp(scope state.Scope, id string) (*serviceRecord, *gateway.RESTResponse, error) {
+	p.recordMu.RLock()
+	defer p.recordMu.RUnlock()
 	var record *serviceRecord
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		record = s.services[id]

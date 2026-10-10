@@ -438,6 +438,20 @@ func (p *Provider) operation(scope state.Scope, name string) *operationRecord {
 	return entry
 }
 
+// latestRevisionOf reads the newest revision of a service. Callers hold the
+// record lock.
+func (p *Provider) latestRevisionOf(scope state.Scope, id string) *revisionRecord {
+	var record *serviceRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		record = s.services[id]
+		return nil
+	})
+	if record == nil {
+		return nil
+	}
+	return latestRevision(record)
+}
+
 // readinessTimeout bounds how long a launched container has to answer its
 // first HTTP request before the launch operation fails.
 const readinessTimeout = 60 * time.Second
@@ -447,11 +461,9 @@ const readinessTimeout = 60 * time.Second
 func (p *Provider) watch(scope state.Scope, id, operationName string) {
 	go func() {
 		base := context.WithoutCancel(context.Background())
-		record, refused, err := p.serviceRecordLookUp(scope, id)
-		if err != nil || refused != nil {
-			return
-		}
-		revision := latestRevision(record)
+		p.recordMu.RLock()
+		revision := p.latestRevisionOf(scope, id)
+		p.recordMu.RUnlock()
 		if revision == nil || revision.Address == "" {
 			return
 		}
@@ -518,6 +530,8 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 	if templateErr != nil {
 		return nil, templateErr
 	}
+	p.recordMu.Lock()
+	defer p.recordMu.Unlock()
 	if body.Ingress != "" {
 		if ingressErr := validateIngress(body.Ingress); ingressErr != nil {
 			return nil, ingressErr
@@ -543,6 +557,8 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 
 // delete stops every container, removes the service, and completes immediately.
 func (p *Provider) delete(call gateway.Call, scope state.Scope, record *serviceRecord) (*gateway.RESTResponse, error) {
+	p.recordMu.Lock()
+	defer p.recordMu.Unlock()
 	name := record.Name
 	for _, revision := range record.Revisions {
 		_ = p.runtime.Stop(call.Context, revision.Container)
@@ -586,6 +602,8 @@ func (p *Provider) setIam(request *gateway.RESTRequest, scope state.Scope, recor
 
 // revisionsList returns the service's revision collection.
 func (p *Provider) revisionsList(scope state.Scope, record *serviceRecord) (*gateway.RESTResponse, error) {
+	p.recordMu.RLock()
+	defer p.recordMu.RUnlock()
 	revisions := sortedRevisions(record)
 	items := make([]any, 0, len(revisions))
 	for _, revision := range revisions {
@@ -596,6 +614,8 @@ func (p *Provider) revisionsList(scope state.Scope, record *serviceRecord) (*gat
 
 // revisionGet returns one revision document.
 func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	p.recordMu.RLock()
+	defer p.recordMu.RUnlock()
 	record, refused, err := p.serviceRecordLookUp(scope, request.Path["service"])
 	if err != nil || refused != nil {
 		return refused, err
@@ -609,6 +629,8 @@ func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope) 
 
 // revisionDelete removes one revision that serves no traffic.
 func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	p.recordMu.Lock()
+	defer p.recordMu.Unlock()
 	id := request.Path["revision"]
 	record, refused, err := p.serviceRecordLookUp(scope, request.Path["service"])
 	if err != nil || refused != nil {
