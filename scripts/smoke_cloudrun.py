@@ -8,6 +8,8 @@ offline validation suite.
 
 import json
 import os
+import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -85,7 +87,29 @@ def build_image(tag: str) -> str:
     return tag
 
 
-def start_core(binary: Path) -> subprocess.Popen:
+def write_configs() -> Path:
+    """Write an owner-only IAM configuration and return its directory."""
+    directory = Path(tempfile.mkdtemp())
+    directory.chmod(stat.S_IRWXU)
+    project = "demo-run"
+    resource = "//cloudresourcemanager.googleapis.com/projects/" + project
+    principal = "serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"
+    iam = {
+        "resources": [{"name": resource, "service": "resourcemanager", "kind": "project",
+                       "number": "000000000001",
+                       "scope": {"project": project, "location": "global"}}],
+        "policies": {resource: {"bindings": [{"role": "roles/run.admin", "members": [principal]}]}},
+        "service_accounts": [{"project": project,
+                              "email": principal,
+                              "unique_id": secrets.token_hex(10)}],
+    }
+    path = directory / "iam.json"
+    path.write_text(json.dumps(iam))
+    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return path
+
+
+def start_core(binary: Path, iam_path: Path) -> subprocess.Popen:
     """Start the core with the run provider and Docker runtime."""
     process = subprocess.Popen(
         [
@@ -94,6 +118,8 @@ def start_core(binary: Path) -> subprocess.Popen:
             "127.0.0.1:" + str(SERVE_SOCKET),
             "--grpc-listen",
             "127.0.0.1:" + str(SERVE_SOCKET + 1),
+            "--iam-config",
+            str(iam_path),
             "--services",
             "run",
             "--run-docker-socket",
@@ -188,7 +214,8 @@ def main() -> int:
     )
     build_image(IMAGE)
     before = subprocess.check_output([DOCKER, "ps", "-aq"], text=True)
-    core = start_core(binary)
+    iam_path = write_configs()
+    core = start_core(binary, iam_path)
     try:
         create_and_grant()
         update_and_delete(before)
