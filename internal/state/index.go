@@ -41,6 +41,7 @@ func (i *Index) Put(owner string, resource Resource) error {
 	i.resources[resource.Name] = resource
 	return nil
 }
+
 // validatePut applies the shape rules that do not depend on index state.
 // Global hierarchy nodes are the only entries allowed outside a project scope.
 func validatePut(owner string, resource Resource) error {
