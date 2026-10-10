@@ -44,16 +44,16 @@ func (p *Provider) executeQueue(call gateway.Call, request *gateway.RESTRequest,
 		return p.listQueues(scope)
 	case methodQueuesDelete:
 		return p.deleteQueue(request, scope)
+	case methodQueuesGetIam:
+		return p.getQueueIam(scope, request)
+	case methodQueuesSetIam:
+		return p.setQueueIam(request, scope)
 	case methodQueuesPause:
 		return p.setQueueState(request, scope, "PAUSED")
 	case methodQueuesResume:
 		return p.setQueueState(request, scope, "RUNNING")
 	case methodQueuesPurge:
 		return p.purgeQueue(request, scope)
-	case methodQueuesGetIam:
-		return p.getQueueIam(scope, request)
-	case methodQueuesSetIam:
-		return p.setQueueIam(request, scope)
 	default:
 		return nil, gap("this method is not implemented")
 	}
