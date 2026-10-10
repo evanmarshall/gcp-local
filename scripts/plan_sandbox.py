@@ -21,7 +21,15 @@ IDENTITIES = {
 }
 
 
-def plan(project, project_number, setup_account, repository, repository_id, owner_id):
+def plan(
+    project: str,
+    project_number: str,
+    setup_account: str,
+    repository: str,
+    repository_id: str,
+    owner_id: str,
+) -> list[str]:
+    """Return the gcloud sequence that provisions a dedicated sandbox project."""
     for value, pattern in (
         (project, r"[a-z][a-z0-9-]{4,28}[a-z0-9]"),
         (project_number, r"[0-9]{6,20}"),
@@ -56,7 +64,8 @@ def plan(project, project_number, setup_account, repository, repository_id, owne
     )
     steps = []
 
-    def add(label, command, check=None, expected=None):
+    def add(label: str, command: str, check: str | None = None, expected: str | None = None) -> None:
+        """Record one command and the output it must produce."""
         steps.append(
             {
                 "description": label,
@@ -175,7 +184,8 @@ def plan(project, project_number, setup_account, repository, repository_id, owne
     }
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
+    """Print or execute the sandbox provisioning plan."""
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in (
         "project",

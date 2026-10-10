@@ -17,7 +17,8 @@ UNSHARE = shutil.which("unshare") or "unshare"
 IP = shutil.which("ip") or "ip"
 
 
-def assert_isolated():
+def assert_isolated() -> None:
+    """Refuse to run on a machine with real GCP credentials present."""
     if sys.platform != "linux" or {name for _, name in __import__("socket").if_nameindex()} != {
         "lo"
     }:
@@ -26,7 +27,8 @@ def assert_isolated():
         )
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
+    """Run the requested validation in a clean isolated environment."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--server-json", help="JSON argv for a provider started inside the same namespace"
@@ -94,7 +96,8 @@ def main(argv=None):
     env["GCP_LOCAL_ISOLATED"] = "1"
     children = []
 
-    def stop_all():
+    def stop_all() -> None:
+        """Stop every process this script started."""
         for child in reversed(children):
             try:
                 os.killpg(child.pid, signal.SIGTERM)
@@ -107,7 +110,8 @@ def main(argv=None):
                 os.killpg(child.pid, signal.SIGKILL)
                 child.wait()
 
-    def interrupted(signum, frame):
+    def interrupted(signum: int, frame: object) -> None:
+        """Handle a termination signal by stopping the isolation."""
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, interrupted)

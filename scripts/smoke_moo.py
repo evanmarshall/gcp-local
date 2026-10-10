@@ -13,7 +13,8 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(args, cwd=ROOT, timeout=120):
+def run(args: list[str], cwd: Path = ROOT, timeout: int = 120) -> str:
+    """Run a command inside the guest machine."""
     result = subprocess.run(
         args, cwd=cwd, text=True, capture_output=True, timeout=timeout, check=False
     )
@@ -22,7 +23,8 @@ def run(args, cwd=ROOT, timeout=120):
     return result.stdout
 
 
-def check_http(port, expected):
+def check_http(port: int, expected: bool) -> None:
+    """Require one HTTP probe to succeed and one to be refused."""
     opener = build_opener(ProxyHandler({}))
     deadline = time.monotonic() + 15
     while True:
@@ -38,7 +40,8 @@ def check_http(port, expected):
             time.sleep(0.25)
 
 
-def main():
+def main() -> int:
+    """Exercise the moo machine packaging end to end."""
     run(["moo", "doctor"])
     token = uuid4().hex[:10]
     started = time.monotonic()

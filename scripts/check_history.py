@@ -8,24 +8,28 @@ import sys
 GIT = shutil.which("git") or "git"
 
 
-def git(*args):
+def git(*args: str) -> str:
+    """Run git against this repository."""
     result = subprocess.run([GIT, *args], capture_output=True, text=True, check=False)
     if result.returncode:
         raise ValueError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()
 
 
-def check_linear(tip):
+def check_linear(tip: str) -> None:
+    """Require a linear, merge-free first-parent history."""
     git("rev-parse", "--verify", f"{tip}^{{commit}}")
     if git("rev-list", "--max-count=1", "--min-parents=2", tip):
         raise ValueError("Merge commits are not allowed; integrate with git merge --ff-only.")
 
 
-def is_zero(oid):
+def is_zero(oid: str) -> bool:
+    """Report whether an oid is the all-zero object id."""
     return bool(oid) and set(oid) == {"0"}
 
 
-def check_push(lines):
+def check_push(lines: list[str]) -> None:
+    """Validate the commits that a push would publish."""
     for line in lines:
         fields = line.split()
         if len(fields) != 4:
@@ -53,14 +57,20 @@ def check_push(lines):
                 raise ValueError("main must advance by fast-forward; fetch and update your branch.")
 
 
-def main():
+def check_cli(arguments: list[str]) -> None:
+    """Dispatch the requested history validation mode."""
+    if arguments == ["--pre-push"]:
+        check_push(sys.stdin)
+    elif len(arguments) == 2:
+        check_linear(arguments[1])
+    else:
+        raise ValueError("Usage: check_history.py REVISION | --pre-push")
+
+
+def main() -> int:
+    """Validate the pending push history of the current branch."""
     try:
-        if sys.argv[1:] == ["--pre-push"]:
-            check_push(sys.stdin)
-        elif len(sys.argv) == 2:
-            check_linear(sys.argv[1])
-        else:
-            raise ValueError("Usage: check_history.py REVISION | --pre-push")
+        check_cli(sys.argv[1:])
     except (ValueError, OSError) as exc:
         print(f"History check failed: {exc}", file=sys.stderr)
         return 1

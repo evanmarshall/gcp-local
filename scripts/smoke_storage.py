@@ -21,12 +21,14 @@ from google.auth.transport.requests import AuthorizedSession, Request
 from google.cloud import storage
 
 
-def private_json(path, value):
+def private_json(path: Path, value: object) -> None:
+    """Write a value as private JSON for a synthetic credential file."""
     path.write_text(json.dumps(value))
     path.chmod(0o600)
 
 
-def main():
+def main() -> int:
+    """Exercise the storage runner end to end against the local emulator."""
     assert sys.platform == "linux" and os.environ.get("GCP_LOCAL_ISOLATED") == "1"
     assert {name for _, name in socket.if_nameindex()} == {"lo"}
     root = Path(__file__).resolve().parents[1]

@@ -26,7 +26,8 @@ PLATFORMS = {"linux": "linux", "darwin": "darwin"}
 ARCHITECTURES = {"x86_64": "amd64", "amd64": "amd64", "arm64": "arm64", "aarch64": "arm64"}
 
 
-def platform_key():
+def platform_key() -> str:
+    """Return the platform identifier used in the pinned manifest."""
     system = PLATFORMS.get(platform.system().lower())
     machine = ARCHITECTURES.get(platform.machine().lower())
     if not system or not machine:
@@ -34,9 +35,11 @@ def platform_key():
     return f"{system}-{machine}"
 
 
-def install_golangci_lint(config, key):
+def install_golangci_lint(config: dict[str, object], key: str) -> None:
+    """Download and verify the pinned golangci-lint binary."""
     target = DESTINATION / "golangci-lint"
-    archive = config["archive"].format(os=key.split("-")[0], arch=key.split("-")[1])
+    os_name, arch = key.split("-", 1)
+    archive = config["archive"].format(os=os_name, arch=arch)
     url = f"{config['release_url']}/{archive}"
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / archive
@@ -53,7 +56,8 @@ def install_golangci_lint(config, key):
     print(f"golangci-lint {config['version']}")
 
 
-def install_go_module(name, config):
+def install_go_module(name: str, config: dict[str, object]) -> None:
+    """Install a pinned Go module tool into the quality directory."""
     environment = dict(os.environ, GOBIN=str(DESTINATION))
     subprocess.run(
         [str(GO), "install", f"{config['module']}@{config['version']}"],
@@ -64,7 +68,8 @@ def install_go_module(name, config):
     print(f"{name} {config['version']}")
 
 
-def main():
+def main() -> int:
+    """Install every pinned quality tool with verified checksums."""
     config = json.loads((ROOT / "toolchains/quality.json").read_text())
     DESTINATION.mkdir(parents=True, exist_ok=True)
     if not GO.is_file():
@@ -89,4 +94,4 @@ if __name__ == "__main__":
         urllib.error.URLError,
     ) as error:
         print(str(error), file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from error
