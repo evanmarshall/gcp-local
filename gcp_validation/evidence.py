@@ -12,39 +12,44 @@ from uuid import uuid4
 from localstack_snapshot.snapshots import SnapshotAssertionError, SnapshotSession
 
 
-class Unverified(AssertionError):
+class Unverified(AssertionError):  # noqa: N818 -- domain vocabulary, not a defect type
     """Required cloud evidence is missing or unsuitable."""
 
 
-class Divergence(AssertionError):
+class Divergence(AssertionError):  # noqa: N818 -- domain vocabulary, not a defect type
     """An observation differs from the reviewed baseline."""
 
 
-class Unsupported(AssertionError):
+class Unsupported(AssertionError):  # noqa: N818 -- domain vocabulary, not a defect type
     """The tested behavior is explicitly outside current support."""
 
 
-class Inconclusive(AssertionError):
+class Inconclusive(AssertionError):  # noqa: N818 -- domain vocabulary, not a defect type
     """The run could not establish the behavior, for example due to propagation."""
 
 
-def now():
+def now() -> str:
+    """Return the current UTC time as an ISO string for provenance records."""
     return datetime.now(UTC).isoformat()
 
 
-def sha256(path):
+def sha256(path: Path) -> str:
+    """Digest a file for provenance binding."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 @dataclass(frozen=True)
 class Scenario:
+    """A cloud conformance scenario's identity and recorded contract revision."""
+
     id: str
     service: str
     transport: str
     revision: str
-    versions: dict = field(default_factory=dict)
+    versions: dict[str, str] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """Reject malformed scenario metadata before any recording starts."""
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", self.id):
             raise ValueError("Scenario IDs must be lowercase hyphenated names")
         if not all((self.service, self.transport, self.revision)):
@@ -75,39 +80,86 @@ SECRET_KEYS = {
 }
 
 
-def check_observation(value):
+def load_provenance(baseline: Path) -> dict[str, object]:
+    """Read a baseline's provenance record, converting any defect to Unverified."""
+    try:
+        manifest = json.loads((baseline / "provenance.json").read_text())
+    except (OSError, ValueError):
+        raise Unverified("Missing or unreadable baseline provenance") from None
+    if not isinstance(manifest, dict):
+        raise Unverified("Baseline provenance is not a mapping")
+    recorded_at = manifest.get("recorded_at")
+    stamp = None
+    if isinstance(recorded_at, str):
+        try:
+            stamp = datetime.fromisoformat(recorded_at)
+        except ValueError:
+            stamp = None
+    if stamp is None or stamp.tzinfo is None:
+        raise Unverified("Baseline recording date is missing or lacks a timezone")
+    try:
+        Scenario(**manifest["scenario"])
+    except (TypeError, ValueError, KeyError):
+        raise Unverified("Baseline provenance does not describe a scenario") from None
+    return manifest
+
+
+def check_observation(value: object) -> None:
     """Reject common secret fields before they enter snapshot memory or disk.
 
     Scenarios must select public response fields; this is not a raw HTTP scrubber.
     """
     if isinstance(value, dict):
-        for key, child in value.items():
-            if not isinstance(key, str):
-                raise ValueError("Observation keys must be strings")
-            if re.sub(r"[^a-z]", "", key.lower()) in SECRET_KEYS:
-                raise ValueError("Observation contains a credential-bearing field")
-            check_observation(child)
+        check_mapping(value)
     elif isinstance(value, list):
         for child in value:
             check_observation(child)
     elif isinstance(value, str):
-        if re.search(r"(?i)\bBearer\s+\S+|-----BEGIN .*PRIVATE KEY-----", value):
-            raise ValueError("Observation contains credential material")
-        if value.lstrip().startswith(("{", "[")):
-            try:
-                decoded = json.loads(value)
-            except ValueError:
-                pass
-            else:
-                # The upstream snapshot library also parses JSON-valued strings.
-                check_observation(decoded)
+        check_text(value)
     elif value is not None and not isinstance(value, (bool, int, float)):
+        # JSON-shaped, not a Python object: ValueError, not TypeError.
         raise ValueError("Observations must contain JSON values, not SDK/HTTP objects")
     json.dumps(value, allow_nan=False)
 
 
+def check_mapping(value: dict[str, object]) -> None:
+    """Reject secret-bearing mapping keys and recurse into the values."""
+    for key, child in value.items():
+        if not isinstance(key, str):
+            # JSON keys are strings; a non-string key is a caller type error.
+            raise TypeError("Observation keys must be strings")
+        if re.sub(r"[^a-z]", "", key.lower()) in SECRET_KEYS:
+            raise ValueError("Observation contains a credential-bearing field")
+        check_observation(child)
+
+
+def check_text(value: str) -> None:
+    """Reject credential material and re-check embedded JSON strings."""
+    if re.search(r"(?i)\bBearer\s+\S+|-----BEGIN .*PRIVATE KEY-----", value):
+        raise ValueError("Observation contains credential material")
+    if not value.lstrip().startswith(("{", "[")):
+        return
+    try:
+        decoded = json.loads(value)
+    except ValueError:
+        return
+    # The upstream snapshot library also parses JSON-valued strings.
+    check_observation(decoded)
+
+
 class SnapshotCase:
-    def __init__(self, scenario, mode, baseline_dir, candidate_dir, *, source="gcp"):
+    """One scenario's evidence session against a recorded baseline directory."""
+
+    def __init__(
+        self,
+        scenario: Scenario,
+        mode: str,
+        baseline_dir: Path,
+        candidate_dir: Path,
+        *,
+        source: str = "gcp",
+    ) -> None:
+        """Bind one scenario to its baseline directory and comparison mode."""
         self.scenario, self.mode, self.source = scenario, mode, source
         self.candidate_dir = Path(candidate_dir)
         self.observations = {}
@@ -120,16 +172,8 @@ class SnapshotCase:
         if source not in {"gcp", "synthetic"}:
             raise ValueError("Unknown evidence source")
         if mode != "record":
-            try:
-                manifest = json.loads((self.baseline / "provenance.json").read_text())
-                if not isinstance(manifest, dict):
-                    raise ValueError("Invalid provenance mapping")
-                snapshot_hash = sha256(self.baseline / "case.snapshot.json")
-                if datetime.fromisoformat(manifest["recorded_at"]).tzinfo is None:
-                    raise ValueError("Recording date must include its timezone")
-                Scenario(**manifest["scenario"])
-            except (OSError, ValueError, KeyError, TypeError):
-                raise Unverified("Missing or invalid baseline evidence") from None
+            snapshot_hash = sha256(self.baseline / "case.snapshot.json")
+            manifest = load_provenance(self.baseline)
             expected = asdict(scenario)
             # SDK/provider/backend versions can differ locally: report both. The
             # scenario revision binds the behavior contract, not emulator versions.
@@ -150,7 +194,8 @@ class SnapshotCase:
             self.manifest = manifest
             self.last_cloud_validation = manifest["recorded_at"] if source == "gcp" else None
 
-    def match(self, label, observation):
+    def match(self, label: str, observation: object) -> None:
+        """Record one observation under a fresh, hyphenated label."""
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", label):
             raise ValueError("Snapshot labels must be lowercase hyphenated names")
         if label in self.observations:
@@ -158,7 +203,7 @@ class SnapshotCase:
         check_observation(observation)
         self.observations[label] = json.loads(json.dumps(observation, allow_nan=False))
 
-    def finish(self):
+    def finish(self) -> Path | None:
         """Invoke only after all test and cleanup phases succeeded."""
         check_observation(self.context)
         if not self.observations:
@@ -181,7 +226,7 @@ class SnapshotCase:
         for label, observation in self.observations.items():
             session.match(label, observation)
         try:
-            session._assert_all()
+            session._assert_all()  # noqa: SLF001 -- the pinned snapshot API is private by design
         except SnapshotAssertionError as exc:
             changed = ", ".join(sorted(result.key for result in exc.result if not result))
             raise Divergence(f"Snapshot mismatch in: {changed}") from None
@@ -191,7 +236,7 @@ class SnapshotCase:
             return None
         # The upstream pytest plugin persists on teardown even after failures.
         # The GCP plugin calls us only after successful cleanup, without that plugin.
-        session._persist_state()
+        session._persist_state()  # noqa: SLF001 -- the pinned snapshot API is private by design
         persisted = json.loads((directory / "case.snapshot.json").read_text())
         if persisted[self.scenario.id]["recorded-content"] != session.observed_state:
             raise OSError("Snapshot persistence failed")
