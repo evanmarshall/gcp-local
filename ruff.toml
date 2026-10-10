@@ -39,7 +39,8 @@ ignore = [
 # The skill scripts and the validation harness are executed as standalone CLIs.
 # Smoke scripts assert their own invariants: the assertion failure is the signal.
 # They invoke pinned executables (git, docker, terraform) by resolved path on purpose.
-"scripts/**" = ["INP", "T20", "S101", "S603"]
+# PT017 does not apply: these are standalone programs, not pytest cases.
+"scripts/**" = ["INP", "T20", "S101", "S603", "PT017"]
 "skills/**" = ["INP", "T20"]
 "examples/**" = ["INP", "T20"]
 "conftest.py" = ["INP"]

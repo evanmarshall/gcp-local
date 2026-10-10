@@ -22,7 +22,7 @@ def main() -> int:
     ):
         print("Pinned Pub/Sub emulator is already installed.")
         return
-    with urlopen(manifest["url"], timeout=60) as response:
+    with urlopen(manifest["url"], timeout=60) as response:  # noqa: S310 -- pinned https release URL
         raw = response.read(manifest["size"] + 1)
     if len(raw) != manifest["size"] or hashlib.sha256(raw).hexdigest() != manifest["sha256"]:
         raise SystemExit("Pub/Sub emulator archive failed size/checksum verification")

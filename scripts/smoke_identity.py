@@ -74,14 +74,14 @@ def main() -> int:
                 "subject_token": subject,
                 "scope": "https://www.googleapis.com/auth/cloud-platform",
             }
-            request = Request(
+            request = Request(  # noqa: S310 -- loopback endpoint built above
                 endpoint + "/v1/token",
                 data=urlencode(form).encode(),
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
             with client.open(request, timeout=5) as response:
                 access = json.load(response)["access_token"]
-            request = Request(
+            request = Request(  # noqa: S310 -- loopback endpoint built above
                 endpoint + "/_local/identity", headers={"Authorization": "Bearer " + access}
             )
             with client.open(request, timeout=5) as response:
@@ -97,7 +97,8 @@ def main() -> int:
             process.terminate()
             assert process.wait(timeout=12) == 0
             reader.join(timeout=2)
-            assert subject not in "".join(lines) and access not in "".join(lines)
+            assert subject not in "".join(lines)
+            assert access not in "".join(lines)
         finally:
             if process.poll() is None:
                 process.kill()

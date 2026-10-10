@@ -28,7 +28,8 @@ def main() -> int:
             client = build_opener(ProxyHandler({}))
             with client.open(endpoint + "/_local/health", timeout=5) as response:
                 body = json.load(response)
-                assert response.status == 200 and body["ready"] is True, body
+                assert response.status == 200
+                assert body["ready"] is True
                 assert body["providers"] == [], body
             try:
                 client.open(endpoint + "/storage/v1/b", timeout=5)

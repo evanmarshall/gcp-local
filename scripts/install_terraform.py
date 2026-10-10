@@ -38,7 +38,7 @@ def main() -> int:
                 and hashlib.sha256(executable.read_bytes()).hexdigest() == saved["binary_sha256"]
             ):
                 continue
-        with urlopen(archive["url"], timeout=60) as response:
+        with urlopen(archive["url"], timeout=60) as response:  # noqa: S310 -- pinned https release URL
             data = response.read(300 * 1024 * 1024 + 1)
         if len(data) > 300 * 1024 * 1024 or hashlib.sha256(data).hexdigest() != archive["sha256"]:
             raise SystemExit("Terraform archive failed size/checksum verification")
