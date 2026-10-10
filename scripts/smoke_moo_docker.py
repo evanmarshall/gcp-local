@@ -134,8 +134,9 @@ def main() -> int:
                             "security_opt": ["no-new-privileges:true"],
                             "mem_limit": "256m",
                             "pids_limit": 64,
-                            "tmpfs": [  # noqa: S108 -- in-container tmpfs mount, not a host path
-                                "/tmp:rw,noexec,nosuid,size=67108864,mode=1777"
+                            "tmpfs": [
+                                # in-container tmpfs mount, not a host path
+                                "/tmp:rw,noexec,nosuid,size=67108864,mode=1777",  # noqa: S108
                             ],
                             "volumes": [str(config) + ":/config:ro"],
                             "command": [
