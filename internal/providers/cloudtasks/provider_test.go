@@ -21,6 +21,7 @@ const (
 	testLocation = "us-central1"
 	testQueue    = "workflow"
 	testKeyURL   = "url"
+	keyName      = "name"
 	testKeyBody  = "body"
 )
 
@@ -83,7 +84,7 @@ var basePrefix = "/v2beta3/projects/" + testProject + "/locations/" + testLocati
 func TestQueueLifecycleAndPurge(t *testing.T) {
 	h := newHarness(t)
 	recorder := h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{
-		"name": "projects/" + testProject + "/locations/" + testLocation + "/queues/" + testQueue,
+		keyName: "projects/" + testProject + "/locations/" + testLocation + "/queues/" + testQueue,
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("queue create status = %d body %s", recorder.Code, recorder.Body.String())
