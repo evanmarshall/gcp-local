@@ -230,7 +230,7 @@ func TestReachabilityDistinguishesVerdicts(t *testing.T) {
 		return verdict
 	}
 	verdict := analyze("10.0.0.5", "10.0.0.9", testTCP, 443)
-	if verdict.Result != "reachable" || len(verdict.Trace) != 1 {
+	if verdict.Result != verdictReachable || len(verdict.Trace) != 1 {
 		t.Fatalf("permitted flow = %+v", verdict)
 	}
 	verdict = analyze("10.0.0.7", "10.0.0.9", testTCP, 80)
@@ -390,7 +390,7 @@ func TestEgressRuleAllowsUnrestricted(t *testing.T) {
 		testAllowed: []any{map[string]any{keyIPProto: "all"}},
 	})
 	verdict := h.analyzeFlow("10.0.0.5", "10.0.0.9", testTCP, 443)
-	if verdict.Result != "reachable" {
+	if verdict.Result != verdictReachable {
 		t.Fatalf("egress-allowed verdict = %+v", verdict)
 	}
 }
@@ -578,7 +578,7 @@ func TestAnalyzerEvaluatesNATEgress(t *testing.T) {
 		keyNats: []any{map[string]any{keyName: "nat-1", keySourceSubnets: []any{testSubnetOne}}},
 	})
 	verdict := h.analyzeFlow("10.0.1.5", "203.0.113.9", testTCP, 443)
-	if verdict.Result != "reachable" || len(verdict.Trace) != 1 {
+	if verdict.Result != verdictReachable || len(verdict.Trace) != 1 {
 		t.Fatalf("NAT egress verdict = %+v", verdict)
 	}
 	if !strings.Contains(verdict.Trace[0], "nat/nat-1") {

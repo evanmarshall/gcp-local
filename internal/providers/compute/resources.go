@@ -15,8 +15,6 @@ import (
 // execute dispatches one authorized method.
 func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
-	case methodConnectivityRun, methodConnectivityCreate, methodConnectivityGet, methodConnectivityList, methodConnectivityDelete:
-		return p.executeConnectivity(call, request, scope)
 	case methodNetworksCreate, methodNetworksGet, methodNetworksList, methodNetworksDelete,
 		methodNetworksAddPeering, methodNetworksRemovePeering:
 		return p.executeNetwork(call, request, scope)
@@ -28,6 +26,16 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.executeRoute(call, request, scope)
 	case methodRoutersCreate, methodRoutersGet, methodRoutersList, methodRoutersDelete:
 		return p.executeRouters(call, request, scope)
+	default:
+		return p.executeAnalysis(call, request, scope)
+	}
+}
+
+// executeAnalysis handles the analyzer and long-running-operation surfaces.
+func (p *Provider) executeAnalysis(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	switch call.Method {
+	case methodConnectivityRun, methodConnectivityCreate, methodConnectivityGet, methodConnectivityList, methodConnectivityDelete:
+		return p.executeConnectivity(call, request, scope)
 	case methodOperationsGet:
 		return p.operationGet(request, scope, "global")
 	case methodRegionOperationsGet:

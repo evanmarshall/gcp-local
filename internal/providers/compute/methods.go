@@ -281,15 +281,40 @@ func (p *Provider) listSubnetworks(scope state.Scope) (*gateway.RESTResponse, er
 
 // deleteSubnetwork removes one subnetwork.
 func (p *Provider) deleteSubnetwork(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	project, name, region := scope.Project, request.Path["subnetwork"], request.Path["region"]
+	return p.removeRegionResource(request, scope, "subnetworks", kindSubnetwork,
+		func(s *scopeState, name string) { delete(s.subnetworks, name) },
+		func(s *scopeState, name string) bool { return s.subnetworks[name] != nil },
+	)
+}
+
+// removeRegionResource deletes one regional resource, unregisters it, and
+// returns the delete operation. The closures are per kind because the scope
+// state maps differ.
+func (p *Provider) removeRegionResource(request *gateway.RESTRequest, scope state.Scope, plural, kind string,
+	remove func(*scopeState, string),
+	exists func(*scopeState, string) bool,
+) (*gateway.RESTResponse, error) {
+	project, name, region := scope.Project, request.Path[requestPath(plural)], request.Path["region"]
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if s.subnetworks[name] != nil {
-			delete(s.subnetworks, name)
+		if exists(s, name) {
+			remove(s, name)
 		}
 		return nil
 	})
-	_ = p.index.Remove(serviceName, scope, regionalName(project, region, kindSubnetwork, name))
-	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, "subnetworks", name))
+	_ = p.index.Remove(serviceName, scope, regionalName(project, region, kind, name))
+	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, plural, name))
+}
+
+// requestPath maps a resource plural to its path segment name.
+func requestPath(plural string) string {
+	switch plural {
+	case "routers":
+		return "router"
+	case "subnetworks":
+		return "subnetwork"
+	default:
+		return strings.TrimSuffix(plural, "s")
+	}
 }
 
 // networkName strips a full network self-link or name into the plain name.
@@ -603,34 +628,43 @@ func (p *Provider) parseNATs(raw any, scope state.Scope) ([]natRecord, error) {
 	}
 	nats := make([]natRecord, 0, len(items))
 	for _, item := range items {
-		gateway, ok := item.(map[string]any)
-		if !ok {
-			return nil, statusInvalid("Invalid NAT gateway entry")
+		nat, err := p.parseNAT(item, scope)
+		if err != nil {
+			return nil, err
 		}
-		name := textOf(gateway["name"])
-		if name == "" {
-			return nil, statusInvalid("A NAT gateway requires a name")
-		}
-		ranges, ok := gateway["sourceSubnetworkIpRanges"].([]any)
-		if !ok || len(ranges) == 0 {
-			return nil, statusInvalid("A NAT gateway requires sourceSubnetworkIpRanges")
-		}
-		subnets := make([]string, 0, len(ranges))
-		for _, value := range ranges {
-			subnet := textOf(value)
-			if subnet == allSubnetworks {
-				subnets = append(subnets, allSubnetworks)
-				continue
-			}
-			subnet = subnetName(subnet)
-			if !p.subnetworkExists(scope, subnet) {
-				return nil, missingReference()
-			}
-			subnets = append(subnets, subnet)
-		}
-		nats = append(nats, natRecord{Name: name, SourceSubnetworks: subnets})
+		nats = append(nats, nat)
 	}
 	return nats, nil
+}
+
+// parseNAT validates one NAT gateway entry of a router body.
+func (p *Provider) parseNAT(raw any, scope state.Scope) (natRecord, error) {
+	gateway, ok := raw.(map[string]any)
+	if !ok {
+		return natRecord{}, statusInvalid("Invalid NAT gateway entry")
+	}
+	name := textOf(gateway["name"])
+	if name == "" {
+		return natRecord{}, statusInvalid("A NAT gateway requires a name")
+	}
+	ranges, ok := gateway["sourceSubnetworkIpRanges"].([]any)
+	if !ok || len(ranges) == 0 {
+		return natRecord{}, statusInvalid("A NAT gateway requires sourceSubnetworkIpRanges")
+	}
+	subnets := make([]string, 0, len(ranges))
+	for _, value := range ranges {
+		subnet := textOf(value)
+		if subnet == allSubnetworks {
+			subnets = append(subnets, allSubnetworks)
+			continue
+		}
+		subnet = subnetName(subnet)
+		if !p.subnetworkExists(scope, subnet) {
+			return natRecord{}, missingReference()
+		}
+		subnets = append(subnets, subnet)
+	}
+	return natRecord{Name: name, SourceSubnetworks: subnets}, nil
 }
 
 // subnetName strips a subnetwork self-link or name into the plain name.
@@ -673,13 +707,8 @@ func (p *Provider) listRouters(scope state.Scope) (*gateway.RESTResponse, error)
 
 // deleteRouter removes one router.
 func (p *Provider) deleteRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	project, name, region := scope.Project, request.Path["router"], request.Path["region"]
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if s.routers[name] != nil {
-			delete(s.routers, name)
-		}
-		return nil
-	})
-	_ = p.index.Remove(serviceName, scope, regionalName(project, region, kindRouter, name))
-	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, "routers", name))
+	return p.removeRegionResource(request, scope, "routers", kindRouter,
+		func(s *scopeState, name string) { delete(s.routers, name) },
+		func(s *scopeState, name string) bool { return s.routers[name] != nil },
+	)
 }
