@@ -8,6 +8,7 @@ const (
 	kindSubnetwork = "subnetwork"
 	kindFirewall   = "firewall"
 	kindRoute      = "route"
+	kindRouter     = "router"
 	kindLocation   = "location"
 )
 
@@ -68,6 +69,22 @@ type routeRecord struct {
 	CreatedAt      time.Time
 }
 
+// natRecord is one Cloud NAT gateway configured on a router.
+type natRecord struct {
+	Name              string
+	SourceSubnetworks []string
+}
+
+// routerRecord is one stored Cloud Router with its NAT gateways.
+type routerRecord struct {
+	Name       string
+	Region     string
+	Network    string
+	NATs       []natRecord
+	Generation int64
+	CreatedAt  time.Time
+}
+
 // scopeState is one project/location slice of provider state.
 type scopeState struct {
 	connectivity map[string]*namedTest
@@ -75,6 +92,7 @@ type scopeState struct {
 	subnetworks  map[string]*subnetworkRecord
 	firewalls    map[string]*firewallRecord
 	routes       map[string]*routeRecord
+	routers      map[string]*routerRecord
 	operations   map[string]*operationRecord
 	generation   int64
 }
@@ -84,6 +102,7 @@ func newScopeState() scopeState {
 		connectivity: map[string]*namedTest{},
 		networks:     map[string]*networkRecord{}, subnetworks: map[string]*subnetworkRecord{},
 		firewalls: map[string]*firewallRecord{}, routes: map[string]*routeRecord{},
+		routers:    map[string]*routerRecord{},
 		operations: map[string]*operationRecord{},
 	}
 }
@@ -94,6 +113,7 @@ func (s *scopeState) reset() {
 	s.subnetworks = map[string]*subnetworkRecord{}
 	s.firewalls = map[string]*firewallRecord{}
 	s.routes = map[string]*routeRecord{}
+	s.routers = map[string]*routerRecord{}
 	s.operations = map[string]*operationRecord{}
 }
 

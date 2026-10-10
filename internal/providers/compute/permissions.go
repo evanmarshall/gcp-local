@@ -26,6 +26,10 @@ var permissions = map[string]string{
 	methodRoutesGet:             "compute.routes.get",
 	methodRoutesList:            "compute.routes.list",
 	methodRoutesDelete:          "compute.routes.delete",
+	methodRoutersCreate:         "compute.routers.create",
+	methodRoutersGet:            "compute.routers.get",
+	methodRoutersList:           "compute.routers.list",
+	methodRoutersDelete:         "compute.routers.delete",
 	methodNetworksAddPeering:    "compute.networks.addPeering",
 	methodNetworksRemovePeering: "compute.networks.removePeering",
 	methodConnectivityCreate:    "networkmanagement.connectivitytests.create",
@@ -57,6 +61,10 @@ const (
 	methodRoutesGet             = "compute.routes.get"
 	methodRoutesList            = "compute.routes.list"
 	methodRoutesDelete          = "compute.routes.delete"
+	methodRoutersCreate         = "compute.routers.create"
+	methodRoutersGet            = "compute.routers.get"
+	methodRoutersList           = "compute.routers.list"
+	methodRoutersDelete         = "compute.routers.delete"
 	methodNetworksAddPeering    = "compute.networks.addPeering"
 	methodNetworksRemovePeering = "compute.networks.removePeering"
 	methodConnectivityCreate    = "networkmanagement.connectivityTests.create"

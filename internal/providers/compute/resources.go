@@ -26,6 +26,8 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.executeFirewall(call, request, scope)
 	case methodRoutesCreate, methodRoutesGet, methodRoutesList, methodRoutesDelete:
 		return p.executeRoute(call, request, scope)
+	case methodRoutersCreate, methodRoutersGet, methodRoutersList, methodRoutersDelete:
+		return p.executeRouters(call, request, scope)
 	case methodOperationsGet:
 		return p.operationGet(request, scope, "global")
 	case methodRegionOperationsGet:
@@ -312,4 +314,26 @@ func (p *Provider) newOperationAt(scope state.Scope, kind, region, opType, targe
 	p.records[scope.Project+"/"+kind+"/"+record.Name] = record
 	p.mu.Unlock()
 	return &gateway.RESTResponse{Status: 200, Headers: http.Header{}, JSON: operationDocument(record)}, nil
+}
+
+// routerDocument renders the router wire shape.
+func routerDocument(project string, record *routerRecord) map[string]any {
+	nats := make([]any, 0, len(record.NATs))
+	for _, nat := range record.NATs {
+		ranges := make([]string, 0, len(nat.SourceSubnetworks))
+		ranges = append(ranges, nat.SourceSubnetworks...)
+		nats = append(nats, map[string]any{
+			keyName: nat.Name, "sourceSubnetworkIpRanges": ranges,
+		})
+	}
+	return map[string]any{
+		"id":           idOf(record.Name, record.Generation),
+		keyName:        record.Name,
+		keySelfLink:    regionalSelfLink(project, record.Region, "routers", record.Name),
+		keyTimestamp:   stamp(record.CreatedAt),
+		keyKind:        "compute#router",
+		keyNetwork:     selfLink(project, "networks", record.Network),
+		"nats":         nats,
+		keyDescription: "",
+	}
 }

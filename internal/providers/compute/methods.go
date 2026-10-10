@@ -534,3 +534,152 @@ func firewallTarget(scope state.Scope, kind, name string) string {
 	}
 	return selfLink(scope.Project, "routes", name)
 }
+
+// executeRouters handles the router methods.
+func (p *Provider) executeRouters(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	switch call.Method {
+	case methodRoutersCreate:
+		return p.createRouter(request, scope)
+	case methodRoutersGet:
+		return p.getRouter(request, scope)
+	case methodRoutersList:
+		return p.listRouters(scope)
+	default:
+		return p.deleteRouter(request, scope)
+	}
+}
+
+// createRouter validates and stores one Cloud Router with NAT gateways.
+func (p *Provider) createRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	body, err := parseInsert(request)
+	if err != nil {
+		return nil, err
+	}
+	name := textOf(body["name"])
+	network := networkName(textOf(body["network"]))
+	if name == "" || network == "" {
+		return nil, statusInvalid("A router requires a name and a network")
+	}
+	if !p.networkExists(scope, network) {
+		return nil, missingReference()
+	}
+	nats, natErr := p.parseNATs(body["nats"], scope)
+	if natErr != nil {
+		return nil, natErr
+	}
+	var created *routerRecord
+	err = p.scopes.With(scope, func(s *scopeState) error {
+		if s.routers[name] != nil {
+			return errAlreadyExists
+		}
+		created = &routerRecord{
+			Name: name, Region: request.Path["region"], Network: network,
+			NATs: nats, Generation: 1, CreatedAt: p.clock(),
+		}
+		s.routers[name] = created
+		return nil
+	})
+	if err != nil {
+		return nil, conflict("router", name)
+	}
+	if indexErr := p.index.Put(serviceName, state.Resource{
+		Name: regionalName(scope.Project, created.Region, kindRouter, created.Name), Service: serviceName,
+		Kind: kindRouter, Parent: regionalName(scope.Project, created.Region, kindLocation, created.Region),
+		Scope: scope,
+	}); indexErr != nil {
+		return nil, gap("index the router")
+	}
+	return p.newOperation(scope, "region", created.Region, "insert", regionalSelfLink(scope.Project, created.Region, "routers", created.Name))
+}
+
+// allSubnetworks is Compute's NAT source selector for every subnetwork.
+const allSubnetworks = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+
+// parseNATs validates the NAT gateways of one router body.
+func (p *Provider) parseNATs(raw any, scope state.Scope) ([]natRecord, error) {
+	items, ok := raw.([]any)
+	if !ok || len(items) == 0 {
+		return nil, statusInvalid("A router requires at least one NAT gateway")
+	}
+	nats := make([]natRecord, 0, len(items))
+	for _, item := range items {
+		gateway, ok := item.(map[string]any)
+		if !ok {
+			return nil, statusInvalid("Invalid NAT gateway entry")
+		}
+		name := textOf(gateway["name"])
+		if name == "" {
+			return nil, statusInvalid("A NAT gateway requires a name")
+		}
+		ranges, ok := gateway["sourceSubnetworkIpRanges"].([]any)
+		if !ok || len(ranges) == 0 {
+			return nil, statusInvalid("A NAT gateway requires sourceSubnetworkIpRanges")
+		}
+		subnets := make([]string, 0, len(ranges))
+		for _, value := range ranges {
+			subnet := textOf(value)
+			if subnet == allSubnetworks {
+				subnets = append(subnets, allSubnetworks)
+				continue
+			}
+			subnet = subnetName(subnet)
+			if !p.subnetworkExists(scope, subnet) {
+				return nil, missingReference()
+			}
+			subnets = append(subnets, subnet)
+		}
+		nats = append(nats, natRecord{Name: name, SourceSubnetworks: subnets})
+	}
+	return nats, nil
+}
+
+// subnetName strips a subnetwork self-link or name into the plain name.
+func subnetName(value string) string {
+	if index := strings.LastIndex(value, "/subnetworks/"); index >= 0 {
+		return value[index+len("/subnetworks/"):]
+	}
+	return value
+}
+
+// subnetworkExists reports whether the named subnetwork exists in the scope.
+func (p *Provider) subnetworkExists(scope state.Scope, name string) bool {
+	var found bool
+	_ = p.scopes.With(scope, func(s *scopeState) error { found = s.subnetworks[name] != nil; return nil })
+	return found
+}
+
+// getRouter returns one router document.
+func (p *Provider) getRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	name := request.Path["router"]
+	var record *routerRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.routers[name]; return nil })
+	if record == nil {
+		return nil, notFound(kindRouter, name)
+	}
+	return &gateway.RESTResponse{JSON: routerDocument(scope.Project, record)}, nil
+}
+
+// listRouters returns the scope's routers.
+func (p *Provider) listRouters(scope state.Scope) (*gateway.RESTResponse, error) {
+	items := []any{}
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		for name := range s.routers {
+			items = append(items, routerDocument(scope.Project, s.routers[name]))
+		}
+		return nil
+	})
+	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
+}
+
+// deleteRouter removes one router.
+func (p *Provider) deleteRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	project, name, region := scope.Project, request.Path["router"], request.Path["region"]
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		if s.routers[name] != nil {
+			delete(s.routers, name)
+		}
+		return nil
+	})
+	_ = p.index.Remove(serviceName, scope, regionalName(project, region, kindRouter, name))
+	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, "routers", name))
+}
