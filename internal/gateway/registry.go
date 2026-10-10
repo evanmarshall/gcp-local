@@ -24,6 +24,7 @@ var (
 type PrincipalState string
 
 const (
+	servicePubsub                = "pubsub"
 	Anonymous     PrincipalState = "anonymous"
 	Unknown       PrincipalState = "unknown"
 	Authenticated PrincipalState = "authenticated"
@@ -86,6 +87,7 @@ func (r *Registry) registerRoutes() {
 		{generated.FirestoreRoutes, "firestore"},
 		{generated.BigQueryRoutes, "bigquery"},
 		{generated.CloudTasksRoutes, "cloudtasks"},
+		{generated.PubSubRestRoutes, servicePubsub},
 	}
 	for _, table := range tables {
 		for _, route := range table.routes {

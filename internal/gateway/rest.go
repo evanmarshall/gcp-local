@@ -87,6 +87,7 @@ func contracts() []generated.Route {
 	routes = append(routes, generated.FirestoreRoutes...)
 	routes = append(routes, generated.BigQueryRoutes...)
 	routes = append(routes, generated.CloudTasksRoutes...)
+	routes = append(routes, generated.PubSubRestRoutes...)
 	sort.SliceStable(routes, func(i, j int) bool {
 		left, right := strings.Contains(routes[i].Path, ":"), strings.Contains(routes[j].Path, ":")
 		return left && !right
@@ -147,6 +148,9 @@ func (g *Gateway) restRequest(r *http.Request, route *compiledRoute) (*RESTReque
 	// Bucket/object names do not encode a project. Providers resolve that owner.
 	if route.contract.Method == "storage.buckets.insert" || route.contract.Method == "storage.buckets.list" {
 		call.Project = query.Get("project")
+	}
+	if strings.HasPrefix(route.contract.Method, "pubsub.http.") {
+		call.Project = request.Path["project"]
 	}
 	if err := restBody(r, route, request); err != nil {
 		return nil, Call{}, err

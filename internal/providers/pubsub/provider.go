@@ -77,6 +77,14 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 			return nil, fmt.Errorf("register %s: %w", method, err)
 		}
 	}
+	for method := range restTwins {
+		if err := registry.Register(method, p.handleRest); err != nil {
+			return nil, fmt.Errorf("register %s: %w", method, err)
+		}
+	}
+	if err := p.registerRestPermissions(); err != nil {
+		return nil, err
+	}
 	for _, method := range []string{"GetIamPolicy", "SetIamPolicy"} {
 		if err := registry.Register(policyRPC+method, p.policy); err != nil {
 			return nil, fmt.Errorf("register policy %s: %w", method, err)
