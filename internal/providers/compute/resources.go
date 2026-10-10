@@ -2,6 +2,7 @@ package compute
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -35,7 +36,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 }
 
 // networkDocument renders the network wire shape.
-func networkDocument(project string, record *networkRecord) map[string]any {
+func (p *Provider) networkDocument(project string, record *networkRecord) map[string]any {
 	return map[string]any{
 		"id":                    idOf(record.Name, record.Generation),
 		keyName:                 record.Name,
@@ -45,9 +46,30 @@ func networkDocument(project string, record *networkRecord) map[string]any {
 		"autoCreateSubnetworks": record.AutoCreateSubnetworks,
 		"mtu":                   record.MTU,
 		"routingConfig":         map[string]any{"routingMode": "REGIONAL"},
-		"subnetworks":           []any{},
+		"subnetworks":           p.subnetworksOf(project, record.Name),
 		keyDescription:          "",
 	}
+}
+
+// subnetworksOf lists the subnetwork self-links of one network. Networks live
+// in the project's global scope, so the lookup walks the single scope.
+func (p *Provider) subnetworksOf(project, network string) []any {
+	links := []any{}
+	scope := scopeOf(project, stateGlobal)
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		names := make([]string, 0, len(s.subnetworks))
+		for name := range s.subnetworks {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if record := s.subnetworks[name]; record.Network == network {
+				links = append(links, regionalSelfLink(project, record.Region, "subnetworks", name))
+			}
+		}
+		return nil
+	})
+	return links
 }
 
 // subnetworkDocument renders the subnetwork wire shape.
