@@ -42,3 +42,11 @@ here is a cloud-fidelity claim yet (#13 tracks that work).
   `run.invoker` to `allUsers`.
 - The authorization header never reaches the container; the proxy forwards only
   method, selected headers, and body, and streams the container's response back.
+
+## Cross-checks
+
+The reachability analyzer ([networking.md](networking.md)) evaluates flows
+against this surface's modeled topology; a named Connectivity Tests surface
+(`networkmanagement.connectivityTests`) exposes the same verdicts over the
+networkmanagement-style route names, marked local-modeled like everything
+without a recording.
