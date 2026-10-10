@@ -24,6 +24,8 @@ from typing import Any
 import google.auth
 from google.auth.transport.grpc import secure_authorized_channel
 from google.cloud import pubsub_v1
+from google.pubsub_v1.services.publisher.transports.grpc import PublisherGrpcTransport
+from google.pubsub_v1.services.subscriber.transports.grpc import SubscriberGrpcTransport
 from smoke_cloudrun import SERVE_SOCKET, build_image, start_core, write_configs  # helpers
 
 PUBSUB_GRPC_PORT = SERVE_SOCKET + 1
@@ -46,8 +48,10 @@ class LocalChannelClients:
         """Pin both clients to the local gRPC gateway channel."""
         channel = secure_authorized_channel(
             credentials, None, "127.0.0.1:" + str(port))
-        self.publisher = pubsub_v1.PublisherClient(channel=channel)
-        self.subscriber = pubsub_v1.SubscriberClient(channel=channel)
+        self.publisher = pubsub_v1.PublisherClient(
+            transport=PublisherGrpcTransport(channel=channel))
+        self.subscriber = pubsub_v1.SubscriberClient(
+            transport=SubscriberGrpcTransport(channel=channel))
 
 
 def sdk_credentials(adc: Path) -> google.auth.credentials.Credentials:
