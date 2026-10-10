@@ -391,7 +391,7 @@ func parseCreate(request *gateway.RESTRequest) (string, templateShape, error) {
 // launchOperation starts the revision container and registers the pending
 // operation that the readiness worker resolves.
 func (p *Provider) launchOperation(scope state.Scope, id string) *gateway.RESTResponse {
-	operationName := scope.Project + "/" + scope.Location + "/operations/rel-" + id
+	operationName := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/rel-" + id
 	record, refused, err := p.serviceRecordLookUp(scope, id)
 	if err != nil || refused != nil {
 		return &gateway.RESTResponse{JSON: wireError(500, "INTERNAL", "The created service vanished before its launch")}
@@ -670,7 +670,7 @@ func (p *Provider) operationsList(scope state.Scope) (*gateway.RESTResponse, err
 
 // operationGet returns one operation document.
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	name := scope.Project + "/" + scope.Location + "/operations/" + request.Path["operation"]
+	name := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + request.Path["operation"]
 	entry := p.operation(scope, name)
 	if entry == nil {
 		return wireError(404, "NOT_FOUND", "operation is not found"), nil
