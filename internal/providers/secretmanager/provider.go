@@ -33,6 +33,8 @@ const (
 	methodVersionsGet     = "secretmanager.versions.get"
 	methodVersionsAccess  = "secretmanager.versions.access"
 	methodVersionsDestroy = "secretmanager.versions.destroy"
+	methodVersionsDisable = "secretmanager.versions.disable"
+	methodVersionsEnable  = "secretmanager.versions.enable"
 	methodLocationsList   = "secretmanager.locations.list"
 )
 
@@ -50,6 +52,8 @@ var permissions = map[string]string{
 	methodVersionsGet:     "secretmanager.versions.get",
 	methodVersionsAccess:  "secretmanager.versions.access",
 	methodVersionsDestroy: "secretmanager.versions.destroy",
+	methodVersionsDisable: "secretmanager.versions.disable",
+	methodVersionsEnable:  "secretmanager.versions.enable",
 	methodLocationsList:   "secretmanager.locations.list",
 }
 

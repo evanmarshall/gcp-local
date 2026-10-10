@@ -245,3 +245,23 @@ func TestListUpdateAndDeleteLifecycle(t *testing.T) {
 		t.Fatalf("deleted secret get status = %d", recorder.Code)
 	}
 }
+
+func TestVersionDisableBlocksAccessUntilReenabled(t *testing.T) {
+	h := newHarness(t)
+	h.create(replicationAuto())
+	h.addVersion(t, "disable-me")
+	grantAccessor(t, h)
+	recorder := h.invoke(http.MethodPost, "/v1/projects/"+testProject+"/secrets/"+testSecret+"/versions/1:disable", map[string]any{}, "actor")
+	if recorder.Code != 200 {
+		t.Fatalf("disable status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodGet, "/v1/projects/"+testProject+"/secrets/"+testSecret+"/versions/1:access", nil, testAccessor)
+	if recorder.Code != 400 {
+		t.Fatalf("disabled access status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodPost, "/v1/projects/"+testProject+"/secrets/"+testSecret+"/versions/1:enable", map[string]any{}, "actor")
+	if recorder.Code != 200 {
+		t.Fatalf("enable status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	assertPayloadAccess(t, h, "disable-me")
+}

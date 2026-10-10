@@ -32,7 +32,8 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodSecretsCreate, methodSecretsGet, methodSecretsList, methodSecretsUpdate,
 		methodSecretsDelete, methodSecretsGetIam, methodSecretsSetIam:
 		return p.executeSecret(call, request, scope, record)
-	case methodVersionsAdd, methodVersionsList, methodVersionsGet, methodVersionsAccess, methodVersionsDestroy:
+	case methodVersionsAdd, methodVersionsList, methodVersionsGet, methodVersionsAccess, methodVersionsDestroy,
+		methodVersionsDisable, methodVersionsEnable:
 		return p.executeVersion(call, request, scope, record)
 	case methodLocationsList:
 		return &gateway.RESTResponse{JSON: map[string]any{"locations": []any{
@@ -78,6 +79,10 @@ func (p *Provider) executeVersion(call gateway.Call, request *gateway.RESTReques
 		return p.versionAccess(request, scope, record)
 	case methodVersionsDestroy:
 		return p.versionDestroy(request, scope, record)
+	case methodVersionsDisable:
+		return p.versionSetState(request, scope, record, stateDisabled)
+	case methodVersionsEnable:
+		return p.versionSetState(request, scope, record, stateEnabled)
 	default:
 		return nil, gap("this method is not implemented")
 	}
@@ -371,3 +376,16 @@ func base64Decode(value string) ([]byte, error) {
 
 // base64Encode encodes one payload to the wire base64 shape.
 func base64Encode(payload []byte) string { return base64.StdEncoding.EncodeToString(payload) }
+
+// versionSetState disables or re-enables one version.
+func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Scope, record *secretRecord, state string) (*gateway.RESTResponse, error) {
+	version := record.Versions[request.Path["version"]]
+	if version == nil {
+		return nil, notFound("versions", request.Path["version"])
+	}
+	if version.State == stateDestroyed {
+		return nil, status.Errorf(codes.InvalidArgument, "Version %s of the secret is destroyed", version.Number)
+	}
+	version.State = state
+	return &gateway.RESTResponse{JSON: versionDocument(scope.Project, record, version)}, nil
+}
