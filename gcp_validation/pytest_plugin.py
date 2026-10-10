@@ -130,9 +130,21 @@ def pytest_configure(config: pytest.Config) -> None:
     except (OSError, ValueError) as exc:
         raise pytest.UsageError(str(exc)) from None
 
+    config.gcp_results = []
+    config.gcp_artifacts = Path(config.getoption("gcp_artifacts")).resolve()
+    if not config.option.xmlpath:
+        config.option.xmlpath = str(config.gcp_artifacts / "junit.xml")
+    config.addinivalue_line(
+        "markers", "gcp_scenario(id, service, transport, versions): cloud conformance contract"
+    )
+    config.addinivalue_line(
+        "markers", "harness_loopback: allow loopback for synthetic harness tests only"
+    )
+    network_policy(config)
+
 
 def scenario_revision(config: pytest.Config, item: pytest.Item, metadata: dict) -> Scenario:
-    """Bind the scenario's contract revision to its module and contract file hashes."""
+    """Bind the scenario's contract revision to module and contract file hashes."""
     files = metadata.pop("contract_files", ())
     revision = sha256(item.path)
     if files:
@@ -217,6 +229,7 @@ def pytest_runtest_teardown(item: pytest.Item) -> None:
 @pytest.fixture
 def gcp_target(pytestconfig: pytest.Config) -> Target:
     """Service adapters must use this explicit target, never ambient ADC."""
+    """Service adapters must use this explicit target, never ambient ADC."""
     return pytestconfig.gcp_target
 
 
@@ -228,6 +241,7 @@ def gcp_snapshot(request: pytest.FixtureRequest) -> SnapshotCase:
     return request.node.gcp_case
 
 
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def finalize_case(item: pytest.Item, report: pytest.TestReport) -> object:
     """Finish the evidence case on teardown and record the resulting status."""
     candidate = None
@@ -246,7 +260,12 @@ def finalize_case(item: pytest.Item, report: pytest.TestReport) -> object:
     return candidate
 
 
-def status_of(item: pytest.Item, report: pytest.TestReport, candidate: object) -> tuple[str, str]:
+def status_of(
+    item: pytest.Item,
+    report: pytest.TestReport,
+    candidate: object,
+    call: pytest.CallInfo[object],
+) -> tuple[str, str]:
     """Choose the report row's status, with cleanup failure never passing."""
     if item.gcp_status:
         status, reason = item.gcp_status
@@ -257,7 +276,7 @@ def status_of(item: pytest.Item, report: pytest.TestReport, candidate: object) -
     else:
         status, reason = "pass", "Completed"
     # Cleanup failure overrides a prior skip/inconclusive result and is never a pass.
-    if report.failed and report.when == "teardown":
+    if report.failed and call.excinfo:
         status, reason = "error", "Cleanup failed"
     scenario = item.gcp_scenario
     case = item.gcp_case
@@ -294,8 +313,12 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[object]) 
     item.gcp_reports.append(report)
     if report.when != "teardown":
         return
-    candidate = finalize_case(item, report) if item.gcp_case else None
-    status_of(item, report, candidate)
+    candidate = (
+        finalize_case(item, report)
+        if item.gcp_case and all(p.passed for p in item.gcp_reports)
+        else None
+    )
+    status_of(item, report, candidate, call)
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -321,5 +344,5 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:  # noqa: ARG001 -- hook contract
-    """Release plugin resources."""
+    """Restore the default socket guard when the session ends."""
     pytest_socket.enable_socket()
