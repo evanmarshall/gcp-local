@@ -206,7 +206,7 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 		scope.Project = call.Project
 		target.Name = projectResource(call.Project)
 		project, ok := p.index.Get(target.Name)
-		if !ok || project.Kind != "project" || !numericProjectNumber.MatchString(project.Number) {
+		if !ok || project.Kind != kindProjectRef || !numericProjectNumber.MatchString(project.Number) {
 			return iam.Target{}, state.Scope{}, projectMethod, nil, gap("configure the explicit project and numeric project number")
 		}
 		return target, scope, projectMethod, nil, nil
@@ -250,6 +250,9 @@ func (p *Provider) objectFeatures(ctx context.Context, b *memoryBackend, call ga
 		return nil, nil, status.Error(codes.Unavailable, "Unable to resolve existing object before authorization")
 	}
 }
+
+// kindProjectRef is the index kind that marks a resource-manager project.
+const kindProjectRef = "project"
 
 // numericProjectNumber pins the project-number shape Storage requires.
 var numericProjectNumber = regexp.MustCompile(`^[0-9]{1,20}$`)

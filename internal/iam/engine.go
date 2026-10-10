@@ -56,6 +56,16 @@ type Engine struct {
 // errPlanExists rejects a second permission plan for one method.
 var errPlanExists = errors.New("method already has a permission plan")
 
+// Decision outcomes recorded on every Check.
+const (
+	outcomeAllow           = "allow"
+	outcomeDeny            = "deny"
+	outcomePreflight       = "preflight"
+	outcomeUnsupported     = "unsupported"
+	outcomeUnauthenticated = "unauthenticated"
+	outcomeCancelled       = "cancelled"
+)
+
 // Engine sentinels for registration and hierarchy validation.
 var (
 	errIndexRequired    = errors.New("resource index is required")
@@ -83,33 +93,9 @@ func New(index *state.Index) (*Engine, error) {
 	return &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, decisions: map[string]Decision{}}, nil
 }
 func (e *Engine) Register(method string, plan Rule) error {
-	if method == "" || len(plan.Baseline) == 0 {
-		return errRuleIncomplete
-	}
-	known := func(permission string) bool {
-		for _, role := range e.roles {
-			if role[permission] {
-				return true
-			}
-		}
-		return false
-	}
-	rule := Rule{Baseline: append([]string(nil), plan.Baseline...), When: map[string][]string{}}
-	for _, permission := range plan.Baseline {
-		if !known(permission) {
-			return fmt.Errorf("%w: %s", errBaselineUnknown, permission)
-		}
-	}
-	for feature, permissions := range plan.When {
-		if feature == "" || len(permissions) == 0 {
-			return errFeatureRequired
-		}
-		for _, permission := range permissions {
-			if !known(permission) {
-				return fmt.Errorf("%w: %s", errFeatureUnknown, permission)
-			}
-		}
-		rule.When[feature] = append([]string(nil), permissions...)
+	rule, err := e.validateRule(plan)
+	if err != nil {
+		return err
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -129,18 +115,10 @@ func (e *Engine) Authorize(call gateway.Call, target Target, features map[string
 	return e.evaluate(call, target, features, true)
 }
 func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]bool, complete bool) (Decision, error) {
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		return Decision{}, status.Error(codes.Internal, "Unable to create decision ID")
+	decision, err := newDecision(call, complete)
+	if err != nil {
+		return Decision{}, err
 	}
-	principal := call.Principal
-	principal.Scopes = append([]string(nil), principal.Scopes...)
-	if principal.State != gateway.Authenticated {
-		principal.Subject = ""
-		principal.Project = ""
-		principal.Scopes = nil
-	}
-	decision := Decision{ID: hex.EncodeToString(raw), TraceID: call.TraceID, Method: call.Method, Principal: principal, Complete: complete, Checks: []Check{}}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	finish := func(outcome, reason string, code codes.Code) (Decision, error) {
@@ -153,85 +131,223 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 		return decision, status.Error(code, reason)
 	}
 	if err := call.Context.Err(); err != nil {
-		return finish("cancelled", "Request context ended", status.FromContextError(err).Code())
+		return finish(outcomeCancelled, "Request context ended", status.FromContextError(err).Code())
 	}
 	rule, ok := e.rules[call.Method]
 	if !ok {
-		return finish("unsupported", "No permission plan is registered for this method", codes.Unimplemented)
+		return finish(outcomeUnsupported, "No permission plan is registered for this method", codes.Unimplemented)
 	}
-	if principal.State == gateway.Unknown || principal.State == gateway.Expired {
-		return finish("unauthenticated", "Unknown or expired credential", codes.Unauthenticated)
+	if outcome, reason, code, refused := principalRefusal(decision.Principal, rule); refused {
+		return finish(outcome, reason, code)
 	}
-	if principal.State != gateway.Authenticated && principal.State != gateway.Anonymous {
-		return finish("unsupported", "Unknown principal state", codes.Unimplemented)
+	permissions, outcome, reason, code, refused := e.plannedPermissions(rule, features, complete)
+	if refused {
+		return finish(outcome, reason, code)
 	}
-	if principal.State == gateway.Authenticated {
-		if principal.Subject == "" {
-			return finish("unauthenticated", "Authenticated caller has no named principal", codes.Unauthenticated)
+	ancestors, refusal, refused := e.ancestorGate(call, target)
+	if refused {
+		return finish(outcomeUnsupported, refusal, codes.Unimplemented)
+	}
+	denied := e.collectChecks(&decision, permissions, ancestors, decision.Principal)
+	return finalize(finish, decision, denied, complete)
+}
+
+// finalize records the outcome of a fully evaluated request. A denied permission
+// is a permission error for an authenticated caller and unauthenticated for an
+// anonymous one; an incomplete evaluation is only a preflight.
+func finalize(finish func(string, string, codes.Code) (Decision, error), decision Decision, denied string, complete bool) (Decision, error) {
+	if denied != "" {
+		if decision.Principal.State == gateway.Anonymous {
+			return finish(outcomeDeny, "Missing permission: "+denied, codes.Unauthenticated)
 		}
-		supported := false
-		for _, scope := range principal.Scopes {
-			if scope == "https://www.googleapis.com/auth/cloud-platform" {
-				supported = true
-			}
-			service := ""
-			if scope == "https://www.googleapis.com/auth/devstorage.full_control" {
-				service = "storage."
-			}
-			if scope == "https://www.googleapis.com/auth/pubsub" {
-				service = "pubsub."
-			}
-			if service != "" {
-				matches := true
-				for _, permission := range rule.Baseline {
-					matches = matches && strings.HasPrefix(permission, service)
-				}
-				for _, permissions := range rule.When {
-					for _, permission := range permissions {
-						matches = matches && strings.HasPrefix(permission, service)
-					}
-				}
-				supported = supported || matches
-			}
+		return finish(outcomeDeny, "Missing permission: "+denied, codes.PermissionDenied)
+	}
+	if !complete {
+		return finish(outcomePreflight, "Baseline permissions satisfied; state-dependent authorization is still required", codes.OK)
+	}
+	return finish(outcomeAllow, "All supported permission checks passed", codes.OK)
+}
+
+// newDecision seeds a decision record. Evaluation then records every outcome
+// through one finish closure so retention and error shape stay consistent.
+func newDecision(call gateway.Call, complete bool) (Decision, error) {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return Decision{}, status.Error(codes.Internal, "Unable to create decision ID")
+	}
+	principal := call.Principal
+	principal.Scopes = append([]string(nil), principal.Scopes...)
+	if principal.State != gateway.Authenticated {
+		principal.Subject = ""
+		principal.Project = ""
+		principal.Scopes = nil
+	}
+	return Decision{ID: hex.EncodeToString(raw), TraceID: call.TraceID, Method: call.Method, Principal: principal, Complete: complete, Checks: []Check{}}, nil
+}
+
+// principalRefusal applies the credential-state gate that precedes any policy
+// read, including the unverified OAuth scope rule.
+func principalRefusal(principal gateway.Principal, rule Rule) (string, string, codes.Code, bool) {
+	state := principal.State
+	if state == gateway.Unknown || state == gateway.Expired {
+		return outcomeUnauthenticated, "Unknown or expired credential", codes.Unauthenticated, true
+	}
+	if state != gateway.Authenticated && state != gateway.Anonymous {
+		return outcomeUnsupported, "Unknown principal state", codes.Unimplemented, true
+	}
+	if state != gateway.Authenticated {
+		return "", "", codes.OK, false
+	}
+	if principal.Subject == "" {
+		return outcomeUnauthenticated, "Authenticated caller has no named principal", codes.Unauthenticated, true
+	}
+	if !scopeSupports(principal.Scopes, rule) {
+		return outcomeUnsupported, "OAuth scope enforcement is unverified for this scope set", codes.Unimplemented, true
+	}
+	return "", "", codes.OK, false
+}
+
+// scopeSupports accepts cloud-platform, or a service scope whose every planned
+// permission belongs to that service.
+func scopeSupports(scopes []string, rule Rule) bool {
+	for _, scope := range scopes {
+		if scope == "https://www.googleapis.com/auth/cloud-platform" {
+			return true
 		}
-		if !supported {
-			return finish("unsupported", "OAuth scope enforcement is unverified for this scope set", codes.Unimplemented)
+		service := ""
+		switch scope {
+		case "https://www.googleapis.com/auth/devstorage.full_control":
+			service = "storage."
+		case "https://www.googleapis.com/auth/pubsub":
+			service = "pubsub."
+		}
+		if service != "" && ruleServes(rule, service) {
+			return true
 		}
 	}
+	return false
+}
+
+// ruleServes reports whether every permission the plan can grant belongs to one service prefix.
+func ruleServes(rule Rule, service string) bool {
+	for _, permission := range rule.Baseline {
+		if !strings.HasPrefix(permission, service) {
+			return false
+		}
+	}
+	for _, permissions := range rule.When {
+		for _, permission := range permissions {
+			if !strings.HasPrefix(permission, service) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// plannedPermissions resolves the baseline plus the state-dependent additions.
+// An unresolved feature is a coverage gap, never an allow.
+func (e *Engine) plannedPermissions(rule Rule, features map[string]bool, complete bool) ([]string, string, string, codes.Code, bool) {
 	permissions := append([]string(nil), rule.Baseline...)
-	if complete {
-		for feature := range features {
-			if _, ok := rule.When[feature]; !ok {
-				return finish("unsupported", "Unknown request/state feature", codes.Unimplemented)
-			}
-		}
-		names := make([]string, 0, len(rule.When))
-		for name := range rule.When {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			enabled, present := features[name]
-			if !present {
-				return finish("unsupported", "Required request/state feature was not resolved: "+name, codes.Unimplemented)
-			}
-			if enabled {
-				permissions = append(permissions, rule.When[name]...)
-			}
+	if !complete {
+		return permissions, "", "", codes.OK, false
+	}
+	for feature := range features {
+		if _, ok := rule.When[feature]; !ok {
+			return nil, "unsupported", "Unknown request/state feature", codes.Unimplemented, true
 		}
 	}
+	names := make([]string, 0, len(rule.When))
+	for name := range rule.When {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		enabled, present := features[name]
+		if !present {
+			return nil, "unsupported", "Required request/state feature was not resolved: " + name, codes.Unimplemented, true
+		}
+		if enabled {
+			permissions = append(permissions, rule.When[name]...)
+		}
+	}
+	return permissions, "", "", codes.OK, false
+}
+
+// anchor resolves the resource whose policies govern a target. An unregistered
+// object is anchored by its bucket: object data stays in the backend.
+func (e *Engine) anchor(target Target) (state.Resource, error) {
+	resource, found := e.index.Get(target.Name)
+	if found {
+		if target.Parent != "" && target.Parent != resource.Parent {
+			return state.Resource{}, errTargetParent
+		}
+		return resource, nil
+	}
+	parent, ok := e.index.Get(target.Parent)
+	if !ok || parent.Service != "storage" || parent.Kind != "bucket" || !strings.HasPrefix(target.Name, parent.Name+"/objects/") || target.Name == parent.Name+"/objects/" {
+		return state.Resource{}, errTargetShape
+	}
+	return parent, nil
+}
+
+// validateRule rejects a permission plan that is incomplete, or that names a
+// permission outside the pinned predefined roles.
+func (e *Engine) validateRule(plan Rule) (Rule, error) {
+	if len(plan.Baseline) == 0 {
+		return Rule{}, errRuleIncomplete
+	}
+	rule := Rule{Baseline: append([]string(nil), plan.Baseline...), When: map[string][]string{}}
+	for _, permission := range plan.Baseline {
+		if !e.roleGrants(permission) {
+			return Rule{}, fmt.Errorf("%w: %s", errBaselineUnknown, permission)
+		}
+	}
+	for feature, permissions := range plan.When {
+		if feature == "" || len(permissions) == 0 {
+			return Rule{}, errFeatureRequired
+		}
+		for _, permission := range permissions {
+			if !e.roleGrants(permission) {
+				return Rule{}, fmt.Errorf("%w: %s", errFeatureUnknown, permission)
+			}
+		}
+		rule.When[feature] = append([]string(nil), permissions...)
+	}
+	return rule, nil
+}
+
+// roleGrants reports whether any pinned predefined role contains a permission.
+func (e *Engine) roleGrants(permission string) bool {
+	for _, role := range e.roles {
+		if role[permission] {
+			return true
+		}
+	}
+	return false
+}
+
+// ancestorGate resolves the ownership chain and refuses when the hierarchy is
+// incomplete, owned by another project, or carries unsupported configuration.
+func (e *Engine) ancestorGate(call gateway.Call, target Target) ([]state.Resource, string, bool) {
 	ancestors, err := e.ancestry(target)
 	if err != nil {
-		return finish("unsupported", err.Error(), codes.Unimplemented)
+		return nil, err.Error(), true
 	}
 	if call.Project != "" && ancestors[0].Scope.Project != call.Project {
-		return finish("unsupported", "Request project disagrees with resource ownership", codes.Unimplemented)
+		return nil, "Request project disagrees with resource ownership", true
 	}
 	for _, ancestor := range ancestors {
 		if len(e.unsupported[ancestor.Name].features) > 0 {
-			return finish("unsupported", "Unsupported policy configuration at "+ancestor.Name, codes.Unimplemented)
+			return nil, "Unsupported policy configuration at " + ancestor.Name, true
 		}
 	}
+	return ancestors, "", false
+}
+
+// collectChecks evaluates every planned permission against the ancestor chain.
+// It records each check on the decision and returns the first denied permission.
+func (e *Engine) collectChecks(decision *Decision, permissions []string, ancestors []state.Resource, principal gateway.Principal) string {
 	seen := map[string]bool{}
 	denied := ""
 	for _, permission := range permissions {
@@ -239,51 +355,38 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 			continue
 		}
 		seen[permission] = true
-		check := Check{Permission: permission, Target: target.Name, Policies: []string{}}
+		check := Check{Permission: permission, Target: decision.Method, Policies: []string{}}
 		for _, ancestor := range ancestors {
 			check.Policies = append(check.Policies, ancestor.Name)
-			policy := e.policies[ancestor.Name].policy
-			for _, binding := range policy.Bindings {
-				for _, member := range binding.Members {
-					matches := (member == "allUsers") || (principal.State == gateway.Authenticated && (member == principal.Subject || member == "allAuthenticatedUsers"))
-					if matches && e.roles[binding.Role][permission] && !check.Allowed {
-						check.Allowed = true
-						check.GrantPolicy = ancestor.Name
-						check.Role = binding.Role
-						check.Member = member
-					}
-				}
-			}
+			e.matchBindings(&check, ancestor.Name, permission, principal)
 		}
 		decision.Checks = append(decision.Checks, check)
 		if !check.Allowed && denied == "" {
 			denied = permission
 		}
 	}
-	if denied != "" {
-		code := codes.PermissionDenied
-		if principal.State == gateway.Anonymous {
-			code = codes.Unauthenticated
-		}
-		return finish("deny", "Missing permission: "+denied, code)
-	}
-	if !complete {
-		return finish("preflight", "Baseline permissions satisfied; state-dependent authorization is still required", codes.OK)
-	}
-	return finish("allow", "All supported permission checks passed", codes.OK)
+	return denied
 }
+
+// matchBindings records the first binding that grants one permission at one policy.
+func (e *Engine) matchBindings(check *Check, policyName, permission string, principal gateway.Principal) {
+	for _, binding := range e.policies[policyName].policy.Bindings {
+		for _, member := range binding.Members {
+			matches := member == "allUsers" || (principal.State == gateway.Authenticated && (member == principal.Subject || member == "allAuthenticatedUsers"))
+			if matches && e.roles[binding.Role][permission] && !check.Allowed {
+				check.Allowed = true
+				check.GrantPolicy = policyName
+				check.Role = binding.Role
+				check.Member = member
+			}
+		}
+	}
+}
+
 func (e *Engine) ancestry(target Target) ([]state.Resource, error) {
-	resource, found := e.index.Get(target.Name)
-	if found {
-		if target.Parent != "" && target.Parent != resource.Parent {
-			return nil, errTargetParent
-		}
-	} else {
-		parent, ok := e.index.Get(target.Parent)
-		if !ok || parent.Service != "storage" || parent.Kind != "bucket" || !strings.HasPrefix(target.Name, parent.Name+"/objects/") || target.Name == parent.Name+"/objects/" {
-			return nil, errTargetShape
-		}
-		resource = parent // Object data stays in the backend; bucket anchors its IAM.
+	resource, err := e.anchor(target)
+	if err != nil {
+		return nil, err
 	}
 	project := resource.Scope.Project
 	seen := map[string]bool{}
@@ -303,10 +406,11 @@ func (e *Engine) ancestry(target Target) ([]state.Resource, error) {
 			}
 			return result, nil
 		}
-		resource, found = e.index.Get(resource.Parent)
+		parent, found := e.index.Get(resource.Parent)
 		if !found {
 			return nil, errHierarchyMissing
 		}
+		resource = parent
 	}
 	return nil, errHierarchyDepth
 }
