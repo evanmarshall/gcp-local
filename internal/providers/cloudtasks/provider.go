@@ -178,6 +178,7 @@ type taskRecord struct {
 	State          string // PENDING, SUCCEEDED, FAILED
 	Detail         string
 	Created        time.Time
+	ScheduleAt     time.Time
 }
 
 // scopeState is one project slice of provider state.

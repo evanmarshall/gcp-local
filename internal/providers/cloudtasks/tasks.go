@@ -55,6 +55,10 @@ func (p *Provider) parseTask(body map[string]any, httpRequest map[string]any, qu
 	if refused != nil {
 		return nil, refused
 	}
+	scheduleAt, refused := parseSchedule(textOf(body["scheduleTime"]), time.Now)
+	if refused != nil {
+		return nil, refused
+	}
 	record := &taskRecord{
 		Name:           lastSegment(textOf(body["name"])),
 		Queue:          queue,
@@ -64,6 +68,7 @@ func (p *Provider) parseTask(body map[string]any, httpRequest map[string]any, qu
 		ServiceAccount: textOf(oidc["serviceAccountEmail"]),
 		Audience:       textOf(oidc["audience"]),
 		Created:        p.clock(),
+		ScheduleAt:     scheduleAt,
 	}
 	if record.Name == "" {
 		record.Name = fmt.Sprintf("task-%d", p.clock().UnixNano()%1000000)
@@ -79,6 +84,19 @@ func (p *Provider) parseTask(body map[string]any, httpRequest map[string]any, qu
 	}
 	record.State = "PENDING"
 	return record, nil
+}
+
+// parseSchedule validates the optional RFC 3339 scheduleTime. A past or
+// absent value schedules immediately.
+func parseSchedule(value string, now func() time.Time) (time.Time, error) {
+	if value == "" {
+		return now(), nil
+	}
+	moment, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, statusInvalid("Invalid scheduleTime " + value)
+	}
+	return moment, nil
 }
 
 // parseTarget validates the target URL, method, and OIDC block.
@@ -180,9 +198,20 @@ func (p *Provider) launchDispatch(scope state.Scope, id string) {
 	}()
 }
 
-// dispatchLoop delivers the task with backoff until it succeeds, fails, or
-// the context ends.
+// dispatchLoop delivers the task at its scheduled time with backoff retries
+// until it succeeds, fails, or the context ends.
 func (p *Provider) dispatchLoop(ctx context.Context, scope state.Scope, id string) error {
+	record := p.mustTask(scope, id)
+	if record == nil {
+		return nil
+	}
+	if wait := time.Until(record.ScheduleAt); wait > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
 	backoff := time.Second
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		select {
@@ -254,4 +283,12 @@ func (p *Provider) sendAttempt(record *taskRecord, request *http.Request) bool {
 	record.State = "SUCCEEDED"
 	record.Detail = ""
 	return true
+}
+
+// scheduleField renders the optional scheduleTime of one task.
+func scheduleField(record *taskRecord) string {
+	if record.ScheduleAt.IsZero() {
+		return ""
+	}
+	return stamp(record.ScheduleAt)
 }

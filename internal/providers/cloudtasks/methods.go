@@ -122,6 +122,7 @@ func taskDocument(project, location, queue string, record *taskRecord) map[strin
 	return map[string]any{
 		"name":             taskResource(project, location, queue, record.Name),
 		"httpRequest":      httpRequest,
+		"scheduleTime":     scheduleField(record),
 		"createTime":       stamp(record.Created),
 		"dispatchCount":    strconv.Itoa(record.Attempts),
 		"dispatchDeadline": "600s",

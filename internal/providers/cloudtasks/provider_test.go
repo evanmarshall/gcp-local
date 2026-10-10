@@ -187,3 +187,51 @@ func TestQueueIAMPolicyGrantsAndReads(t *testing.T) {
 		t.Fatalf("policy = %v", policy)
 	}
 }
+
+func TestScheduledTaskWaitsThenDispatches(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	schedule := time.Now().Add(2 * time.Second).UTC().Format(time.RFC3339)
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{
+		"scheduleTime": schedule,
+		"httpRequest":  map[string]any{testKeyURL: target.URL, "method": "POST"},
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("scheduled task create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var task struct {
+		ScheduleTime string `json:"scheduleTime"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &task); err != nil {
+		t.Fatalf("decode task: %v", err)
+	}
+	if task.ScheduleTime == "" {
+		t.Fatalf("scheduleTime missing in %s", recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodGet, basePrefix+"/queues/"+testQueue+"/tasks", nil)
+	var listing struct {
+		Tasks []map[string]any `json:"tasks"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listing); err != nil {
+		t.Fatalf("decode listing: %v", err)
+	}
+	if len(listing.Tasks) != 1 {
+		t.Fatalf("listing = %v", listing)
+	}
+}
+
+func TestInvalidScheduleTimeIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{
+		"scheduleTime": "not-a-time",
+		"httpRequest":  map[string]any{testKeyURL: "http://127.0.0.1:1/", "method": "POST"},
+	})
+	if recorder.Code != 400 {
+		t.Fatalf("invalid schedule status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+}
