@@ -100,7 +100,7 @@ def write_configs() -> Path:
                        "scope": {"project": project, "location": "global"}}],
         "policies": {resource: {"bindings": [{"role": "roles/run.admin", "members": [principal]}]}},
         "service_accounts": [{"project": project,
-                              "email": principal,
+                              "email": principal.split(":")[1],
                               "unique_id": str(secrets.randbelow(10**15) + 10**15)}],
     }
     path = directory / "iam.json"
