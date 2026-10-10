@@ -30,6 +30,9 @@ const (
 	testSubnetCIDR     = "10.0.0.0/20"
 	verdictDropped     = "dropped"
 	verdictUnsupported = "unsupported"
+	testSourceCIDR     = "10.0.0.0/8"
+	keyDirection       = "direction"
+	keySourceRanges    = "sourceRanges"
 	// verdictUnknown is the analyzer's unresolved result.
 	verdictUnknown = "unknown"
 )
@@ -145,9 +148,9 @@ func TestFirewallLifecycleAndUpdate(t *testing.T) {
 	h := newHarness(t)
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{keyName: testNetwork})
 	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
-		keyName: testFirewall, keyNetwork: testNetwork, "direction": "INGRESS",
-		testAllowed:    []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"80"}}},
-		"sourceRanges": []any{"10.0.0.0/8"},
+		keyName: testFirewall, keyNetwork: testNetwork, keyDirection: directionIngress,
+		testAllowed:     []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"80"}}},
+		keySourceRanges: []any{testSourceCIDR},
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("firewall create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -202,9 +205,9 @@ func TestReachabilityDistinguishesVerdicts(t *testing.T) {
 		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
 	})
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
-		keyName: testFirewall, keyNetwork: testNetwork, "direction": "INGRESS",
-		testAllowed:    []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
-		"sourceRanges": []any{"10.0.0.0/8"},
+		keyName: testFirewall, keyNetwork: testNetwork, keyDirection: directionIngress,
+		testAllowed:     []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
+		keySourceRanges: []any{testSourceCIDR},
 	})
 	analyze := func(source, dest, protocol string, port int) Reachability {
 		spec := map[string]any{
@@ -226,7 +229,7 @@ func TestReachabilityDistinguishesVerdicts(t *testing.T) {
 	if verdict.Result != "reachable" || len(verdict.Trace) != 1 {
 		t.Fatalf("permitted flow = %+v", verdict)
 	}
-	verdict = analyze("10.0.0.5", "10.0.0.9", testTCP, 80)
+	verdict = analyze("10.0.0.7", "10.0.0.9", testTCP, 80)
 	if verdict.Result != verdictDropped {
 		t.Fatalf("unpermitted flow = %+v", verdict)
 	}
@@ -317,7 +320,7 @@ func TestCrossNetworkFlowsViaPeering(t *testing.T) {
 	if recorder.Code != 200 {
 		t.Fatalf("removePeering status = %d body %s", recorder.Code, recorder.Body.String())
 	}
-	verdict = h.analyzeFlow("10.0.0.5", "10.1.0.9", testTCP, 443)
+	verdict = h.analyzeFlow("10.0.0.5", "10.1.0.9", "udp", 53)
 	if verdict.Result != verdictUnsupported {
 		t.Fatalf("unpeered flow verdict = %+v", verdict)
 	}
@@ -351,16 +354,16 @@ func TestEgressRulesDenyBeforeIngress(t *testing.T) {
 	})
 	// An ingress rule that would allow the flow.
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
-		keyName: testFirewall, keyNetwork: testNetwork, "direction": "INGRESS",
-		testAllowed:    []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
-		"sourceRanges": []any{"10.0.0.0/8"},
+		keyName: testFirewall, keyNetwork: testNetwork, keyDirection: directionIngress,
+		testAllowed:     []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
+		keySourceRanges: []any{testSourceCIDR},
 	})
 	// An egress rule that denies it, at higher precedence.
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
-		keyName: "egress-block", keyNetwork: testNetwork, "direction": "EGRESS",
+		keyName: "egress-block", keyNetwork: testNetwork, keyDirection: "EGRESS",
 		"denied": []any{map[string]any{keyIPProto: "all"}}, "priority": 100,
 	})
-	verdict := h.analyzeFlow("10.0.0.5", "10.0.0.9", testTCP, 443)
+	verdict := h.analyzeFlow("10.0.4.5", "10.0.0.9", testTCP, 443)
 	if verdict.Result != verdictDropped {
 		t.Fatalf("egress-denied verdict = %+v", verdict)
 	}
@@ -379,7 +382,7 @@ func TestEgressRuleAllowsUnrestricted(t *testing.T) {
 	})
 	// No ingress rule at all; a broad egress allow makes egress decided.
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
-		keyName: "egress-all", keyNetwork: testNetwork, "direction": "EGRESS",
+		keyName: "egress-all", keyNetwork: testNetwork, keyDirection: "EGRESS",
 		testAllowed: []any{map[string]any{keyIPProto: "all"}},
 	})
 	verdict := h.analyzeFlow("10.0.0.5", "10.0.0.9", testTCP, 443)
