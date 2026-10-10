@@ -55,7 +55,7 @@ func (p *Provider) policyUpdate(call *gateway.Call, request proto.Message) (*iam
 			return nil, err
 		}
 		call.Method = "pubsub." + kind + ".getIamPolicy"
-		return nil, nil
+		return nil, nil //nolint:nilnil // a get request carries no policy update
 	case *iampb.SetIamPolicyRequest:
 		policy, err := decodeSetPolicy(r)
 		if err != nil {
