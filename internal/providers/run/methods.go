@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -437,21 +438,52 @@ func (p *Provider) operation(scope state.Scope, name string) *operationRecord {
 	return entry
 }
 
-// watch completes the operation when the container exits before readiness.
+// readinessTimeout bounds how long a launched container has to answer its
+// first HTTP request before the launch operation fails.
+const readinessTimeout = 60 * time.Second
+
+// watch resolves the launch operation from actual container readiness: the
+// revision answers its first HTTP request, or the container exits first.
 func (p *Provider) watch(scope state.Scope, id, operationName string) {
 	go func() {
+		base := context.WithoutCancel(context.Background())
 		record, refused, err := p.serviceRecordLookUp(scope, id)
 		if err != nil || refused != nil {
 			return
 		}
 		revision := latestRevision(record)
-		if revision == nil || revision.Container == "" {
+		if revision == nil || revision.Address == "" {
 			return
 		}
-		if exited := p.runtime.Ready(context.WithoutCancel(context.Background()), revision.Container); exited != nil {
-			p.finishOperation(scope, operationName, 2, exited.Error())
+		deadline := time.Now().Add(readinessTimeout)
+		for time.Now().Before(deadline) {
+			if exited := p.runtime.Ready(base, revision.Container); exited != nil {
+				p.finishOperation(scope, operationName, 2, exited.Error())
+				return
+			}
+			if serving(revision.Address) {
+				p.finishOperation(scope, operationName, 0, "")
+				return
+			}
+			time.Sleep(250 * time.Millisecond)
 		}
+		p.finishOperation(scope, operationName, 4, "The revision did not become ready before the deadline")
 	}()
+}
+
+// serving reports whether the revision answers one loopback HTTP request.
+func serving(address string) bool {
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+address+"/", nil)
+	if err != nil {
+		return false
+	}
+	client := &http.Client{Timeout: time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = response.Body.Close() }()
+	return true
 }
 
 // get returns one service document.
