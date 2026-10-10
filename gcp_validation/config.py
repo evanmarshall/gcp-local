@@ -1,9 +1,9 @@
 """Explicit targets, with no ambient credential or project discovery."""
 
-from dataclasses import dataclass
 import ipaddress
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 
@@ -16,8 +16,16 @@ class Target:
     live_scope: str | None = None
 
     @classmethod
-    def select(cls, mode="offline", *, project=None, endpoint=None,
-               credentials_file=None, live_scope=None, allow_live=False):
+    def select(
+        cls,
+        mode="offline",
+        *,
+        project=None,
+        endpoint=None,
+        credentials_file=None,
+        live_scope=None,
+        allow_live=False,
+    ):
         if mode == "offline":
             if any((project, endpoint, credentials_file, live_scope, allow_live)):
                 raise ValueError("Offline mode does not accept target or credential options")
@@ -31,9 +39,16 @@ class Target:
                 port = url.port
             except ValueError:
                 loopback, port = False, None
-            if not (loopback and port and url.scheme in {"http", "https"}
-                    and not url.username and not url.password
-                    and url.path in {"", "/"} and not url.query and not url.fragment):
+            if not (
+                loopback
+                and port
+                and url.scheme in {"http", "https"}
+                and not url.username
+                and not url.password
+                and url.path in {"", "/"}
+                and not url.query
+                and not url.fragment
+            ):
                 raise ValueError("Local mode requires a loopback IP endpoint with an explicit port")
             if not project:
                 raise ValueError("Local mode requires an explicit synthetic project ID")
@@ -41,11 +56,15 @@ class Target:
         if mode not in {"record", "revalidate"}:
             raise ValueError("Unknown validation mode")
         if not all((project, credentials_file, live_scope, allow_live)):
-            raise ValueError("Live mode requires project, credential file, live scope, and --gcp-allow-live")
+            raise ValueError(
+                "Live mode requires project, credential file, live scope, and --gcp-allow-live"
+            )
         if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", project):
             raise ValueError("Supply the dedicated sandbox project ID, not its number")
         if endpoint:
-            raise ValueError("Live API endpoints are selected by the service adapter, not an override")
+            raise ValueError(
+                "Live API endpoints are selected by the service adapter, not an override"
+            )
         path = Path(credentials_file).expanduser().resolve()
         if not path.is_file():
             raise ValueError("The explicitly selected credential file does not exist")

@@ -1,7 +1,11 @@
 import subprocess
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
+
+GIT = shutil.which("git") or "git"
+PYTHON3 = shutil.which("python3") or "python3"
 
 CHECK = Path(__file__).resolve().parents[2] / "scripts/check_history.py"
 HOOK = Path(__file__).resolve().parents[2] / ".githooks/pre-push"
@@ -20,7 +24,10 @@ class HistoryPolicyTests(unittest.TestCase):
 
     def git(self, *args):
         return subprocess.check_output(
-            ["git", *args], cwd=self.repo, stderr=subprocess.DEVNULL, text=True,
+            [GIT, *args],
+            cwd=self.repo,
+            stderr=subprocess.DEVNULL,
+            text=True,
         ).strip()
 
     def commit(self, name):
@@ -31,9 +38,11 @@ class HistoryPolicyTests(unittest.TestCase):
 
     def push_check(self, local, remote, ref="refs/heads/main"):
         return subprocess.run(
-            ["python3", str(CHECK), "--pre-push"], cwd=self.repo,
+            [PYTHON3, str(CHECK), "--pre-push"],
+            cwd=self.repo,
             input=f"refs/heads/feature {local} {ref} {remote}\n",
-            text=True, capture_output=True,
+            text=True,
+            capture_output=True,
         )
 
     def test_fast_forward_is_allowed(self):
@@ -86,7 +95,10 @@ class HistoryPolicyTests(unittest.TestCase):
         self.git("remote", "add", "origin", str(bare))
         self.git("push", "origin", "main")
         result = subprocess.run(
-            ["git", "push", "origin", ":main"], cwd=self.repo, text=True, capture_output=True,
+            [GIT, "push", "origin", ":main"],
+            cwd=self.repo,
+            text=True,
+            capture_output=True,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Deleting main", result.stderr)

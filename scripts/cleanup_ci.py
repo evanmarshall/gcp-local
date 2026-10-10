@@ -3,8 +3,8 @@
 
 import argparse
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gcp_validation.sandbox import Sandbox
@@ -22,10 +22,16 @@ def main(argv=None):
     for path in sorted(state.glob("*.json")):
         try:
             if json.loads(path.read_text()).get("cleanup") != "passed":
-                cleanup(["cleanup", "--profile", args.profile, "--manifest", str(path), "--allow-live"])
+                cleanup(
+                    ["cleanup", "--profile", args.profile, "--manifest", str(path), "--allow-live"]
+                )
         except Exception:
             failures += 1
-            print("An owned manifest still needs cleanup; retain the run's resource-manifest artifact.", file=sys.stderr)
+            print(
+                "An owned manifest still needs cleanup; retain the run's "
+                "resource-manifest artifact.",
+                file=sys.stderr,
+            )
     return bool(failures)
 
 

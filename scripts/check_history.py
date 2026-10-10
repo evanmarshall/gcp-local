@@ -2,11 +2,14 @@
 """Reject merge commits and unsafe main updates without modifying Git state."""
 
 import subprocess
+import shutil
 import sys
+
+GIT = shutil.which("git") or "git"
 
 
 def git(*args):
-    result = subprocess.run(["git", *args], capture_output=True, text=True)
+    result = subprocess.run([GIT, *args], capture_output=True, text=True)
     if result.returncode:
         raise ValueError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()
@@ -41,8 +44,9 @@ def check_push(lines):
             except ValueError as exc:
                 raise ValueError("Remote main is not available locally; fetch and retry.") from exc
             result = subprocess.run(
-                ["git", "merge-base", "--is-ancestor", remote_oid, local_oid],
-                capture_output=True, text=True,
+                [GIT, "merge-base", "--is-ancestor", remote_oid, local_oid],
+                capture_output=True,
+                text=True,
             )
             if result.returncode:
                 raise ValueError("main must advance by fast-forward; fetch and update your branch.")

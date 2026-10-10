@@ -1,32 +1,39 @@
 import json
 import os
-from pathlib import Path
 import runpy
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
+from storage_server import storage_server
 
 from gcp_validation.config import Target
 from gcp_validation.evidence import Divergence, Inconclusive, Scenario, SnapshotCase, Unverified
 from gcp_validation.normalization import StorageObservations
 from gcp_validation.storage import Response, StorageClient, StorageFixture
 
-from storage_server import storage_server
-
-
 pytestmark = pytest.mark.harness_loopback
 ROOT = Path(__file__).resolve().parents[2]
-run_lifecycle = runpy.run_path(str(ROOT / "tests/conformance/test_storage.py"))["test_storage_object_lifecycle"]
-SCENARIO = Scenario("synthetic-storage-lifecycle", "storage", "rest-json-v1", "synthetic-contract",
-                    {"sdk": "synthetic", "provider": "not-applicable", "backend": "synthetic-server"})
+run_lifecycle = runpy.run_path(str(ROOT / "tests/conformance/test_storage.py"))[
+    "test_storage_object_lifecycle"
+]
+SCENARIO = Scenario(
+    "synthetic-storage-lifecycle",
+    "storage",
+    "rest-json-v1",
+    "synthetic-contract",
+    {"sdk": "synthetic", "provider": "not-applicable", "backend": "synthetic-server"},
+)
 
 
 def execute(endpoint, tmp_path, mode="record"):
     client = StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint))
     fixture = StorageFixture(client, tmp_path / "state")
-    case = SnapshotCase(SCENARIO, mode, tmp_path / "baselines", tmp_path / "candidates", source="synthetic")
+    case = SnapshotCase(
+        SCENARIO, mode, tmp_path / "baselines", tmp_path / "candidates", source="synthetic"
+    )
     try:
         fixture.setup()
         run_lifecycle(fixture, case)
@@ -94,7 +101,9 @@ def test_failed_cleanup_keeps_owned_manifest_and_no_candidate(tmp_path):
         assert len(manifests) == 1
         assert json.loads(manifests[0].read_text())["cleanup"] == "pending"
         state["fail_cleanup"] = False
-        client = StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint))
+        client = StorageClient(
+            Target.select("local", project="synthetic-project", endpoint=endpoint)
+        )
         recovery = StorageFixture(client, tmp_path / "state", manifest=manifests[0])
         recovery.acquire()
         recovery.cleanup()
@@ -104,7 +113,10 @@ def test_failed_cleanup_keeps_owned_manifest_and_no_candidate(tmp_path):
 
 def test_cleanup_refuses_foreign_ownership(tmp_path):
     with storage_server() as (endpoint, state):
-        fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)), tmp_path)
+        fixture = StorageFixture(
+            StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)),
+            tmp_path,
+        )
         fixture.setup()
         state["bucket"]["labels"]["gcp-local-run"] = "different-owner"
         with pytest.raises(ValueError, match="ownership"):
@@ -116,7 +128,9 @@ def test_cleanup_refuses_foreign_ownership(tmp_path):
 
 def test_resource_lock_and_payload_limits(tmp_path):
     with storage_server() as (endpoint, state):
-        client = StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint))
+        client = StorageClient(
+            Target.select("local", project="synthetic-project", endpoint=endpoint)
+        )
         first, second = StorageFixture(client, tmp_path), StorageFixture(client, tmp_path)
         try:
             first.setup()
@@ -134,17 +148,26 @@ def test_resource_lock_and_payload_limits(tmp_path):
 def test_local_transport_refuses_redirect_to_cloud(tmp_path):
     with storage_server() as (endpoint, state):
         state["redirect"] = True
-        client = StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint))
+        client = StorageClient(
+            Target.select("local", project="synthetic-project", endpoint=endpoint)
+        )
         assert client.request("allowed", "GET", "/storage/v1/b").status == 307
         assert len(state["requests"]) == 1
 
 
 def test_normalization_preserves_alias_relationships_and_rejects_secrets(tmp_path):
-    fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint="http://127.0.0.1:1234")), tmp_path)
+    fixture = StorageFixture(
+        StorageClient(
+            Target.select("local", project="synthetic-project", endpoint="http://127.0.0.1:1234")
+        ),
+        tmp_path,
+    )
     normalizer = StorageObservations(fixture)
     assert normalizer.reference("etag", "one") == normalizer.reference("etag", "one")
     assert normalizer.reference("etag", "one") != normalizer.reference("etag", "two")
-    response = Response(403, b'{"error":{"code":403,"message":"Bearer synthetic-secret"}}', "application/json")
+    response = Response(
+        403, b'{"error":{"code":403,"message":"Bearer synthetic-secret"}}', "application/json"
+    )
     with pytest.raises(ValueError, match="credential"):
         normalizer.error(response)
 
@@ -157,12 +180,27 @@ def test_missing_baseline_fails_before_storage_mutation(tmp_path):
 
 
 def test_json_error_with_non_json_content_type_still_selects_public_fields(tmp_path):
-    fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint="http://127.0.0.1:1234")), tmp_path)
+    fixture = StorageFixture(
+        StorageClient(
+            Target.select("local", project="synthetic-project", endpoint="http://127.0.0.1:1234")
+        ),
+        tmp_path,
+    )
     normalizer = StorageObservations(fixture)
-    response = Response(403, json.dumps({"error": {
-        "code": 403, "message": "storage.objects.create denied", "authorization": "Bearer synthetic-secret",
-        "errors": [{"reason": "forbidden", "refresh_token": "synthetic-private-value"}],
-    }}).encode(), "text/plain")
+    response = Response(
+        403,
+        json.dumps(
+            {
+                "error": {
+                    "code": 403,
+                    "message": "storage.objects.create denied",
+                    "authorization": "Bearer synthetic-secret",
+                    "errors": [{"reason": "forbidden", "refresh_token": "synthetic-private-value"}],
+                }
+            }
+        ).encode(),
+        "text/plain",
+    )
     result = normalizer.error(response)
     assert result["format"] == "json" and result["content_type"] == "text/plain"
     assert result["reasons"] == ["forbidden"]
@@ -182,11 +220,30 @@ def test_local_cli_uses_committed_cloud_contract_and_detects_corruption(tmp_path
         for corrupted in (False, True):
             state["corrupt_reason"] = corrupted
             artifacts = tmp_path / ("corrupt" if corrupted else "matching")
-            result = subprocess.run([sys.executable, "-m", "pytest", "-p", "pytest_socket",
-                "tests/conformance/test_storage.py", "-q", "--gcp-mode", "local",
-                "--gcp-project", "synthetic-project", "--gcp-endpoint", endpoint,
-                "--gcp-artifacts", str(artifacts)], cwd=ROOT, env=env,
-                text=True, capture_output=True, timeout=30)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-p",
+                    "pytest_socket",
+                    "tests/conformance/test_storage.py",
+                    "-q",
+                    "--gcp-mode",
+                    "local",
+                    "--gcp-project",
+                    "synthetic-project",
+                    "--gcp-endpoint",
+                    endpoint,
+                    "--gcp-artifacts",
+                    str(artifacts),
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=30,
+            )
             report = json.loads((artifacts / "coverage.json").read_text())
             if corrupted:
                 assert result.returncode != 0

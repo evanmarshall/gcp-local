@@ -1,27 +1,38 @@
 import json
-from pathlib import Path
 import runpy
 import shutil
+from pathlib import Path
 
 import pytest
+from storage_server import storage_server
 
 from gcp_validation.authorization import StorageAuthorization
 from gcp_validation.config import Target
 from gcp_validation.evidence import Inconclusive, Scenario, SnapshotCase
 from gcp_validation.storage import StorageClient, StorageFixture
-from storage_server import storage_server
-
 
 pytestmark = pytest.mark.harness_loopback
 ROOT = Path(__file__).resolve().parents[2]
-run_authorization = runpy.run_path(str(ROOT / "tests/conformance/test_storage_authorization.py"))["test_storage_authorization"]
-SCENARIO = Scenario("synthetic-authorization", "storage", "rest-json-v1", "synthetic-contract",
-                    {"sdk": "synthetic", "provider": "not-applicable", "backend": "synthetic-server"})
+run_authorization = runpy.run_path(str(ROOT / "tests/conformance/test_storage_authorization.py"))[
+    "test_storage_authorization"
+]
+SCENARIO = Scenario(
+    "synthetic-authorization",
+    "storage",
+    "rest-json-v1",
+    "synthetic-contract",
+    {"sdk": "synthetic", "provider": "not-applicable", "backend": "synthetic-server"},
+)
 
 
 def execute(endpoint, tmp_path, mode="record", scenario=run_authorization):
-    fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)), tmp_path / "state")
-    case = SnapshotCase(SCENARIO, mode, tmp_path / "baselines", tmp_path / "candidates", source="synthetic")
+    fixture = StorageFixture(
+        StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)),
+        tmp_path / "state",
+    )
+    case = SnapshotCase(
+        SCENARIO, mode, tmp_path / "baselines", tmp_path / "candidates", source="synthetic"
+    )
     try:
         fixture.setup()
         scenario(fixture, case)
@@ -45,7 +56,12 @@ def test_authorization_scenario_records_compares_and_cleans_up(tmp_path):
         path.write_text(json.dumps(manifest))
         assert execute(endpoint, tmp_path, "local") is None
         assert state["bucket"] is None and not state["objects"]
-        assert {actor for actor, _, _ in state["requests"]} == {"fixture", "allowed", "denied", "anonymous"}
+        assert {actor for actor, _, _ in state["requests"]} == {
+            "fixture",
+            "allowed",
+            "denied",
+            "anonymous",
+        }
 
 
 @pytest.mark.parametrize("fault", ["denied", "anonymous", "side-effect"])
@@ -65,7 +81,10 @@ def test_authorization_detects_access_leaks_and_denied_side_effects(tmp_path, fa
 def test_revocation_timeout_is_inconclusive_and_cleanup_still_runs(tmp_path):
     with storage_server() as (endpoint, state):
         state["authorization"] = True
-        fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)), tmp_path)
+        fixture = StorageFixture(
+            StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)),
+            tmp_path,
+        )
         try:
             fixture.setup()
             fixture.upload("object.txt", b"test").require(200)
@@ -82,11 +101,17 @@ def test_revocation_timeout_is_inconclusive_and_cleanup_still_runs(tmp_path):
 
 def test_policy_transition_preserves_unrelated_bindings_and_etag(tmp_path):
     with storage_server() as (endpoint, state):
-        fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)), tmp_path)
+        fixture = StorageFixture(
+            StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)),
+            tmp_path,
+        )
         try:
             fixture.setup()
-            unrelated = {"role": "roles/storage.objectViewer", "members": ["serviceAccount:unrelated@example.com"],
-                         "condition": {"expression": "true", "title": "synthetic"}}
+            unrelated = {
+                "role": "roles/storage.objectViewer",
+                "members": ["serviceAccount:unrelated@example.com"],
+                "condition": {"expression": "true", "title": "synthetic"},
+            }
             state["policy"]["etag"] = "unchanged-etag"
             state["policy"]["bindings"].append(unrelated)
             StorageAuthorization(fixture).set_role("denied", "roles/storage.objectViewer")
@@ -99,7 +124,9 @@ def test_policy_transition_preserves_unrelated_bindings_and_etag(tmp_path):
 
 
 def test_cross_project_scenario_uses_foreign_identity_and_detects_leaks(tmp_path):
-    scenario = runpy.run_path(str(ROOT / "tests/conformance/test_storage_isolation.py"))["test_storage_cross_project"]
+    scenario = runpy.run_path(str(ROOT / "tests/conformance/test_storage_isolation.py"))[
+        "test_storage_cross_project"
+    ]
     with storage_server() as (endpoint, state):
         state["authorization"] = True
         assert execute(endpoint, tmp_path, scenario=scenario).is_dir()

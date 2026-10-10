@@ -1,29 +1,49 @@
 import json
-from pathlib import Path
 import runpy
 import shutil
+from pathlib import Path
 
 import pytest
+from storage_server import storage_server
 
 from gcp_validation.config import Target
 from gcp_validation.evidence import Scenario, SnapshotCase, Unverified
-from gcp_validation.sdk_storage import OwnedBucket, require_local_isolation, sdk_client, upstream_slice
+from gcp_validation.sdk_storage import (
+    OwnedBucket,
+    require_local_isolation,
+    sdk_client,
+    upstream_slice,
+)
 from gcp_validation.storage import StorageClient, StorageFixture
-from storage_server import storage_server
-
 
 pytest.importorskip("google.cloud.storage")
 pytestmark = pytest.mark.harness_loopback
 ROOT = Path(__file__).resolve().parents[2]
-run_sdk = runpy.run_path(str(ROOT / "tests/conformance/test_storage_sdk.py"))["test_storage_python_sdk"]
-SCENARIO = Scenario("synthetic-sdk", "storage", "rest-json-v1", "synthetic-contract",
-                    {"sdk": "google-cloud-storage/3.10.1", "provider": "not-applicable", "backend": "synthetic-server"})
+run_sdk = runpy.run_path(str(ROOT / "tests/conformance/test_storage_sdk.py"))[
+    "test_storage_python_sdk"
+]
+SCENARIO = Scenario(
+    "synthetic-sdk",
+    "storage",
+    "rest-json-v1",
+    "synthetic-contract",
+    {
+        "sdk": "google-cloud-storage/3.10.1",
+        "provider": "not-applicable",
+        "backend": "synthetic-server",
+    },
+)
 
 
 def execute(endpoint, tmp_path, mode="record"):
     tmp_path.mkdir(exist_ok=True)
-    fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)), tmp_path / "state")
-    case = SnapshotCase(SCENARIO, mode, tmp_path / "baselines", tmp_path / "candidates", source="synthetic")
+    fixture = StorageFixture(
+        StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)),
+        tmp_path / "state",
+    )
+    case = SnapshotCase(
+        SCENARIO, mode, tmp_path / "baselines", tmp_path / "candidates", source="synthetic"
+    )
     try:
         fixture.setup()
         run_sdk(fixture, case, tmp_path)
@@ -65,10 +85,15 @@ def test_upstream_assertions_detect_incorrect_protocol(tmp_path, controlled_tran
         assert state["bucket"] is None and not state["objects"]
 
 
-def test_sdk_transport_refuses_cloud_escape_redirects_and_unowned_names(tmp_path, controlled_transport):
+def test_sdk_transport_refuses_cloud_escape_redirects_and_unowned_names(
+    tmp_path, controlled_transport
+):
     with storage_server() as (endpoint, state):
         state["sdk"] = True
-        fixture = StorageFixture(StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)), tmp_path)
+        fixture = StorageFixture(
+            StorageClient(Target.select("local", project="synthetic-project", endpoint=endpoint)),
+            tmp_path,
+        )
         client, session = sdk_client(fixture)
         try:
             fixture.setup()

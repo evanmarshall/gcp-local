@@ -1,12 +1,12 @@
 """Thin, GCP-independent adapter for LocalStack's pinned snapshot library."""
 
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 import hashlib
-from importlib.metadata import version
 import json
-from pathlib import Path
 import re
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from importlib.metadata import version
+from pathlib import Path
 from uuid import uuid4
 
 from localstack_snapshot.snapshots import SnapshotAssertionError, SnapshotSession
@@ -29,7 +29,7 @@ class Inconclusive(AssertionError):
 
 
 def now():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def sha256(path):
@@ -50,15 +50,28 @@ class Scenario:
         if not all((self.service, self.transport, self.revision)):
             raise ValueError("Scenario service, transport, and revision are required")
         if set(self.versions) != {"sdk", "provider", "backend"}:
-            raise ValueError("Declare sdk, provider, and backend versions, using 'not-applicable' where appropriate")
+            raise ValueError(
+                "Declare sdk, provider, and backend versions, "
+                "using 'not-applicable' where appropriate"
+            )
         if not all(isinstance(v, str) and v.strip() for v in self.versions.values()):
             raise ValueError("Version declarations must be nonempty strings")
 
 
 SECRET_KEYS = {
-    "authorization", "proxyauthorization", "cookie", "setcookie", "password",
-    "accesstoken", "refreshtoken", "idtoken", "privatekey", "clientsecret",
-    "apikey", "xgoogapikey", "credentials",
+    "authorization",
+    "proxyauthorization",
+    "cookie",
+    "setcookie",
+    "password",
+    "accesstoken",
+    "refreshtoken",
+    "idtoken",
+    "privatekey",
+    "clientsecret",
+    "apikey",
+    "xgoogapikey",
+    "credentials",
 }
 
 
@@ -121,11 +134,19 @@ class SnapshotCase:
             # SDK/provider/backend versions can differ locally: report both. The
             # scenario revision binds the behavior contract, not emulator versions.
             observed = manifest.get("scenario", {})
-            if (manifest.get("source") != source or manifest.get("reviewed") is not True
-                    or manifest.get("cleanup") != "passed"
-                    or manifest.get("snapshot_sha256") != snapshot_hash
-                    or any(observed.get(k) != expected[k] for k in ("id", "service", "transport", "revision"))):
-                raise Unverified("Baseline is unreviewed, stale, synthetic, or has mismatched provenance")
+            if (
+                manifest.get("source") != source
+                or manifest.get("reviewed") is not True
+                or manifest.get("cleanup") != "passed"
+                or manifest.get("snapshot_sha256") != snapshot_hash
+                or any(
+                    observed.get(k) != expected[k]
+                    for k in ("id", "service", "transport", "revision")
+                )
+            ):
+                raise Unverified(
+                    "Baseline is unreviewed, stale, synthetic, or has mismatched provenance"
+                )
             self.manifest = manifest
             self.last_cloud_validation = manifest["recorded_at"] if source == "gcp" else None
 
@@ -143,11 +164,18 @@ class SnapshotCase:
         if not self.observations:
             raise Unverified("Scenario completed without any snapshot observations")
         recording = self.mode == "record"
-        directory = self.candidate_dir / f"{self.scenario.id}-{uuid4().hex}" if recording else self.baseline
+        directory = (
+            self.candidate_dir / f"{self.scenario.id}-{uuid4().hex}" if recording else self.baseline
+        )
         if recording:
             directory.mkdir(parents=True, exist_ok=False)
-        session = SnapshotSession(base_file_path=str(directory / "case"),
-                                  scope_key=self.scenario.id, update=recording, verify=True, raw=False)
+        session = SnapshotSession(
+            base_file_path=str(directory / "case"),
+            scope_key=self.scenario.id,
+            update=recording,
+            verify=True,
+            raw=False,
+        )
         if not recording and set(session.recorded_state or {}) != set(self.observations):
             raise Divergence("Observed snapshot labels differ from the reviewed baseline")
         for label, observation in self.observations.items():
@@ -168,11 +196,15 @@ class SnapshotCase:
         if persisted[self.scenario.id]["recorded-content"] != session.observed_state:
             raise OSError("Snapshot persistence failed")
         manifest = {
-            "source": self.source, "reviewed": False, "cleanup": "passed",
-            "recorded_at": now(), "scenario": asdict(self.scenario),
+            "source": self.source,
+            "reviewed": False,
+            "cleanup": "passed",
+            "recorded_at": now(),
+            "scenario": asdict(self.scenario),
             "snapshot_sha256": sha256(directory / "case.snapshot.json"),
-            "runner_versions": {name: version(name) for name in (
-                "pytest", "pytest-socket", "localstack-snapshot")},
+            "runner_versions": {
+                name: version(name) for name in ("pytest", "pytest-socket", "localstack-snapshot")
+            },
         }
         manifest["context"] = self.context
         (directory / "provenance.json").write_text(json.dumps(manifest, indent=2) + "\n")

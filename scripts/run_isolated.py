@@ -4,23 +4,33 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
+import shutil
 import sys
 import time
-from urllib.request import ProxyHandler, build_opener
+from pathlib import Path
 from urllib.parse import urlsplit
+from urllib.request import ProxyHandler, build_opener
+
+UNSHARE = shutil.which("unshare") or "unshare"
+IP = shutil.which("ip") or "ip"
 
 
 def assert_isolated():
-    if sys.platform != "linux" or {name for _, name in __import__("socket").if_nameindex()} != {"lo"}:
-        raise RuntimeError("Local upstream tests require a Linux network namespace containing only loopback")
+    if sys.platform != "linux" or {name for _, name in __import__("socket").if_nameindex()} != {
+        "lo"
+    }:
+        raise RuntimeError(
+            "Local upstream tests require a Linux network namespace containing only loopback"
+        )
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--server-json", help="JSON argv for a provider started inside the same namespace")
+    parser.add_argument(
+        "--server-json", help="JSON argv for a provider started inside the same namespace"
+    )
     parser.add_argument("--ready-url")
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
@@ -31,11 +41,22 @@ def main(argv=None):
         parser.error("Supply a command and timeout between 1 and 1800 seconds")
     if args.server_json:
         server_command = json.loads(args.server_json)
-        if not isinstance(server_command, list) or not server_command or not all(isinstance(value, str) for value in server_command):
+        if (
+            not isinstance(server_command, list)
+            or not server_command
+            or not all(isinstance(value, str) for value in server_command)
+        ):
             parser.error("Server command must be a nonempty JSON string array")
         url = urlsplit(args.ready_url or "")
-        if (url.scheme != "http" or url.hostname not in {"127.0.0.1", "::1"} or not url.port
-                or url.username or url.password or url.query or url.fragment):
+        if (
+            url.scheme != "http"
+            or url.hostname not in {"127.0.0.1", "::1"}
+            or not url.port
+            or url.username
+            or url.password
+            or url.query
+            or url.fragment
+        ):
             parser.error("Select a numeric loopback HTTP readiness URL with an explicit port")
     elif args.ready_url:
         parser.error("A readiness URL requires a server command")
@@ -46,13 +67,30 @@ def main(argv=None):
         # Terraform and other helpers may create their own process groups. A
         # private PID namespace also removes detached descendants when this
         # runner exits, including after timeout or a killed test process.
-        os.execvp("unshare", ["unshare", "--net", "--mount", "--pid", "--mount-proc", "--fork", "--kill-child",
-                            sys.executable, str(Path(__file__).resolve()), "--inside", *original])
-    subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
+        os.execvp(
+            UNSHARE,
+            [
+                UNSHARE,
+                "--net",
+                "--mount",
+                "--pid",
+                "--mount-proc",
+                "--fork",
+                "--kill-child",
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--inside",
+                *original,
+            ],
+        )
+    subprocess.run([IP, "link", "set", "lo", "up"], check=True)
     assert_isolated()
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("GOOGLE_", "GCLOUD_", "CLOUDSDK_", "GCP_TEST_", "ACTIONS_ID_TOKEN_"))
-           and key.lower() not in {"http_proxy", "https_proxy", "all_proxy"}}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("GOOGLE_", "GCLOUD_", "CLOUDSDK_", "GCP_TEST_", "ACTIONS_ID_TOKEN_"))
+        and key.lower() not in {"http_proxy", "https_proxy", "all_proxy"}
+    }
     env["GCP_LOCAL_ISOLATED"] = "1"
     children = []
 

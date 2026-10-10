@@ -27,7 +27,8 @@ ignore = [
 "tests/**" = ["ANN", "S101", "SLF001", "T20"]
 "**/testdata/**" = ["ANN", "D", "S", "T20", "INP"]
 # The skill scripts and the validation harness are executed as standalone CLIs.
-"scripts/**" = ["INP", "T20"]
+# Smoke scripts assert their own invariants: the assertion failure is the signal.
+"scripts/**" = ["INP", "T20", "S101"]
 "skills/**" = ["INP", "T20"]
 "examples/**" = ["INP", "T20"]
 "conftest.py" = ["INP"]

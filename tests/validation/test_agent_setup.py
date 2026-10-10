@@ -2,29 +2,49 @@
 
 import importlib.util
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
+PYTHON3 = shutil.which("python3") or "python3"
+GIT = shutil.which("git") or "git"
 
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("agent_installer", ROOT / "scripts/install_agent_skill.py")
+spec = importlib.util.spec_from_file_location(
+    "agent_installer", ROOT / "scripts/install_agent_skill.py"
+)
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 
 
 def git(root, *args):
-    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Fixture",
-                           "-c", "user.email=fixture@example.invalid", *args], cwd=root,
-                          text=True, capture_output=True, check=True).stdout.strip()
+    return subprocess.run(
+        [
+            GIT,
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            *args,
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
 
 
 def tree(root):
-    return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*")
-            if path.is_file() and ".git" not in path.relative_to(root).parts and not path.is_symlink()}
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and ".git" not in path.relative_to(root).parts and not path.is_symlink()
+    }
 
 
 @pytest.fixture
@@ -53,7 +73,9 @@ def test_preview_then_install_preserves_application_and_is_idempotent(repos):
     assert before == tree(app)
     installer.install(app, apply=True)
     assert (app / "AGENTS.md").read_text().startswith(before["AGENTS.md"].decode())
-    assert (app / ".agents/skills/another-skill/SKILL.md").read_bytes() == before[".agents/skills/another-skill/SKILL.md"]
+    assert (app / ".agents/skills/another-skill/SKILL.md").read_bytes() == before[
+        ".agents/skills/another-skill/SKILL.md"
+    ]
     copied = tree(app / installer.DESTINATION)
     assert set(copied) == set(tree(source / installer.BUNDLE)) | {installer.STAMP}
     stamp = json.loads(copied[installer.STAMP])
@@ -120,7 +142,11 @@ def test_unmanaged_skill_and_edited_discovery_entry_are_preserved(repos):
     shutil.rmtree(destination)
     installer.install(app, apply=True)
     agents = app / "AGENTS.md"
-    agents.write_text(agents.read_text().replace("For GCP application validation", "Customized application validation"))
+    agents.write_text(
+        agents.read_text().replace(
+            "For GCP application validation", "Customized application validation"
+        )
+    )
     with pytest.raises(ValueError, match="AGENTS.md entry"):
         installer.install(app, apply=True)
 
@@ -135,8 +161,14 @@ def test_ignored_source_secrets_do_not_enter_copied_bundle(repos):
 
 def test_bundle_operates_after_source_checkout_is_removed(repos, tmp_path):
     source, app = repos
-    (app / "package.json").write_text(json.dumps({"dependencies": {"@google-cloud/storage": "^7"},
-        "scripts": {"test": "touch MUST_NOT_RUN; SECRET=synthetic-secret npm test"}}))
+    (app / "package.json").write_text(
+        json.dumps(
+            {
+                "dependencies": {"@google-cloud/storage": "^7"},
+                "scripts": {"test": "touch MUST_NOT_RUN; SECRET=synthetic-secret npm test"},
+            }
+        )
+    )
     (app / "requirements.txt").write_text("google-cloud-pubsub==2.0\n")
     (app / "main.tf").write_text('resource "google_storage_bucket" "example" {}\n')
     (app / "app.py").write_text('raise RuntimeError("MUST_NOT_IMPORT")\n# STORAGE_EMULATOR_HOST\n')
@@ -145,11 +177,23 @@ def test_bundle_operates_after_source_checkout_is_removed(repos, tmp_path):
     moved = tmp_path / "relocated-app"
     shutil.move(app, moved)
     shutil.rmtree(source)
-    block_network = ("import runpy,socket,sys; "
-                     "socket.socket=lambda *a,**k: (_ for _ in ()).throw(RuntimeError('network forbidden')); "
-                     "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')")
-    command = [sys.executable, "-I", "-c", block_network, str(moved / installer.DESTINATION / "scripts/inspect_repo.py"),
-               "--repo", str(moved), "--output", ".gcp-local/compatibility.json", "--doctor"]
+    block_network = (
+        "import runpy,socket,sys; "
+        "socket.socket=lambda *a,**k: (_ for _ in ()).throw(RuntimeError('network forbidden')); "
+        "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')"
+    )
+    command = [
+        sys.executable,
+        "-I",
+        "-c",
+        block_network,
+        str(moved / installer.DESTINATION / "scripts/inspect_repo.py"),
+        "--repo",
+        str(moved),
+        "--output",
+        ".gcp-local/compatibility.json",
+        "--doctor",
+    ]
     result = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert result.returncode == 2, result.stderr
     report = json.loads(result.stdout)
@@ -158,7 +202,9 @@ def test_bundle_operates_after_source_checkout_is_removed(repos, tmp_path):
     assert {entry["name"] for entry in report["services"]} == {"storage", "pubsub"}
     assert "google_storage_bucket" in report["terraform_resource_types"]
     assert report["endpoint_variable_references"] == ["STORAGE_EMULATOR_HOST"]
-    assert report["test_command_candidates"] == [{"cwd": ".", "command": "npm run test", "execution": "not-run"}]
+    assert report["test_command_candidates"] == [
+        {"cwd": ".", "command": "npm run test", "execution": "not-run"}
+    ]
     assert report["profiles"]["local"]["status"] == "unavailable"
     assert not (moved / "MUST_NOT_RUN").exists()
     assert "synthetic-secret" not in result.stdout
@@ -173,10 +219,18 @@ def test_inspector_does_not_follow_links_or_overwrite_unrelated_reports(repos, t
     script = app / installer.DESTINATION / "scripts/inspect_repo.py"
     output = app / "report.json"
     output.write_text('{"user":"data"}')
-    result = subprocess.run([sys.executable, "-I", str(script), "--repo", str(app), "--output", "report.json"],
-                            capture_output=True, text=True, timeout=10)
+    result = subprocess.run(
+        [sys.executable, "-I", str(script), "--repo", str(app), "--output", "report.json"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     assert result.returncode == 1 and "unrelated report" in result.stderr
     assert output.read_text() == '{"user":"data"}'
-    result = subprocess.run([sys.executable, "-I", str(script), "--repo", str(app)],
-                            capture_output=True, text=True, timeout=10)
+    result = subprocess.run(
+        [sys.executable, "-I", str(script), "--repo", str(app)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     assert json.loads(result.stdout)["services"] == []

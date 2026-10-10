@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Exercise actual moo isolation and restore using disposable worktrees/machines."""
 
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 import re
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from urllib.request import ProxyHandler, build_opener
 from uuid import uuid4
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -88,17 +87,30 @@ def main():
                 check_http(port, label)
             if ports[0] == ports[1]:
                 raise AssertionError("Two machines share a host port")
-            print("PASS: concurrent worktrees, ignored-file exclusion, independent state and HTTP ports", flush=True)
+            print(
+                "PASS: concurrent worktrees, ignored-file exclusion, "
+                "independent state and HTTP ports",
+                flush=True,
+            )
 
             handle, tree, _ = machines[0]
             run(["moo", "save", handle], cwd=tree)
-            run(["moo", "run", handle, "--",
-                 "printf changed > /var/tmp/gcp-local-smoke/index.html"], cwd=tree)
+            run(
+                [
+                    "moo",
+                    "run",
+                    handle,
+                    "--",
+                    "printf changed > /var/tmp/gcp-local-smoke/index.html",
+                ],
+                cwd=tree,
+            )
             check_http(ports[0], "changed")
             check_http(ports[1], "right")
             run(["moo", "new", handle], cwd=tree)
-            restored = run(["moo", "run", handle, "--",
-                            "cat /var/tmp/gcp-local-smoke/index.html"], cwd=tree)
+            restored = run(
+                ["moo", "run", handle, "--", "cat /var/tmp/gcp-local-smoke/index.html"], cwd=tree
+            )
             if restored.strip() != "left":
                 raise AssertionError("Saved state was not restored")
             check_http(ports[1], "right")

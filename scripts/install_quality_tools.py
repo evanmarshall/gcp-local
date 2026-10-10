@@ -10,13 +10,13 @@ requirements-quality.txt.
 import hashlib
 import json
 import os
-from pathlib import Path
 import platform
 import subprocess
 import sys
 import tarfile
 import tempfile
 import urllib.request
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DESTINATION = ROOT / ".tools/quality/bin"
@@ -55,8 +55,12 @@ def install_golangci_lint(config, key):
 
 def install_go_module(name, config):
     environment = dict(os.environ, GOBIN=str(DESTINATION))
-    subprocess.run([str(GO), "install", f"{config['module']}@{config['version']}"],
-                   cwd=ROOT, env=environment, check=True)
+    subprocess.run(
+        [str(GO), "install", f"{config['module']}@{config['version']}"],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+    )
     print(f"{name} {config['version']}")
 
 
@@ -68,13 +72,21 @@ def main():
     install_golangci_lint(config["golangci_lint"], platform_key())
     install_go_module("staticcheck", config["staticcheck"])
     install_go_module("deadcode", config["deadcode"])
-    print(f"Python analyzers are pinned in requirements-quality.txt "
-          f"(ruff=={config['ruff']['version']}, vulture=={config['vulture']['version']})")
+    print(
+        f"Python analyzers are pinned in requirements-quality.txt "
+        f"(ruff=={config['ruff']['version']}, vulture=={config['vulture']['version']})"
+    )
 
 
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, subprocess.CalledProcessError, KeyError, StopIteration, urllib.error.URLError) as error:
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        KeyError,
+        StopIteration,
+        urllib.error.URLError,
+    ) as error:
         print(str(error), file=sys.stderr)
         raise SystemExit(1)

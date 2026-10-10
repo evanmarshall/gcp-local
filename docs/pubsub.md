@@ -74,10 +74,11 @@ session = requests.Session()
 session.trust_env = False
 request = Request(session=session)
 credentials, project = google.auth.default(
-    scopes=["https://www.googleapis.com/auth/cloud-platform"], request=request)
+    scopes=["https://www.googleapis.com/auth/cloud-platform"], request=request
+)
 channel = secure_authorized_channel(
-    credentials, request, "127.0.0.1:4567",
-    ssl_credentials=grpc.local_channel_credentials())
+    credentials, request, "127.0.0.1:4567", ssl_credentials=grpc.local_channel_credentials()
+)
 publisher = pubsub_v1.PublisherClient(transport=PublisherGrpcTransport(channel=channel))
 ```
 

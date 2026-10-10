@@ -2,18 +2,22 @@
 """Verify the built process's listener and SIGTERM shutdown without cloud access."""
 
 import json
-from pathlib import Path
 import select
 import signal
 import subprocess
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, build_opener
 
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    with subprocess.Popen([str(root / "bin/gcp-local"), "-listen", "127.0.0.1:0", "-grpc-listen", "127.0.0.1:0"],
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as process:
+    with subprocess.Popen(
+        [str(root / "bin/gcp-local"), "-listen", "127.0.0.1:0", "-grpc-listen", "127.0.0.1:0"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    ) as process:
         try:
             if not select.select([process.stdout], [], [], 10)[0]:
                 raise AssertionError("Runtime did not start within ten seconds")
@@ -35,7 +39,9 @@ def main():
             process.send_signal(signal.SIGTERM)
             tail, _ = process.communicate(timeout=12)
             assert process.returncode == 0, tail
-            assert any(json.loads(line).get("msg") == "gcp-local stopped" for line in tail.splitlines()), tail
+            assert any(
+                json.loads(line).get("msg") == "gcp-local stopped" for line in tail.splitlines()
+            ), tail
         finally:
             if process.poll() is None:
                 process.kill()

@@ -13,9 +13,9 @@ definition must be deleted or named in quality/vulture-whitelist.py.
 import argparse
 import collections
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 QUALITY = ROOT / "quality"
@@ -40,13 +40,24 @@ def relative(name):
 def go_lint():
     report = ROOT / ".artifacts/quality/go-lint.json"
     report.parent.mkdir(parents=True, exist_ok=True)
-    result = run([str(TOOLS / "golangci-lint"), "run", "-c", ".golangci.yml",
-                  "--output.json.path", str(report), "--output.text.path="])
+    result = run(
+        [
+            str(TOOLS / "golangci-lint"),
+            "run",
+            "-c",
+            ".golangci.yml",
+            "--output.json.path",
+            str(report),
+            "--output.text.path=",
+        ]
+    )
     if not report.is_file():
         raise SystemExit(f"golangci-lint produced no report:\n{result.stdout}{result.stderr}")
     findings = collections.Counter()
     for issue in json.loads(report.read_text())["Issues"]:
-        findings[(issue.get("FromLinter") or issue["Linter"], relative(issue["Pos"]["Filename"]))] += 1
+        findings[
+            (issue.get("FromLinter") or issue["Linter"], relative(issue["Pos"]["Filename"]))
+        ] += 1
     return findings
 
 
@@ -72,8 +83,17 @@ def go_dead_code():
 
 def python_dead_code():
     sources = [str(ROOT / name) for name in PYTHON_SOURCES if (ROOT / name).exists()]
-    result = run([sys.executable, "-m", "vulture", "--min-confidence", "100",
-                  *sources, str(VULTURE_WHITELIST)])
+    result = run(
+        [
+            sys.executable,
+            "-m",
+            "vulture",
+            "--min-confidence",
+            "100",
+            *sources,
+            str(VULTURE_WHITELIST),
+        ]
+    )
     return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
 
 
@@ -106,19 +126,27 @@ def compare(current, baseline, label):
     failures = False
     for (rule, name), count in sorted(current.items()):
         if count > baseline.get((rule, name), 0):
-            print(f"new {label} finding: {name}: {rule} "
-                  f"({count} now, {baseline.get((rule, name), 0)} baselined)", file=sys.stderr)
+            print(
+                f"new {label} finding: {name}: {rule} "
+                f"({count} now, {baseline.get((rule, name), 0)} baselined)",
+                file=sys.stderr,
+            )
             failures = True
     for (rule, name), count in sorted(baseline.items()):
         if count > current.get((rule, name), 0):
-            print(f"stale {label} baseline entry: {name}: {rule} "
-                  "(rerun scripts/check_quality.py --update-baseline)", file=sys.stderr)
+            print(
+                f"stale {label} baseline entry: {name}: {rule} "
+                "(rerun scripts/check_quality.py --update-baseline)",
+                file=sys.stderr,
+            )
             failures = True
     return failures
 
 
 def summarize(counts, label, rules=6):
-    print(f"{label}: {sum(counts.values())} baselined finding(s) in {len(counts)} rule/file pair(s)")
+    print(
+        f"{label}: {sum(counts.values())} baselined finding(s) in {len(counts)} rule/file pair(s)"
+    )
     totals = collections.Counter()
     for (rule, _), count in counts.items():
         totals[rule] += count
@@ -128,8 +156,11 @@ def summarize(counts, label, rules=6):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--update-baseline", action="store_true",
-                        help="rewrite the checked-in lint baselines from the current findings")
+    parser.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="rewrite the checked-in lint baselines from the current findings",
+    )
     arguments = parser.parse_args()
 
     go = go_lint()
@@ -140,7 +171,10 @@ def main():
     if arguments.update_baseline:
         write_counts(GO_BASELINE, go)
         write_counts(PYTHON_BASELINE, python)
-        print(f"Baseline rewritten: {sum(go.values())} Go and {sum(python.values())} Python finding(s).")
+        print(
+            f"Baseline rewritten: {sum(go.values())} Go and "
+            f"{sum(python.values())} Python finding(s)."
+        )
         return 0
 
     failures = compare(go, read_counts(GO_BASELINE), "Go")
@@ -161,11 +195,16 @@ def main():
 
     summarize(go, "Go lint")
     summarize(python, "Python lint")
-    print(f"Dead code: {len(unreachable)} unreachable Go function(s), "
-          f"{len(unused)} unused Python definition(s)")
+    print(
+        f"Dead code: {len(unreachable)} unreachable Go function(s), "
+        f"{len(unused)} unused Python definition(s)"
+    )
     if failures:
-        print("Quality gate failed. Delete the dead code, fix the finding, or record why the "
-              "finding is deliberate before rerunning.", file=sys.stderr)
+        print(
+            "Quality gate failed. Delete the dead code, fix the finding, or record why the "
+            "finding is deliberate before rerunning.",
+            file=sys.stderr,
+        )
         return 1
     print("Quality gate passed.")
     return 0
