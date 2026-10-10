@@ -55,8 +55,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_request(self):
         """Route the request to its endpoint family."""
-
-    def handle_request(self):
         path, query, method, actor, body = self.context()
         if self.state["redirect"]:
             return self.respond(307)
