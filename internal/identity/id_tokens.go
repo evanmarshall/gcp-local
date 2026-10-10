@@ -86,8 +86,14 @@ func (s *IDTokens) Mint(call gateway.Call, account, audience string) (string, er
 		return "", fmt.Errorf("authorize id token request: %w", err)
 	}
 	now := s.now().Unix()
-	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": s.kid})
-	claims, _ := json.Marshal(IDClaims{Issuer: IDTokenIssuer, Subject: resource.Number, Audience: audience, Email: email, EmailVerified: true, IssuedAt: now, ExpiresAt: now + 300})
+	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": s.kid})
+	if err != nil {
+		return "", fmt.Errorf("encode id token header: %w", err)
+	}
+	claims, err := json.Marshal(IDClaims{Issuer: IDTokenIssuer, Subject: resource.Number, Audience: audience, Email: email, EmailVerified: true, IssuedAt: now, ExpiresAt: now + 300})
+	if err != nil {
+		return "", fmt.Errorf("encode id token claims: %w", err)
+	}
 	message := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(claims)
 	digest := sha256.Sum256([]byte(message))
 	signature, err := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, digest[:])

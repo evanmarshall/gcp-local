@@ -274,7 +274,10 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	if _, exists := p.index.Get(BucketResource(request.Name)); exists {
 		return wireError(409, "conflict", "Bucket name is already owned"), nil
 	}
-	payload, _ := json.Marshal(request)
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Unable to encode the bucket request")
+	}
 	response, err := b.forward(ctx, "POST", "/storage/v1/b", r.Query, http.Header{"Content-Type": {"application/json"}}, payload)
 	if err != nil || response.Status != 200 {
 		return response, err
@@ -286,7 +289,10 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	metadata["projectNumber"] = project.Number
 	metadata["metageneration"] = "1"
 	metadata["etag"] = objectETag(request.Name, "1")
-	encoded, _ := json.Marshal(metadata)
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Unable to encode the bucket metadata")
+	}
 	if err := p.catalog.PublishBucket(scope, Bucket{Name: request.Name, Location: request.Location, Metadata: string(encoded)}); err != nil {
 		// A competing project may have claimed the global name while this backend
 		// created its empty bucket. Roll back only this scope before returning conflict.

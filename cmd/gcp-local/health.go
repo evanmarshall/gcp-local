@@ -46,6 +46,9 @@ func health(ctx context.Context, args []string, output, errors io.Writer) int {
 		fmt.Fprintln(errors, "gcp-local is not ready")
 		return 1
 	}
-	_ = json.NewEncoder(output).Encode(result)
+	if err := json.NewEncoder(output).Encode(result); err != nil {
+		fmt.Fprintln(errors, "Unable to write the health response:", err)
+		return 1
+	}
 	return 0
 }

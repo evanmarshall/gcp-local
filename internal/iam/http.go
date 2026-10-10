@@ -24,7 +24,12 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	encoded, err := json.Marshal(decision)
+	if err != nil {
+		http.Error(w, `{"error":"response encoding failed"}`, http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(decision)
+	_, _ = w.Write(encoded)
 }

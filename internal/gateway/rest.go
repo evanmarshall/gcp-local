@@ -149,16 +149,28 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				defer closer.Close()
 			}
 			w.WriteHeader(code)
-			_, _ = io.Copy(w, response.Body)
+			if _, err := io.Copy(w, response.Body); err != nil {
+				// The status and part of the body are already committed.
+				return
+			}
 			return
 		}
 		if w.Header().Get("Content-Type") == "" {
 			w.Header().Set("Content-Type", "application/json")
 		}
-		w.WriteHeader(code)
 		if response.JSON != nil {
-			_ = json.NewEncoder(w).Encode(response.JSON)
+			// Marshal before committing the status so an encoding failure is a
+			// reportable 500, not a silent truncated body.
+			encoded, err := json.Marshal(response.JSON)
+			if err != nil {
+				writeError(w, status.Error(codes.Internal, "Response encoding failed"))
+				return
+			}
+			w.WriteHeader(code)
+			_, _ = w.Write(encoded)
+			return
 		}
+		w.WriteHeader(code)
 		return
 	}
 	writeError(w, gap("this REST API method"))

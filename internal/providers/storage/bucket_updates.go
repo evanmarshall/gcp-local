@@ -67,7 +67,10 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	metadata["metageneration"] = strconv.FormatUint(generation+1, 10)
 	metadata["etag"] = objectETag(name, strconv.FormatUint(generation+1, 10))
 	metadata["updated"] = time.Now().UTC().Format(time.RFC3339Nano)
-	encoded, _ := json.Marshal(metadata)
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, invalid("Unable to encode the bucket update")
+	}
 	if err := p.catalog.UpdateMetadata(scope, name, string(encoded)); err != nil {
 		return nil, err
 	}

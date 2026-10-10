@@ -164,8 +164,15 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 	return serveErr
 }
 func writeJSON(w http.ResponseWriter, code int, value any) {
+	// Marshal before committing a status so an encoding failure is still
+	// reportable as a 500 instead of a silent truncated 200.
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		http.Error(w, `{"error":"response encoding failed"}`, http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(value)
+	_, _ = w.Write(encoded)
 }

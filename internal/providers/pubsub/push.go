@@ -250,7 +250,10 @@ func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, con
 			if err == nil {
 				encoded, err := protojson.Marshal(message.GetMessage())
 				if err == nil {
-					body, _ := json.Marshal(map[string]any{"message": json.RawMessage(encoded), "subscription": call.Resource})
+					body, err := json.Marshal(map[string]any{"message": json.RawMessage(encoded), "subscription": call.Resource})
+					if err != nil {
+						return
+					}
 					request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.GetPushEndpoint(), bytes.NewReader(body))
 					if err == nil {
 						request.Header.Set("Content-Type", "application/json")
