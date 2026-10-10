@@ -263,23 +263,35 @@ func (p *Provider) splitPushConfig(call gateway.Call, request proto.Message) (pr
 // rather than assuming success.
 func (p *Provider) settleMutation(session context.Context, b driver, call gateway.Call, response proto.Message, push *pb.PushConfig, creating bool, invokeErr error) error {
 	if invokeErr == nil {
-		if !creating {
-			return p.forget(call)
-		}
-		if err := p.publish(call); err != nil {
-			return err
-		}
-		if push != nil {
-			if err := p.startPush(session, call, push); err != nil {
-				return err
-			}
-		}
-		p.restorePush(response)
-		return nil
+		return p.commitMutation(session, call, response, push, creating)
 	}
 	if !ambiguous(invokeErr) {
 		return invokeErr
 	}
+	return p.resolveMutation(session, b, call, push, creating, invokeErr)
+}
+
+// commitMutation mirrors a successful create or delete into the provider index
+// and starts the push worker for a created subscription.
+func (p *Provider) commitMutation(session context.Context, call gateway.Call, response proto.Message, push *pb.PushConfig, creating bool) error {
+	if !creating {
+		return p.forget(call)
+	}
+	if err := p.publish(call); err != nil {
+		return err
+	}
+	if push != nil {
+		if err := p.startPush(session, call, push); err != nil {
+			return err
+		}
+	}
+	p.restorePush(response)
+	return nil
+}
+
+// resolveMutation re-reads an ambiguous mutation's resource to decide whether
+// the backend landed it before the error, and starts the push worker only then.
+func (p *Provider) resolveMutation(session context.Context, b driver, call gateway.Call, push *pb.PushConfig, creating bool, invokeErr error) error {
 	p.reconcile(session, b, call)
 	if creating && push != nil && p.mutationLanded(call) {
 		if err := p.startPush(session, call, push); err != nil {

@@ -201,18 +201,43 @@ func applyUploadMetadata(r *gateway.RESTRequest, value map[string]json.RawMessag
 			return gap("unsupported object metadata " + key)
 		}
 	}
-	if raw, ok := value["storageClass"]; ok {
-		var class string
-		if json.Unmarshal(raw, &class) != nil || class != storageClassStandard {
-			return gap("only STANDARD object storage class is supported")
-		}
+	if err := uploadClass(value); err != nil {
+		return err
 	}
-	if raw, ok := value["bucket"]; ok {
-		var bucket string
-		if json.Unmarshal(raw, &bucket) != nil || bucket != r.Path["bucket"] {
-			return status.Error(codes.InvalidArgument, "Object bucket does not match the upload target")
-		}
+	if err := uploadBucket(r, value); err != nil {
+		return err
 	}
+	return uploadName(u, value)
+}
+
+// uploadClass accepts only the STANDARD storage class.
+func uploadClass(value map[string]json.RawMessage) error {
+	raw, ok := value["storageClass"]
+	if !ok {
+		return nil
+	}
+	var class string
+	if json.Unmarshal(raw, &class) != nil || class != storageClassStandard {
+		return gap("only STANDARD object storage class is supported")
+	}
+	return nil
+}
+
+// uploadBucket keeps caller-supplied bucket names consistent with the target.
+func uploadBucket(r *gateway.RESTRequest, value map[string]json.RawMessage) error {
+	raw, ok := value["bucket"]
+	if !ok {
+		return nil
+	}
+	var bucket string
+	if json.Unmarshal(raw, &bucket) != nil || bucket != r.Path["bucket"] {
+		return status.Error(codes.InvalidArgument, "Object bucket does not match the upload target")
+	}
+	return nil
+}
+
+// uploadName records the metadata-supplied name, or the query parameter's.
+func uploadName(u *uploadRequest, value map[string]json.RawMessage) error {
 	raw, ok := value["name"]
 	if !ok {
 		return nil
