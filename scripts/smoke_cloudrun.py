@@ -101,7 +101,7 @@ def write_configs() -> Path:
         "policies": {resource: {"bindings": [{"role": "roles/run.admin", "members": [principal]}]}},
         "service_accounts": [{"project": project,
                               "email": principal,
-                              "unique_id": secrets.token_hex(10)}],
+                              "unique_id": str(secrets.randbelow(10**15) + 10**15)}],
     }
     path = directory / "iam.json"
     path.write_text(json.dumps(iam))
