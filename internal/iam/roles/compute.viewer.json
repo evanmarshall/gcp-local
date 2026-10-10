@@ -1,0 +1,23 @@
+{
+  "description": "Read-only access to Compute Engine resources.",
+  "etag": "AA==",
+  "includedPermissions": [
+    "compute.addresses.get",
+    "compute.addresses.list",
+    "compute.firewalls.get",
+    "compute.firewalls.list",
+    "compute.globalOperations.get",
+    "compute.globalOperations.list",
+    "compute.networks.get",
+    "compute.networks.list",
+    "compute.regionOperations.get",
+    "compute.regionOperations.list",
+    "compute.routes.get",
+    "compute.routes.list",
+    "compute.subnetworks.get",
+    "compute.subnetworks.list"
+  ],
+  "name": "roles/compute.viewer",
+  "stage": "GA",
+  "title": "Compute Viewer"
+}

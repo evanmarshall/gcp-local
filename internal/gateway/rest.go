@@ -81,7 +81,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // contracts returns the REST route tables, custom-method suffixes first so the
 // generic variable pattern cannot swallow the literal ":method" suffix.
 func contracts() []generated.Route {
-	routes := append(append([]generated.Route(nil), generated.StorageRoutes...), generated.RunRoutes...)
+	routes := append(append(append([]generated.Route(nil), generated.StorageRoutes...), generated.RunRoutes...), generated.ComputeRoutes...)
 	sort.SliceStable(routes, func(i, j int) bool {
 		left, right := strings.Contains(routes[i].Path, ":"), strings.Contains(routes[j].Path, ":")
 		return left && !right

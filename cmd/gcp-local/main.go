@@ -19,6 +19,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -249,38 +250,67 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 			return fmt.Errorf("register the Storage provider: %w", err)
 		}
 	}
-	if selected["pubsub"] {
-		tokens, err := identity.NewIDTokens(engine, index)
-		if err != nil {
-			return fmt.Errorf("mint the ID-token keys: %w", err)
-		}
-		identities.IDTokens = tokens
-		config := pubsub.Config{Java: options.pubsubJava, JAR: options.pubsubJAR, IDTokens: tokens}
-		if _, err := pubsub.New(registry, server.Backends, index, engine, config); err != nil {
-			return fmt.Errorf("register the Pub/Sub provider: %w", err)
-		}
+	if err := assemblePubSub(options, selected, registry, server, index, engine, identities); err != nil {
+		return err
 	}
-	if selected["run"] {
-		// The container runtime is provider-owned. Without an explicit Docker
-		// socket the provider refuses every container launch.
-		var runtime runprovider.Runtime = runprovider.NoopRuntime{}
-		if options.runSocket != "" {
-			runtime = runprovider.NewDockerRuntime(options.runSocket)
-		}
-		config := runprovider.Config{BaseURL: "http://" + options.listen}
-		if identities != nil {
-			// Workload identity: each revision's configured service account
-			// gets its own metadata handler bound on the container-reachable
-			// bridge address. Without an identity config the feature stays off.
-			config.Metadata = identities.Metadata
-			config.MetadataBind = workloadMetadataBind
-		}
-		provider, err := runprovider.New(ctx, config, registry, server.Backends, index, engine, runtime)
-		if err != nil {
-			return fmt.Errorf("register the Cloud Run provider: %w", err)
-		}
-		server.Run = provider.Invocation()
+	if err := assembleCompute(ctx, selected, registry, server, index, engine); err != nil {
+		return err
 	}
+	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
+}
+
+// assemblePubSub registers the Pub/Sub provider and its ID-token key.
+func assemblePubSub(options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service) error {
+	if !selected["pubsub"] {
+		return nil
+	}
+	tokens, err := identity.NewIDTokens(engine, index)
+	if err != nil {
+		return fmt.Errorf("mint the ID-token keys: %w", err)
+	}
+	identities.IDTokens = tokens
+	config := pubsub.Config{Java: options.pubsubJava, JAR: options.pubsubJAR, IDTokens: tokens}
+	if _, err := pubsub.New(registry, server.Backends, index, engine, config); err != nil {
+		return fmt.Errorf("register the Pub/Sub provider: %w", err)
+	}
+	return nil
+}
+
+// assembleCompute registers the networking control-plane provider.
+func assembleCompute(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["compute"] {
+		return nil
+	}
+	if _, err := computeprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Compute provider: %w", err)
+	}
+	return nil
+}
+
+// assembleRun registers the Cloud Run provider and its invocation surface.
+func assembleRun(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service) error {
+	if !selected["run"] {
+		return nil
+	}
+	// The container runtime is provider-owned. Without an explicit Docker
+	// socket the provider refuses every container launch.
+	var runtime runprovider.Runtime = runprovider.NoopRuntime{}
+	if options.runSocket != "" {
+		runtime = runprovider.NewDockerRuntime(options.runSocket)
+	}
+	config := runprovider.Config{BaseURL: "http://" + options.listen}
+	if identities != nil {
+		// Workload identity: each revision's configured service account gets
+		// its own metadata handler bound on the container-reachable bridge
+		// address. Without an identity config the feature stays off.
+		config.Metadata = identities.Metadata
+		config.MetadataBind = workloadMetadataBind
+	}
+	provider, err := runprovider.New(ctx, config, registry, server.Backends, index, engine, runtime)
+	if err != nil {
+		return fmt.Errorf("register the Cloud Run provider: %w", err)
+	}
+	server.Run = provider.Invocation()
 	return nil
 }
 
