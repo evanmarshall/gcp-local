@@ -340,3 +340,50 @@ func TestDuplicatePeeringIsRefused(t *testing.T) {
 		t.Fatalf("duplicate peering status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestEgressRulesDenyBeforeIngress(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testNetwork, keyAutoSubnets: false,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
+	})
+	// An ingress rule that would allow the flow.
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
+		keyName: testFirewall, keyNetwork: testNetwork, "direction": "INGRESS",
+		testAllowed:    []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
+		"sourceRanges": []any{"10.0.0.0/8"},
+	})
+	// An egress rule that denies it, at higher precedence.
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
+		keyName: "egress-block", keyNetwork: testNetwork, "direction": "EGRESS",
+		"denied": []any{map[string]any{keyIPProto: "all"}}, "priority": 100,
+	})
+	verdict := h.analyzeFlow("10.0.0.5", "10.0.0.9", testTCP, 443)
+	if verdict.Result != verdictDropped {
+		t.Fatalf("egress-denied verdict = %+v", verdict)
+	}
+	if verdict.Trace[0] != "firewall/egress-block priority=100" {
+		t.Fatalf("trace = %v", verdict.Trace)
+	}
+}
+
+func TestEgressRuleAllowsUnrestricted(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testNetwork, keyAutoSubnets: false,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
+	})
+	// No ingress rule at all; a broad egress allow makes egress decided.
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
+		keyName: "egress-all", keyNetwork: testNetwork, "direction": "EGRESS",
+		testAllowed: []any{map[string]any{keyIPProto: "all"}},
+	})
+	verdict := h.analyzeFlow("10.0.0.5", "10.0.0.9", testTCP, 443)
+	if verdict.Result != "reachable" {
+		t.Fatalf("egress-allowed verdict = %+v", verdict)
+	}
+}

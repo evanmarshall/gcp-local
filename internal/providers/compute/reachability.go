@@ -163,15 +163,16 @@ func (p *Provider) peeringBetween(scope state.Scope, source, destination string)
 }
 
 // applyFirewalls returns the modeled verdict and whether one was decided.
-func (p *Provider) applyFirewalls(scope state.Scope, request reachabilityRequest, source, _ endpoint, trace *[]string) (string, string) {
-	return p.matchRules(scope, request, source, trace)
+func (p *Provider) applyFirewalls(scope state.Scope, request reachabilityRequest, source, destination endpoint, trace *[]string) (string, string) {
+	return p.matchRules(scope, request, source, destination, trace)
 }
 
-// matchRules walks the modeled rules in precedence order.
-func (p *Provider) matchRules(scope state.Scope, request reachabilityRequest, source endpoint, trace *[]string) (string, string) {
-	rules := p.orderedFirewalls(scope, source.network)
+// matchRules walks the modeled rules in precedence order: ingress rules of
+// the destination network, egress rules of the source network.
+func (p *Provider) matchRules(scope state.Scope, request reachabilityRequest, source, destination endpoint, trace *[]string) (string, string) {
+	rules := p.flowFirewalls(scope, source.network, destination.network)
 	for _, rule := range rules {
-		if rule.Disabled || !ruleMatches(rule, request, source) {
+		if rule.Disabled || !ruleMatches(rule, request) {
 			continue
 		}
 		*trace = append(*trace, "firewall/"+rule.Name+" priority="+strconv.Itoa(rule.Priority))
@@ -180,8 +181,27 @@ func (p *Provider) matchRules(scope state.Scope, request reachabilityRequest, so
 	return "", ""
 }
 
+// flowFirewalls collects the rules applicable to one flow: ingress rules of
+// the destination network plus egress rules of the source network, merged in
+// priority order.
+func (p *Provider) flowFirewalls(scope state.Scope, sourceNetwork, destinationNetwork string) []*firewallRecord {
+	if sourceNetwork == destinationNetwork {
+		return p.orderedFirewalls(scope, sourceNetwork, "")
+	}
+	rules := p.orderedFirewalls(scope, destinationNetwork, directionIngress)
+	rules = append(rules, p.orderedFirewalls(scope, sourceNetwork, directionEgress)...)
+	sort.SliceStable(rules, func(i, j int) bool { return rules[i].Priority < rules[j].Priority })
+	return rules
+}
+
+// directionIngress and directionEgress name the firewall rule directions.
+const (
+	directionIngress = "INGRESS"
+	directionEgress  = "EGRESS"
+)
+
 // orderedFirewalls returns the network's rules sorted by priority.
-func (p *Provider) orderedFirewalls(scope state.Scope, network string) []*firewallRecord {
+func (p *Provider) orderedFirewalls(scope state.Scope, network, direction string) []*firewallRecord {
 	var rules []*firewallRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		names := make([]string, 0, len(s.firewalls))
@@ -190,8 +210,9 @@ func (p *Provider) orderedFirewalls(scope state.Scope, network string) []*firewa
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			if s.firewalls[name].Network == network {
-				rules = append(rules, s.firewalls[name])
+			rule := s.firewalls[name]
+			if rule.Network == network && (direction == "" || rule.Direction == direction) {
+				rules = append(rules, rule)
 			}
 		}
 		return nil
@@ -212,10 +233,9 @@ func ruleVerdict(rule *firewallRecord) (string, string) {
 }
 
 // ruleMatches reports whether one rule's terms cover the flow.
-func ruleMatches(rule *firewallRecord, request reachabilityRequest, _ endpoint) bool {
-	if rule.Direction == "EGRESS" {
-		// Modeled egress evaluation arrives with its recorded scenarios.
-		return false
+func ruleMatches(rule *firewallRecord, request reachabilityRequest) bool {
+	if rule.Direction == directionEgress {
+		return egressMatches(rule, request)
 	}
 	for _, cidr := range rule.SourceRanges {
 		if parsed := net.ParseIP(request.SourceIP); parsed != nil && cidrContains(cidr, parsed) {
@@ -225,9 +245,35 @@ func ruleMatches(rule *firewallRecord, request reachabilityRequest, _ endpoint) 
 	return false
 }
 
-// ruleServes reports whether the rule's protocol and port terms match.
+// egressMatches evaluates one EGRESS rule against the destination address.
+func egressMatches(rule *firewallRecord, request reachabilityRequest) bool {
+	if request.DestIP == "" {
+		return false
+	}
+	parsed := net.ParseIP(request.DestIP)
+	if parsed == nil {
+		return false
+	}
+	if len(rule.SourceRanges) == 0 {
+		return ruleServes(rule, request)
+	}
+	for _, cidr := range rule.SourceRanges {
+		if cidrContains(cidr, parsed) {
+			return ruleServes(rule, request)
+		}
+	}
+	return false
+}
+
+// ruleServes reports whether any of the rule's terms (allowed or denied)
+// covers the flow's protocol and port.
 func ruleServes(rule *firewallRecord, request reachabilityRequest) bool {
-	for _, entry := range rule.Allowed {
+	return termsMatch(rule.Allowed, request) || termsMatch(rule.Denied, request)
+}
+
+// termsMatch reports whether one term list covers the flow.
+func termsMatch(entries []map[string]any, request reachabilityRequest) bool {
+	for _, entry := range entries {
 		protocol := fmt.Sprintf("%v", entry["IPProtocol"])
 		if protocol != request.Protocol && protocol != "all" {
 			continue
@@ -239,9 +285,14 @@ func ruleServes(rule *firewallRecord, request reachabilityRequest) bool {
 	return false
 }
 
-// portMatches reports whether the port list covers the request port.
+// portMatches reports whether the port list covers the request port. An
+// empty list matches every port (GCE terms without ports are unrestricted).
 func portMatches(ports any, port int) bool {
-	for _, value := range stringListOf(ports) {
+	values := stringListOf(ports)
+	if len(values) == 0 {
+		return true
+	}
+	for _, value := range values {
 		if strings.Contains(value, "-") {
 			bounds := strings.SplitN(value, "-", 2)
 			low, lowErr := strconv.Atoi(bounds[0])
