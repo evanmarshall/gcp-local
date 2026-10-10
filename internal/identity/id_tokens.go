@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -70,20 +71,12 @@ func (s *IDTokens) Mint(call gateway.Call, account, audience string) (string, er
 	if call.Principal.State != gateway.Authenticated {
 		return "", status.Error(codes.Unauthenticated, "ID-token minting requires an authenticated acting principal")
 	}
-	if audience == "" || len(audience) > 2048 || strings.ContainsAny(audience, "\r\n") {
-		return "", status.Error(codes.InvalidArgument, "Invalid ID-token audience")
+	if err := validateAudience(audience); err != nil {
+		return "", err
 	}
-	resource, ok := s.index.Get(account)
-	if !ok || resource.Service != "iam" || resource.Kind != "serviceAccount" || resource.Number == "" {
-		return "", status.Error(codes.Unimplemented, "Configure an explicit local service account before minting ID tokens")
-	}
-	email := strings.TrimPrefix(resource.Name, "//iam.googleapis.com/projects/"+resource.Scope.Project+"/serviceAccounts/")
-	if email == resource.Name || !strings.HasSuffix(email, "@"+resource.Scope.Project+".iam.gserviceaccount.com") {
-		return "", status.Error(codes.Unimplemented, "Invalid service account ownership")
-	}
-	call.Method, call.Project, call.Resource = generateIDToken, resource.Scope.Project, account
-	if _, err := s.engine.Authorize(call, iam.Target{Name: account}, nil); err != nil {
-		return "", fmt.Errorf("authorize id token request: %w", err)
+	resource, email, err := s.mintableAccount(&call, account)
+	if err != nil {
+		return "", err
 	}
 	now := s.now().Unix()
 	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": s.kid})
@@ -103,6 +96,32 @@ func (s *IDTokens) Mint(call gateway.Call, account, audience string) (string, er
 	return message + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
+// validateAudience accepts a bounded, header-free audience string.
+func validateAudience(audience string) error {
+	if audience == "" || len(audience) > 2048 || strings.ContainsAny(audience, "\r\n") {
+		return status.Error(codes.InvalidArgument, "Invalid ID-token audience")
+	}
+	return nil
+}
+
+// mintableAccount resolves the service account an ID token names, checks its
+// shape, and authorizes the caller for the generateAccessToken-style act.
+func (s *IDTokens) mintableAccount(call *gateway.Call, account string) (state.Resource, string, error) {
+	resource, ok := s.index.Get(account)
+	if !ok || resource.Service != "iam" || resource.Kind != "serviceAccount" || resource.Number == "" {
+		return state.Resource{}, "", status.Error(codes.Unimplemented, "Configure an explicit local service account before minting ID tokens")
+	}
+	email := strings.TrimPrefix(resource.Name, "//iam.googleapis.com/projects/"+resource.Scope.Project+"/serviceAccounts/")
+	if email == resource.Name || !strings.HasSuffix(email, "@"+resource.Scope.Project+".iam.gserviceaccount.com") {
+		return state.Resource{}, "", status.Error(codes.Unimplemented, "Invalid service account ownership")
+	}
+	call.Method, call.Project, call.Resource = generateIDToken, resource.Scope.Project, account
+	if _, err := s.engine.Authorize(*call, iam.Target{Name: account}, nil); err != nil {
+		return state.Resource{}, "", fmt.Errorf("authorize id token request: %w", err)
+	}
+	return resource, email, nil
+}
+
 // Verify validates only this runtime's key, issuer, audience, and token lifetime.
 // It performs no discovery, Google key fetch, or principal authorization.
 func (s *IDTokens) Verify(token, audience string) (IDClaims, error) {
@@ -116,24 +135,7 @@ func (s *IDTokens) Verify(token, audience string) (IDClaims, error) {
 	if len(parts) != 3 {
 		return fail()
 	}
-	header, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return fail()
-	}
-	var properties struct {
-		Alg string `json:"alg"`
-		Typ string `json:"typ"`
-		Kid string `json:"kid"`
-	}
-	if json.Unmarshal(header, &properties) != nil || properties.Alg != "RS256" || properties.Typ != "JWT" || properties.Kid != s.kid {
-		return fail()
-	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return fail()
-	}
-	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if rsa.VerifyPKCS1v15(&s.key.PublicKey, crypto.SHA256, digest[:], signature) != nil {
+	if err := s.verifyEnvelope(parts); err != nil {
 		return fail()
 	}
 	encoded, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -144,9 +146,43 @@ func (s *IDTokens) Verify(token, audience string) (IDClaims, error) {
 	if json.Unmarshal(encoded, &claims) != nil {
 		return fail()
 	}
-	now := s.now().Unix()
-	if claims.Issuer != IDTokenIssuer || claims.Audience != audience || claims.Subject == "" || claims.Email == "" || !claims.EmailVerified || claims.IssuedAt > now || claims.ExpiresAt <= now || claims.ExpiresAt-claims.IssuedAt != 300 {
+	if !claims.acceptable(s.now().Unix(), audience) {
 		return fail()
 	}
 	return claims, nil
 }
+
+// verifyEnvelope checks the JWT header and RSA signature over the signed part.
+func (s *IDTokens) verifyEnvelope(parts []string) error {
+	header, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return fmt.Errorf("decode the token header: %w", err)
+	}
+	var properties struct {
+		Alg string `json:"alg"`
+		Typ string `json:"typ"`
+		Kid string `json:"kid"`
+	}
+	if json.Unmarshal(header, &properties) != nil || properties.Alg != "RS256" || properties.Typ != "JWT" || properties.Kid != s.kid {
+		return errEnvelope
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return fmt.Errorf("decode the token signature: %w", err)
+	}
+	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	if rsa.VerifyPKCS1v15(&s.key.PublicKey, crypto.SHA256, digest[:], signature) != nil {
+		return errEnvelope
+	}
+	return nil
+}
+
+// acceptable reports whether the decoded claims name a live local identity for
+// this audience. The token lifetime is fixed at five minutes.
+func (claims IDClaims) acceptable(now int64, audience string) bool {
+	return claims.Issuer == IDTokenIssuer && claims.Audience == audience && claims.Subject != "" && claims.Email != "" && claims.EmailVerified &&
+		claims.IssuedAt <= now && claims.ExpiresAt > now && claims.ExpiresAt-claims.IssuedAt == 300
+}
+
+// errEnvelope marks a token whose header or signature does not match this issuer.
+var errEnvelope = errors.New("id token envelope rejected")

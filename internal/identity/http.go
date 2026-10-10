@@ -50,25 +50,8 @@ func (s *Service) exchange(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, 400, "invalid_request", "Malformed token exchange")
 		return
 	}
-	required := map[string]bool{"grant_type": true, "audience": true, "requested_token_type": true, "subject_token_type": true, "subject_token": true, "scope": true}
-	for field, values := range r.PostForm {
-		if !required[field] || len(values) != 1 {
-			oauthError(w, 400, "invalid_request", "Unsupported or repeated exchange parameter")
-			return
-		}
-	}
-	for field := range required {
-		if r.PostForm.Get(field) == "" {
-			oauthError(w, 400, "invalid_request", "Missing exchange parameter")
-			return
-		}
-	}
-	if r.PostForm.Get("grant_type") != "urn:ietf:params:oauth:grant-type:token-exchange" {
-		oauthError(w, 400, "unsupported_grant_type", "Only token exchange is implemented")
-		return
-	}
-	if r.PostForm.Get("audience") != Audience || r.PostForm.Get("requested_token_type") != AccessTokenType || r.PostForm.Get("subject_token_type") != AccessTokenType {
-		oauthError(w, 400, "invalid_target", "Select the local audience and access-token types")
+	if code, detail, refused := exchangeForm(r); refused {
+		oauthError(w, code, detail[0], detail[1])
 		return
 	}
 	p, ok := s.subjects[sha256.Sum256([]byte(r.PostForm.Get("subject_token")))]
@@ -83,6 +66,34 @@ func (s *Service) exchange(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"access_token": value, "issued_token_type": AccessTokenType, "token_type": "Bearer", "expires_in": lifetime})
 }
+
+// exchangeForm validates the token-exchange form and reports the OAuth error to
+// write when it is refused. Only this audience, access-token subjects, and the
+// token-exchange grant are implemented.
+func exchangeForm(r *http.Request) (int, [2]string, bool) {
+	refuse := func(code int, code_ string, detail string) (int, [2]string, bool) {
+		return code, [2]string{code_, detail}, true
+	}
+	required := map[string]bool{"grant_type": true, "audience": true, "requested_token_type": true, "subject_token_type": true, "subject_token": true, "scope": true}
+	for field, values := range r.PostForm {
+		if !required[field] || len(values) != 1 {
+			return refuse(400, "invalid_request", "Unsupported or repeated exchange parameter")
+		}
+	}
+	for field := range required {
+		if r.PostForm.Get(field) == "" {
+			return refuse(400, "invalid_request", "Missing exchange parameter")
+		}
+	}
+	if r.PostForm.Get("grant_type") != "urn:ietf:params:oauth:grant-type:token-exchange" {
+		return refuse(400, "unsupported_grant_type", "Only token exchange is implemented")
+	}
+	if r.PostForm.Get("audience") != Audience || r.PostForm.Get("requested_token_type") != AccessTokenType || r.PostForm.Get("subject_token_type") != AccessTokenType {
+		return refuse(400, "invalid_target", "Select the local audience and access-token types")
+	}
+	return 0, [2]string{}, false
+}
+
 func (s *Service) inspect(w http.ResponseWriter, r *http.Request) {
 	headers := r.Header.Values("Authorization")
 	var bearer string
