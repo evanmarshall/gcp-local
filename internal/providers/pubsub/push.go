@@ -42,16 +42,26 @@ func validatePush(config *pb.PushConfig) error {
 	if err := fields(config.GetOidcToken(), "service_account_email", "audience"); err != nil {
 		return err
 	}
-	endpoint, err := url.Parse(config.GetPushEndpoint())
+	if err := validatePushEndpoint(config.GetPushEndpoint()); err != nil {
+		return err
+	}
+	token := config.GetOidcToken()
+	if token.GetServiceAccountEmail() == "" || len(token.GetAudience()) > 2048 || strings.ContainsAny(token.GetAudience(), "\r\n") {
+		return invalid("Invalid push account or audience")
+	}
+	return nil
+}
+
+// validatePushEndpoint requires a numeric loopback HTTP URL with an explicit
+// port: the worker must not dial arbitrary hosts or leak the loopback worker.
+func validatePushEndpoint(raw string) error {
+	endpoint, err := url.Parse(raw)
 	if err != nil {
 		return invalid("Invalid push endpoint")
 	}
 	ip := net.ParseIP(endpoint.Hostname())
 	if endpoint.Scheme != "http" || ip == nil || !ip.IsLoopback() || endpoint.Port() == "" || endpoint.User != nil || endpoint.Fragment != "" {
 		return gap("push endpoints currently require numeric loopback HTTP and an explicit port")
-	}
-	if config.GetOidcToken().GetServiceAccountEmail() == "" || len(config.GetOidcToken().GetAudience()) > 2048 || strings.ContainsAny(config.GetOidcToken().GetAudience(), "\r\n") {
-		return invalid("Invalid push account or audience")
 	}
 	return nil
 }
@@ -189,97 +199,131 @@ func (p *Provider) pushToken(ctx context.Context, call gateway.Call, config *pb.
 }
 
 func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, config *pb.PushConfig) {
-	endpoint, _ := url.Parse(config.GetPushEndpoint())
-	transport := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
-		if address != endpoint.Host {
-			return nil, gap("push dial target changed")
-		}
-		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", endpoint.Host)
-	}}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	pause := func() bool {
-		timer := time.NewTimer(time.Second)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			return true
-		case <-ctx.Done():
-			return false
-		}
-	}
+	client := pushClient(config.GetPushEndpoint())
 	for ctx.Err() == nil {
-		if _, err := p.pushToken(ctx, call, config); err != nil {
-			if !pause() {
-				return
-			}
-			continue
-		}
-		pullCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		result, err := invoke(pullCtx, b, subscriber+"Pull", &pb.PullRequest{Subscription: call.Resource, MaxMessages: 1})
-		cancel()
-		if err != nil {
-			if status.Code(err) == codes.NotFound {
-				return
-			}
-			if !pause() {
-				return
-			}
-			continue
-		}
-		pulled, ok := result.(*pb.PullResponse)
-		if !ok {
-			if !pause() {
-				return
-			}
-			continue
-		}
-		messages := pulled.GetReceivedMessages()
-		if len(messages) == 0 {
-			if !pause() {
-				return
-			}
-			continue
+		messages, retry := p.pullForDelivery(ctx, b, call, config)
+		if retry && !pauseFor(ctx, time.Second) {
+			return
 		}
 		for _, message := range messages {
 			if ctx.Err() != nil {
 				return
 			}
-			token, err := p.pushToken(ctx, call, config)
-			accepted := false
-			if err == nil {
-				encoded, err := protojson.Marshal(message.GetMessage())
-				if err == nil {
-					body, err := json.Marshal(map[string]any{"message": json.RawMessage(encoded), "subscription": call.Resource})
-					if err != nil {
-						return
-					}
-					request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.GetPushEndpoint(), bytes.NewReader(body))
-					if err == nil {
-						request.Header.Set("Content-Type", "application/json")
-						request.Header.Set("Authorization", "Bearer "+token)
-						response, err := client.Do(request)
-						if err == nil {
-							_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-							_ = response.Body.Close()
-							switch response.StatusCode {
-							case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
-								accepted = true
-							}
-						}
-					}
-				}
-			}
-			ackCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			if accepted {
-				_, err = invoke(ackCtx, b, subscriber+"Acknowledge", &pb.AcknowledgeRequest{Subscription: call.Resource, AckIds: []string{message.GetAckId()}})
-			} else {
-				_, err = invoke(ackCtx, b, subscriber+"ModifyAckDeadline", &pb.ModifyAckDeadlineRequest{Subscription: call.Resource, AckIds: []string{message.GetAckId()}, AckDeadlineSeconds: 0})
-			}
-			cancel()
-			if (!accepted || err != nil) && !pause() {
+			accepted := p.pushMessage(ctx, call, config, client, message.GetMessage())
+			if !p.settleDelivery(ctx, b, call, message.GetAckId(), accepted) {
 				return
 			}
 		}
 	}
+}
+
+// pushClient builds a client that dials only the configured endpoint and never
+// follows redirects, so a push target cannot pivot the worker elsewhere.
+func pushClient(endpoint string) *http.Client {
+	parsed, _ := url.Parse(endpoint)
+	transport := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
+		if address != parsed.Host {
+			return nil, gap("push dial target changed")
+		}
+		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "tcp", parsed.Host)
+	}}
+	return &http.Client{Transport: transport, Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+}
+
+// pauseFor waits one interval or until the context ends, and reports whether the
+// loop may continue.
+func pauseFor(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// pullForDelivery draws one message batch, or reports whether the failure is
+// worth retrying after a pause. An empty subscription just idles the worker.
+func (p *Provider) pullForDelivery(ctx context.Context, b driver, call gateway.Call, config *pb.PushConfig) ([]*pb.ReceivedMessage, bool) {
+	if _, err := p.pushToken(ctx, call, config); err != nil {
+		return nil, true
+	}
+	pullCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	result, err := invoke(pullCtx, b, subscriber+"Pull", &pb.PullRequest{Subscription: call.Resource, MaxMessages: 1})
+	cancel()
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, false
+		}
+		return nil, true
+	}
+	pulled, ok := result.(*pb.PullResponse)
+	if !ok {
+		return nil, true
+	}
+	return pulled.GetReceivedMessages(), true
+}
+
+// pushBody encodes the Pub/Sub push envelope or reports why it cannot.
+func pushBody(subscription string, message *pb.PubsubMessage) ([]byte, bool) {
+	encoded, err := protojson.Marshal(message)
+	if err != nil {
+		return nil, false
+	}
+	body, err := json.Marshal(map[string]any{"message": json.RawMessage(encoded), "subscription": subscription})
+	if err != nil {
+		return nil, false
+	}
+	return body, true
+}
+
+// pushMessage posts one message to the endpoint and reports whether the
+// endpoint accepted it. Failures are retried by nacking, not logged.
+func (p *Provider) pushMessage(ctx context.Context, call gateway.Call, config *pb.PushConfig, client *http.Client, message *pb.PubsubMessage) bool {
+	token, err := p.pushToken(ctx, call, config)
+	if err != nil {
+		return false
+	}
+	body, ok := pushBody(call.Resource, message)
+	if !ok {
+		return false
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.GetPushEndpoint(), bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := client.Do(request)
+	if err != nil {
+		return false
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+	_ = response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
+		return true
+	default:
+		return false
+	}
+}
+
+// settleDelivery acknowledges an accepted delivery, or resets the ack deadline
+// so the message is redelivered. A failed settle without a pause ends the worker.
+func (p *Provider) settleDelivery(ctx context.Context, b driver, call gateway.Call, ackID string, accepted bool) bool {
+	ackCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if accepted {
+		_, err := invoke(ackCtx, b, subscriber+"Acknowledge", &pb.AcknowledgeRequest{Subscription: call.Resource, AckIds: []string{ackID}})
+		if err == nil {
+			return true
+		}
+	} else {
+		_, err := invoke(ackCtx, b, subscriber+"ModifyAckDeadline", &pb.ModifyAckDeadlineRequest{Subscription: call.Resource, AckIds: []string{ackID}, AckDeadlineSeconds: 0})
+		if err == nil {
+			return true
+		}
+	}
+	return pauseFor(ctx, time.Second)
 }
