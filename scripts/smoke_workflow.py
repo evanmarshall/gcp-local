@@ -83,14 +83,11 @@ def rest(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[in
         return error.code, json.loads(payload) if payload else {}
 
 
-def write_adc(project: str) -> Path:
+def write_adc(project: str, subject_token: str) -> Path:
     """Write the developer fixture ADC bundle for the local token exchange."""
     directory = Path(tempfile.mkdtemp())
     directory.chmod(stat.S_IRWXU)
-    subject = "gls." + secrets.token_urlsafe(32)
-    # The subject token must match the developer principal written above.
-    _ = project
-    (directory / "subject.txt").write_text(subject)
+    (directory / "subject.txt").write_text(subject_token)
     adc = {
         "type": "external_account_authorized_user",
         "audience": (
