@@ -86,8 +86,8 @@ func validateQueryValues(method string, r *gateway.RESTRequest) error {
 	if alt := r.Query.Get("alt"); alt != "" && alt != "json" && (alt != altMedia || method != MethodObjectsGet) {
 		return gap("unsupported response representation")
 	}
-	if v := r.Query.Get("optionsRequestedPolicyVersion"); v != "" && v != "1" {
-		return gap("conditional policies")
+	if v := r.Query.Get("optionsRequestedPolicyVersion"); v != "" && v != "1" && v != "3" {
+		return gap("requested IAM policy version")
 	}
 	if projection := r.Query.Get("projection"); projection != "" && projection != "noAcl" {
 		return gap("only the noAcl projection is supported")
