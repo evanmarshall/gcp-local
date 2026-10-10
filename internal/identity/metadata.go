@@ -2,6 +2,7 @@ package identity
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -92,7 +93,7 @@ func (s *Service) Metadata(subject string) (http.Handler, error) {
 }
 func parseMetadataQuery(r *http.Request) (string, error) {
 	if err := r.ParseForm(); err != nil {
-		return "", err
+		return "", fmt.Errorf("parse metadata query: %w", err)
 	}
 	for key, values := range r.Form {
 		if key != fieldScopes || len(values) != 1 {

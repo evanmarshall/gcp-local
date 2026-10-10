@@ -3,6 +3,7 @@ package pubsub
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
@@ -83,14 +84,17 @@ func (p *Provider) policy(call gateway.Call, raw any) (any, error) {
 		} else {
 			result, err = p.iam.SetPolicy(canonical(call.Resource), *update)
 		}
-		return err
+		if err != nil {
+			return fmt.Errorf("set iam policy: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("apply policy in the backend session: %w", err)
 	}
 	etag, err := base64.StdEncoding.DecodeString(result.ETag)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode policy etag: %w", err)
 	}
 	response := &iampb.Policy{Version: int32(result.Version), Etag: etag}
 	for _, binding := range result.Bindings {

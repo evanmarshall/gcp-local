@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -70,7 +71,10 @@ func (p *Provider) authorizePush(call gateway.Call, config *pb.PushConfig) error
 	}
 	call.Method, call.Resource = "pubsub.push.actAs", account
 	_, err := p.iam.Authorize(call, iam.Target{Name: account}, nil)
-	return err
+	if err != nil {
+		return fmt.Errorf("authorize push identity: %w", err)
+	}
+	return nil
 }
 
 func (p *Provider) pushCount(scope state.Scope) int {
@@ -156,7 +160,11 @@ func (p *Provider) pushToken(ctx context.Context, call gateway.Call, config *pb.
 	if audience == "" {
 		audience = config.GetPushEndpoint()
 	}
-	return p.tokens.Mint(call, iam.AccountResource(call.Project, config.GetOidcToken().GetServiceAccountEmail()), audience)
+	token, err := p.tokens.Mint(call, iam.AccountResource(call.Project, config.GetOidcToken().GetServiceAccountEmail()), audience)
+	if err != nil {
+		return "", fmt.Errorf("mint push identity token: %w", err)
+	}
+	return token, nil
 }
 
 func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, config *pb.PushConfig) {

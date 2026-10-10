@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 //go:embed roles/*.json
@@ -24,16 +25,16 @@ func loadRoles() (map[string]map[string]bool, error) {
 	}
 	raw, err := roleFiles.ReadFile("roles/manifest.json")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read role manifest: %w", err)
 	}
 	if err = json.Unmarshal(raw, &manifest); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode role manifest: %w", err)
 	}
 	roles := map[string]map[string]bool{}
 	for _, entry := range manifest.Roles {
 		raw, err := roleFiles.ReadFile("roles/" + entry.File)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read role snapshot %s: %w", entry.File, err)
 		}
 		sum := sha256.Sum256(raw)
 		if hex.EncodeToString(sum[:]) != entry.SHA256 {
@@ -44,7 +45,7 @@ func loadRoles() (map[string]map[string]bool, error) {
 			IncludedPermissions []string
 		}
 		if err := json.Unmarshal(raw, &role); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode role snapshot %s: %w", entry.File, err)
 		}
 		if role.Name != entry.Name || role.Stage != "GA" || len(role.IncludedPermissions) == 0 {
 			return nil, errRoleSnapshot

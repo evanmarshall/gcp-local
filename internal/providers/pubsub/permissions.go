@@ -1,6 +1,10 @@
 package pubsub
 
-import "github.com/evanmarshall/gcp-local/internal/iam"
+import (
+	"fmt"
+
+	"github.com/evanmarshall/gcp-local/internal/iam"
+)
 
 const publisher = "/google.pubsub.v1.Publisher/"
 const subscriber = "/google.pubsub.v1.Subscriber/"
@@ -38,7 +42,7 @@ const permissionSubscriptionsConsume = "pubsub.subscriptions.consume"
 func registerPermissions(engine *iam.Engine) error {
 	for method, permission := range permissions {
 		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-			return err
+			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}
 	return nil

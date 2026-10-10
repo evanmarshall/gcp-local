@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -19,10 +20,11 @@ func (b *memoryBackend) Start(ctx context.Context) error {
 		return err
 	}
 	server, err := fakestorage.NewServerWithOptions(fakestorage.Options{NoListener: true, Writer: io.Discard})
-	if err == nil {
-		b.server = server
+	if err != nil {
+		return fmt.Errorf("start the storage backend: %w", err)
 	}
-	return err
+	b.server = server
+	return nil
 }
 
 // errBackendStopped reports a readiness probe after Stop.
@@ -49,5 +51,9 @@ func (b *memoryBackend) request(r *http.Request) (*http.Response, error) {
 	if err := b.Ready(r.Context()); err != nil {
 		return nil, err
 	}
-	return b.server.HTTPClient().Transport.RoundTrip(r)
+	response, err := b.server.HTTPClient().Transport.RoundTrip(r)
+	if err != nil {
+		return nil, fmt.Errorf("forward to the storage backend: %w", err)
+	}
+	return response, nil
 }

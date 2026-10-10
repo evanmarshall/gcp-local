@@ -194,7 +194,7 @@ func (m *Manager) get(key Key) (*instance, error) {
 		return nil, errServiceUnregistered
 	}
 	if err := key.Scope.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scope validation: %w", err)
 	}
 	if definition.Validate != nil {
 		if err := definition.Validate(key.Scope); err != nil {
@@ -301,7 +301,7 @@ func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Bac
 		}
 		if errors.Is(err, ErrProcessExited) {
 			m.fail(instance, "readiness")
-			return nil, err
+			return nil, fmt.Errorf("backend readiness: %w", err)
 		}
 		select {
 		case <-deadline.Done():
@@ -363,11 +363,11 @@ func (m *Manager) Reset(ctx context.Context, key Key) error {
 	if instance.backend != nil {
 		if err := instance.backend.Stop(ctx); err != nil {
 			instance.phase(Failed, "reset stop")
-			return err
+			return fmt.Errorf("backend stop: %w", err)
 		}
 		if err := instance.backend.Reset(ctx); err != nil {
 			instance.phase(Failed, "reset assets")
-			return err
+			return fmt.Errorf("backend reset: %w", err)
 		}
 	}
 	if err := instance.definition.AfterReset(key.Scope); err != nil {

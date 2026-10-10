@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -118,7 +119,7 @@ func New(config Config, now func() time.Time) (*Service, error) {
 			return nil, errEnrollSubject
 		}
 		if err := (state.Scope{Project: entry.Project, Location: state.Global}).Validate(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("enrolled principal scope: %w", err)
 		}
 		if len(entry.SubjectToken) < 32 || len(entry.SubjectToken) > 256 || strings.ContainsAny(entry.SubjectToken, "\r\n \t") {
 			return nil, errSubjectSecret

@@ -2,6 +2,7 @@ package pubsub
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
@@ -42,7 +43,7 @@ func validateStream(request *pb.StreamingPullRequest, first bool) error {
 func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 	first := &pb.StreamingPullRequest{}
 	if err := downstream.Recv(first); err != nil {
-		return err
+		return fmt.Errorf("read the opening stream request: %w", err)
 	}
 	if err := validateStream(first, true); err != nil {
 		return err
@@ -53,7 +54,7 @@ func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 	if err := p.authorize(call, first); err != nil {
 		return err
 	}
-	return p.manager.Session(call.Context, keyOf(call), func(ctx context.Context, active backend.Backend) error {
+	if err := p.manager.Session(call.Context, keyOf(call), func(ctx context.Context, active backend.Backend) error {
 		call.Context = ctx
 		if err := p.authorize(call, first); err != nil {
 			return err
@@ -62,10 +63,10 @@ func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 		defer cancel()
 		upstream, err := pb.NewSubscriberClient(active.(driver).client()).StreamingPull(ctx)
 		if err != nil {
-			return err
+			return fmt.Errorf("open the upstream stream: %w", err)
 		}
 		if err := upstream.Send(first); err != nil {
-			return err
+			return fmt.Errorf("forward the opening request upstream: %w", err)
 		}
 		_ = grpc.SendHeader(call.Context, nil)
 		errors := make(chan error, 2)
@@ -125,5 +126,8 @@ func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	})
+	}); err != nil {
+		return fmt.Errorf("open the backend stream session: %w", err)
+	}
+	return nil
 }

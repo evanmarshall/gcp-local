@@ -52,11 +52,11 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 			return nil
 		},
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("register the storage backend: %w", err)
 	}
 	for _, method := range methods {
 		if err := registry.Register(method, p.handle); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("register %s: %w", method, err)
 		}
 	}
 	return p, nil
@@ -89,7 +89,7 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 	}
 	code := status.Code(err)
 	if code != codes.PermissionDenied && code != codes.Unauthenticated {
-		return nil, d.ID, err
+		return nil, d.ID, fmt.Errorf("authorize %s: %w", call.Method, err)
 	}
 	permission := ""
 	for _, check := range d.Checks {
@@ -99,7 +99,7 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 		}
 	}
 	if permission == "" {
-		return nil, d.ID, err
+		return nil, d.ID, fmt.Errorf("identify the denied permission for %s: %w", call.Method, err)
 	}
 	actor := strings.TrimPrefix(strings.TrimPrefix(call.Principal.Subject, "serviceAccount:"), "user:")
 	httpCode, reason := 403, "forbidden"
@@ -216,7 +216,10 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		}
 		return err
 	})
-	return response, err
+	if err != nil {
+		return response, fmt.Errorf("forward %s: %w", call.Method, err)
+	}
+	return response, nil
 }
 func objectPath(bucket, object string) string {
 	return "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(object)
@@ -227,7 +230,7 @@ func objectPath(bucket, object string) string {
 func (b *memoryBackend) forward(ctx context.Context, method, path string, query url.Values, headers http.Header, body []byte) (*gateway.RESTResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, method, "http://storage.invalid"+path+"?"+query.Encode(), bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build backend request: %w", err)
 	}
 	for _, key := range []string{"Content-Type", "Range", "Accept-Encoding"} {
 		if value := headers.Get(key); value != "" {
@@ -241,7 +244,7 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 	defer result.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(result.Body, maxObjectSize+(1<<20)+1))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read backend response: %w", err)
 	}
 	if len(payload) > maxObjectSize+(1<<20) {
 		return nil, status.Error(codes.ResourceExhausted, "Storage response exceeds supported size")
@@ -304,7 +307,10 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 		return p.patchBucket(ctx, b, r, scope, bucket)
 	case MethodBucketsGetIamPolicy:
 		policy, err := p.iam.GetPolicy(BucketResource(bucket))
-		return &gateway.RESTResponse{JSON: policy}, err
+		if err != nil {
+			return nil, fmt.Errorf("read bucket policy: %w", err)
+		}
+		return &gateway.RESTResponse{JSON: policy}, nil
 	case MethodBucketsSetIamPolicy:
 		var request struct {
 			iam.Policy
@@ -331,7 +337,10 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 			}
 		}
 		result, err := p.iam.SetPolicy(BucketResource(bucket), policy)
-		return &gateway.RESTResponse{JSON: result}, err
+		if err != nil {
+			return nil, fmt.Errorf("write bucket policy: %w", err)
+		}
+		return &gateway.RESTResponse{JSON: result}, nil
 	case MethodBucketsList:
 		response, err := b.forward(ctx, "GET", "/storage/v1/b", r.Query, nil, nil)
 		if err != nil {

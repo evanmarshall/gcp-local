@@ -3,6 +3,7 @@ package backend_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -100,11 +101,11 @@ func newFixture(t *testing.T, mode string) *fixture {
 			}
 			address, err := os.ReadFile(filepath.Join(directory, "address"))
 			if err != nil {
-				return err
+				return fmt.Errorf("read address: %w", err)
 			}
 			probe, err := backend.HTTPProbe("http://" + string(address) + "/health")
 			if err != nil {
-				return err
+				return fmt.Errorf("probe endpoint: %w", err)
 			}
 			return probe(ctx)
 		},
@@ -117,7 +118,7 @@ func newFixture(t *testing.T, mode string) *fixture {
 			}
 			for _, name := range []string{"payload", "address"} {
 				if err := os.Remove(filepath.Join(directory, name)); err != nil && !os.IsNotExist(err) {
-					return err
+					return fmt.Errorf("remove %s: %w", name, err)
 				}
 			}
 			result.resets.Add(1)

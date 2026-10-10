@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"strings"
 	"time"
 
@@ -48,15 +49,15 @@ func NewIDTokens(engine *iam.Engine, index *state.Index) (*IDTokens, error) {
 	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("generate id token key: %w", err)
 	}
 	public, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal id token public key: %w", err)
 	}
 	sum := sha256.Sum256(public)
 	if err := engine.Register(generateIDToken, iam.Rule{Baseline: []string{"iam.serviceAccounts.getOpenIdToken"}}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("register id token method: %w", err)
 	}
 	return &IDTokens{key: key, kid: hex.EncodeToString(sum[:16]), certificate: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: public})), engine: engine, index: index, now: time.Now}, nil
 }
@@ -82,7 +83,7 @@ func (s *IDTokens) Mint(call gateway.Call, account, audience string) (string, er
 	}
 	call.Method, call.Project, call.Resource = generateIDToken, resource.Scope.Project, account
 	if _, err := s.engine.Authorize(call, iam.Target{Name: account}, nil); err != nil {
-		return "", err
+		return "", fmt.Errorf("authorize id token request: %w", err)
 	}
 	now := s.now().Unix()
 	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": s.kid})
@@ -91,7 +92,7 @@ func (s *IDTokens) Mint(call gateway.Call, account, audience string) (string, er
 	digest := sha256.Sum256([]byte(message))
 	signature, err := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, digest[:])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("sign id token: %w", err)
 	}
 	return message + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }

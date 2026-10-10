@@ -2,6 +2,7 @@ package iam
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -25,7 +26,7 @@ var errAccountShape = errors.New("local service accounts require a matching proj
 func (a ServiceAccount) resource() (state.Resource, error) {
 	scope := state.Scope{Project: a.Project, Location: state.Global}
 	if err := scope.Validate(); err != nil {
-		return state.Resource{}, err
+		return state.Resource{}, fmt.Errorf("service account scope: %w", err)
 	}
 	pattern := `^[a-z][a-z0-9-]{4,28}[a-z0-9]@` + regexp.QuoteMeta(a.Project) + `\.iam\.gserviceaccount\.com$`
 	if !regexp.MustCompile(pattern).MatchString(a.Email) || !regexp.MustCompile(`^[1-9][0-9]{5,20}$`).MatchString(a.UniqueID) {

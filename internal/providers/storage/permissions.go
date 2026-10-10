@@ -1,6 +1,10 @@
 package storage
 
-import "github.com/evanmarshall/gcp-local/internal/iam"
+import (
+	"fmt"
+
+	"github.com/evanmarshall/gcp-local/internal/iam"
+)
 
 // RegisterPermissions describes the initial UBLA permission plans. Registering
 // these rules does not register API providers or claim service conformance.
@@ -20,7 +24,7 @@ func RegisterPermissions(engine *iam.Engine) error {
 	}
 	for method, rule := range rules {
 		if err := engine.Register(method, rule); err != nil {
-			return err
+			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}
 	return nil

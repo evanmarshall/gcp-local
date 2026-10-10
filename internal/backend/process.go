@@ -70,7 +70,7 @@ func (p *Process) Start(ctx context.Context) error {
 	// No stdout/stderr pipes: the child cannot leak credentials into diagnostics
 	// or keep Wait blocked through a descendant holding an inherited pipe open.
 	if err := command.Start(); err != nil {
-		return err
+		return fmt.Errorf("start backend command: %w", err)
 	}
 	p.command = command
 	p.done = make(chan struct{})
@@ -118,14 +118,14 @@ func (p *Process) Stop(ctx context.Context) error {
 	}
 	pid := p.command.Process.Pid
 	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return err
+		return fmt.Errorf("signal backend process: %w", err)
 	}
 	select {
 	case <-p.done:
 		return nil
 	case <-ctx.Done():
 		if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			return err
+			return fmt.Errorf("kill backend process: %w", err)
 		}
 		<-p.done
 		return ctx.Err()
@@ -152,7 +152,7 @@ func (p *Process) Reset(ctx context.Context) error {
 func HTTPProbe(endpoint string) (func(context.Context) error, error) {
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse readiness endpoint: %w", err)
 	}
 	ip := net.ParseIP(parsed.Hostname())
 	if parsed.Scheme != "http" || ip == nil || !ip.IsLoopback() || parsed.Port() == "" || parsed.User != nil || parsed.Fragment != "" {
@@ -162,11 +162,11 @@ func HTTPProbe(endpoint string) (func(context.Context) error, error) {
 	return func(ctx context.Context) error {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
-			return err
+			return fmt.Errorf("build readiness request: %w", err)
 		}
 		response, err := client.Do(request)
 		if err != nil {
-			return err
+			return fmt.Errorf("readiness request: %w", err)
 		}
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusOK {

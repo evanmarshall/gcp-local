@@ -3,6 +3,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -42,24 +43,29 @@ func (c *Catalog) PublishBucket(scope state.Scope, bucket Bucket) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.store.With(scope, func(value *projectState) error {
+	if err := c.store.With(scope, func(value *projectState) error {
 		if existing, ok := value.Buckets[bucket.Name]; ok && existing != bucket {
 			return errBucketImmutable
 		}
 		if err := c.index.Put(serviceName, state.Resource{Name: BucketResource(bucket.Name), Service: serviceName, Kind: kindBucket, Parent: "//cloudresourcemanager.googleapis.com/projects/" + scope.Project, Scope: scope}); err != nil {
-			return err
+			return fmt.Errorf("index bucket %s: %w", bucket.Name, err)
 		}
 		value.Buckets[bucket.Name] = bucket
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("publish bucket %s: %w", bucket.Name, err)
+	}
+	return nil
 }
 func (c *Catalog) Bucket(scope state.Scope, name string) (Bucket, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var result Bucket
 	var found bool
-	err := c.store.With(scope, func(value *projectState) error { result, found = value.Buckets[name]; return nil })
-	return result, found, err
+	if err := c.store.With(scope, func(value *projectState) error { result, found = value.Buckets[name]; return nil }); err != nil {
+		return result, found, fmt.Errorf("read bucket %s: %w", name, err)
+	}
+	return result, found, nil
 }
 
 // UpdateMetadata changes provider-owned bucket fields under the backend gate.
@@ -67,7 +73,7 @@ func (c *Catalog) Bucket(scope state.Scope, name string) (Bucket, bool, error) {
 func (c *Catalog) UpdateMetadata(scope state.Scope, name, metadata string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.store.With(scope, func(value *projectState) error {
+	if err := c.store.With(scope, func(value *projectState) error {
 		bucket, ok := value.Buckets[name]
 		if !ok {
 			return errBucketAbsent
@@ -75,20 +81,26 @@ func (c *Catalog) UpdateMetadata(scope state.Scope, name, metadata string) error
 		bucket.Metadata = metadata
 		value.Buckets[name] = bucket
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("update bucket %s metadata: %w", name, err)
+	}
+	return nil
 }
 
 // ForgetBucket follows confirmed backend deletion, never an attempted deletion.
 func (c *Catalog) ForgetBucket(scope state.Scope, name string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.store.With(scope, func(value *projectState) error {
+	if err := c.store.With(scope, func(value *projectState) error {
 		if err := c.index.Remove(serviceName, scope, BucketResource(name)); err != nil {
-			return err
+			return fmt.Errorf("unindex bucket %s: %w", name, err)
 		}
 		delete(value.Buckets, name)
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("delete bucket %s: %w", name, err)
+	}
+	return nil
 }
 
 // Reset is the manager's after-backend-reset hook, not a standalone API reset.
@@ -96,7 +108,7 @@ func (c *Catalog) Reset(scope state.Scope) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.store.Reset(scope); err != nil {
-		return err
+		return fmt.Errorf("reset scope %s: %w", scope, err)
 	}
 	c.index.RemoveScope(serviceName, scope)
 	return nil

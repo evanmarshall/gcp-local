@@ -3,6 +3,7 @@ package iam_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -132,8 +133,9 @@ func TestReplacementCannotOmitBaselineOrUnresolvedState(t *testing.T) {
 		decision, err := engine.Authorize(create, object(), features)
 		if err == nil {
 			writes.Add(1)
+			return decision, nil
 		}
-		return decision, err
+		return decision, fmt.Errorf("authorize: %w", err)
 	}
 	if result, err := perform(map[string]bool{conditionObjectExists: false}); err != nil || !result.Complete || len(result.Checks) != 1 {
 		t.Fatalf("%+v %v", result, err)

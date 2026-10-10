@@ -4,6 +4,7 @@ package pubsub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -66,23 +67,23 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		p.poisoned.Delete(scope)
 		return nil
 	}}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("register the pub/sub backend: %w", err)
 	}
 	for method := range permissions {
 		if !strings.HasPrefix(method, "/") || method == subscriber+"StreamingPull" {
 			continue
 		}
 		if err := registry.Register(method, p.handle); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("register %s: %w", method, err)
 		}
 	}
 	for _, method := range []string{"GetIamPolicy", "SetIamPolicy"} {
 		if err := registry.Register(policyRPC+method, p.policy); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("register policy %s: %w", method, err)
 		}
 	}
 	if err := registry.RegisterStream(subscriber+"StreamingPull", p.stream); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("register the streaming pull method: %w", err)
 	}
 	return p, nil
 }
@@ -120,7 +121,7 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 	decision, err := p.iam.Authorize(call, target, nil)
 	_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-decision-id", decision.ID))
 	if err != nil {
-		return err
+		return fmt.Errorf("authorize %s: %w", call.Method, err)
 	}
 	if subscription, ok := request.(*pb.Subscription); ok {
 		project, err := resourceName(subscription.GetTopic(), "topics")
@@ -142,7 +143,7 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 		decision, err := p.iam.Authorize(attachment, iam.Target{Name: topic.Name}, nil)
 		_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-attachment-decision-id", decision.ID))
 		if err != nil {
-			return err
+			return fmt.Errorf("authorize attachment for %s: %w", call.Method, err)
 		}
 		if subscription.GetPushConfig() != nil {
 			if err := p.authorizePush(call, subscription.GetPushConfig()); err != nil {

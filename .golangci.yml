@@ -51,6 +51,16 @@ linters:
     nestif:
       min-complexity: 4
     wrapcheck:
+      # gRPC status errors carry the wire status the peer must read, and context
+      # cancellation/deadline must stay comparable with errors.Is, so wrapping
+      # any of these would itself be the defect. Every other returned error is
+      # wrapped with diagnostic context.
+      ignore-sig-regexps:
+        - 'status\.(Error|Errorf)\(c '
+        - 'func \(context\.Context\)\.Err\(\) error'
+        - 'func \(\*google\.golang\.org/grpc/internal/status\.Status\)\.Err\(\) error'
+        - 'func \(google\.golang\.org/grpc\.ServerStream\)\.(RecvMsg|SendMsg)\(m any\) error'
+        - 'func \(google\.golang\.org/grpc\.ClientConnInterface\)\.Invoke\(ctx context\.Context'
       ignore-sigs:
         - .Errorf(
         - errors.New(
@@ -62,8 +72,8 @@ linters:
         - .WithMessagef(
         - .WithStack(
       ignore-interface-regexps:
-        - ^context\.Context\.Err$
-        - ^context\.Context\.Deadline$
+        - ^grpc\.ServerStream$
+        - ^gateway\.Stream$
 
   exclusions:
     generated: lax

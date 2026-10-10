@@ -3,6 +3,7 @@ package iam
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -84,7 +85,7 @@ func Load(path string) (*Engine, *state.Index, error) {
 			return nil, nil, errConfigKind
 		}
 		if err := index.Put("resourcemanager", resource); err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("publish hierarchy resource %s: %w", resource.Name, err)
 		}
 	}
 	for _, resource := range config.Resources {
@@ -103,7 +104,7 @@ func Load(path string) (*Engine, *state.Index, error) {
 		}
 		seen[resource.Name], accountIDs[account.UniqueID] = true, true
 		if err := index.Put("iam", resource); err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("publish service account %s: %w", resource.Name, err)
 		}
 		if _, err := engine.ancestry(Target{Name: resource.Name}); err != nil {
 			return nil, nil, err

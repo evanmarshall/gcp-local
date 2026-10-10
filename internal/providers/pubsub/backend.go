@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -46,12 +47,12 @@ func (c Config) validate() error {
 	}
 	jar, err := os.Open(c.JAR)
 	if err != nil {
-		return err
+		return fmt.Errorf("open emulator jar: %w", err)
 	}
 	defer jar.Close()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, io.LimitReader(jar, 100<<20)); err != nil {
-		return err
+		return fmt.Errorf("hash emulator jar: %w", err)
 	}
 	if hex.EncodeToString(hash.Sum(nil)) != EmulatorSHA256 {
 		return errJarMismatch
@@ -76,21 +77,21 @@ func (b *emulator) Start(ctx context.Context) error {
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return err
+		return fmt.Errorf("listen for the emulator port: %w", err)
 	}
 	endpoint := listener.Addr().String()
 	_, port, _ := net.SplitHostPort(endpoint)
 	listener.Close()
 	b.directory, err = os.MkdirTemp("", "gcp-local-pubsub-")
 	if err != nil {
-		return err
+		return fmt.Errorf("create the emulator data directory: %w", err)
 	}
 	b.connection, err = grpc.NewClient("passthrough:///"+endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "tcp", endpoint)
 		}), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(2<<20)))
 	if err != nil {
-		return err
+		return fmt.Errorf("connect to the emulator: %w", err)
 	}
 	b.process, err = backend.NewProcess(backend.ProcessConfig{
 		Command: []string{b.config.Java, "-Xms32m", "-Xmx256m", "-XX:MaxDirectMemorySize=128m", "-XX:ActiveProcessorCount=2", "-Djava.io.tmpdir=" + b.directory,
@@ -103,20 +104,26 @@ func (b *emulator) Start(ctx context.Context) error {
 			if status.Code(err) == codes.NotFound || err == nil {
 				return nil
 			}
-			return err
+			return fmt.Errorf("query emulator readiness: %w", err)
 		},
 		ResetAssets: func(context.Context) error { return nil },
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("configure the emulator process: %w", err)
 	}
-	return b.process.Start(ctx)
+	if err := b.process.Start(ctx); err != nil {
+		return fmt.Errorf("start the emulator process: %w", err)
+	}
+	return nil
 }
 func (b *emulator) Ready(ctx context.Context) error {
 	if b.process == nil {
 		return backend.ErrProcessExited
 	}
-	return b.process.Ready(ctx)
+	if err := b.process.Ready(ctx); err != nil {
+		return fmt.Errorf("emulator readiness: %w", err)
+	}
+	return nil
 }
 func (b *emulator) Stop(ctx context.Context) error {
 	if b.connection != nil {
@@ -124,12 +131,12 @@ func (b *emulator) Stop(ctx context.Context) error {
 	}
 	if b.process != nil {
 		if err := b.process.Stop(ctx); err != nil {
-			return err
+			return fmt.Errorf("stop the emulator process: %w", err)
 		}
 	}
 	if b.directory != "" {
 		if err := os.RemoveAll(b.directory); err != nil {
-			return err
+			return fmt.Errorf("remove the emulator data directory: %w", err)
 		}
 		b.directory = ""
 	}
