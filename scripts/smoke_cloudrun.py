@@ -116,7 +116,7 @@ def write_configs(project: str = "demo-run", extra_roles: list[str] | None = Non
 
 def start_core(
     binary: Path, iam_path: Path, identity_path: Path | None = None,
-    port: int = SERVE_SOCKET, services: str = "run",
+    port: int = SERVE_SOCKET, services: str = "run", pubsub_java: str = "",
 ) -> subprocess.Popen:
     """Start the core with the selected providers and Docker runtime."""
     process = subprocess.Popen(
@@ -129,6 +129,7 @@ def start_core(
             "--iam-config",
             str(iam_path),
             *(("--identity-config", str(identity_path)) if identity_path else ()),
+            *(("--pubsub-java", pubsub_java) if pubsub_java else ()),
             "--services",
             services,
             "--run-docker-socket",

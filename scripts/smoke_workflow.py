@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import secrets
+import shutil
 import stat
 import subprocess
 import sys
@@ -57,6 +58,18 @@ def rest(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[in
     except urllib.error.HTTPError as error:
         payload = error.read()
         return error.code, json.loads(payload) if payload else {}
+
+
+def install_java() -> str:
+    """Install the pinned Pub/Sub emulator jar and return an absolute Java path."""
+    install = subprocess.run(
+        [sys.executable, "scripts/install_pubsub.py"], check=True, capture_output=True, text=True)
+    assert install.returncode == 0, install.stdout + install.stderr
+    java = os.environ.get("GCP_LOCAL_JAVA") or shutil.which("java") or ""
+    assert java.startswith("/"), "An absolute Java path is required"
+    jar = REPO / ".tools/pubsub/emulator.jar"
+    assert jar.exists(), "The pinned Pub/Sub emulator jar is missing"
+    return java
 
 
 def write_identity(project: str) -> Path:
@@ -203,11 +216,13 @@ def main() -> int:
         ["/bin/sh", str(REPO / "scripts/go.sh"), "build", "-o", str(binary), "./cmd/gcp-local"],
         check=True, capture_output=True)
     build_image(WORKER_IMAGE)
-    before = subprocess.check_output([os.environ.get("DOCKER", "docker"), "ps", "-aq"], text=True)
+    java = install_java()
+    docker = os.environ.get("DOCKER", "docker")
+    before = subprocess.check_output([docker, "ps", "-aq"], text=True)
     iam_path = write_configs(PROJECT, ["roles/pubsub.admin"])
     identity_path = write_identity(PROJECT)
-    core = start_core(binary, iam_path, identity_path,
-                      port=SERVE_SOCKET, services="storage,pubsub,run")
+    core = start_core(binary, iam_path, identity_path, port=SERVE_SOCKET,
+                      services="storage,pubsub,run", pubsub_java=java)
     try:
         bucket = deploy_worker()
         publish(bucket, "workflow-payload", "wf-msg-1")
