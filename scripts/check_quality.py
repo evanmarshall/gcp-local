@@ -15,6 +15,7 @@ import collections
 import json
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,16 +29,19 @@ GO_PROGRAMS = ["./cmd/gcp-local", "./tools/..."]
 PYTHON_SOURCES = ("gcp_validation", "scripts", "skills", "tests", "examples", "conftest.py")
 
 
-def run(command):
+def run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """Run a command in the repository root and capture its output."""
     return subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
 
 
-def relative(name):
+def relative(name: str) -> str:
+    """Make an absolute path relative to the repository for stable baseline entries."""
     path = Path(name)
     return str(path.relative_to(ROOT)) if path.is_absolute() else name
 
 
-def go_lint():
+def go_lint() -> collections.Counter[tuple[str, str]]:
+    """Collect Go lint findings grouped by rule and file."""
     report = ROOT / ".artifacts/quality/go-lint.json"
     report.parent.mkdir(parents=True, exist_ok=True)
     result = run(
@@ -61,7 +65,8 @@ def go_lint():
     return findings
 
 
-def python_lint():
+def python_lint() -> collections.Counter[tuple[str, str]]:
+    """Collect Python lint findings grouped by rule and file."""
     result = run([sys.executable, "-m", "ruff", "check", "--output-format", "json", "."])
     if result.returncode not in (0, 1):
         raise SystemExit(f"ruff failed:\n{result.stdout}{result.stderr}")
@@ -71,7 +76,8 @@ def python_lint():
     return findings
 
 
-def go_dead_code():
+def go_dead_code() -> list[str]:
+    """List unreachable Go functions reported by the deadcode analyzer."""
     result = run([str(TOOLS / "deadcode"), *GO_PROGRAMS])
     dead = set()
     for line in result.stdout.splitlines():
@@ -81,7 +87,8 @@ def go_dead_code():
     return sorted(dead)
 
 
-def python_dead_code():
+def python_dead_code() -> list[str]:
+    """List unused Python definitions reported by vulture at full confidence."""
     sources = [str(ROOT / name) for name in PYTHON_SOURCES if (ROOT / name).exists()]
     result = run(
         [
@@ -97,7 +104,8 @@ def python_dead_code():
     return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
 
 
-def read_counts(path):
+def read_counts(path: Path) -> collections.Counter[tuple[str, str]]:
+    """Read a baseline count file into a rule/file counter."""
     counts = collections.Counter()
     if path.is_file():
         for line in path.read_text().splitlines():
@@ -107,12 +115,14 @@ def read_counts(path):
     return counts
 
 
-def write_counts(path, counts):
+def write_counts(path: Path, counts: collections.Counter[tuple[str, str]]) -> None:
+    """Write baseline counts as sorted rule/file rows."""
     rows = sorted(f"{count}\t{rule}\t{name}" for (rule, name), count in counts.items() if count)
     path.write_text("".join(f"{row}\n" for row in rows))
 
 
-def read_reasons(path):
+def read_reasons(path: Path) -> list[tuple[str, str]]:
+    """Read documented baseline entries and their reasons."""
     entries = []
     if path.is_file():
         for line in path.read_text().splitlines():
@@ -122,7 +132,12 @@ def read_reasons(path):
     return entries
 
 
-def compare(current, baseline, label):
+def compare(
+    current: collections.Counter[tuple[str, str]],
+    baseline: collections.Counter[tuple[str, str]],
+    label: str,
+) -> bool:
+    """Fail when a finding exceeds its baseline or a baseline entry went stale."""
     failures = False
     for (rule, name), count in sorted(current.items()):
         if count > baseline.get((rule, name), 0):
@@ -143,7 +158,8 @@ def compare(current, baseline, label):
     return failures
 
 
-def summarize(counts, label, rules=6):
+def summarize(counts: collections.Counter[tuple[str, str]], label: str, rules: int = 6) -> str:
+    """Format the top findings of one language for the quality report."""
     print(
         f"{label}: {sum(counts.values())} baselined finding(s) in {len(counts)} rule/file pair(s)"
     )
@@ -154,7 +170,8 @@ def summarize(counts, label, rules=6):
         print(f"  {rule}: {count}")
 
 
-def main():
+def main() -> int:
+    """Run the full quality gate and exit nonzero on any regression."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--update-baseline",
