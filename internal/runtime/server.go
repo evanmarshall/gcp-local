@@ -38,26 +38,39 @@ func New(version string, shutdownTimeout time.Duration) *Server {
 func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gateway) *Server {
 	s := &Server{ShutdownTimeout: shutdownTimeout, GRPC: g.NewGRPCServer(), Backends: backend.NewManager(30*time.Second, shutdownTimeout)}
 	s.HTTP = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Dispatch directly, preserving escaped object paths without ServeMux redirects.
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/_local/health":
-			ready := s.ready.Load()
-			code := http.StatusOK
-			if !ready {
-				code = http.StatusServiceUnavailable
-			}
-			writeJSON(w, code, map[string]any{"service": "gcp-local", "version": version, "ready": ready, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
-		case r.Method == http.MethodGet && r.URL.Path == "/_local/diagnostics":
-			writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
-		case s.IAM != nil && strings.HasPrefix(r.URL.Path, "/_local/iam/decisions/"):
-			s.IAM.ServeHTTP(w, r)
-		case s.Identity != nil && (r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs"):
-			s.Identity.ServeHTTP(w, r)
-		default:
-			g.ServeHTTP(w, r)
+		if s.adminRoute(w, r, g, version) {
+			return
 		}
+		// Dispatch directly, preserving escaped object paths without ServeMux redirects.
+		g.ServeHTTP(w, r)
 	}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	return s
+}
+
+// adminRoute serves the local administrative endpoints and reports whether the
+// request matched one. Service traffic falls through to the gateway.
+func (s *Server) adminRoute(w http.ResponseWriter, r *http.Request, g *gateway.Gateway, version string) bool {
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/_local/health":
+		writeJSON(w, s.healthCode(), map[string]any{"service": "gcp-local", "version": version, "ready": s.ready.Load(), "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
+	case r.Method == http.MethodGet && r.URL.Path == "/_local/diagnostics":
+		writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
+	case s.IAM != nil && strings.HasPrefix(r.URL.Path, "/_local/iam/decisions/"):
+		s.IAM.ServeHTTP(w, r)
+	case s.Identity != nil && (r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs"):
+		s.Identity.ServeHTTP(w, r)
+	default:
+		return false
+	}
+	return true
+}
+
+// healthCode is 200 once startup work completes, 503 before that.
+func (s *Server) healthCode() int {
+	if s.ready.Load() {
+		return http.StatusOK
+	}
+	return http.StatusServiceUnavailable
 }
 
 // Listeners carries the bound sockets Serve owns. Serve binds none of them
