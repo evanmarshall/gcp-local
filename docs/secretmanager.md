@@ -12,8 +12,8 @@ claim; issue #37 tracks the recording and the Terraform workflow pin.
   addVersion, versions list/get/access/destroy, locations list.
 - Payloads stay in provider state, reset with the scope, and are never
   returned by version metadata reads.
-- Version states: ENABLED, DISABLED (access is a precondition failure),
-  DESTROYED (payload is unrecoverable; access is a 400 and a second destroy
-  is refused).
+- Version states: ENABLED, DISABLED (access fails until re-enabled via
+  :enable; :disable moves an enabled version), DESTROYED (payload is
+  unrecoverable; access is a 400 and a second destroy is refused).
 - Payload access requires the `secretmanager.versions.access` permission on
   the secret (pinned `roles/secretmanager.secretAccessor` exists for it).
