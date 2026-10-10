@@ -95,7 +95,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodOperationsGet, methodOperationsList, methodOperationsDelete:
 		return p.executeOperations(call, request, scope)
 	default:
-		return nil, gap("this method is not implemented")
+		return nil, errUnimplemented
 	}
 }
 
@@ -117,7 +117,7 @@ func (p *Provider) executeService(call gateway.Call, request *gateway.RESTReques
 	case methodServicesSetIam:
 		return p.setIam(request, scope, record)
 	default:
-		return nil, gap("this method is not implemented")
+		return nil, errUnimplemented
 	}
 }
 
@@ -131,7 +131,7 @@ func (p *Provider) executeRevision(call gateway.Call, request *gateway.RESTReque
 	case methodRevisionsDelete:
 		return p.revisionDelete(call, request, scope)
 	default:
-		return nil, gap("this method is not implemented")
+		return nil, errUnimplemented
 	}
 }
 
@@ -145,7 +145,7 @@ func (p *Provider) executeOperations(call gateway.Call, request *gateway.RESTReq
 	case methodOperationsDelete:
 		return p.operationDelete(request, scope)
 	default:
-		return nil, gap("this method is not implemented")
+		return nil, errUnimplemented
 	}
 }
 

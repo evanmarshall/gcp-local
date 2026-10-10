@@ -148,10 +148,8 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 	return decision, nil
 }
 
-// gap reports an unimplemented slice boundary.
-func gap(message string) error {
-	return status.Error(codes.Unimplemented, "Cloud Run coverage gap: "+message)
-}
+// errUnimplemented is the default dispatch gap for unregistered methods.
+var errUnimplemented = status.Error(codes.Unimplemented, "Cloud Run coverage gap: this method is not implemented")
 
 // wireError builds the Cloud Run REST error body.
 func wireError(code int, statusText, message string) *gateway.RESTResponse {
