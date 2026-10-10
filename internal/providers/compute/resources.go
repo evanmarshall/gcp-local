@@ -273,13 +273,18 @@ func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope,
 func (p *Provider) operationsList(_ *gateway.RESTRequest, _ state.Scope, kind string) (*gateway.RESTResponse, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	items := []any{}
-	for _, record := range p.records {
+	names := make([]string, 0, len(p.records))
+	for name, record := range p.records {
 		if record.Kind == kind {
-			items = append(items, operationDocument(record))
+			names = append(names, name)
 		}
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{"items": items}}, nil
+	sort.Strings(names)
+	items := make([]any, 0, len(names))
+	for _, name := range names {
+		items = append(items, operationDocument(p.records[name]))
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
 }
 
 // newOperation registers the completed compute operation for a realized
