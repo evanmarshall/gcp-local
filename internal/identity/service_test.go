@@ -16,13 +16,16 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 )
 
+// testProjectName is the fixture project used by the identity service tests.
+const testProjectName = "synthetic"
+
 const subjectSecret = "gls.synthetic-secret-for-local-test-only-0123456789"
 const appSubject = "serviceAccount:app@synthetic.iam.gserviceaccount.com"
 
 func service(t *testing.T) (*Service, *atomic.Int64) {
 	t.Helper()
 	clock := &atomic.Int64{}
-	s, err := New(Config{TokenLifetimeSeconds: 600, Principals: []Enrollment{{Subject: appSubject, Project: "synthetic", SubjectToken: subjectSecret}, {Subject: "serviceAccount:other@peer.iam.gserviceaccount.com", Project: "peer", SubjectToken: subjectSecret + "-other"}}}, func() time.Time { return time.Unix(1700000000+clock.Load(), 0) })
+	s, err := New(Config{TokenLifetimeSeconds: 600, Principals: []Enrollment{{Subject: appSubject, Project: testProjectName, SubjectToken: subjectSecret}, {Subject: "serviceAccount:other@peer.iam.gserviceaccount.com", Project: "peer", SubjectToken: subjectSecret + "-other"}}}, func() time.Time { return time.Unix(1700000000+clock.Load(), 0) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +57,7 @@ func TestExchangeExpiryAndPrincipalStates(t *testing.T) {
 		t.Fatal("invalid access token contract")
 	}
 	p, err := s.Resolve(context.Background(), token)
-	if err != nil || p.State != gateway.Authenticated || p.Subject != appSubject || p.Project != "synthetic" || len(p.Scopes) != 1 || p.Scopes[0] != CloudPlatform {
+	if err != nil || p.State != gateway.Authenticated || p.Subject != appSubject || p.Project != testProjectName || len(p.Scopes) != 1 || p.Scopes[0] != CloudPlatform {
 		t.Fatalf("%+v %v", p, err)
 	}
 	p.Scopes[0] = "mutated"
@@ -199,7 +202,7 @@ func TestConfigurationRequiresExplicitPrivateEnrollment(t *testing.T) {
 	if _, err := Load(link); err == nil {
 		t.Fatal("read symlinked credential config")
 	}
-	if _, err := New(Config{Principals: []Enrollment{{Subject: appSubject, Project: "synthetic", SubjectToken: "short"}}}, nil); err == nil {
+	if _, err := New(Config{Principals: []Enrollment{{Subject: appSubject, Project: testProjectName, SubjectToken: "short"}}}, nil); err == nil {
 		t.Fatal("accepted short subject credential")
 	}
 	s, err := New(Config{}, nil)

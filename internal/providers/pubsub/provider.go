@@ -22,6 +22,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// serviceName is the registered service key for Pub/Sub backends and index entries.
+const serviceName = "pubsub"
+
 type Provider struct {
 	manager  *backend.Manager
 	index    *state.Index
@@ -51,12 +54,12 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 	if err := registerPermissions(engine); err != nil {
 		return nil, err
 	}
-	if err := manager.Register("pubsub", backend.Definition{Validate: state.GlobalScope, New: factory, AfterReset: func(scope state.Scope) error {
+	if err := manager.Register(serviceName, backend.Definition{Validate: state.GlobalScope, New: factory, AfterReset: func(scope state.Scope) error {
 		if err := p.resetPush(scope); err != nil {
 			return err
 		}
-		engine.ClearScope("pubsub", scope)
-		index.RemoveScope("pubsub", scope)
+		engine.ClearScope(serviceName, scope)
+		index.RemoveScope(serviceName, scope)
 		p.poisoned.Delete(scope)
 		return nil
 	}}); err != nil {
@@ -85,7 +88,7 @@ func scopeOf(call gateway.Call) state.Scope {
 	return state.Scope{Project: call.Project, Location: state.Global}
 }
 func keyOf(call gateway.Call) backend.Key {
-	return backend.Key{Service: "pubsub", Scope: scopeOf(call)}
+	return backend.Key{Service: serviceName, Scope: scopeOf(call)}
 }
 func projectMethod(method string) bool {
 	return method == publisher+"CreateTopic" || method == subscriber+"CreateSubscription" || method == publisher+"ListTopics" || method == subscriber+"ListSubscriptions"
@@ -105,7 +108,7 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 	target := iam.Target{Name: project.Name}
 	if !projectMethod(call.Method) {
 		if resource, found := p.index.Get(canonical(call.Resource)); found {
-			if resource.Service != "pubsub" || resource.Scope != scopeOf(call) || resource.Parent != project.Name {
+			if resource.Service != serviceName || resource.Scope != scopeOf(call) || resource.Parent != project.Name {
 				return gap("resource ownership disagrees with the index")
 			}
 			target.Name = resource.Name
@@ -128,7 +131,7 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 		if !found {
 			return status.Error(codes.NotFound, "Topic does not exist")
 		}
-		if topic.Service != "pubsub" || topic.Kind != "topic" || topic.Scope != scopeOf(call) {
+		if topic.Service != serviceName || topic.Kind != "topic" || topic.Scope != scopeOf(call) {
 			return gap("topic ownership disagrees with the index")
 		}
 		attachment := call
@@ -259,7 +262,7 @@ func (p *Provider) publish(call gateway.Call) error {
 	if strings.Contains(call.Resource, "/subscriptions/") {
 		kind = "subscription"
 	}
-	if err := p.index.Put("pubsub", state.Resource{Name: canonical(call.Resource), Service: "pubsub", Kind: kind, Parent: projectResource(call.Project), Scope: scopeOf(call)}); err != nil {
+	if err := p.index.Put(serviceName, state.Resource{Name: canonical(call.Resource), Service: serviceName, Kind: kind, Parent: projectResource(call.Project), Scope: scopeOf(call)}); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return status.Error(codes.FailedPrecondition, "Backend mutation could not be indexed; reset this scope")
 	}
@@ -270,7 +273,7 @@ func (p *Provider) forget(call gateway.Call) error {
 		p.poisoned.Store(scopeOf(call), true)
 		return err
 	}
-	if err := p.index.Remove("pubsub", scopeOf(call), canonical(call.Resource)); err != nil {
+	if err := p.index.Remove(serviceName, scopeOf(call), canonical(call.Resource)); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return status.Error(codes.FailedPrecondition, "Backend deletion could not be indexed; reset this scope")
 	}

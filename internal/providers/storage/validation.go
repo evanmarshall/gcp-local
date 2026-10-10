@@ -37,19 +37,19 @@ func validateQuery(method string, r *gateway.RESTRequest) error {
 		}
 	}
 	switch method {
-	case "storage.buckets.insert":
+	case MethodBucketsInsert:
 		add("project")
-	case "storage.buckets.list":
+	case MethodBucketsList:
 		add("project", "prefix", "maxResults", "pageToken")
-	case "storage.buckets.getIamPolicy":
+	case MethodBucketsGetIamPolicy:
 		add("optionsRequestedPolicyVersion")
-	case "storage.buckets.patch":
+	case MethodBucketsPatch:
 		add("ifMetagenerationMatch", "ifMetagenerationNotMatch")
-	case "storage.objects.insert":
+	case MethodObjectsInsert:
 		add("uploadType", "name", "ifGenerationMatch", "ifGenerationNotMatch", "ifMetagenerationMatch", "ifMetagenerationNotMatch")
-	case "storage.objects.get", "storage.objects.delete":
+	case MethodObjectsGet, MethodObjectsDelete:
 		add("generation", "ifGenerationMatch", "ifGenerationNotMatch", "ifMetagenerationMatch", "ifMetagenerationNotMatch")
-	case "storage.objects.list":
+	case MethodObjectsList:
 		add("prefix", "delimiter", "maxResults", "pageToken", "startOffset", "endOffset", "versions")
 	}
 	for key, values := range r.Query {
@@ -60,7 +60,7 @@ func validateQuery(method string, r *gateway.RESTRequest) error {
 			return status.Error(codes.InvalidArgument, "Query options must not repeat")
 		}
 	}
-	if alt := r.Query.Get("alt"); alt != "" && alt != "json" && (alt != "media" || method != "storage.objects.get") {
+	if alt := r.Query.Get("alt"); alt != "" && alt != "json" && (alt != altMedia || method != MethodObjectsGet) {
 		return gap("unsupported response representation")
 	}
 	if v := r.Query.Get("optionsRequestedPolicyVersion"); v != "" && v != "1" {
@@ -125,7 +125,7 @@ func parseUpload(r *gateway.RESTRequest) (*uploadRequest, error) {
 		var name string
 		if raw, ok := value["storageClass"]; ok {
 			var class string
-			if json.Unmarshal(raw, &class) != nil || class != "STANDARD" {
+			if json.Unmarshal(raw, &class) != nil || class != storageClassStandard {
 				return nil, gap("only STANDARD object storage class is supported")
 			}
 		}
@@ -207,7 +207,7 @@ func preconditions(r *gateway.RESTRequest, current map[string]any, method string
 		return fail(), nil
 	}
 	if h := r.Headers.Get("If-None-Match"); h != "" && matches(h) {
-		if method == "storage.objects.get" {
+		if method == MethodObjectsGet {
 			return &gateway.RESTResponse{Status: 304}, nil
 		}
 		return fail(), nil
@@ -262,9 +262,9 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 		return nil, gap("bucket lifecycle rules")
 	}
 	if request.StorageClass == "" {
-		request.StorageClass = "STANDARD"
+		request.StorageClass = storageClassStandard
 	}
-	if request.StorageClass != "STANDARD" {
+	if request.StorageClass != storageClassStandard {
 		return nil, gap("only STANDARD storage class")
 	}
 	if request.Location == "" {

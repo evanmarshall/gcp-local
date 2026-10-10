@@ -19,6 +19,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// healthPath is the local readiness endpoint asserted across runtime tests.
+const healthPath = "/_local/health"
+
 func start(t *testing.T, s *Server) (string, context.CancelFunc, <-chan error) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -41,7 +44,7 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 	s := New("test-version", time.Second)
 	url, cancel, result := start(t, s)
 	client := &http.Client{Timeout: time.Second}
-	for _, path := range []string{"/_local/health", "/_local/diagnostics", "/storage/v1/b"} {
+	for _, path := range []string{healthPath, "/_local/diagnostics", "/storage/v1/b"} {
 		response, err := client.Get(url + path)
 		if err != nil {
 			t.Fatal(err)
@@ -59,7 +62,7 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 		} else if response.StatusCode != http.StatusOK {
 			t.Fatalf("diagnostics status %d", response.StatusCode)
 		}
-		if path == "/_local/health" && (body["ready"] != true || body["version"] != "test-version") {
+		if path == healthPath && (body["ready"] != true || body["version"] != "test-version") {
 			t.Fatalf("unexpected health: %v", body)
 		}
 	}
@@ -67,7 +70,7 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 	if err := <-result; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Get(url + "/_local/health"); err == nil {
+	if _, err := client.Get(url + healthPath); err == nil {
 		t.Fatal("listener remained open")
 	}
 }
@@ -145,7 +148,7 @@ func TestDiagnosticsDoNotDispatchProviders(t *testing.T) {
 	}
 	s := WithGateway("test", time.Second, gateway.New(registry, nil))
 	url, cancel, result := start(t, s)
-	for _, path := range []string{"/_local/health", "/_local/diagnostics", "/_local/unknown"} {
+	for _, path := range []string{healthPath, "/_local/diagnostics", "/_local/unknown"} {
 		response, err := http.Get(url + path)
 		if err != nil {
 			t.Fatal(err)

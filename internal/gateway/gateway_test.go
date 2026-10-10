@@ -22,6 +22,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	authorizationHeader  = "Authorization"
+	bucketCollectionPath = "/storage/v1/b"
+	streamSubscription   = "projects/synthetic/subscriptions/sub"
+	ackID                = "ack"
+)
+
 func register(t *testing.T, r *Registry, method string, h Handler) {
 	t.Helper()
 	if err := r.Register(method, h); err != nil {
@@ -53,7 +60,7 @@ func TestRESTDispatchPreservesEscapedResourcesAndIdentity(t *testing.T) {
 	calls := make(chan Call, 1)
 	register(t, r, "storage.objects.get", func(call Call, input any) (any, error) {
 		req := input.(*RESTRequest)
-		if req.Path["bucket"] != "bucket" || req.Path["object"] != "folder/a%?.txt" || req.Headers.Get("Authorization") != "" {
+		if req.Path["bucket"] != "bucket" || req.Path["object"] != "folder/a%?.txt" || req.Headers.Get(authorizationHeader) != "" {
 			return nil, errors.New("bad decoded request")
 		}
 		calls <- call
@@ -68,7 +75,7 @@ func TestRESTDispatchPreservesEscapedResourcesAndIdentity(t *testing.T) {
 	server := httptest.NewServer(g)
 	defer server.Close()
 	trace := "1234567890abcdef1234567890abcdef"
-	code, body, headers := request(t, server.Client(), "GET", server.URL+"/storage/v1/b/bucket/o/folder%2Fa%25%3F.txt?project=untrusted", "", http.Header{"Authorization": {"Bearer fixture-token"}, "Traceparent": {"00-" + trace + "-0123456789abcdef-01"}})
+	code, body, headers := request(t, server.Client(), "GET", server.URL+"/storage/v1/b/bucket/o/folder%2Fa%25%3F.txt?project=untrusted", "", http.Header{authorizationHeader: {"Bearer fixture-token"}, "Traceparent": {"00-" + trace + "-0123456789abcdef-01"}})
 	if code != 200 || body["name"] != "folder/a%?.txt" || headers.Get("X-Gcp-Local-Trace-Id") != trace {
 		t.Fatalf("%d %v %v", code, body, headers)
 	}
@@ -95,10 +102,10 @@ func TestRESTValidationBeforeDispatchAndExplicitGaps(t *testing.T) {
 		code       int
 	}{
 		{"/storage/v1/b?project=synthetic-project", `{"name":"bucket"}`, nil, 201},
-		{"/storage/v1/b", `{`, nil, 400}, {"/storage/v1/b", `[]`, nil, 400}, {"/storage/v1/b", `null`, nil, 400},
+		{bucketCollectionPath, `{`, nil, 400}, {bucketCollectionPath, `[]`, nil, 400}, {bucketCollectionPath, `null`, nil, 400},
 		{"/storage/v1/b?invalid=%zz", `{}`, nil, 400},
-		{"/storage/v1/b", `{}`, http.Header{"Authorization": {"Bearer one", "Bearer two"}}, 401},
-		{"/storage/v1/b", `{}`, http.Header{"Authorization": {"Basic one"}}, 401},
+		{bucketCollectionPath, `{}`, http.Header{authorizationHeader: {"Bearer one", "Bearer two"}}, 401},
+		{bucketCollectionPath, `{}`, http.Header{authorizationHeader: {"Basic one"}}, 401},
 		{"/storage/v1/b/bucket/restore", `{}`, nil, 501},
 		{"/_local/diagnostics", `{}`, nil, 501},
 		{"/unknown", `{}`, nil, 501},
@@ -125,9 +132,9 @@ func TestDefaultIdentityNeverAuthenticatesPresentedToken(t *testing.T) {
 	}{{"", Anonymous}, {"Bearer any-real-or-local-token", Unknown}} {
 		headers := http.Header{}
 		if tc.auth != "" {
-			headers.Set("Authorization", tc.auth)
+			headers.Set(authorizationHeader, tc.auth)
 		}
-		_, body, _ := request(t, server.Client(), "GET", server.URL+"/storage/v1/b", "", headers)
+		_, body, _ := request(t, server.Client(), "GET", server.URL+bucketCollectionPath, "", headers)
 		if body["state"] != string(tc.state) || body["subject"] != "" {
 			t.Fatal(body)
 		}
@@ -173,7 +180,7 @@ func TestRESTCancellationReachesProvider(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/storage/v1/b", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+bucketCollectionPath, nil)
 	completed := make(chan struct{})
 	go func() {
 		defer close(completed)
@@ -250,17 +257,17 @@ func TestStreamingPullBidirectionalDeliveryAndCancellation(t *testing.T) {
 				if err := stream.Recv(&first); err != nil {
 					return err
 				}
-				if first.GetSubscription() != "projects/synthetic/subscriptions/sub" || call.Project != "synthetic" || call.Resource != first.GetSubscription() {
+				if first.GetSubscription() != streamSubscription || call.Project != "synthetic" || call.Resource != first.GetSubscription() {
 					return errors.New("missing first request context")
 				}
-				if err := stream.Send(&pb.StreamingPullResponse{ReceivedMessages: []*pb.ReceivedMessage{{AckId: "ack", Message: &pb.PubsubMessage{Data: []byte("payload")}}}}); err != nil {
+				if err := stream.Send(&pb.StreamingPullResponse{ReceivedMessages: []*pb.ReceivedMessage{{AckId: ackID, Message: &pb.PubsubMessage{Data: []byte("payload")}}}}); err != nil {
 					return err
 				}
 				var second pb.StreamingPullRequest
 				if err := stream.Recv(&second); err != nil {
 					return err
 				}
-				if len(second.GetAckIds()) != 1 || second.GetAckIds()[0] != "ack" {
+				if len(second.GetAckIds()) != 1 || second.GetAckIds()[0] != ackID {
 					return errors.New("missing acknowledgement")
 				}
 				close(received)
@@ -280,14 +287,14 @@ func TestStreamingPullBidirectionalDeliveryAndCancellation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := stream.Send(&pb.StreamingPullRequest{Subscription: "projects/synthetic/subscriptions/sub"}); err != nil {
+			if err := stream.Send(&pb.StreamingPullRequest{Subscription: streamSubscription}); err != nil {
 				t.Fatal(err)
 			}
 			response, err := stream.Recv()
 			if err != nil || string(response.GetReceivedMessages()[0].GetMessage().GetData()) != "payload" {
 				t.Fatalf("%v %v", response, err)
 			}
-			if err := stream.Send(&pb.StreamingPullRequest{AckIds: []string{"ack"}}); err != nil {
+			if err := stream.Send(&pb.StreamingPullRequest{AckIds: []string{ackID}}); err != nil {
 				t.Fatal(err)
 			}
 			wait(t, received)
@@ -340,7 +347,7 @@ func TestStreamMissingInitialMessageAndWrongResponseType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream.Send(&pb.StreamingPullRequest{Subscription: "projects/synthetic/subscriptions/sub"})
+	stream.Send(&pb.StreamingPullRequest{Subscription: streamSubscription})
 	_, err = stream.Recv()
 	if status.Code(err) != codes.Internal {
 		t.Fatal(err)

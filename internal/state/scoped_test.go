@@ -5,11 +5,14 @@ import (
 	"testing"
 )
 
+// testProject is the primary fixture project for scope isolation tests.
+const testProject = "project-a"
+
 func TestProjectAndLocationIsolationAndConcurrentAccess(t *testing.T) {
 	store := NewStore(func() map[string]int { return map[string]int{} }, nil)
-	a := Scope{"project-a", "us-central1"}
+	a := Scope{testProject, "us-central1"}
 	b := Scope{"project-b", "us-central1"}
-	c := Scope{"project-a", "europe-west1"}
+	c := Scope{testProject, "europe-west1"}
 	var group sync.WaitGroup
 	for range 40 {
 		group.Go(func() {
@@ -45,7 +48,7 @@ func TestProjectAndLocationIsolationAndConcurrentAccess(t *testing.T) {
 			return nil
 		})
 	}
-	if store.With(Scope{Project: "project-a"}, func(*map[string]int) error { return nil }) == nil {
+	if store.With(Scope{Project: testProject}, func(*map[string]int) error { return nil }) == nil {
 		t.Fatal("accepted implicit location")
 	}
 	if store.With(Scope{Location: Global}, func(*map[string]int) error { return nil }) == nil {
@@ -54,7 +57,7 @@ func TestProjectAndLocationIsolationAndConcurrentAccess(t *testing.T) {
 }
 func TestIndexRejectsCrossOwnerAndCrossScopeChanges(t *testing.T) {
 	index := NewIndex()
-	resource := Resource{Name: "//storage.googleapis.com/projects/_/buckets/bucket", Service: "storage", Kind: "bucket", Parent: "//cloudresourcemanager.googleapis.com/projects/a", Scope: Scope{"project-a", Global}}
+	resource := Resource{Name: "//storage.googleapis.com/projects/_/buckets/bucket", Service: "storage", Kind: "bucket", Parent: "//cloudresourcemanager.googleapis.com/projects/a", Scope: Scope{testProject, Global}}
 	if err := index.Put("storage", resource); err != nil {
 		t.Fatal(err)
 	}

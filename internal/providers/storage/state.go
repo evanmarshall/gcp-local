@@ -39,7 +39,7 @@ func (c *Catalog) PublishBucket(scope state.Scope, bucket Bucket) error {
 		if existing, ok := value.Buckets[bucket.Name]; ok && existing != bucket {
 			return errors.New("bucket placement is immutable")
 		}
-		if err := c.index.Put("storage", state.Resource{Name: BucketResource(bucket.Name), Service: "storage", Kind: "bucket", Parent: "//cloudresourcemanager.googleapis.com/projects/" + scope.Project, Scope: scope}); err != nil {
+		if err := c.index.Put(serviceName, state.Resource{Name: BucketResource(bucket.Name), Service: serviceName, Kind: kindBucket, Parent: "//cloudresourcemanager.googleapis.com/projects/" + scope.Project, Scope: scope}); err != nil {
 			return err
 		}
 		value.Buckets[bucket.Name] = bucket
@@ -76,7 +76,7 @@ func (c *Catalog) ForgetBucket(scope state.Scope, name string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.store.With(scope, func(value *projectState) error {
-		if err := c.index.Remove("storage", scope, BucketResource(name)); err != nil {
+		if err := c.index.Remove(serviceName, scope, BucketResource(name)); err != nil {
 			return err
 		}
 		delete(value.Buckets, name)
@@ -91,6 +91,6 @@ func (c *Catalog) Reset(scope state.Scope) error {
 	if err := c.store.Reset(scope); err != nil {
 		return err
 	}
-	c.index.RemoveScope("storage", scope)
+	c.index.RemoveScope(serviceName, scope)
 	return nil
 }

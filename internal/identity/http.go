@@ -96,5 +96,5 @@ func (s *Service) inspect(w http.ResponseWriter, r *http.Request) {
 	if principal.State == gateway.Unknown || principal.State == gateway.Expired {
 		code = 401
 	}
-	writeJSON(w, code, map[string]any{"state": principal.State, "subject": principal.Subject, "project": principal.Project, "scopes": principal.Scopes})
+	writeJSON(w, code, map[string]any{"state": principal.State, "subject": principal.Subject, "project": principal.Project, fieldScopes: principal.Scopes})
 }

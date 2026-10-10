@@ -20,6 +20,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// testProject is the primary fixture project for Pub/Sub provider tests.
+const testProject = "project-a"
+
 const owner = "serviceAccount:owner@project-a.iam.gserviceaccount.com"
 const other = "serviceAccount:other@project-b.iam.gserviceaccount.com"
 const testTopic = "projects/project-a/topics/topic"
@@ -52,12 +55,12 @@ func (*faultDriver) NewStream(context.Context, *grpc.StreamDesc, string, ...grpc
 func fixture(t *testing.T) (*Provider, *gateway.Registry, *faultDriver) {
 	t.Helper()
 	index := state.NewIndex()
-	for _, project := range []string{"project-a", "project-b"} {
+	for _, project := range []string{testProject, "project-b"} {
 		must(t, index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: state.Scope{Project: project, Location: state.Global}}))
 	}
 	engine, err := iam.New(index)
 	must(t, err)
-	_, err = engine.SetPolicy(projectResource("project-a"), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{owner}}}})
+	_, err = engine.SetPolicy(projectResource(testProject), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{owner}}}})
 	must(t, err)
 	_, err = engine.SetPolicy(projectResource("project-b"), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{other}}}})
 	must(t, err)
@@ -75,8 +78,8 @@ func must(t *testing.T, err error) {
 	}
 }
 func call(method, resource, actor string) gateway.Call {
-	return gateway.Call{Context: context.Background(), Method: method, Resource: resource, Project: "project-a", Location: state.Global,
-		Principal: gateway.Principal{State: gateway.Authenticated, Subject: actor, Project: "project-a", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}}
+	return gateway.Call{Context: context.Background(), Method: method, Resource: resource, Project: testProject, Location: state.Global,
+		Principal: gateway.Principal{State: gateway.Authenticated, Subject: actor, Project: testProject, Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}}
 }
 
 func TestDeniedOrUnsupportedCallsNeverStartOrReachBackend(t *testing.T) {
@@ -209,7 +212,7 @@ func TestPushActAsDeniedBeforeAnyBackendAccess(t *testing.T) {
 	must(t, err)
 	must(t, p.publish(call(publisher+"CreateTopic", testTopic, owner)))
 	email := "push-worker@project-a.iam.gserviceaccount.com"
-	must(t, p.index.Put("iam", state.Resource{Name: iam.AccountResource("project-a", email), Service: "iam", Kind: "serviceAccount", Number: "123456789012345678901", Parent: projectResource("project-a"), Scope: state.Scope{Project: "project-a", Location: state.Global}}))
+	must(t, p.index.Put("iam", state.Resource{Name: iam.AccountResource(testProject, email), Service: "iam", Kind: "serviceAccount", Number: "123456789012345678901", Parent: projectResource(testProject), Scope: state.Scope{Project: testProject, Location: state.Global}}))
 	request := &pb.Subscription{Name: testSub, Topic: testTopic, PushConfig: &pb.PushConfig{PushEndpoint: "http://127.0.0.1:8888/receive", AuthenticationMethod: &pb.PushConfig_OidcToken_{OidcToken: &pb.PushConfig_OidcToken{ServiceAccountEmail: email}}}}
 	_, err = registry.Invoke(call(subscriber+"CreateSubscription", testSub, owner), request)
 	if status.Code(err) != codes.PermissionDenied || b.calls != 0 || b.starts != 0 {

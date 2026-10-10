@@ -18,6 +18,9 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
+// testProject is the primary fixture project for Storage provider tests.
+const testProject = "project-a"
+
 type fixture struct {
 	p *Provider
 	g *gateway.Gateway
@@ -30,7 +33,7 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, project := range []string{"project-a", "project-b"} {
+	for _, project := range []string{testProject, "project-b"} {
 		if err := index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: state.Scope{Project: project, Location: state.Global}}); err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +89,7 @@ func TestProviderIAMMutationIsolationAndReset(t *testing.T) {
 	if len(f.p.manager.Status()) != 0 {
 		t.Fatal("denied request started backend")
 	}
-	f.bucket("project-a", "owned-bucket", 200)
+	f.bucket(testProject, "owned-bucket", 200)
 	f.bucket("project-b", "other-bucket", 200)
 	f.bucket("project-b", "owned-bucket", 409)
 	object := "nested/a %?.json"
@@ -111,13 +114,13 @@ func TestProviderIAMMutationIsolationAndReset(t *testing.T) {
 	if f.request("admin@project-a.test", "GET", path+"?alt=media", nil, 200).Body.String() != "updated" {
 		t.Fatal("revoked caller deleted object")
 	}
-	scope := state.Scope{Project: "project-a", Location: state.Global}
+	scope := state.Scope{Project: testProject, Location: state.Global}
 	if err := f.p.manager.Reset(context.Background(), backend.Key{Service: "storage", Scope: scope}); err != nil {
 		t.Fatal(err)
 	}
 	f.request("admin@project-a.test", "GET", "/storage/v1/b/owned-bucket", nil, 404)
 	f.request("admin@project-b.test", "GET", "/storage/v1/b/other-bucket", nil, 200)
-	f.bucket("project-a", "owned-bucket", 200)
+	f.bucket(testProject, "owned-bucket", 200)
 	policy, err := f.p.iam.GetPolicy(BucketResource("owned-bucket"))
 	if err != nil || len(policy.Bindings) != 0 {
 		t.Fatal("reset retained bucket grants")
@@ -127,18 +130,18 @@ func TestProviderIAMMutationIsolationAndReset(t *testing.T) {
 }
 func TestProviderFailsClosedForUnsupportedFeatures(t *testing.T) {
 	f := setup(t)
-	f.bucket("project-a", "owned-bucket", 200)
+	f.bucket(testProject, "owned-bucket", 200)
 	for _, path := range []string{"/_internal/healthcheck", "/storage/v1/b/owned-bucket/notificationConfigs", "/storage/v1/b/owned-bucket/acl"} {
 		f.request("admin@project-a.test", "GET", path, nil, 501)
 	}
 	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=resumable&name=a", []byte(`{}`), 501)
 	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=a&predefinedAcl=publicRead", []byte("x"), 501)
 	f.request("admin@project-a.test", "PUT", "/storage/v1/b/owned-bucket/iam", []byte(`{"bindings":[{"role":"roles/storage.objectViewer","members":["allUsers"]}]}`), 412)
-	if err := f.p.iam.MarkUnsupported(projectResource("project-a"), []string{"deny"}); err != nil {
+	if err := f.p.iam.MarkUnsupported(projectResource(testProject), []string{"deny"}); err != nil {
 		t.Fatal(err)
 	}
 	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=a", []byte("x"), 501)
-	if err := f.p.iam.MarkUnsupported(projectResource("project-a"), nil); err != nil {
+	if err := f.p.iam.MarkUnsupported(projectResource(testProject), nil); err != nil {
 		t.Fatal(err)
 	}
 	body := f.request("admin@project-a.test", "GET", "/storage/v1/b/owned-bucket/o", nil, 200).Body.String()
@@ -151,7 +154,7 @@ func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 	f := setup(t)
 	var group sync.WaitGroup
 	codes := make(chan int, 2)
-	for _, project := range []string{"project-a", "project-b"} {
+	for _, project := range []string{testProject, "project-b"} {
 		group.Add(1)
 		go func(project string) {
 			defer group.Done()
@@ -176,7 +179,7 @@ func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 	if !ok {
 		t.Fatal("missing owner")
 	}
-	for _, project := range []string{"project-a", "project-b"} {
+	for _, project := range []string{testProject, "project-b"} {
 		response := f.request("admin@"+project+".test", "GET", "/storage/v1/b?project="+project, nil, 200)
 		hasBucket := strings.Contains(response.Body.String(), "contended-bucket")
 		if hasBucket != (resource.Scope.Project == project) {

@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// fieldScopes is the metadata and identity field name for the granted scopes.
+const fieldScopes = "scopes"
+
 // Metadata binds a handler to one configured service account. The request URL,
 // headers, and query never select a different principal. Workload orchestration
 // must expose this handler only in that workload's private network (#13).
@@ -50,13 +53,13 @@ func (s *Service) Metadata(subject string) (http.Handler, error) {
 		switch parts[1] {
 		case "":
 			if r.URL.Query().Get("recursive") == "true" {
-				writeJSON(w, 200, map[string]any{"email": email, "aliases": []string{"default"}, "scopes": p.scopes})
+				writeJSON(w, 200, map[string]any{"email": email, "aliases": []string{"default"}, fieldScopes: p.scopes})
 			} else {
 				text("email\nscopes\ntoken\n")
 			}
 		case "email":
 			text(email)
-		case "scopes":
+		case fieldScopes:
 			text(strings.Join(p.scopes, "\n") + "\n")
 		case "identity":
 			http.Error(w, "Local ID tokens are unimplemented", http.StatusNotImplemented)
@@ -86,7 +89,7 @@ func parseMetadataQuery(r *http.Request) (string, error) {
 		return "", err
 	}
 	for key, values := range r.Form {
-		if key != "scopes" || len(values) != 1 {
+		if key != fieldScopes || len(values) != 1 {
 			return "", errors.New("unsupported metadata token parameter")
 		}
 	}

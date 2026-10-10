@@ -8,6 +8,9 @@ import (
 	"testing"
 )
 
+// endpointFlag is the shared CLI flag every command test passes an endpoint with.
+const endpointFlag = "-endpoint"
+
 func TestHealthRequiresReadyLocalRuntime(t *testing.T) {
 	for _, tc := range []struct {
 		body string
@@ -25,13 +28,13 @@ func TestHealthRequiresReadyLocalRuntime(t *testing.T) {
 			_, _ = w.Write([]byte(tc.body))
 		}))
 		var output, errors bytes.Buffer
-		if got := run(context.Background(), []string{"health", "-endpoint", s.URL}, &output, &errors); got != tc.want {
+		if got := run(context.Background(), []string{"health", endpointFlag, s.URL}, &output, &errors); got != tc.want {
 			t.Fatalf("health(%s) = %d, want %d", tc.body, got, tc.want)
 		}
 		s.Close()
 	}
 	var output, errors bytes.Buffer
-	if run(context.Background(), []string{"health", "-endpoint", "https://storage.googleapis.com"}, &output, &errors) != 2 {
+	if run(context.Background(), []string{"health", endpointFlag, "https://storage.googleapis.com"}, &output, &errors) != 2 {
 		t.Fatal("health accepted a cloud endpoint")
 	}
 }

@@ -6,17 +6,17 @@ import "github.com/evanmarshall/gcp-local/internal/iam"
 // these rules does not register API providers or claim service conformance.
 func RegisterPermissions(engine *iam.Engine) error {
 	rules := map[string]iam.Rule{
-		"storage.buckets.list":         {Baseline: []string{"storage.buckets.list"}},
-		"storage.buckets.insert":       {Baseline: []string{"storage.buckets.create"}},
-		"storage.buckets.get":          {Baseline: []string{"storage.buckets.get"}},
-		"storage.buckets.delete":       {Baseline: []string{"storage.buckets.delete"}},
-		"storage.buckets.patch":        {Baseline: []string{"storage.buckets.update"}},
-		"storage.buckets.getIamPolicy": {Baseline: []string{"storage.buckets.getIamPolicy"}},
-		"storage.buckets.setIamPolicy": {Baseline: []string{"storage.buckets.setIamPolicy"}},
-		"storage.objects.list":         {Baseline: []string{"storage.objects.list"}},
-		"storage.objects.get":          {Baseline: []string{"storage.objects.get"}},
-		"storage.objects.delete":       {Baseline: []string{"storage.objects.delete"}},
-		"storage.objects.insert":       {Baseline: []string{"storage.objects.create"}, When: map[string][]string{"object_exists": {"storage.objects.delete"}}},
+		MethodBucketsList:         {Baseline: []string{MethodBucketsList}},
+		MethodBucketsInsert:       {Baseline: []string{permissionBucketsCreate}},
+		MethodBucketsGet:          {Baseline: []string{MethodBucketsGet}},
+		MethodBucketsDelete:       {Baseline: []string{MethodBucketsDelete}},
+		MethodBucketsPatch:        {Baseline: []string{permissionBucketsUpdate}},
+		MethodBucketsGetIamPolicy: {Baseline: []string{MethodBucketsGetIamPolicy}},
+		MethodBucketsSetIamPolicy: {Baseline: []string{MethodBucketsSetIamPolicy}},
+		MethodObjectsList:         {Baseline: []string{MethodObjectsList}},
+		MethodObjectsGet:          {Baseline: []string{MethodObjectsGet}},
+		MethodObjectsDelete:       {Baseline: []string{MethodObjectsDelete}},
+		MethodObjectsInsert:       {Baseline: []string{"storage.objects.create"}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
 	}
 	for method, rule := range rules {
 		if err := engine.Register(method, rule); err != nil {

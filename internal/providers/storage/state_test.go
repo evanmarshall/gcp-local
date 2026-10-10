@@ -9,7 +9,7 @@ import (
 func TestBucketProjectOwnershipAndGlobalNamespace(t *testing.T) {
 	index := state.NewIndex()
 	catalog := NewCatalog(index)
-	a, b := state.Scope{Project: "project-a", Location: state.Global}, state.Scope{Project: "project-b", Location: state.Global}
+	a, b := state.Scope{Project: testProject, Location: state.Global}, state.Scope{Project: "project-b", Location: state.Global}
 	bucket := Bucket{Name: "shared-name", Location: "us-central1"}
 	if err := catalog.PublishBucket(a, bucket); err != nil {
 		t.Fatal(err)

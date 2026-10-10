@@ -19,10 +19,10 @@ var permissions = map[string]string{
 	subscriber + "GetSubscription":      "pubsub.subscriptions.get",
 	subscriber + "DeleteSubscription":   "pubsub.subscriptions.delete",
 	subscriber + "ListSubscriptions":    "pubsub.subscriptions.list",
-	subscriber + "Pull":                 "pubsub.subscriptions.consume",
-	subscriber + "Acknowledge":          "pubsub.subscriptions.consume",
-	subscriber + "ModifyAckDeadline":    "pubsub.subscriptions.consume",
-	subscriber + "StreamingPull":        "pubsub.subscriptions.consume",
+	subscriber + "Pull":                 permissionSubscriptionsConsume,
+	subscriber + "Acknowledge":          permissionSubscriptionsConsume,
+	subscriber + "ModifyAckDeadline":    permissionSubscriptionsConsume,
+	subscriber + "StreamingPull":        permissionSubscriptionsConsume,
 	attach:                              "pubsub.topics.attachSubscription",
 	"pubsub.topics.getIamPolicy":        "pubsub.topics.getIamPolicy",
 	"pubsub.topics.setIamPolicy":        "pubsub.topics.setIamPolicy",
@@ -30,6 +30,10 @@ var permissions = map[string]string{
 	"pubsub.subscriptions.setIamPolicy": "pubsub.subscriptions.setIamPolicy",
 	"pubsub.push.actAs":                 "iam.serviceAccounts.actAs",
 }
+
+// permissionSubscriptionsConsume is the single permission that governs every
+// subscription message operation.
+const permissionSubscriptionsConsume = "pubsub.subscriptions.consume"
 
 func registerPermissions(engine *iam.Engine) error {
 	for method, permission := range permissions {

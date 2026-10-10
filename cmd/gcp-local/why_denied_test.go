@@ -18,10 +18,10 @@ func TestWhyDeniedUsesOnlyExplicitLocalDiagnostics(t *testing.T) {
 	}))
 	defer server.Close()
 	var output bytes.Buffer
-	if code := run(t.Context(), []string{"why-denied", "-endpoint", server.URL, id}, &output, &output); code != 0 || !bytes.Contains(output.Bytes(), []byte("storage.objects.get")) {
+	if code := run(t.Context(), []string{"why-denied", endpointFlag, server.URL, id}, &output, &output); code != 0 || !bytes.Contains(output.Bytes(), []byte("storage.objects.get")) {
 		t.Fatalf("%d %s", code, output.String())
 	}
-	for _, args := range [][]string{{"-endpoint", "https://iam.googleapis.com", id}, {"-endpoint", server.URL, "invalid"}, {"-endpoint", server.URL + "/other", id}} {
+	for _, args := range [][]string{{endpointFlag, "https://iam.googleapis.com", id}, {endpointFlag, server.URL, "invalid"}, {endpointFlag, server.URL + "/other", id}} {
 		output.Reset()
 		if code := whyDenied(args, &output, &output); code != 2 {
 			t.Fatal("accepted unsafe endpoint or ID")
@@ -33,7 +33,7 @@ func TestWhyDeniedUsesOnlyExplicitLocalDiagnostics(t *testing.T) {
 	}))
 	defer redirect.Close()
 	output.Reset()
-	if code := whyDenied([]string{"-endpoint", redirect.URL, id}, &output, &output); code != 1 {
+	if code := whyDenied([]string{endpointFlag, redirect.URL, id}, &output, &output); code != 1 {
 		t.Fatal("followed diagnostics redirect")
 	}
 }

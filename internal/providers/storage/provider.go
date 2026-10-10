@@ -28,7 +28,7 @@ type Provider struct {
 	manager *backend.Manager
 }
 
-var methods = []string{"storage.buckets.insert", "storage.buckets.list", "storage.buckets.get", "storage.buckets.patch", "storage.buckets.delete", "storage.buckets.getIamPolicy", "storage.buckets.setIamPolicy", "storage.objects.insert", "storage.objects.list", "storage.objects.get", "storage.objects.delete"}
+var methods = []string{MethodBucketsInsert, MethodBucketsList, MethodBucketsGet, MethodBucketsPatch, MethodBucketsDelete, MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy, MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete}
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
@@ -38,14 +38,14 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 	if err := RegisterPermissions(engine); err != nil {
 		return nil, err
 	}
-	if err := manager.Register("storage", backend.Definition{
+	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
 		New:      func(state.Scope) (backend.Backend, error) { return &memoryBackend{}, nil },
 		AfterReset: func(scope state.Scope) error {
 			if err := p.catalog.Reset(scope); err != nil {
 				return err
 			}
-			engine.ClearScope("storage", scope)
+			engine.ClearScope(serviceName, scope)
 			return nil
 		},
 	}); err != nil {
@@ -105,17 +105,17 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 		httpCode = 401
 		reason = "required"
 	}
-	kind := "bucket"
+	kind := kindBucket
 	if strings.HasPrefix(permission, "storage.objects.") {
 		kind = "object"
 	}
 	message := fmt.Sprintf("%s does not have %s access to the Google Cloud Storage %s. Permission '%s' denied on resource '%s' (or it may not exist).", actor, permission, kind, permission, target.Name)
-	if call.Method == "storage.objects.insert" && permission == "storage.objects.delete" {
+	if call.Method == MethodObjectsInsert && permission == MethodObjectsDelete {
 		message = actor + " does not have storage.objects.delete access to the Google Cloud Storage object."
 	}
 	response := wireError(httpCode, reason, message)
 	response.Headers = http.Header{"X-Gcp-Local-Decision-Id": {d.ID}}
-	if call.Method == "storage.objects.insert" && permission != "storage.objects.delete" {
+	if call.Method == MethodObjectsInsert && permission != MethodObjectsDelete {
 		response.Headers.Set("Content-Type", "text/html")
 	}
 	return response, d.ID, nil
@@ -130,7 +130,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	bucket, object := r.Path["bucket"], r.Path["object"]
 	var upload *uploadRequest
-	if call.Method == "storage.objects.insert" {
+	if call.Method == MethodObjectsInsert {
 		var err error
 		upload, err = parseUpload(r)
 		if err != nil {
@@ -140,7 +140,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	target := iam.Target{Name: BucketResource(bucket)}
 	scope := state.Scope{Location: state.Global}
-	projectMethod := call.Method == "storage.buckets.insert" || call.Method == "storage.buckets.list"
+	projectMethod := call.Method == MethodBucketsInsert || call.Method == MethodBucketsList
 	if projectMethod {
 		scope.Project = call.Project
 		target.Name = projectResource(call.Project)
@@ -169,7 +169,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return denied, err
 	}
 	var response *gateway.RESTResponse
-	err = p.manager.Use(call.Context, backend.Key{Service: "storage", Scope: scope}, func(ctx context.Context, driver backend.Backend) error {
+	err = p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(ctx context.Context, driver backend.Backend) error {
 		call.Context = ctx
 		b := driver.(*memoryBackend)
 		if !projectMethod {
@@ -181,7 +181,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		}
 		features := map[string]bool{}
 		var current map[string]any
-		if call.Method == "storage.objects.insert" {
+		if call.Method == MethodObjectsInsert {
 			result, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
 			if err != nil {
 				return err
@@ -189,9 +189,9 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 			switch result.Status {
 			case 200:
 				current = result.JSON.(map[string]any)
-				features["object_exists"] = true
+				features[objectExistsCondition] = true
 			case 404:
-				features["object_exists"] = false
+				features[objectExistsCondition] = false
 			default:
 				return status.Error(codes.Unavailable, "Unable to resolve existing object before authorization")
 			}
@@ -245,7 +245,7 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 	}
 	response := &gateway.RESTResponse{Status: result.StatusCode, Headers: result.Header.Clone()}
 	response.Headers.Del("Content-Length")
-	if strings.Contains(result.Header.Get("Content-Type"), "application/json") && (result.StatusCode >= 300 || query.Get("alt") != "media") {
+	if strings.Contains(result.Header.Get("Content-Type"), "application/json") && (result.StatusCode >= 300 || query.Get("alt") != altMedia) {
 		var value map[string]any
 		if len(payload) > 0 && json.Unmarshal(payload, &value) != nil {
 			return nil, status.Error(codes.Internal, "Invalid backend JSON")
@@ -295,14 +295,14 @@ func objectETag(generation, metageneration string) string {
 func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.Call, r *gateway.RESTRequest, scope state.Scope, bucket, object string, upload *uploadRequest, current map[string]any) (*gateway.RESTResponse, error) {
 	path := "/storage/v1/b/" + url.PathEscape(bucket)
 	switch call.Method {
-	case "storage.buckets.insert":
+	case MethodBucketsInsert:
 		return p.createBucket(ctx, b, r, scope)
-	case "storage.buckets.patch":
+	case MethodBucketsPatch:
 		return p.patchBucket(ctx, b, r, scope, bucket)
-	case "storage.buckets.getIamPolicy":
+	case MethodBucketsGetIamPolicy:
 		policy, err := p.iam.GetPolicy(BucketResource(bucket))
 		return &gateway.RESTResponse{JSON: policy}, err
-	case "storage.buckets.setIamPolicy":
+	case MethodBucketsSetIamPolicy:
 		var request struct {
 			iam.Policy
 			ResourceID string `json:"resourceId"`
@@ -329,7 +329,7 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 		}
 		result, err := p.iam.SetPolicy(BucketResource(bucket), policy)
 		return &gateway.RESTResponse{JSON: result}, err
-	case "storage.buckets.list":
+	case MethodBucketsList:
 		response, err := b.forward(ctx, "GET", "/storage/v1/b", r.Query, nil, nil)
 		if err != nil {
 			return nil, err
@@ -343,13 +343,13 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 			}
 		}
 		return response, nil
-	case "storage.buckets.get":
+	case MethodBucketsGet:
 		response, err := b.forward(ctx, "GET", path, r.Query, nil, nil)
 		if err == nil && response.Status == 200 {
 			p.bucketMetadata(scope, response.JSON.(map[string]any))
 		}
 		return response, err
-	case "storage.buckets.delete":
+	case MethodBucketsDelete:
 		response, err := b.forward(ctx, "DELETE", path, r.Query, nil, nil)
 		if err == nil && response.Status == 200 {
 			response.Status = 204
@@ -361,10 +361,10 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 			p.iam.Forget(BucketResource(bucket))
 		}
 		return response, err
-	case "storage.objects.list":
+	case MethodObjectsList:
 		return b.forward(ctx, "GET", path+"/o", r.Query, nil, nil)
 	}
-	if call.Method != "storage.objects.insert" {
+	if call.Method != MethodObjectsInsert {
 		response, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
 		if err != nil {
 			return nil, err
@@ -380,13 +380,13 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 	if response, err := preconditions(r, current, call.Method); response != nil || err != nil {
 		return response, err
 	}
-	if call.Method == "storage.objects.insert" {
+	if call.Method == MethodObjectsInsert {
 		return b.forward(ctx, "POST", "/upload/storage/v1/b/"+url.PathEscape(bucket)+"/o", upload.query, upload.headers, upload.body)
 	}
 	if generation := r.Query.Get("generation"); generation != "" && current["generation"] != generation {
 		return notFound(bucket, object), nil
 	}
-	if call.Method == "storage.objects.get" {
+	if call.Method == MethodObjectsGet {
 		return b.forward(ctx, "GET", objectPath(bucket, object), r.Query, r.Headers, nil)
 	}
 	response, err := b.forward(ctx, "DELETE", objectPath(bucket, object), r.Query, nil, nil)

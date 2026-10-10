@@ -17,13 +17,20 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// testProject and pushWorkerEmail are the fixture identities shared by the
+// identity tests.
+const (
+	testProject     = "project-a"
+	pushWorkerEmail = "push-worker@project-a.iam.gserviceaccount.com"
+)
+
 func TestIDTokensRequireAccountGrantAndValidateClaims(t *testing.T) {
-	project := "project-a"
-	account := iam.AccountResource(project, "push-worker@project-a.iam.gserviceaccount.com")
+	project := testProject
+	account := iam.AccountResource(project, pushWorkerEmail)
 	agent := "serviceAccount:service-123456@gcp-sa-pubsub.iam.gserviceaccount.com"
 	parent := "//cloudresourcemanager.googleapis.com/projects/" + project
 	config := iam.Config{Resources: []state.Resource{{Name: parent, Service: "resourcemanager", Kind: "project", Scope: state.Scope{Project: project, Location: state.Global}}},
-		ServiceAccounts: []iam.ServiceAccount{{Project: project, Email: "push-worker@project-a.iam.gserviceaccount.com", UniqueID: "123456789012345678901"}},
+		ServiceAccounts: []iam.ServiceAccount{{Project: project, Email: pushWorkerEmail, UniqueID: "123456789012345678901"}},
 		Policies:        map[string]iam.Policy{account: {Bindings: []iam.Binding{{Role: "roles/iam.serviceAccountTokenCreator", Members: []string{agent}}}}}}
 	path := filepath.Join(t.TempDir(), "iam.json")
 	raw, _ := json.Marshal(config)
@@ -78,12 +85,12 @@ func TestIDTokensRequireAccountGrantAndValidateClaims(t *testing.T) {
 
 func TestAccountBootstrapRejectsConflictingOwnershipAndIDs(t *testing.T) {
 	parent := "//cloudresourcemanager.googleapis.com/projects/project-a"
-	base := iam.Config{Resources: []state.Resource{{Name: parent, Service: "resourcemanager", Kind: "project", Scope: state.Scope{Project: "project-a", Location: state.Global}}}}
+	base := iam.Config{Resources: []state.Resource{{Name: parent, Service: "resourcemanager", Kind: "project", Scope: state.Scope{Project: testProject, Location: state.Global}}}}
 	for _, accounts := range [][]iam.ServiceAccount{
-		{{Project: "project-a", Email: "push-worker@project-b.iam.gserviceaccount.com", UniqueID: "123456"}},
+		{{Project: testProject, Email: "push-worker@project-b.iam.gserviceaccount.com", UniqueID: "123456"}},
 		{{Project: "project-b", Email: "push-worker@project-b.iam.gserviceaccount.com", UniqueID: "123456"}},
-		{{Project: "project-a", Email: "push-worker@project-a.iam.gserviceaccount.com", UniqueID: "not-numeric"}},
-		{{Project: "project-a", Email: "push-worker@project-a.iam.gserviceaccount.com", UniqueID: "123456"}, {Project: "project-a", Email: "another-worker@project-a.iam.gserviceaccount.com", UniqueID: "123456"}},
+		{{Project: testProject, Email: pushWorkerEmail, UniqueID: "not-numeric"}},
+		{{Project: testProject, Email: pushWorkerEmail, UniqueID: "123456"}, {Project: testProject, Email: "another-worker@project-a.iam.gserviceaccount.com", UniqueID: "123456"}},
 	} {
 		base.ServiceAccounts = accounts
 		raw, _ := json.Marshal(base)

@@ -28,17 +28,25 @@ const allowed = "serviceAccount:allowed@project-a.iam.gserviceaccount.com"
 const fixture = "serviceAccount:fixture@project-a.iam.gserviceaccount.com"
 const peer = "serviceAccount:peer@project-b.iam.gserviceaccount.com"
 
+const (
+	resourceManagerService = "resourcemanager"
+	kindProject            = "project"
+	projectBName           = "project-b"
+	conditionObjectExists  = "object_exists"
+	changedMarker          = "changed"
+)
+
 func setup(t *testing.T) (*iam.Engine, *state.Index) {
 	t.Helper()
 	index := state.NewIndex()
 	resources := []state.Resource{
-		{Name: org, Service: "resourcemanager", Kind: "organization", Scope: state.Scope{Location: state.Global}},
-		{Name: folder, Service: "resourcemanager", Kind: "folder", Parent: org, Scope: state.Scope{Location: state.Global}},
-		{Name: projectA, Service: "resourcemanager", Kind: "project", Parent: folder, Scope: state.Scope{Project: "project-a", Location: state.Global}},
-		{Name: projectB, Service: "resourcemanager", Kind: "project", Parent: org, Scope: state.Scope{Project: "project-b", Location: state.Global}},
+		{Name: org, Service: resourceManagerService, Kind: "organization", Scope: state.Scope{Location: state.Global}},
+		{Name: folder, Service: resourceManagerService, Kind: "folder", Parent: org, Scope: state.Scope{Location: state.Global}},
+		{Name: projectA, Service: resourceManagerService, Kind: kindProject, Parent: folder, Scope: state.Scope{Project: "project-a", Location: state.Global}},
+		{Name: projectB, Service: resourceManagerService, Kind: kindProject, Parent: org, Scope: state.Scope{Project: projectBName, Location: state.Global}},
 	}
 	for _, resource := range resources {
-		if err := index.Put("resourcemanager", resource); err != nil {
+		if err := index.Put(resourceManagerService, resource); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -89,12 +97,12 @@ func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 	if err != nil || inherited.Checks[0].GrantPolicy != projectA {
 		t.Fatalf("%+v %v", inherited, err)
 	}
-	foreign := call("storage.objects.get", peer, "project-b")
+	foreign := call("storage.objects.get", peer, projectBName)
 	if _, err := engine.Authorize(foreign, object(), nil); status.Code(err) != codes.PermissionDenied {
 		t.Fatal("caller-project role leaked into resource project:", err)
 	}
 	set(t, engine, object().Parent, "roles/storage.objectViewer", peer)
-	if result, err := engine.Authorize(foreign, object(), nil); err != nil || result.Principal.Project != "project-b" || result.Checks[0].GrantPolicy != object().Parent {
+	if result, err := engine.Authorize(foreign, object(), nil); err != nil || result.Principal.Project != projectBName || result.Checks[0].GrantPolicy != object().Parent {
 		t.Fatalf("%+v %v", result, err)
 	}
 	engine.SetPolicy(object().Parent, iam.Policy{})
@@ -127,10 +135,10 @@ func TestReplacementCannotOmitBaselineOrUnresolvedState(t *testing.T) {
 		}
 		return decision, err
 	}
-	if result, err := perform(map[string]bool{"object_exists": false}); err != nil || !result.Complete || len(result.Checks) != 1 {
+	if result, err := perform(map[string]bool{conditionObjectExists: false}); err != nil || !result.Complete || len(result.Checks) != 1 {
 		t.Fatalf("%+v %v", result, err)
 	}
-	denied, err := perform(map[string]bool{"object_exists": true})
+	denied, err := perform(map[string]bool{conditionObjectExists: true})
 	if status.Code(err) != codes.PermissionDenied || len(denied.Checks) != 2 || !denied.Checks[0].Allowed || denied.Checks[1].Allowed || denied.Checks[1].Permission != "storage.objects.delete" {
 		t.Fatalf("%+v %v", denied, err)
 	}
@@ -144,7 +152,7 @@ func TestReplacementCannotOmitBaselineOrUnresolvedState(t *testing.T) {
 		t.Fatal("denied or incomplete plan reached mutation")
 	}
 	set(t, engine, object().Parent, "roles/storage.objectViewer", allowed)
-	denied, err = perform(map[string]bool{"object_exists": true})
+	denied, err = perform(map[string]bool{conditionObjectExists: true})
 	if status.Code(err) != codes.PermissionDenied || denied.Checks[0].Allowed {
 		t.Fatal("additional check displaced baseline create permission")
 	}
@@ -209,12 +217,12 @@ func TestHierarchyGapsAndOwnershipMismatchFailClosed(t *testing.T) {
 	if _, err := engine.Authorize(read, target, nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal("object accepted unrelated anchor")
 	}
-	read.Project = "project-b"
+	read.Project = projectBName
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal("caller resource project mismatch ignored")
 	}
 	read.Project = "project-a"
-	index.Remove("resourcemanager", state.Scope{Location: state.Global}, folder)
+	index.Remove(resourceManagerService, state.Scope{Location: state.Global}, folder)
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal("missing hierarchy silently ended inheritance")
 	}
@@ -253,7 +261,7 @@ func TestPolicyETagsCopiesAndScopedCleanup(t *testing.T) {
 }
 func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", peer, "project-b")
+	read := call("storage.objects.get", peer, projectBName)
 	first, _ := engine.Authorize(read, object(), nil)
 	second, _ := engine.Authorize(read, object(), nil)
 	if first.ID == second.ID || first.ID == read.TraceID {
@@ -274,10 +282,10 @@ func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 		t.Fatalf("%+v", result)
 	}
 	copy, _ := engine.Decision(first.ID)
-	copy.Checks[0].Policies[0] = "changed"
-	copy.Principal.Scopes[0] = "changed"
+	copy.Checks[0].Policies[0] = changedMarker
+	copy.Principal.Scopes[0] = changedMarker
 	again, _ := engine.Decision(first.ID)
-	if again.Checks[0].Policies[0] == "changed" || again.Principal.Scopes[0] == "changed" {
+	if again.Checks[0].Policies[0] == changedMarker || again.Principal.Scopes[0] == changedMarker {
 		t.Fatal("diagnostics mutated audit record")
 	}
 }
@@ -299,7 +307,7 @@ func TestConcurrentPoliciesAndBoundedDecisionRetention(t *testing.T) {
 }
 func TestBootstrapIsExplicitAndRejectsIncompleteHierarchy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "iam.json")
-	config := iam.Config{Resources: []state.Resource{{Name: projectA, Kind: "project", Service: "resourcemanager", Scope: state.Scope{Project: "project-a", Location: state.Global}}}, Policies: map[string]iam.Policy{projectA: {Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{fixture}}}}}}
+	config := iam.Config{Resources: []state.Resource{{Name: projectA, Kind: kindProject, Service: resourceManagerService, Scope: state.Scope{Project: "project-a", Location: state.Global}}}, Policies: map[string]iam.Policy{projectA: {Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{fixture}}}}}}
 	raw, _ := json.Marshal(config)
 	os.WriteFile(path, raw, 0600)
 	engine, index, err := iam.Load(path)
