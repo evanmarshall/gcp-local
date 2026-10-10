@@ -130,12 +130,13 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 		}
 		server.IAM = engine
 	}
-	listener, err := net.Listen("tcp", *address)
+	var listen net.ListenConfig
+	listener, err := listen.Listen(ctx, "tcp", *address)
 	if err != nil {
 		fmt.Fprintln(errors, "Unable to bind the requested HTTP listener:", err)
 		return 1
 	}
-	grpcListener, err := net.Listen("tcp", *grpcAddress)
+	grpcListener, err := listen.Listen(ctx, "tcp", *grpcAddress)
 	if err != nil {
 		_ = listener.Close()
 		fmt.Fprintln(errors, "Unable to bind the requested gRPC listener:", err)
@@ -143,7 +144,7 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	}
 	listeners := core.Listeners{HTTP: listener, GRPC: grpcListener}
 	if metadataHandler != nil {
-		listeners.Metadata, err = net.Listen("tcp", *metadataAddress)
+		listeners.Metadata, err = listen.Listen(ctx, "tcp", *metadataAddress)
 		if err != nil {
 			_ = listener.Close()
 			_ = grpcListener.Close()
@@ -167,6 +168,7 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }

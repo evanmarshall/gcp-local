@@ -48,7 +48,7 @@ func (g *Gateway) newCall(ctx context.Context, method string, authorization, tra
 		if principal.Subject == "" {
 			return call, status.Error(codes.Internal, "Identity resolver returned no subject")
 		}
-	case Unknown, Expired:
+	case Unknown, Expired, Anonymous:
 	default:
 		return call, status.Error(codes.Internal, "Identity resolver returned an invalid principal state")
 	}

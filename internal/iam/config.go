@@ -52,7 +52,7 @@ func Load(path string) (*Engine, *state.Index, error) {
 	if err := decoder.Decode(&config); err != nil {
 		return nil, nil, errConfigInvalid
 	}
-	var trailing any
+	var trailing map[string]any
 	if decoder.Decode(&trailing) != io.EOF {
 		return nil, nil, errConfigTrailing
 	}

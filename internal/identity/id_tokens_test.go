@@ -3,7 +3,6 @@ package identity
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +32,7 @@ func TestIDTokensRequireAccountGrantAndValidateClaims(t *testing.T) {
 		ServiceAccounts: []iam.ServiceAccount{{Project: project, Email: pushWorkerEmail, UniqueID: "123456789012345678901"}},
 		Policies:        map[string]iam.Policy{account: {Bindings: []iam.Binding{{Role: "roles/iam.serviceAccountTokenCreator", Members: []string{agent}}}}}}
 	path := filepath.Join(t.TempDir(), "iam.json")
-	raw, _ := json.Marshal(config)
+	raw := mustMarshal(t, config)
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +92,7 @@ func TestAccountBootstrapRejectsConflictingOwnershipAndIDs(t *testing.T) {
 		{{Project: testProject, Email: pushWorkerEmail, UniqueID: "123456"}, {Project: testProject, Email: "another-worker@project-a.iam.gserviceaccount.com", UniqueID: "123456"}},
 	} {
 		base.ServiceAccounts = accounts
-		raw, _ := json.Marshal(base)
+		raw := mustMarshal(t, base)
 		path := filepath.Join(t.TempDir(), "iam.json")
 		if err := os.WriteFile(path, raw, 0600); err != nil {
 			t.Fatal(err)

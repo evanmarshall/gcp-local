@@ -201,7 +201,7 @@ func TestEmulatorPinMatchesInstaller(t *testing.T) {
 	raw, err := os.ReadFile("../../../toolchains/pubsub.json")
 	must(t, err)
 	var pin struct {
-		Version string
+		Version string `json:"version"`
 		SHA256  string `json:"jar_sha256"`
 	}
 	must(t, json.Unmarshal(raw, &pin))

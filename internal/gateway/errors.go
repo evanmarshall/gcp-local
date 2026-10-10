@@ -61,6 +61,8 @@ func writeError(w http.ResponseWriter, err error) {
 		code = 503
 	case codes.DeadlineExceeded:
 		code = 504
+	default:
+		// Every other status stays 500; the wire status name still describes it.
 	}
 	names := map[codes.Code]string{codes.Canceled: "CANCELLED", codes.InvalidArgument: "INVALID_ARGUMENT", codes.DeadlineExceeded: "DEADLINE_EXCEEDED", codes.NotFound: "NOT_FOUND", codes.AlreadyExists: "ALREADY_EXISTS", codes.PermissionDenied: "PERMISSION_DENIED", codes.ResourceExhausted: "RESOURCE_EXHAUSTED", codes.FailedPrecondition: "FAILED_PRECONDITION", codes.OutOfRange: "OUT_OF_RANGE", codes.DataLoss: "DATA_LOSS"}
 	name := names[s.Code()]

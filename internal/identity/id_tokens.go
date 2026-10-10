@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// This issuer is deliberately local. Tokens never claim Google's signing
+// IDTokenIssuer is deliberately local: tokens never claim Google's signing
 // authority. Applications configure this issuer and the runtime's public key.
 const IDTokenIssuer = "https://identity.gcp-local.invalid"    //nolint:gosec // a public local issuer URL, not a credential
 const generateIDToken = "iam.serviceAccounts.generateIdToken" //nolint:gosec // an RPC method name, not a credential
@@ -120,7 +120,11 @@ func (s *IDTokens) Verify(token, audience string) (IDClaims, error) {
 	if err != nil {
 		return fail()
 	}
-	var properties struct{ Alg, Typ, Kid string }
+	var properties struct {
+		Alg string `json:"alg"`
+		Typ string `json:"typ"`
+		Kid string `json:"kid"`
+	}
 	if json.Unmarshal(header, &properties) != nil || properties.Alg != "RS256" || properties.Typ != "JWT" || properties.Kid != s.kid {
 		return fail()
 	}

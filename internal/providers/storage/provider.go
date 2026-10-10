@@ -141,27 +141,9 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		}
 		object = upload.name
 	}
-	target := iam.Target{Name: BucketResource(bucket)}
-	scope := state.Scope{Location: state.Global}
-	projectMethod := call.Method == MethodBucketsInsert || call.Method == MethodBucketsList
-	if projectMethod {
-		scope.Project = call.Project
-		target.Name = projectResource(call.Project)
-		project, ok := p.index.Get(target.Name)
-		if !ok || project.Kind != "project" || !regexp.MustCompile(`^[0-9]{1,20}$`).MatchString(project.Number) {
-			return nil, gap("configure the explicit project and numeric project number")
-		}
-	} else {
-		resource, found := p.index.Get(target.Name)
-		if !found {
-			return notFound(bucket, ""), nil
-		}
-		scope = resource.Scope
-		call.Project = scope.Project
-		if object != "" {
-			target.Parent = target.Name
-			target.Name += "/objects/" + object
-		}
+	target, scope, projectMethod, refused, err := p.resolveTarget(call, bucket, object)
+	if refused != nil || err != nil {
+		return refused, err
 	}
 	call.Resource = target.Name
 	call.Location = state.Global
@@ -172,49 +154,32 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return denied, err
 	}
 	var response *gateway.RESTResponse
-	err = p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(ctx context.Context, driver backend.Backend) error {
-		call.Context = ctx
+	err = p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(session context.Context, driver backend.Backend) error {
+		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
 		b, backendErr := backendOf(driver)
 		if backendErr != nil {
 			return backendErr
 		}
 		if !projectMethod {
-			resource, ok := p.index.Get(BucketResource(bucket))
-			if !ok || resource.Scope != scope {
+			resource, found := p.index.Get(BucketResource(bucket))
+			if !found || resource.Scope != scope {
 				response = notFound(bucket, "")
 				return nil
 			}
 		}
-		features := map[string]bool{}
-		var current map[string]any
-		if call.Method == MethodObjectsInsert {
-			result, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
-			if err != nil {
-				return err
-			}
-			switch result.Status {
-			case 200:
-				payload, payloadErr := jsonObject(result.JSON)
-				if payloadErr != nil {
-					return payloadErr
-				}
-				current = payload
-				features[objectExistsCondition] = true
-			case 404:
-				features[objectExistsCondition] = false
-			default:
-				return status.Error(codes.Unavailable, "Unable to resolve existing object before authorization")
-			}
+		features, current, featureErr := p.objectFeatures(session, b, call, bucket, object)
+		if featureErr != nil {
+			return featureErr
 		}
-		denied, id, err := p.authorize(call, target, features, true)
-		if err != nil {
-			return err
+		denied, id, authorizeErr := p.authorize(call, target, features, true)
+		if authorizeErr != nil {
+			return authorizeErr
 		}
 		if denied != nil {
 			response = denied
 			return nil
 		}
-		response, err = p.execute(ctx, b, call, r, scope, bucket, object, upload, current)
+		response, err = p.execute(session, b, call, r, scope, bucket, object, upload, current)
 		if response != nil {
 			if response.Headers == nil {
 				response.Headers = http.Header{}
@@ -228,6 +193,67 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	return response, nil
 }
+
+// resolveTarget derives the IAM target and backend scope for one request. A
+// project-scoped method addresses the project; every other method addresses the
+// bucket, whose recorded scope decides the backend instance. An unknown bucket
+// is refused with a notFound response.
+func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.Target, state.Scope, bool, *gateway.RESTResponse, error) {
+	target := iam.Target{Name: BucketResource(bucket)}
+	scope := state.Scope{Location: state.Global}
+	projectMethod := call.Method == MethodBucketsInsert || call.Method == MethodBucketsList
+	if projectMethod {
+		scope.Project = call.Project
+		target.Name = projectResource(call.Project)
+		project, ok := p.index.Get(target.Name)
+		if !ok || project.Kind != "project" || !numericProjectNumber.MatchString(project.Number) {
+			return iam.Target{}, state.Scope{}, projectMethod, nil, gap("configure the explicit project and numeric project number")
+		}
+		return target, scope, projectMethod, nil, nil
+	}
+	resource, found := p.index.Get(target.Name)
+	if !found {
+		return iam.Target{}, state.Scope{}, projectMethod, notFound(bucket, ""), nil
+	}
+	scope = resource.Scope
+	call.Project = scope.Project
+	if object != "" {
+		target.Parent = target.Name
+		target.Name += "/objects/" + object
+	}
+	return target, scope, projectMethod, nil, nil
+}
+
+// objectFeatures resolves whether an inserted object already exists, which the
+// object-exists permission plan depends on.
+func (p *Provider) objectFeatures(ctx context.Context, b *memoryBackend, call gateway.Call, bucket, object string) (map[string]bool, map[string]any, error) {
+	features := map[string]bool{}
+	if call.Method != MethodObjectsInsert {
+		return features, nil, nil
+	}
+	result, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch result.Status {
+	case 200:
+		payload, payloadErr := jsonObject(result.JSON)
+		if payloadErr != nil {
+			return nil, nil, payloadErr
+		}
+		features[objectExistsCondition] = true
+		return features, payload, nil
+	case 404:
+		features[objectExistsCondition] = false
+		return features, nil, nil
+	default:
+		return nil, nil, status.Error(codes.Unavailable, "Unable to resolve existing object before authorization")
+	}
+}
+
+// numericProjectNumber pins the project-number shape Storage requires.
+var numericProjectNumber = regexp.MustCompile(`^[0-9]{1,20}$`)
+
 func objectPath(bucket, object string) string {
 	return "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(object)
 }
@@ -313,81 +339,23 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 	case MethodBucketsPatch:
 		return p.patchBucket(ctx, b, r, scope, bucket)
 	case MethodBucketsGetIamPolicy:
-		policy, err := p.iam.GetPolicy(BucketResource(bucket))
-		if err != nil {
-			return nil, fmt.Errorf("read bucket policy: %w", err)
-		}
-		return &gateway.RESTResponse{JSON: policy}, nil
+		return p.readBucketPolicy(bucket)
 	case MethodBucketsSetIamPolicy:
-		var request struct {
-			iam.Policy
-			ResourceID string `json:"resourceId"`
-			Kind       string `json:"kind"`
-		}
-		decoder := json.NewDecoder(bytes.NewReader(r.JSON))
-		decoder.DisallowUnknownFields()
-		if decoder.Decode(&request) != nil {
-			return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
-		}
-		if request.ResourceID != "" && request.ResourceID != "/b/"+bucket && request.ResourceID != "projects/_/buckets/"+bucket {
-			return nil, status.Error(codes.InvalidArgument, "Policy resource disagrees with bucket")
-		}
-		if request.Kind != "" && request.Kind != "storage#policy" {
-			return nil, status.Error(codes.InvalidArgument, "Invalid policy kind")
-		}
-		policy := request.Policy
-		for _, binding := range policy.Bindings {
-			for _, member := range binding.Members {
-				if member == "allUsers" || member == "allAuthenticatedUsers" {
-					return wireError(412, "conditionNotMet", "The bucket is subject to public access prevention."), nil
-				}
-			}
-		}
-		result, err := p.iam.SetPolicy(BucketResource(bucket), policy)
-		if err != nil {
-			return nil, fmt.Errorf("write bucket policy: %w", err)
-		}
-		return &gateway.RESTResponse{JSON: result}, nil
+		return p.writeBucketPolicy(bucket, r)
 	case MethodBucketsList:
-		response, err := b.forward(ctx, "GET", "/storage/v1/b", r.Query, nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		if response.Status == 200 {
-			body, bodyErr := jsonObject(response.JSON)
-			if bodyErr != nil {
-				return nil, bodyErr
-			}
-			for _, item := range itemList(body["items"]) {
-				p.bucketMetadata(scope, item)
-			}
-		}
-		return response, nil
+		return p.listBuckets(ctx, b, r, scope)
 	case MethodBucketsGet:
-		response, err := b.forward(ctx, "GET", path, r.Query, nil, nil)
-		if err == nil && response.Status == 200 {
-			body, bodyErr := jsonObject(response.JSON)
-			if bodyErr != nil {
-				return nil, bodyErr
-			}
-			p.bucketMetadata(scope, body)
-		}
-		return response, err
+		return p.getBucket(ctx, b, r, scope, path)
 	case MethodBucketsDelete:
-		response, err := b.forward(ctx, "DELETE", path, r.Query, nil, nil)
-		if err == nil && response.Status == 200 {
-			response.Status = 204
-			response.JSON = nil
-			response.Body = nil
-		}
-		if err == nil && response.Status == 204 {
-			err = p.catalog.ForgetBucket(scope, bucket)
-			p.iam.Forget(BucketResource(bucket))
-		}
-		return response, err
+		return p.deleteBucket(ctx, b, r, scope, path, bucket)
 	case MethodObjectsList:
 		return b.forward(ctx, "GET", path+"/o", r.Query, nil, nil)
 	}
+	return p.executeObject(ctx, b, call, r, bucket, object, upload, current)
+}
+
+// executeObject handles the object methods, which share one precondition pass.
+func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, call gateway.Call, r *gateway.RESTRequest, bucket, object string, upload *uploadRequest, current map[string]any) (*gateway.RESTResponse, error) {
 	if call.Method != MethodObjectsInsert {
 		response, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
 		if err != nil {
@@ -422,6 +390,97 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 		response.Status = 204
 		response.JSON = nil
 		response.Body = nil
+	}
+	return response, err
+}
+
+// readBucketPolicy returns the IAM policy for one bucket.
+func (p *Provider) readBucketPolicy(bucket string) (*gateway.RESTResponse, error) {
+	policy, err := p.iam.GetPolicy(BucketResource(bucket))
+	if err != nil {
+		return nil, fmt.Errorf("read bucket policy: %w", err)
+	}
+	return &gateway.RESTResponse{JSON: policy}, nil
+}
+
+// writeBucketPolicy validates and stores one bucket IAM policy.
+func (p *Provider) writeBucketPolicy(bucket string, r *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+	var request struct {
+		iam.Policy
+		ResourceID string `json:"resourceId"`
+		Kind       string `json:"kind"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(r.JSON))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&request) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+	}
+	if request.ResourceID != "" && request.ResourceID != "/b/"+bucket && request.ResourceID != "projects/_/buckets/"+bucket {
+		return nil, status.Error(codes.InvalidArgument, "Policy resource disagrees with bucket")
+	}
+	if request.Kind != "" && request.Kind != "storage#policy" {
+		return nil, status.Error(codes.InvalidArgument, "Invalid policy kind")
+	}
+	for _, binding := range request.Bindings {
+		for _, member := range binding.Members {
+			if member == "allUsers" || member == "allAuthenticatedUsers" {
+				return wireError(412, "conditionNotMet", "The bucket is subject to public access prevention."), nil
+			}
+		}
+	}
+	result, err := p.iam.SetPolicy(BucketResource(bucket), request.Policy)
+	if err != nil {
+		return nil, fmt.Errorf("write bucket policy: %w", err)
+	}
+	return &gateway.RESTResponse{JSON: result}, nil
+}
+
+// listBuckets mirrors every returned bucket into the provider-owned catalog.
+func (p *Provider) listBuckets(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	response, err := b.forward(ctx, "GET", "/storage/v1/b", r.Query, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if response.Status == 200 {
+		body, bodyErr := jsonObject(response.JSON)
+		if bodyErr != nil {
+			return nil, bodyErr
+		}
+		for _, item := range itemList(body["items"]) {
+			p.bucketMetadata(scope, item)
+		}
+	}
+	return response, nil
+}
+
+// getBucket reads one bucket and mirrors its metadata into the catalog.
+func (p *Provider) getBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, path string) (*gateway.RESTResponse, error) {
+	response, err := b.forward(ctx, "GET", path, r.Query, nil, nil)
+	if err != nil || response.Status != 200 {
+		return response, err
+	}
+	body, bodyErr := jsonObject(response.JSON)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	p.bucketMetadata(scope, body)
+	return response, nil
+}
+
+// deleteBucket deletes one bucket, then releases its catalog and IAM state.
+func (p *Provider) deleteBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, path, bucket string) (*gateway.RESTResponse, error) {
+	response, err := b.forward(ctx, "DELETE", path, r.Query, nil, nil)
+	if err != nil {
+		return response, err
+	}
+	if response.Status == 200 {
+		response.Status = 204
+		response.JSON = nil
+		response.Body = nil
+	}
+	if response.Status == 204 {
+		err = p.catalog.ForgetBucket(scope, bucket)
+		p.iam.Forget(BucketResource(bucket))
 	}
 	return response, err
 }

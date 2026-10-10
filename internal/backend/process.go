@@ -63,7 +63,10 @@ func (p *Process) Start(ctx context.Context) error {
 			return errProcessRunning
 		}
 	}
-	command := exec.Command(p.config.Command[0], p.config.Command[1:]...) //nolint:gosec // the operator supplies the pinned backend command
+	// The child outlives the request that started it: it is owned by the manager's
+	// lifetime and stopped by Stop/Shutdown, so it must not inherit a caller's
+	// cancellation. That is why this is not CommandContext.
+	command := exec.Command(p.config.Command[0], p.config.Command[1:]...) //nolint:gosec,noctx // lifetime is the manager's, not the caller's
 	command.Dir = p.config.Directory
 	command.Env = p.config.Environment
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

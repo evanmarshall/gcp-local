@@ -189,8 +189,8 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if call.Method == subscriber+"Pull" {
 		use = p.manager.Session
 	}
-	err := use(call.Context, keyOf(call), func(ctx context.Context, active backend.Backend) error {
-		call.Context = ctx
+	err := use(call.Context, keyOf(call), func(session context.Context, active backend.Backend) error {
+		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
 		if err := p.authorize(call, request); err != nil {
 			return err
 		}
@@ -215,14 +215,14 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 			if err != nil {
 				return err
 			}
-			copy, cloneErr := cloneMessage(subscription)
+			forwardedSubscription, cloneErr := cloneMessage(subscription)
 			if cloneErr != nil {
 				return cloneErr
 			}
-			copy.PushConfig = nil // The unauthenticated emulator must never make HTTP deliveries.
-			forwarded = copy
+			forwardedSubscription.PushConfig = nil // The unauthenticated emulator must never make HTTP deliveries.
+			forwarded = forwardedSubscription
 		}
-		response, err = invoke(ctx, b, call.Method, forwarded)
+		response, err = invoke(session, b, call.Method, forwarded)
 		if err == nil && call.Method == subscriber+"Pull" {
 			err = p.authorize(call, request)
 		}
@@ -233,7 +233,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 						return err
 					}
 					if push != nil {
-						if err := p.startPush(call, push); err != nil {
+						if err := p.startPush(session, call, push); err != nil {
 							return err
 						}
 					}
@@ -243,11 +243,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 				return p.forget(call)
 			}
 			if ambiguous(err) {
-				p.reconcile(b, call)
+				p.reconcile(session, b, call)
 				if creating && push != nil {
 					_, failed := p.poisoned.Load(scopeOf(call))
 					if _, found := p.index.Get(canonical(call.Resource)); found && !failed {
-						if err := p.startPush(call, push); err != nil {
+						if err := p.startPush(session, call, push); err != nil {
 							return err
 						}
 					}
@@ -302,8 +302,10 @@ func ambiguous(err error) bool {
 
 // Resolve uncertain control-plane outcomes under the same mutation gate. A
 // read failure retains the last confirmed index and blocks access until reset.
-func (p *Provider) reconcile(b driver, call gateway.Call) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+func (p *Provider) reconcile(parent context.Context, b driver, call gateway.Call) {
+	// A cancelled request must not cancel reconciliation, and the Python JVM
+	// backend outlives it, so the deadline is derived rather than inherited.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
 	defer cancel()
 	method, request := publisher+"GetTopic", proto.Message(&pb.GetTopicRequest{Topic: call.Resource})
 	if strings.Contains(call.Resource, "/subscriptions/") {

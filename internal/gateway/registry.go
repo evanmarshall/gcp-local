@@ -40,7 +40,7 @@ type Principal struct {
 // Call is request-scoped. Project/location are resource scope, not caller scope.
 // A missing project (for example a globally named bucket) awaits provider lookup.
 type Call struct {
-	Context                                      context.Context
+	Context                                      context.Context //nolint:containedctx // a Call carries one request context by design
 	Method, Project, Location, Resource, TraceID string
 	Principal                                    Principal
 }

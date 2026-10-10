@@ -87,12 +87,12 @@ func (p *Provider) pushCount(scope state.Scope) int {
 	})
 	return count
 }
-func (p *Provider) startPush(call gateway.Call, config *pb.PushConfig) error {
+func (p *Provider) startPush(parent context.Context, call gateway.Call, config *pb.PushConfig) error {
 	cloned, err := cloneMessage(config)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	worker := &pushSubscription{scope: scopeOf(call), config: cloned, cancel: cancel, done: make(chan struct{})}
 	p.pushes.Store(canonical(call.Resource), worker)
 	go func() {
@@ -190,7 +190,7 @@ func (p *Provider) pushToken(ctx context.Context, call gateway.Call, config *pb.
 
 func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, config *pb.PushConfig) {
 	endpoint, _ := url.Parse(config.GetPushEndpoint())
-	transport := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+	transport := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, address string) (net.Conn, error) {
 		if address != endpoint.Host {
 			return nil, gap("push dial target changed")
 		}

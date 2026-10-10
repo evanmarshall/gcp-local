@@ -2,6 +2,7 @@ package pubsub
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -54,49 +55,49 @@ func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 	if err := p.authorize(call, first); err != nil {
 		return err
 	}
-	if err := p.manager.Session(call.Context, keyOf(call), func(ctx context.Context, active backend.Backend) error {
-		call.Context = ctx
+	if err := p.manager.Session(call.Context, keyOf(call), func(session context.Context, active backend.Backend) error {
+		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
 		if err := p.authorize(call, first); err != nil {
 			return err
 		}
-		ctx, cancel := context.WithCancel(metadata.NewOutgoingContext(ctx, metadata.MD{}))
+		upstreamCtx, cancel := context.WithCancel(metadata.NewOutgoingContext(session, metadata.MD{}))
 		defer cancel()
 		b, err := driverOf(active)
 		if err != nil {
 			return err
 		}
-		upstream, err := pb.NewSubscriberClient(b.client()).StreamingPull(ctx)
+		upstream, err := pb.NewSubscriberClient(b.client()).StreamingPull(upstreamCtx)
 		if err != nil {
 			return fmt.Errorf("open the upstream stream: %w", err)
 		}
 		if err := upstream.Send(first); err != nil {
 			return fmt.Errorf("forward the opening request upstream: %w", err)
 		}
-		_ = grpc.SendHeader(call.Context, nil)
-		errors := make(chan error, 2)
+		_ = grpc.SendHeader(call.Context, nil) //nolint:contextcheck // the session context is this request's context by design
+		failures := make(chan error, 2)
 		go func() {
 			for {
 				request := &pb.StreamingPullRequest{}
 				if err := downstream.Recv(request); err != nil {
-					if err == io.EOF {
+					if errors.Is(err, io.EOF) {
 						if err = upstream.CloseSend(); err != nil {
-							errors <- err
+							failures <- err
 						}
 						return // Drain responses until upstream EOF after half-close.
 					}
-					errors <- err
+					failures <- err
 					return
 				}
 				if err := validateStream(request, false); err != nil {
-					errors <- err
+					failures <- err
 					return
 				}
 				if err := p.authorize(call, request); err != nil {
-					errors <- err
+					failures <- err
 					return
 				}
 				if err := upstream.Send(request); err != nil {
-					errors <- err
+					failures <- err
 					return
 				}
 			}
@@ -105,15 +106,15 @@ func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 			for {
 				response, err := upstream.Recv()
 				if err != nil {
-					errors <- err
+					failures <- err
 					return
 				}
 				if err := p.authorize(call, first); err != nil {
-					errors <- err
+					failures <- err
 					return
 				}
 				if err := downstream.Send(response); err != nil {
-					errors <- err
+					failures <- err
 					return
 				}
 			}
@@ -122,13 +123,13 @@ func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 		// relay mutates provider state; the cancelled upstream context terminates
 		// pending backend work before its owned connection is closed on reset.
 		select {
-		case err := <-errors:
-			if err == io.EOF {
+		case err := <-failures:
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-session.Done():
+			return session.Err()
 		}
 	}); err != nil {
 		return fmt.Errorf("open the backend stream session: %w", err)

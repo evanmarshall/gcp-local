@@ -82,8 +82,8 @@ func New(index *state.Index) (*Engine, error) {
 	}
 	return &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, decisions: map[string]Decision{}}, nil
 }
-func (e *Engine) Register(method string, rule Rule) error {
-	if method == "" || len(rule.Baseline) == 0 {
+func (e *Engine) Register(method string, plan Rule) error {
+	if method == "" || len(plan.Baseline) == 0 {
 		return errRuleIncomplete
 	}
 	known := func(permission string) bool {
@@ -94,13 +94,13 @@ func (e *Engine) Register(method string, rule Rule) error {
 		}
 		return false
 	}
-	copy := Rule{Baseline: append([]string(nil), rule.Baseline...), When: map[string][]string{}}
-	for _, permission := range rule.Baseline {
+	rule := Rule{Baseline: append([]string(nil), plan.Baseline...), When: map[string][]string{}}
+	for _, permission := range plan.Baseline {
 		if !known(permission) {
 			return fmt.Errorf("%w: %s", errBaselineUnknown, permission)
 		}
 	}
-	for feature, permissions := range rule.When {
+	for feature, permissions := range plan.When {
 		if feature == "" || len(permissions) == 0 {
 			return errFeatureRequired
 		}
@@ -109,14 +109,14 @@ func (e *Engine) Register(method string, rule Rule) error {
 				return fmt.Errorf("%w: %s", errFeatureUnknown, permission)
 			}
 		}
-		copy.When[feature] = append([]string(nil), permissions...)
+		rule.When[feature] = append([]string(nil), permissions...)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if _, ok := e.rules[method]; ok {
-		return errors.New("method already has a permission plan")
+		return errPlanExists
 	}
-	e.rules[method] = copy
+	e.rules[method] = rule
 	return nil
 }
 

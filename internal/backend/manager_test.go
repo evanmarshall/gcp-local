@@ -22,7 +22,7 @@ import (
 
 // The test executable doubles as a real child backend, avoiding an installed
 // emulator or shell. It never loads credentials and listens on loopback only.
-func TestProcessFixture(t *testing.T) {
+func TestProcessFixture(_ *testing.T) {
 	if os.Getenv("GCP_LOCAL_PROCESS_FIXTURE") != "1" {
 		return
 	}
@@ -40,11 +40,11 @@ func TestProcessFixture(t *testing.T) {
 	if err != nil {
 		os.Exit(24)
 	}
-	directory := os.Getenv("GCP_LOCAL_FIXTURE_DIR") //nolint:gosec // the fixture harness owns this directory
-	if os.WriteFile(filepath.Join(directory, "address"), []byte(listener.Addr().String()), 0600) != nil {
+	directory := os.Getenv("GCP_LOCAL_FIXTURE_DIR")
+	if os.WriteFile(filepath.Join(directory, "address"), []byte(listener.Addr().String()), 0600) != nil { //nolint:gosec // the fixture harness owns this directory
 		os.Exit(25)
 	}
-	if os.WriteFile(filepath.Join(directory, "payload"), []byte("owned data"), 0600) != nil {
+	if os.WriteFile(filepath.Join(directory, "payload"), []byte("owned data"), 0600) != nil { //nolint:gosec // the fixture harness owns this directory
 		os.Exit(26)
 	}
 	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,9 +62,9 @@ func TestProcessFixture(t *testing.T) {
 		signals = append(signals, syscall.SIGTERM)
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), signals...)
-	defer cancel()
 	go func() { <-ctx.Done(); _ = server.Close() }()
 	_ = server.Serve(listener)
+	cancel()
 	os.Exit(0)
 }
 
@@ -79,7 +79,11 @@ type fixture struct {
 // listenTestAddress opens a loopback listener through the context-aware API.
 func listenTestAddress() (net.Listener, error) {
 	var listen net.ListenConfig
-	return listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	listener, err := listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("listen on loopback: %w", err)
+	}
+	return listener, nil
 }
 
 // Sentinels returned by the test's injected failures.
@@ -362,7 +366,7 @@ func TestHTTPProbeRejectsExternalOrRedirectedReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Location", "https://storage.googleapis.com/")
 		w.WriteHeader(http.StatusFound)
 	})}
@@ -409,7 +413,7 @@ func TestResetWaitsForProviderMutationAndShutdownCancelsUse(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	operation := make(chan error, 1)
 	go func() {
-		operation <- manager.Use(context.Background(), scope, func(ctx context.Context, _ backend.Backend) error {
+		operation <- manager.Use(context.Background(), scope, func(_ context.Context, _ backend.Backend) error {
 			close(entered)
 			<-release
 			return catalog.PublishBucket(scope.Scope, storage.Bucket{Name: "bucket", Location: "us-central1"})

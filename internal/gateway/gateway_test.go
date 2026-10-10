@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -25,14 +26,19 @@ import (
 // listenTestAddress opens a loopback listener through the context-aware API.
 func listenTestAddress() (net.Listener, error) {
 	var listen net.ListenConfig
-	return listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	listener, err := listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("listen on loopback: %w", err)
+	}
+	return listener, nil
 }
 
 const (
-	authorizationHeader  = "Authorization"
-	bucketCollectionPath = "/storage/v1/b"
-	streamSubscription   = "projects/synthetic/subscriptions/sub"
-	ackID                = "ack"
+	authorizationHeader    = "Authorization"
+	bucketCollectionPath   = "/storage/v1/b"
+	streamSubscription     = "projects/synthetic/subscriptions/sub"
+	ackID                  = "ack"
+	permissionDeniedReason = "IAM_PERMISSION_DENIED"
 )
 
 // Sentinels returned by the stub handlers in this file.
@@ -83,7 +89,7 @@ func TestRESTDispatchPreservesEscapedResourcesAndIdentity(t *testing.T) {
 		calls <- call
 		return &RESTResponse{JSON: map[string]any{"name": req.Path["object"]}}, nil
 	})
-	g := New(r, func(ctx context.Context, token string) (Principal, error) {
+	g := New(r, func(_ context.Context, token string) (Principal, error) {
 		if token != "fixture-token" {
 			t.Error("wrong token")
 		}
@@ -104,7 +110,7 @@ func TestRESTDispatchPreservesEscapedResourcesAndIdentity(t *testing.T) {
 func TestRESTValidationBeforeDispatchAndExplicitGaps(t *testing.T) {
 	r := NewRegistry()
 	var called atomic.Int32
-	register(t, r, "storage.buckets.insert", func(call Call, input any) (any, error) {
+	register(t, r, "storage.buckets.insert", func(call Call, _ any) (any, error) {
 		called.Add(1)
 		if call.Project != "synthetic-project" {
 			t.Errorf("wrong project: %q", call.Project)
@@ -138,7 +144,7 @@ func TestRESTValidationBeforeDispatchAndExplicitGaps(t *testing.T) {
 }
 func TestDefaultIdentityNeverAuthenticatesPresentedToken(t *testing.T) {
 	r := NewRegistry()
-	register(t, r, "storage.buckets.list", func(call Call, input any) (any, error) {
+	register(t, r, "storage.buckets.list", func(call Call, _ any) (any, error) {
 		return &RESTResponse{JSON: map[string]any{"state": call.Principal.State, "subject": call.Principal.Subject}}, nil
 	})
 	server := httptest.NewServer(New(r, nil))
@@ -158,7 +164,7 @@ func TestDefaultIdentityNeverAuthenticatesPresentedToken(t *testing.T) {
 	}
 }
 func permissionError() error {
-	s, _ := status.New(codes.PermissionDenied, "Missing permission").WithDetails(&errdetails.ErrorInfo{Reason: "IAM_PERMISSION_DENIED", Domain: "gcp-local", Metadata: map[string]string{"permission": "storage.objects.get"}})
+	s, _ := status.New(codes.PermissionDenied, "Missing permission").WithDetails(&errdetails.ErrorInfo{Reason: permissionDeniedReason, Domain: "gcp-local", Metadata: map[string]string{"permission": "storage.objects.get"}})
 	return s.Err()
 }
 func TestRESTErrorsPreserveDetailsAndHideInternalFailures(t *testing.T) {
@@ -185,7 +191,7 @@ func TestRESTErrorsPreserveDetailsAndHideInternalFailures(t *testing.T) {
 				t.Fatalf("missing error details: %v", detail)
 			}
 			first, ok := details[0].(map[string]any)
-			if !ok || first["reason"] != "IAM_PERMISSION_DENIED" {
+			if !ok || first["reason"] != permissionDeniedReason {
 				t.Fatal(details)
 			}
 		}
@@ -230,7 +236,7 @@ func grpcClient(t *testing.T, g *Gateway) *grpc.ClientConn {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { client.Close(); server.Stop(); listener.Close() })
+	t.Cleanup(func() { _ = client.Close(); server.Stop(); _ = listener.Close() })
 	return client
 }
 func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
@@ -267,7 +273,7 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 	_, err = client.GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/synthetic/topics/denied"})
 	s := status.Convert(err)
 	info, ok := s.Details()[0].(*errdetails.ErrorInfo)
-	if s.Code() != codes.PermissionDenied || !ok || info.GetReason() != "IAM_PERMISSION_DENIED" {
+	if s.Code() != codes.PermissionDenied || !ok || info.GetReason() != permissionDeniedReason {
 		t.Fatal(s)
 	}
 	_, err = client.ListTopics(ctx, &pb.ListTopicsRequest{Project: "projects/synthetic"})

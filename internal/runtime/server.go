@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"runtime"
@@ -59,8 +60,9 @@ func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gatew
 	return s
 }
 
-// Serve binds neither listener itself. Cancellation drains both transports under
-// a shared deadline, then forcibly closes remaining HTTP requests/gRPC streams.
+// Listeners carries the bound sockets Serve owns. Serve binds none of them
+// itself; cancellation drains both transports under a shared deadline, then
+// forcibly closes remaining HTTP requests and gRPC streams.
 type Listeners struct{ HTTP, GRPC, Metadata net.Listener }
 
 // errListeners rejects an incomplete listener pairing.
@@ -95,7 +97,10 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 		closeListeners()
 		cleanup, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
 		defer cancel()
-		return s.Backends.Shutdown(cleanup)
+		if err := s.Backends.Shutdown(cleanup); err != nil { //nolint:contextcheck // draining must outlive the cancelled request
+			return fmt.Errorf("drain backends: %w", err)
+		}
+		return nil
 	}
 	s.ready.Store(true)
 	count := 2
@@ -152,7 +157,7 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 			serveErr = err
 		}
 	}
-	if err := s.Backends.Shutdown(deadline); err != nil {
+	if err := s.Backends.Shutdown(deadline); err != nil { //nolint:contextcheck // draining must outlive the cancelled request
 		shutdownErr = errors.Join(shutdownErr, err)
 	}
 	if shutdownErr != nil {

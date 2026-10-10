@@ -48,6 +48,25 @@ linters:
       statements: 45
     gocognit:
       min-complexity: 15
+    exhaustive:
+      # A default clause here means "the remaining wire codes keep their
+      # generic mapping", which is the intent; the switch is over an open enum.
+      default-signifies-exhaustive: true
+    ireturn:
+      # These interfaces are the polymorphism this emulator is built on: a
+      # provider registry, the protobuf message surface, and gRPC transports.
+      # Returning them is the design, not an abstraction leak.
+      allow:
+        - anon
+        - error
+        - empty
+        - stdlib
+        - generic
+        - proto.Message
+        - grpc.ClientConnInterface
+        - grpc.ClientStream
+        - backend.Backend
+        - driver
     gosec:
       excludes:
         - G404 # math/rand is not used for secrets in this emulator

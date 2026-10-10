@@ -63,15 +63,15 @@ func TestIndexRejectsCrossOwnerAndCrossScopeChanges(t *testing.T) {
 	if err := index.Put("storage", resource); err != nil {
 		t.Fatal(err)
 	}
-	copy := resource
-	copy.Scope.Project = "project-b"
-	if index.Put("storage", copy) == nil {
+	changed := resource
+	changed.Scope.Project = "project-b"
+	if index.Put("storage", changed) == nil {
 		t.Fatal("global name changed owner")
 	}
 	if index.Remove("pubsub", resource.Scope, resource.Name) == nil {
 		t.Fatal("foreign service deleted resource")
 	}
-	if index.Remove("storage", copy.Scope, resource.Name) == nil {
+	if index.Remove("storage", changed.Scope, resource.Name) == nil {
 		t.Fatal("foreign project deleted resource")
 	}
 	index.RemoveScope("pubsub", resource.Scope)

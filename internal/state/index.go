@@ -16,9 +16,12 @@ var (
 
 // Resource is a cross-service reference, not a second copy of backend data/IAM.
 type Resource struct {
-	Name, Service, Kind, Parent string
-	Number                      string `json:"number,omitempty"`
-	Scope                       Scope
+	Name    string `json:"name"`
+	Service string `json:"service"`
+	Kind    string `json:"kind"`
+	Parent  string `json:"parent"`
+	Number  string `json:"number,omitempty"`
+	Scope   Scope  `json:"scope"`
 }
 type Index struct {
 	mu        sync.RWMutex

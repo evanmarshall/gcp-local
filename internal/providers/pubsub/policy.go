@@ -76,8 +76,8 @@ func (p *Provider) policy(call gateway.Call, raw any) (any, error) {
 		return nil, err
 	}
 	var result iam.Policy
-	err = p.manager.Use(call.Context, keyOf(call), func(ctx context.Context, _ backend.Backend) error {
-		call.Context = ctx
+	err = p.manager.Use(call.Context, keyOf(call), func(session context.Context, _ backend.Backend) error {
+		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
 		if err := p.authorize(call, request); err != nil {
 			return err
 		}

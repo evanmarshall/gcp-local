@@ -19,7 +19,20 @@ import (
 )
 
 // testProject is the primary fixture project for Storage provider tests.
-const testProject = "project-a"
+const (
+	testProject = "project-a"
+	peerProject = "project-b"
+)
+
+// mustMarshal encodes a fixture value or fails the test.
+func mustMarshal(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
 
 type fixture struct {
 	p *Provider
@@ -33,7 +46,7 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, project := range []string{testProject, "project-b"} {
+	for _, project := range []string{testProject, peerProject} {
 		if err := index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: state.Scope{Project: project, Location: state.Global}}); err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +65,7 @@ func setup(t *testing.T) *fixture {
 			t.Error(err)
 		}
 	})
-	g := gateway.New(registry, func(ctx context.Context, token string) (gateway.Principal, error) {
+	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token, Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
 	return &fixture{p, g, t}
@@ -75,12 +88,12 @@ func (f *fixture) bucket(project, name string, expected int) {
 	body := []byte(`{"name":"` + name + `","location":"US-CENTRAL1","storageClass":"STANDARD","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0"}}`)
 	f.request("admin@"+project+".test", "POST", "/storage/v1/b?project="+project, body, expected)
 }
-func (f *fixture) policy(name, member, role string) {
+func (f *fixture) policy(t *testing.T, name, member, role string) {
 	policy := iam.Policy{Bindings: []iam.Binding{}}
 	if role != "" {
 		policy.Bindings = append(policy.Bindings, iam.Binding{Role: role, Members: []string{"serviceAccount:" + member}})
 	}
-	raw, _ := json.Marshal(policy)
+	raw := mustMarshal(t, policy)
 	f.request("admin@project-a.test", "PUT", "/storage/v1/b/"+name+"/iam", raw, 200)
 }
 func TestProviderIAMMutationIsolationAndReset(t *testing.T) {
@@ -90,12 +103,12 @@ func TestProviderIAMMutationIsolationAndReset(t *testing.T) {
 		t.Fatal("denied request started backend")
 	}
 	f.bucket(testProject, "owned-bucket", 200)
-	f.bucket("project-b", "other-bucket", 200)
-	f.bucket("project-b", "owned-bucket", 409)
+	f.bucket(peerProject, "other-bucket", 200)
+	f.bucket(peerProject, "owned-bucket", 409)
 	object := "nested/a %?.json"
 	path := "/storage/v1/b/owned-bucket/o/" + url.PathEscape(object)
 	upload := "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=" + url.QueryEscape(object)
-	f.policy("owned-bucket", "caller@project-b.test", "roles/storage.objectCreator")
+	f.policy(t, "owned-bucket", "caller@project-b.test", "roles/storage.objectCreator")
 	f.request("caller@project-b.test", "POST", upload, []byte(`{"body":"original"}`), 200)
 	denied := f.request("caller@project-b.test", "POST", upload, []byte(`{"body":"wrong"}`), 403)
 	id := denied.Header().Get("X-Gcp-Local-Decision-Id")
@@ -107,9 +120,9 @@ func TestProviderIAMMutationIsolationAndReset(t *testing.T) {
 	if got.Body.String() != `{"body":"original"}` {
 		t.Fatal("denied replacement mutated media")
 	}
-	f.policy("owned-bucket", "caller@project-b.test", "roles/storage.objectUser")
+	f.policy(t, "owned-bucket", "caller@project-b.test", "roles/storage.objectUser")
 	f.request("caller@project-b.test", "POST", upload, []byte("updated"), 200)
-	f.policy("owned-bucket", "caller@project-b.test", "")
+	f.policy(t, "owned-bucket", "caller@project-b.test", "")
 	f.request("caller@project-b.test", "DELETE", path, nil, 403)
 	if f.request("admin@project-a.test", "GET", path+"?alt=media", nil, 200).Body.String() != "updated" {
 		t.Fatal("revoked caller deleted object")
@@ -154,7 +167,7 @@ func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 	f := setup(t)
 	var group sync.WaitGroup
 	codes := make(chan int, 2)
-	for _, project := range []string{testProject, "project-b"} {
+	for _, project := range []string{testProject, peerProject} {
 		group.Add(1)
 		go func(project string) {
 			defer group.Done()
@@ -179,13 +192,13 @@ func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 	if !ok {
 		t.Fatal("missing owner")
 	}
-	for _, project := range []string{testProject, "project-b"} {
+	for _, project := range []string{testProject, peerProject} {
 		response := f.request("admin@"+project+".test", "GET", "/storage/v1/b?project="+project, nil, 200)
 		hasBucket := strings.Contains(response.Body.String(), "contended-bucket")
 		if hasBucket != (resource.Scope.Project == project) {
 			t.Fatal("compensation left a foreign backend bucket")
 		}
-		err := f.p.manager.Use(context.Background(), backend.Key{Service: "storage", Scope: state.Scope{Project: project, Location: state.Global}}, func(ctx context.Context, driver backend.Backend) error {
+		err := f.p.manager.Use(context.Background(), backend.Key{Service: "storage", Scope: state.Scope{Project: project, Location: state.Global}}, func(_ context.Context, driver backend.Backend) error {
 			backend, ok := driver.(*memoryBackend)
 			if !ok {
 				t.Error("unexpected backend type")

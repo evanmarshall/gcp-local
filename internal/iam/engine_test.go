@@ -21,13 +21,27 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// mustMarshal encodes a fixture value or fails the test.
+func mustMarshal(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
 // getWithContext issues a context-aware GET against a local test server.
 func getWithContext(url string) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build request: %w", err)
 	}
-	return http.DefaultClient.Do(request)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("get %s: %w", url, err)
+	}
+	return response, nil
 }
 
 // mustWriteFile writes a fixture file or fails the test.
@@ -38,6 +52,7 @@ func mustWriteFile(t *testing.T, path string, content []byte) {
 	}
 }
 
+const testProject = "project-a"
 const projectA = "//cloudresourcemanager.googleapis.com/projects/project-a"
 const projectB = "//cloudresourcemanager.googleapis.com/projects/project-b"
 const org = "//cloudresourcemanager.googleapis.com/organizations/local-org"
@@ -60,7 +75,7 @@ func setup(t *testing.T) (*iam.Engine, *state.Index) {
 	resources := []state.Resource{
 		{Name: org, Service: resourceManagerService, Kind: "organization", Scope: state.Scope{Location: state.Global}},
 		{Name: folder, Service: resourceManagerService, Kind: "folder", Parent: org, Scope: state.Scope{Location: state.Global}},
-		{Name: projectA, Service: resourceManagerService, Kind: kindProject, Parent: folder, Scope: state.Scope{Project: "project-a", Location: state.Global}},
+		{Name: projectA, Service: resourceManagerService, Kind: kindProject, Parent: folder, Scope: state.Scope{Project: testProject, Location: state.Global}},
 		{Name: projectB, Service: resourceManagerService, Kind: kindProject, Parent: org, Scope: state.Scope{Project: projectBName, Location: state.Global}},
 	}
 	for _, resource := range resources {
@@ -69,7 +84,7 @@ func setup(t *testing.T) (*iam.Engine, *state.Index) {
 		}
 	}
 	catalog := storage.NewCatalog(index)
-	if err := catalog.PublishBucket(state.Scope{Project: "project-a", Location: state.Global}, storage.Bucket{Name: "bucket-a", Location: "us-central1"}); err != nil {
+	if err := catalog.PublishBucket(state.Scope{Project: testProject, Location: state.Global}, storage.Bucket{Name: "bucket-a", Location: "us-central1"}); err != nil {
 		t.Fatal(err)
 	}
 	engine, err := iam.New(index)
@@ -93,14 +108,14 @@ func set(t *testing.T, e *iam.Engine, resource, role string, members ...string) 
 	return policy
 }
 func call(method, subject, project string) gateway.Call {
-	return gateway.Call{Context: context.Background(), Method: method, Project: "project-a", Location: state.Global, TraceID: "same-client-trace", Principal: gateway.Principal{State: gateway.Authenticated, Subject: subject, Project: project, Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}}
+	return gateway.Call{Context: context.Background(), Method: method, Project: testProject, Location: state.Global, TraceID: "same-client-trace", Principal: gateway.Principal{State: gateway.Authenticated, Subject: subject, Project: project, Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}}
 }
 func object() iam.Target {
 	return iam.Target{Name: storage.BucketResource("bucket-a") + "/objects/object.txt", Parent: storage.BucketResource("bucket-a")}
 }
 func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", allowed, "project-a")
+	read := call("storage.objects.get", allowed, testProject)
 	decision, err := engine.Authorize(read, object(), nil)
 	if err != nil || decision.Outcome != "allow" || decision.Checks[0].GrantPolicy != object().Parent {
 		t.Fatalf("%+v %v", decision, err)
@@ -111,7 +126,7 @@ func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
 		t.Fatal(err)
 	}
-	inherited, err := engine.Authorize(call("storage.objects.get", fixture, "project-a"), object(), nil)
+	inherited, err := engine.Authorize(call("storage.objects.get", fixture, testProject), object(), nil)
 	if err != nil || inherited.Checks[0].GrantPolicy != projectA {
 		t.Fatalf("%+v %v", inherited, err)
 	}
@@ -140,7 +155,7 @@ func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 func TestReplacementCannotOmitBaselineOrUnresolvedState(t *testing.T) {
 	engine, _ := setup(t)
 	set(t, engine, object().Parent, "roles/storage.objectCreator", allowed)
-	create := call("storage.objects.insert", allowed, "project-a")
+	create := call("storage.objects.insert", allowed, testProject)
 	preflight, err := engine.Baseline(create, object())
 	if err != nil || preflight.Complete || preflight.Outcome != "preflight" {
 		t.Fatalf("%+v %v", preflight, err)
@@ -178,7 +193,7 @@ func TestReplacementCannotOmitBaselineOrUnresolvedState(t *testing.T) {
 }
 func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", fixture, "project-a")
+	read := call("storage.objects.get", fixture, testProject)
 	if err := engine.MarkUnsupported(org, []string{"deny", "principal-access-boundary"}); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +222,7 @@ func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 }
 func TestAnonymousPublicBindingsAndInvalidCredentials(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", "forged-admin", "project-a")
+	read := call("storage.objects.get", "forged-admin", testProject)
 	read.Principal.State = gateway.Anonymous
 	if result, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unauthenticated || result.Principal.Subject != "" {
 		t.Fatal("anonymous caller became administrator")
@@ -230,7 +245,7 @@ func TestAnonymousPublicBindingsAndInvalidCredentials(t *testing.T) {
 }
 func TestHierarchyGapsAndOwnershipMismatchFailClosed(t *testing.T) {
 	engine, index := setup(t)
-	read := call("storage.objects.get", fixture, "project-a")
+	read := call("storage.objects.get", fixture, testProject)
 	target := object()
 	target.Parent = projectB
 	if _, err := engine.Authorize(read, target, nil); status.Code(err) != codes.Unimplemented {
@@ -240,7 +255,7 @@ func TestHierarchyGapsAndOwnershipMismatchFailClosed(t *testing.T) {
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal("caller resource project mismatch ignored")
 	}
-	read.Project = "project-a"
+	read.Project = testProject
 	_ = index.Remove(resourceManagerService, state.Scope{Location: state.Global}, folder)
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal("missing hierarchy silently ended inheritance")
@@ -266,15 +281,15 @@ func TestPolicyETagsCopiesAndScopedCleanup(t *testing.T) {
 		t.Fatal("stale etag overwrote policy")
 	}
 	_ = engine.MarkUnsupported(object().Parent, []string{"vpc-service-controls"})
-	index.RemoveScope("storage", state.Scope{Project: "project-a", Location: state.Global})
-	engine.ClearScope("storage", state.Scope{Project: "project-a", Location: state.Global})
+	index.RemoveScope("storage", state.Scope{Project: testProject, Location: state.Global})
+	engine.ClearScope("storage", state.Scope{Project: testProject, Location: state.Global})
 	catalog := storage.NewCatalog(index)
-	_ = catalog.PublishBucket(state.Scope{Project: "project-a", Location: state.Global}, storage.Bucket{Name: "bucket-a", Location: "us-central1"})
+	_ = catalog.PublishBucket(state.Scope{Project: testProject, Location: state.Global}, storage.Bucket{Name: "bucket-a", Location: "us-central1"})
 	fresh, _ := engine.GetPolicy(object().Parent)
 	if len(fresh.Bindings) != 0 {
 		t.Fatal("reset retained resource policy")
 	}
-	if _, err := engine.Authorize(call("storage.objects.get", fixture, "project-a"), object(), nil); err != nil {
+	if _, err := engine.Authorize(call("storage.objects.get", fixture, testProject), object(), nil); err != nil {
 		t.Fatal("reset retained unsupported marker or erased project policy:", err)
 	}
 }
@@ -300,9 +315,9 @@ func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 	if result.Outcome != "deny" || result.Checks[0].Permission != "storage.objects.get" || len(result.Checks[0].Policies) != 4 || result.Principal.Subject != peer {
 		t.Fatalf("%+v", result)
 	}
-	copy, _ := engine.Decision(first.ID)
-	copy.Checks[0].Policies[0] = changedMarker
-	copy.Principal.Scopes[0] = changedMarker
+	snapshot, _ := engine.Decision(first.ID)
+	snapshot.Checks[0].Policies[0] = changedMarker
+	snapshot.Principal.Scopes[0] = changedMarker
 	again, _ := engine.Decision(first.ID)
 	if again.Checks[0].Policies[0] == changedMarker || again.Principal.Scopes[0] == changedMarker {
 		t.Fatal("diagnostics mutated audit record")
@@ -310,12 +325,12 @@ func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 }
 func TestConcurrentPoliciesAndBoundedDecisionRetention(t *testing.T) {
 	engine, _ := setup(t)
-	first, _ := engine.Authorize(call("storage.objects.get", allowed, "project-a"), object(), nil)
+	first, _ := engine.Authorize(call("storage.objects.get", allowed, testProject), object(), nil)
 	var group sync.WaitGroup
 	for range 20 {
 		group.Go(func() {
 			for range 60 {
-				_, _ = engine.Authorize(call("storage.objects.get", allowed, "project-a"), object(), nil)
+				_, _ = engine.Authorize(call("storage.objects.get", allowed, testProject), object(), nil)
 			}
 		})
 	}
@@ -326,15 +341,15 @@ func TestConcurrentPoliciesAndBoundedDecisionRetention(t *testing.T) {
 }
 func TestBootstrapIsExplicitAndRejectsIncompleteHierarchy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "iam.json")
-	config := iam.Config{Resources: []state.Resource{{Name: projectA, Kind: kindProject, Service: resourceManagerService, Scope: state.Scope{Project: "project-a", Location: state.Global}}}, Policies: map[string]iam.Policy{projectA: {Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{fixture}}}}}}
-	raw, _ := json.Marshal(config)
+	config := iam.Config{Resources: []state.Resource{{Name: projectA, Kind: kindProject, Service: resourceManagerService, Scope: state.Scope{Project: testProject, Location: state.Global}}}, Policies: map[string]iam.Policy{projectA: {Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{fixture}}}}}}
+	raw := mustMarshal(t, config)
 	mustWriteFile(t, path, raw)
 	engine, index, err := iam.Load(path)
 	if err != nil || engine == nil || index == nil {
 		t.Fatal(err)
 	}
 	config.Resources[0].Parent = folder
-	raw, _ = json.Marshal(config)
+	raw = mustMarshal(t, config)
 	mustWriteFile(t, path, raw)
 	if _, _, err := iam.Load(path); err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatal("accepted missing hierarchy:", err)

@@ -21,7 +21,11 @@ var (
 
 func loadRoles() (map[string]map[string]bool, error) {
 	var manifest struct {
-		Roles []struct{ File, Name, SHA256 string }
+		Roles []struct {
+			File   string `json:"file"`
+			Name   string `json:"name"`
+			SHA256 string `json:"sha256"`
+		} `json:"roles"`
 	}
 	raw, err := roleFiles.ReadFile("roles/manifest.json")
 	if err != nil {
@@ -41,8 +45,9 @@ func loadRoles() (map[string]map[string]bool, error) {
 			return nil, errRoleChecksum
 		}
 		var role struct {
-			Name, Stage         string
-			IncludedPermissions []string
+			Name                string   `json:"name"`
+			Stage               string   `json:"stage"`
+			IncludedPermissions []string `json:"includedPermissions"`
 		}
 		if err := json.Unmarshal(raw, &role); err != nil {
 			return nil, fmt.Errorf("decode role snapshot %s: %w", entry.File, err)

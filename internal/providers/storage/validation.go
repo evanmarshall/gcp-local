@@ -212,7 +212,7 @@ func preconditions(r *gateway.RESTRequest, current map[string]any, method string
 		}
 		return fail(), nil
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // a nil response with a nil error means "no precondition failure"
 }
 
 type bucketRequest struct {

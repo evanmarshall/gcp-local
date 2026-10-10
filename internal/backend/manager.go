@@ -111,9 +111,9 @@ type Manager struct {
 	definitions               map[string]Definition
 	instances                 map[Key]*instance
 	closed                    bool
-	lifetime                  context.Context
+	lifetime                  context.Context //nolint:containedctx // the manager owns the lifetime, not a request
 	cancel                    context.CancelFunc
-	sessionLifetime           context.Context
+	sessionLifetime           context.Context //nolint:containedctx // the manager owns the lifetime, not a request
 	cancelSessions            context.CancelFunc
 	startTimeout, stopTimeout time.Duration
 }
@@ -436,7 +436,8 @@ func (m *Manager) Status() []Status {
 	return result
 }
 
-// This first manager has no complete provider+backend snapshot format. Do not
-// restore only the index while leaving backend objects missing or inconsistent.
+// Snapshot reports that this manager has no complete provider+backend snapshot
+// format. Restoring only the index would leave backend objects missing or
+// inconsistent, so persistence stays unsupported.
 func (m *Manager) Snapshot(context.Context) error { return ErrPersistenceUnsupported }
 func (m *Manager) Restore(context.Context) error  { return ErrPersistenceUnsupported }

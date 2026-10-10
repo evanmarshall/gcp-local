@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 
@@ -103,7 +104,7 @@ func (g *Gateway) Stream(method string, transport grpc.ServerStream) error {
 	info := g.rpcs[method]
 	first := info.NewRequest()
 	if err := transport.RecvMsg(first); err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return status.Error(codes.InvalidArgument, "Missing initial stream request")
 		}
 		return normalizeError(err)
@@ -112,7 +113,7 @@ func (g *Gateway) Stream(method string, transport grpc.ServerStream) error {
 	if err != nil {
 		return err
 	}
-	transport.SetHeader(metadata.Pairs("x-gcp-local-trace-id", call.TraceID))
+	_ = transport.SetHeader(metadata.Pairs("x-gcp-local-trace-id", call.TraceID))
 	stream := &rpcStream{ServerStream: transport, first: first, requestType: first.ProtoReflect().Descriptor().FullName(), responseType: info.NewResponse().ProtoReflect().Descriptor().FullName()}
 	return normalizeError(handler(call, stream))
 }

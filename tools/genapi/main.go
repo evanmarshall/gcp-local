@@ -110,11 +110,11 @@ type RPC struct { Method, ResourceField, ResourcePattern string; Streaming bool;
 	descriptors.WriteString("var PubSubMethods = []RPC{\n")
 	services := pb.File_google_pubsub_v1_pubsub_proto.Services()
 	var resourceVariable = regexp.MustCompile(`\{([^=}]+)=([^}]+)\}`)
-	for i := 0; i < services.Len(); i++ {
+	for i := range services.Len() {
 		service := services.Get(i)
 		name := string(service.Name())
 		fmt.Fprintf(&out, "type %sServer struct { pb.Unimplemented%sServer; Dispatch PubSubDispatch }\n", name, name)
-		for j := 0; j < service.Methods().Len(); j++ {
+		for j := range service.Methods().Len() {
 			m := service.Methods().Get(j)
 			methodName := string(m.Name())
 			id := "/" + string(service.FullName()) + "/" + methodName
@@ -170,7 +170,7 @@ type IAMPolicyServer struct { iampb.UnimplementedIAMPolicyServer; Dispatch PubSu
 	descriptors.Reset()
 	descriptors.WriteString("var IAMMethods = []RPC{\n")
 	iamService := iampb.File_google_iam_v1_iam_policy_proto.Services().ByName("IAMPolicy")
-	for i := 0; i < iamService.Methods().Len(); i++ {
+	for i := range iamService.Methods().Len() {
 		m := iamService.Methods().Get(i)
 		if m.IsStreamingClient() || m.IsStreamingServer() {
 			panic("Unexpected IAM stream")

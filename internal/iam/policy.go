@@ -102,8 +102,8 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	return clonePolicy(policy), nil
 }
 
-// Unsupported configuration is retained as a fail-closed coverage marker;
-// recording its presence never pretends to evaluate its policy semantics.
+// MarkUnsupported retains unsupported configuration as a fail-closed coverage
+// marker; recording its presence never pretends to evaluate its semantics.
 func (e *Engine) MarkUnsupported(resource string, features []string) error {
 	owner, ok := e.index.Get(resource)
 	if !ok {

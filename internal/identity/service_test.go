@@ -22,6 +22,16 @@ const testProjectName = "synthetic"
 const subjectSecret = "gls.synthetic-secret-for-local-test-only-0123456789" //nolint:gosec // a published test fixture, not a credential
 const appSubject = "serviceAccount:app@synthetic.iam.gserviceaccount.com"
 
+// mustMarshal encodes a fixture value or fails the test.
+func mustMarshal(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
 func service(t *testing.T) (*Service, *atomic.Int64) {
 	t.Helper()
 	clock := &atomic.Int64{}
@@ -101,7 +111,7 @@ func TestExchangeRejectsUnknownCredentialsAndUnsupportedFeatures(t *testing.T) {
 		if code != 400 {
 			t.Fatalf("accepted %s", tc.field)
 		}
-		encoded, _ := json.Marshal(body)
+		encoded := mustMarshal(t, body)
 		if strings.Contains(string(encoded), tc.value) {
 			t.Fatal("exchange echoed supplied credential or unsupported value")
 		}

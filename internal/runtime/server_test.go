@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -21,14 +22,34 @@ import (
 
 // Sentinels returned by the runtime test handlers.
 var (
-	errRequestUnfinished = errors.New("request did not finish")
-	errProviderReached   = errors.New("diagnostics reached provider")
+	errUnexpectedFixtureRequest = errors.New("unexpected fixture request")
+	errRequestUnfinished        = errors.New("request did not finish")
+	errProviderReached          = errors.New("diagnostics reached provider")
 )
+
+// getWithClient issues a context-aware GET and closes nothing on the caller's
+// behalf; the returned response is always safe to read or close.
+func getWithClient(t *testing.T, client *http.Client, url string) (*http.Response, error) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("get %s: %w", url, err)
+	}
+	return response, nil
+}
 
 // listenTestAddress opens a loopback listener through the context-aware API.
 func listenTestAddress() (net.Listener, error) {
 	var listen net.ListenConfig
-	return listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	listener, err := listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("listen on loopback: %w", err)
+	}
+	return listener, nil
 }
 
 // healthPath is the local readiness endpoint asserted across runtime tests.
@@ -57,7 +78,7 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 	url, cancel, result := start(t, s)
 	client := &http.Client{Timeout: time.Second}
 	for _, path := range []string{healthPath, "/_local/diagnostics", "/storage/v1/b"} {
-		response, err := client.Get(url + path)
+		response, err := getWithClient(t, client, url+path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +104,8 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 	if err := <-result; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Get(url + healthPath); err == nil {
+	if response, err := getWithClient(t, client, url+healthPath); err == nil {
+		_ = response.Body.Close()
 		t.Fatal("listener remained open")
 	}
 }
@@ -91,7 +113,7 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 func TestShutdownDrainsActiveRequest(t *testing.T) {
 	s := New("test", time.Second)
 	entered, release := make(chan struct{}), make(chan struct{})
-	s.HTTP.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s.HTTP.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(entered)
 		<-release
 		_, _ = io.WriteString(w, "finished")
@@ -100,7 +122,7 @@ func TestShutdownDrainsActiveRequest(t *testing.T) {
 	response := make(chan error, 1)
 	go func() {
 		client := &http.Client{Timeout: 2 * time.Second}
-		r, err := client.Get(url)
+		r, err := getWithClient(t, client, url)
 		if err == nil {
 			defer r.Body.Close()
 			var body []byte
@@ -130,13 +152,13 @@ func TestShutdownDrainsActiveRequest(t *testing.T) {
 func TestShutdownDeadlineClosesBlockedRequest(t *testing.T) {
 	s := New("test", 20*time.Millisecond)
 	entered := make(chan struct{})
-	s.HTTP.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done() })
+	s.HTTP.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done() })
 	url, cancel, result := start(t, s)
 	completed := make(chan struct{})
 	go func() {
 		defer close(completed)
 		client := &http.Client{Timeout: time.Second}
-		r, _ := client.Get(url)
+		r, _ := getWithClient(t, client, url)
 		if r != nil {
 			_ = r.Body.Close()
 		}
@@ -162,7 +184,7 @@ func TestDiagnosticsDoNotDispatchProviders(t *testing.T) {
 	s := WithGateway("test", time.Second, gateway.New(registry, nil))
 	url, cancel, result := start(t, s)
 	for _, path := range []string{healthPath, "/_local/diagnostics", "/_local/unknown"} {
-		response, err := http.Get(url + path)
+		response, err := getWithClient(t, http.DefaultClient, url+path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -189,7 +211,7 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 				case <-release:
 					request, ok := input.(*pb.GetTopicRequest)
 					if !ok {
-						return nil, errors.New("unexpected fixture request")
+						return nil, errUnexpectedFixtureRequest
 					}
 					return &pb.Topic{Name: request.GetTopic()}, nil
 				case <-call.Context.Done():
@@ -253,7 +275,8 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("RPC context not cancelled")
 			}
-			if next, err := net.DialTimeout("tcp", grpcListener.Addr().String(), time.Second); err == nil {
+			dialer := &net.Dialer{Timeout: time.Second}
+			if next, err := dialer.DialContext(context.Background(), "tcp", grpcListener.Addr().String()); err == nil {
 				_ = next.Close()
 				t.Fatal("gRPC listener remained open")
 			}
@@ -277,11 +300,13 @@ func TestRuntimeShutdownStopsManagedBackends(t *testing.T) {
 		t.Fatal(err)
 	}
 	url, cancel, result := start(t, s)
-	response, err := http.Get(url + "/_local/diagnostics")
+	response, err := getWithClient(t, http.DefaultClient, url+"/_local/diagnostics")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var body struct{ Backends []backend.Status }
+	var body struct {
+		Backends []backend.Status `json:"backends"`
+	}
 	err = json.NewDecoder(response.Body).Decode(&body)
 	_ = response.Body.Close()
 	if err != nil {

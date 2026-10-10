@@ -27,7 +27,7 @@ func TestWhyDeniedUsesOnlyExplicitLocalDiagnostics(t *testing.T) {
 			t.Fatal("accepted unsafe endpoint or ID")
 		}
 	}
-	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Location", "https://iam.googleapis.com")
 		w.WriteHeader(http.StatusFound)
 	}))
