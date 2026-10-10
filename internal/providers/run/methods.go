@@ -259,12 +259,12 @@ func (p *Provider) startRevision(record *serviceRecord, revision *revisionRecord
 		Port:  revision.Template.Container.Port,
 		Env:   workloadEnv(record, revision),
 	}
-	address, err := p.runtime.Start(context.WithoutCancel(context.Background()), spec)
+	started, err := p.runtime.Start(context.WithoutCancel(context.Background()), spec)
 	if err != nil {
 		return fmt.Errorf("start the revision container: %w", err)
 	}
-	revision.Container = revision.ID
-	revision.Address = address
+	revision.Container = started.Container
+	revision.Address = started.Address
 	return nil
 }
 

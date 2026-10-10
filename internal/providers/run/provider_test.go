@@ -34,18 +34,18 @@ func newFakeRuntime() *fakeRuntime {
 	return &fakeRuntime{running: map[string]error{}}
 }
 
-func (f *fakeRuntime) Start(_ context.Context, spec StartSpec) (string, error) {
+func (f *fakeRuntime) Start(_ context.Context, spec StartSpec) (Started, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failNext != nil {
 		err := f.failNext
 		f.failNext = nil
-		return "", err
+		return Started{}, err
 	}
 	f.started = append(f.started, spec)
 	id := spec.Image + "-container"
 	f.running[id] = nil
-	return "127.0.0.1:19000", nil
+	return Started{Address: "127.0.0.1:19000", Container: id}, nil
 }
 
 func (f *fakeRuntime) Ready(_ context.Context, container string) error {

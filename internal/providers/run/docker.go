@@ -83,14 +83,14 @@ func (d *DockerRuntime) consume(method, path string, response *http.Response, ou
 
 // Start creates and starts the revision container and returns its loopback
 // address with the bound host port.
-func (d *DockerRuntime) Start(ctx context.Context, spec StartSpec) (string, error) {
+func (d *DockerRuntime) Start(ctx context.Context, spec StartSpec) (Started, error) {
 	created := struct {
 		ID string `json:"Id"`
 	}{}
 	// A unique engine name keeps concurrent revisions addressable.
 	suffix, err := cryptoRandSuffix()
 	if err != nil {
-		return "", fmt.Errorf("derive the container name: %w", err)
+		return Started{}, fmt.Errorf("derive the container name: %w", err)
 	}
 	config := map[string]any{
 		"Image": spec.Image,
@@ -104,11 +104,11 @@ func (d *DockerRuntime) Start(ctx context.Context, spec StartSpec) (string, erro
 		},
 	}
 	if err := d.call(ctx, http.MethodPost, "/containers/create?name=gcp-local-run-"+suffix, config, &created); err != nil {
-		return "", err
+		return Started{}, err
 	}
 	if err := d.call(ctx, http.MethodPost, "/containers/"+created.ID+"/start", nil, nil); err != nil {
 		_ = d.Stop(ctx, created.ID)
-		return "", err
+		return Started{}, err
 	}
 	var inspect struct {
 		NetworkSettings struct {
@@ -120,13 +120,13 @@ func (d *DockerRuntime) Start(ctx context.Context, spec StartSpec) (string, erro
 	}
 	if err := d.call(ctx, http.MethodGet, "/containers/"+created.ID+"/json", nil, &inspect); err != nil {
 		_ = d.Stop(ctx, created.ID)
-		return "", err
+		return Started{}, err
 	}
 	key := fmt.Sprintf("%d/tcp", spec.Port)
 	bindings := inspect.NetworkSettings.Ports[key]
 	if len(bindings) == 0 {
 		_ = d.Stop(ctx, created.ID)
-		return "", status.Errorf(codes.Internal, "The engine exposed no port for %s", key)
+		return Started{}, status.Errorf(codes.Internal, "The engine exposed no port for %s", key)
 	}
 	// A published port binds every interface; the loopback form is the one
 	// the invocation proxy may dial.
@@ -134,7 +134,7 @@ func (d *DockerRuntime) Start(ctx context.Context, spec StartSpec) (string, erro
 	if host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
-	return host + ":" + bindings[0].HostPort, nil
+	return Started{Address: host + ":" + bindings[0].HostPort, Container: created.ID}, nil
 }
 
 // Ready blocks until the container exits and reports its failure, or nil while
