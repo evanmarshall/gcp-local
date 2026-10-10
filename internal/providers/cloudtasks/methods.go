@@ -48,6 +48,14 @@ func (p *Provider) executeQueue(call gateway.Call, request *gateway.RESTRequest,
 		return p.getQueueIam(scope, request)
 	case methodQueuesSetIam:
 		return p.setQueueIam(request, scope)
+	default:
+		return p.executeQueueState(call, request, scope)
+	}
+}
+
+// executeQueueState dispatches the pause/resume/purge state family.
+func (p *Provider) executeQueueState(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	switch call.Method {
 	case methodQueuesPause:
 		return p.setQueueState(request, scope, "PAUSED")
 	case methodQueuesResume:
