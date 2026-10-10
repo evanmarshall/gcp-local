@@ -428,10 +428,10 @@ func TestConnectivityTestSurfaceReportsVerdicts(t *testing.T) {
 			keySourceRanges: []any{testSourceCIDR},
 		})
 		return map[string]any{
-			"source":      map[string]any{"ipAddress": source},
-			"destination": map[string]any{"ipAddress": dest},
-			"protocol":    testTCP,
-			"port":        443,
+			keySource:      map[string]any{"ipAddress": source},
+			keyDestination: map[string]any{"ipAddress": dest},
+			"protocol":     testTCP,
+			"port":         443,
 		}
 	}
 	recorder := h.invoke(http.MethodPost, "/v1/projects/demo-net/locations/global/connectivityTests:run", spec("10.0.0.5", "10.0.0.9"))
@@ -489,11 +489,11 @@ func TestNamedConnectivityTestsStoreAndReevaluate(t *testing.T) {
 	})
 	body := func() map[string]any {
 		return map[string]any{
-			"name":        "projects/demo-net/locations/global/connectivityTests/check-web",
-			"source":      map[string]any{"ipAddress": "10.0.0.5"},
-			"destination": map[string]any{"ipAddress": "10.0.0.9"},
-			"protocol":    testTCP,
-			"port":        443,
+			"name":         "projects/demo-net/locations/global/connectivityTests/check-web",
+			keySource:      map[string]any{keyDestIP: "10.0.0.5"},
+			keyDestination: map[string]any{keyDestIP: "10.0.0.9"},
+			"protocol":     testTCP,
+			"port":         443,
 		}
 	}
 	recorder := h.invoke(http.MethodPost, "/v1/projects/demo-net/locations/global/connectivityTests", body())
