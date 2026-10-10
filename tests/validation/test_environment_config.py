@@ -22,7 +22,7 @@ def environment(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "field,value",
+    ("field", "value"),
     [
         ("port", "80@storage.googleapis.com"),
         ("port", 0),

@@ -147,7 +147,7 @@ def test_unmanaged_skill_and_edited_discovery_entry_are_preserved(repos):
             "For GCP application validation", "Customized application validation"
         )
     )
-    with pytest.raises(ValueError, match="AGENTS.md entry"):
+    with pytest.raises(ValueError, match=r"AGENTS\.md entry"):
         installer.install(app, apply=True)
 
 

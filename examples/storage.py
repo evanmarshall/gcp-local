@@ -12,7 +12,8 @@ from google.auth.transport.requests import AuthorizedSession, Request
 from google.cloud import storage
 
 
-def main():
+def main() -> None:
+    """Run the local Storage example against a packaged environment."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=Path.cwd() / ".gcp-local/environment")
     args = parser.parse_args()
@@ -35,11 +36,11 @@ def main():
     # The runtime has no real-cloud credentials. This example also confines the
     # client's requests, including STS refresh, to its explicit local endpoint.
     class LocalSession(requests.Session):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.trust_env = False
 
-        def request(self, method, url, **kwargs):
+        def request(self, method: str, url: str, **kwargs: object) -> requests.Response:
             if urlsplit(url).scheme != "http" or urlsplit(url).netloc != urlsplit(endpoint).netloc:
                 raise ValueError("Request left the local environment")
             kwargs.update(allow_redirects=False, timeout=5)
@@ -52,7 +53,7 @@ def main():
     )
 
     class API(AuthorizedSession):
-        def request(self, method, url, **kwargs):
+        def request(self, method: str, url: str, **kwargs: object) -> requests.Response:
             if urlsplit(url).scheme != "http" or urlsplit(url).netloc != urlsplit(endpoint).netloc:
                 raise ValueError("Request left the local environment")
             kwargs.update(allow_redirects=False, timeout=5)

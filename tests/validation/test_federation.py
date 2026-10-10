@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import pytest
+import yaml
 
 from gcp_validation.sandbox import Identity, inspect_credentials, load_credentials
 
@@ -56,6 +57,43 @@ def test_typed_wif_load_is_offline_and_uses_explicit_identity(wif):
     assert not credential.valid
 
 
+def mutate_wif(mutation: str, identity: Identity, data: dict) -> Identity:
+    """Apply one credential-confusion mutation and return the identity to test."""
+    mutations = {
+        "provider": lambda d: d.update(audience=d["audience"] + "-different"),
+        "target": lambda d: d.update(
+            service_account_impersonation_url=d["service_account_impersonation_url"].replace(
+                "allowed", "fixture"
+            )
+        ),
+        "token-url": lambda d: d.update(token_url="https://example.com/steal"),
+        "source-host": lambda d: d["credential_source"].update(
+            url=d["credential_source"]["url"].replace(
+                "pipelines.actions.githubusercontent.com", "example.com"
+            )
+        ),
+        "source-path": lambda d: d["credential_source"].update(
+            url=d["credential_source"]["url"].replace("/synthetic/", "/foreign/")
+        ),
+        "source-audience": lambda d: d["credential_source"].update(
+            url=d["credential_source"]["url"] + "-different"
+        ),
+        "file": lambda d: d["credential_source"].update(file="/unsafe/credential-source"),
+        "executable": lambda d: d["credential_source"].update(
+            executable="/unsafe/credential-source"
+        ),
+        "unknown-field": lambda d: d.update(token_info_url="https://example.com/steal"),
+        "quota": lambda d: d.update(quota_project_id="unrelated-project"),
+        "universe": lambda d: d.update(universe_domain="example.com"),
+        "headers": lambda d: d["credential_source"].update(headers=None),
+    }
+    if mutation == "no-provider":
+        return Identity(identity.email, identity.credentials_file)
+    if mutation in mutations:
+        mutations[mutation](data)
+    return identity
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -74,38 +112,11 @@ def test_typed_wif_load_is_offline_and_uses_explicit_identity(wif):
         "no-provider",
     ],
 )
+
+
 def test_wif_rejects_credential_confusion_before_network(wif, mutation):
     identity, data = wif
-    if mutation == "provider":
-        data["audience"] += "-different"
-    elif mutation == "target":
-        data["service_account_impersonation_url"] = data[
-            "service_account_impersonation_url"
-        ].replace("allowed", "fixture")
-    elif mutation == "token-url":
-        data["token_url"] = "https://example.com/steal"
-    elif mutation == "source-host":
-        data["credential_source"]["url"] = data["credential_source"]["url"].replace(
-            "pipelines.actions.githubusercontent.com", "example.com"
-        )
-    elif mutation == "source-path":
-        data["credential_source"]["url"] = data["credential_source"]["url"].replace(
-            "/synthetic/", "/foreign/"
-        )
-    elif mutation == "source-audience":
-        data["credential_source"]["url"] += "-different"
-    elif mutation in {"file", "executable"}:
-        data["credential_source"][mutation] = "/unsafe/credential-source"
-    elif mutation == "unknown-field":
-        data["token_info_url"] = "https://example.com/steal"
-    elif mutation == "quota":
-        data["quota_project_id"] = "unrelated-project"
-    elif mutation == "universe":
-        data["universe_domain"] = "example.com"
-    elif mutation == "headers":
-        data["credential_source"]["headers"] = None
-    elif mutation == "no-provider":
-        identity = Identity(identity.email, identity.credentials_file)
+    identity = mutate_wif(mutation, identity, data)
     identity.credentials_file.write_text(json.dumps(data))
     with pytest.raises(ValueError) as caught:
         load_credentials(identity, PROJECT)
@@ -113,7 +124,7 @@ def test_wif_rejects_credential_confusion_before_network(wif, mutation):
 
 
 @pytest.mark.parametrize(
-    "key,value",
+    ("key", "value"),
     [
         ("GITHUB_ACTIONS", "false"),
         ("GITHUB_EVENT_NAME", "pull_request"),
@@ -156,10 +167,11 @@ def test_provisioning_plan_has_no_caller_storage_grants_or_ambient_project():
 
 
 def test_ci_workflow_is_manual_and_artifacts_exclude_credentials():
-    import yaml
 
+    # BaseLoader never constructs Python objects; the raw mapping is the point.
     workflow = yaml.load(
-        (ROOT / ".github/workflows/cloud-conformance.yml").read_text(), Loader=yaml.BaseLoader
+        (ROOT / ".github/workflows/cloud-conformance.yml").read_text(),
+        Loader=yaml.BaseLoader,  # noqa: S506 -- BaseLoader cannot construct objects
     )
     assert set(workflow["on"]) == {"workflow_dispatch"}
     job = workflow["jobs"]["storage"]

@@ -51,12 +51,12 @@ def test_local_requires_explicit_project_and_keeps_ipv6():
 def test_live_requires_every_scope_input(tmp_path, missing):
     path = tmp_path / "synthetic.json"
     path.write_text("{}")
-    inputs = dict(
-        project="sandbox-test",
-        credentials_file=str(path),
-        live_scope="synthetic configuration test; no cloud execution",
-        allow_live=True,
-    )
+    inputs = {
+        "project": "sandbox-test",
+        "credentials_file": str(path),
+        "live_scope": "synthetic configuration test; no cloud execution",
+        "allow_live": True,
+    }
     inputs.pop(missing)
     with pytest.raises(ValueError, match="Live mode requires"):
         Target.select("record", **inputs)

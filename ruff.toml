@@ -33,9 +33,12 @@ ignore = [
 # Tests assert aggressively, spawn controlled subprocesses, use fixtures
 # with framework-mandated signatures, and name tests to describe intent:
 # a docstring would restate the test name. INP001 is pytest's package-free
-# rootdir convention; PT009/PT018 keep unittest-style and compound assertions.
-"tests/**" = ["ANN", "D", "INP001", "S101", "SLF001", "T20", "S603", "PT009", "PT018"]
-"**/testdata/**" = ["ANN", "D", "S", "T20", "INP"]
+# rootdir convention; PT009/PT018 keep unittest-style and compound assertions;
+# PT011 asserts broad failure classes on purpose; ARG keeps fixture and
+# parametrize contracts; S105 names synthetic fixture fields, not credentials.
+"tests/**" = ["ANN", "ARG", "D", "INP001", "PT011", "S101", "S105", "S106", "SLF001", "T20", "S603", "PT009", "PT018"]
+# Testdata is synthetic sample code mirroring SDK shapes, not product source.
+"**/testdata/**" = ["ANN", "ARG", "D", "S", "T20", "INP", "PT", "SIM", "ICN", "PLR0915", "PLC0415"]
 # The skill scripts and the validation harness are executed as standalone CLIs.
 # Smoke scripts assert their own invariants: the assertion failure is the signal.
 # They invoke pinned executables (git, docker, terraform) by resolved path on purpose.

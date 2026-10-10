@@ -72,7 +72,8 @@ def test_offline_blocks_network_and_emits_junit_without_cloud_coverage(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert report["harness"] == {"pass": 1}
     assert report["conformance"] == {"total": 0, "verified": 0, "outcomes": {}}
-    xml = ET.parse(tmp_path / "artifacts/junit.xml")
+    # The JUnit file was written by this same test process, never external input.
+    xml = ET.parse(tmp_path / "artifacts/junit.xml")  # noqa: S314 -- locally generated
     assert len(xml.findall(".//testcase")) == 1
 
 
@@ -136,7 +137,7 @@ def test_local_versions_report_without_inventing_verification(tmp_path):
 
 
 def test_incomplete_live_config_fails_before_test_import(tmp_path):
-    result, report = run_suite(
+    result, _report = run_suite(
         tmp_path,
         """
         from pathlib import Path
@@ -165,7 +166,7 @@ def test_network_guard_overrides_are_rejected(tmp_path, args):
 
 
 def test_local_allows_loopback_but_blocks_cloud_addresses(tmp_path):
-    result, report = run_suite(
+    result, _report = run_suite(
         tmp_path,
         """
         import socket
