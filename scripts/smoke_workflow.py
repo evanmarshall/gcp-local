@@ -103,11 +103,11 @@ def await_operation(name: str, deadline: float = 90.0) -> dict[str, Any]:
 def deploy_worker() -> None:
     """Create the bucket, topic, push subscription, and the worker service."""
     bucket = "workflow-" + PROJECT
-    status, _ = rest("POST", "/storage/v1/b?project=" + PROJECT, {
+    status, body = rest("POST", "/storage/v1/b?project=" + PROJECT, {
         "name": bucket, "location": "US-CENTRAL1",
         "iamConfiguration": {"uniformBucketLevelAccess": {"enabled": True}},
     })
-    assert status == 200, "bucket create failed"
+    assert status == 200, "bucket create failed: " + json.dumps(body if isinstance(body, dict) else {})
     status, _ = rest("GET", "/storage/v1/b/" + bucket + "/iam")
     assert status == 200
     # Grant the worker storage.objects.create on the bucket.
@@ -220,7 +220,7 @@ def main() -> int:
     jar = str(REPO / ".tools/pubsub/emulator.jar")
     docker = os.environ.get("DOCKER", "docker")
     before = subprocess.check_output([docker, "ps", "-aq"], text=True)
-    iam_path = write_configs(PROJECT, ["roles/pubsub.admin"])
+    iam_path = write_configs(PROJECT, ["roles/pubsub.admin", "roles/storage.admin"])
     identity_path = write_identity(PROJECT)
     core = start_core(binary, iam_path, identity_path, port=SERVE_SOCKET,
                       services="storage,pubsub,run", pubsub_java=java, pubsub_jar=jar)
