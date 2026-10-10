@@ -75,6 +75,13 @@ type fixture struct {
 	resets     atomic.Int32
 }
 
+// Sentinels returned by the test's injected failures.
+var (
+	errInjectedReset  = errors.New("injected asset reset failure")
+	errResetCrossed   = errors.New("reset crossed active session")
+	errPublisherStuck = errors.New("publisher was blocked by the session")
+)
+
 func newFixture(t *testing.T, mode string) *fixture {
 	t.Helper()
 	directory := t.TempDir()
@@ -103,7 +110,7 @@ func newFixture(t *testing.T, mode string) *fixture {
 		},
 		ResetAssets: func(ctx context.Context) error {
 			if result.failReset.Load() {
-				return errors.New("injected asset reset failure")
+				return errInjectedReset
 			}
 			if err := ctx.Err(); err != nil {
 				return err
@@ -439,7 +446,7 @@ func TestSessionsAllowPublishingAndDrainBeforeReset(t *testing.T) {
 	var ended atomic.Bool
 	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return f.process, nil }, AfterReset: func(state.Scope) error {
 		if !ended.Load() {
-			return errors.New("reset crossed active session")
+			return errResetCrossed
 		}
 		return nil
 	}})
@@ -451,7 +458,7 @@ func TestSessionsAllowPublishingAndDrainBeforeReset(t *testing.T) {
 			select {
 			case <-published:
 			case <-ctx.Done():
-				return errors.New("publisher was blocked by the session")
+				return errPublisherStuck
 			}
 			<-ctx.Done()
 			ended.Store(true)

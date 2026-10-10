@@ -19,6 +19,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// Sentinels returned by the runtime test handlers.
+var (
+	errRequestUnfinished = errors.New("request did not finish")
+	errProviderReached   = errors.New("diagnostics reached provider")
+)
+
 // healthPath is the local readiness endpoint asserted across runtime tests.
 const healthPath = "/_local/health"
 
@@ -93,7 +99,7 @@ func TestShutdownDrainsActiveRequest(t *testing.T) {
 			var body []byte
 			body, err = io.ReadAll(r.Body)
 			if string(body) != "finished" {
-				err = errors.New("request did not finish")
+				err = errRequestUnfinished
 			}
 		}
 		response <- err
@@ -141,7 +147,7 @@ func TestDiagnosticsDoNotDispatchProviders(t *testing.T) {
 	var calls atomic.Int32
 	err := registry.Register("storage.buckets.list", func(gateway.Call, any) (any, error) {
 		calls.Add(1)
-		return nil, errors.New("diagnostics reached provider")
+		return nil, errProviderReached
 	})
 	if err != nil {
 		t.Fatal(err)

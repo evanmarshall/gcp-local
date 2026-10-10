@@ -28,11 +28,14 @@ type Provider struct {
 	manager *backend.Manager
 }
 
+// errProviderShape rejects an incomplete provider construction.
+var errProviderShape = errors.New("storage requires registry, lifecycle, index, and iam")
+
 var methods = []string{MethodBucketsInsert, MethodBucketsList, MethodBucketsGet, MethodBucketsPatch, MethodBucketsDelete, MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy, MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete}
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
-		return nil, errors.New("Storage requires registry, lifecycle, index, and IAM")
+		return nil, errProviderShape
 	}
 	p := &Provider{index: index, catalog: NewCatalog(index), iam: engine, manager: manager}
 	if err := RegisterPermissions(engine); err != nil {

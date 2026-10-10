@@ -63,6 +63,12 @@ func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gatew
 // a shared deadline, then forcibly closes remaining HTTP requests/gRPC streams.
 type Listeners struct{ HTTP, GRPC, Metadata net.Listener }
 
+// errListeners rejects an incomplete listener pairing.
+var errListeners = errors.New("supply http/grpc listeners and pair the metadata handler/listener")
+
+// errShutdownTimeout rejects a server without a positive drain budget.
+var errShutdownTimeout = errors.New("shutdown timeout must be positive")
+
 func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 	httpListener, grpcListener := listeners.HTTP, listeners.GRPC
 	if httpListener == nil || grpcListener == nil || (s.Metadata == nil) != (listeners.Metadata == nil) {
@@ -71,7 +77,7 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 				listener.Close()
 			}
 		}
-		return errors.New("supply HTTP/gRPC listeners and pair the metadata handler/listener")
+		return errListeners
 	}
 	closeListeners := func() {
 		httpListener.Close()
@@ -83,7 +89,7 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 
 	if s.ShutdownTimeout <= 0 {
 		closeListeners()
-		return errors.New("shutdown timeout must be positive")
+		return errShutdownTimeout
 	}
 	if ctx.Err() != nil {
 		closeListeners()

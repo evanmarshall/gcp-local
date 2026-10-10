@@ -15,6 +15,10 @@ import (
 var ErrFailed = errors.New("backend failed; explicit reset is required")
 var ErrClosed = errors.New("backend manager is shut down")
 var ErrPersistenceUnsupported = errors.New("backend snapshots and restore are unsupported")
+var errDefinitionInvalid = errors.New("backend definition and positive lifecycle timeouts are required")
+var errServiceRegistered = errors.New("backend service already registered")
+var errServiceUnregistered = errors.New("backend service is not registered")
+var errFactoryNil = errors.New("backend factory returned nil")
 
 type Key struct {
 	Service string      `json:"service"`
@@ -171,10 +175,10 @@ func (m *Manager) Register(service string, definition Definition) error {
 		return ErrClosed
 	}
 	if m.startTimeout <= 0 || m.stopTimeout <= 0 || service == "" || definition.New == nil || definition.AfterReset == nil {
-		return errors.New("backend definition and positive lifecycle timeouts are required")
+		return errDefinitionInvalid
 	}
 	if _, exists := m.definitions[service]; exists {
-		return errors.New("backend service already registered")
+		return errServiceRegistered
 	}
 	m.definitions[service] = definition
 	return nil
@@ -187,7 +191,7 @@ func (m *Manager) get(key Key) (*instance, error) {
 	}
 	definition, ok := m.definitions[key.Service]
 	if !ok {
-		return nil, errors.New("backend service is not registered")
+		return nil, errServiceUnregistered
 	}
 	if err := key.Scope.Validate(); err != nil {
 		return nil, err
@@ -280,7 +284,7 @@ func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Bac
 		}
 		if instance.backend == nil {
 			instance.phase(Failed, "construct")
-			return nil, errors.New("backend factory returned nil")
+			return nil, errFactoryNil
 		}
 	}
 	if err := instance.backend.Start(deadline); err != nil {

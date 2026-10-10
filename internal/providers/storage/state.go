@@ -26,18 +26,25 @@ func NewCatalog(index *state.Index) *Catalog {
 }
 func BucketResource(name string) string { return "//storage.googleapis.com/projects/_/buckets/" + name }
 
+// Catalog sentinels for bucket placement and metadata ownership.
+var (
+	errBucketIdentity  = errors.New("bucket name and placement are required")
+	errBucketImmutable = errors.New("bucket placement is immutable")
+	errBucketAbsent    = errors.New("bucket metadata is absent")
+)
+
 // PublishBucket is called only after backend creation succeeds. A caller must
 // compensate/reconcile a backend creation if publication fails; no false entry
 // is published when another project already owns this global name.
 func (c *Catalog) PublishBucket(scope state.Scope, bucket Bucket) error {
 	if bucket.Name == "" || bucket.Location == "" {
-		return errors.New("bucket name and placement are required")
+		return errBucketIdentity
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.store.With(scope, func(value *projectState) error {
 		if existing, ok := value.Buckets[bucket.Name]; ok && existing != bucket {
-			return errors.New("bucket placement is immutable")
+			return errBucketImmutable
 		}
 		if err := c.index.Put(serviceName, state.Resource{Name: BucketResource(bucket.Name), Service: serviceName, Kind: kindBucket, Parent: "//cloudresourcemanager.googleapis.com/projects/" + scope.Project, Scope: scope}); err != nil {
 			return err
@@ -63,7 +70,7 @@ func (c *Catalog) UpdateMetadata(scope state.Scope, name, metadata string) error
 	return c.store.With(scope, func(value *projectState) error {
 		bucket, ok := value.Buckets[name]
 		if !ok {
-			return errors.New("bucket metadata is absent")
+			return errBucketAbsent
 		}
 		bucket.Metadata = metadata
 		value.Buckets[name] = bucket

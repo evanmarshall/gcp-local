@@ -24,6 +24,13 @@ import (
 const EmulatorVersion = "0.8.36"
 const EmulatorSHA256 = "51f87210e624d28d7473f3cfa6eb2d4538a7362c8c4948ef08498cdd7595d25a"
 
+// Backend configuration sentinels.
+var (
+	errBackendPaths = errors.New("pub/sub requires absolute java and pinned emulator jar paths")
+	errJavaMissing  = errors.New("pub/sub java executable is unavailable")
+	errJarMismatch  = errors.New("pub/sub emulator jar does not match the committed pin")
+)
+
 type Config struct {
 	Java, JAR string
 	IDTokens  *identity.IDTokens
@@ -31,11 +38,11 @@ type Config struct {
 
 func (c Config) validate() error {
 	if !filepath.IsAbs(c.Java) || !filepath.IsAbs(c.JAR) {
-		return errors.New("Pub/Sub requires absolute Java and pinned emulator JAR paths")
+		return errBackendPaths
 	}
 	java, err := os.Stat(c.Java)
 	if err != nil || !java.Mode().IsRegular() || java.Mode().Perm()&0111 == 0 {
-		return errors.New("Pub/Sub Java executable is unavailable")
+		return errJavaMissing
 	}
 	jar, err := os.Open(c.JAR)
 	if err != nil {
@@ -47,7 +54,7 @@ func (c Config) validate() error {
 		return err
 	}
 	if hex.EncodeToString(hash.Sum(nil)) != EmulatorSHA256 {
-		return errors.New("Pub/Sub emulator JAR does not match the committed pin")
+		return errJarMismatch
 	}
 	return nil
 }

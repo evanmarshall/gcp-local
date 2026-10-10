@@ -26,6 +26,15 @@ type ProcessConfig struct {
 	// Reset removes only assets owned by this scoped instance, after Stop.
 	ResetAssets func(context.Context) error
 }
+
+var (
+	errProcessConfig   = errors.New("process command, readiness probe, and reset hook are required")
+	errProcessRunning  = errors.New("backend process already running")
+	errProcessNotDone  = errors.New("stop backend before resetting assets")
+	errProbeEndpoint   = errors.New("readiness requires a loopback HTTP endpoint with an explicit port")
+	errProbeStatusCode = errors.New("backend readiness returned an unexpected status")
+)
+
 type Process struct {
 	config  ProcessConfig
 	mu      sync.Mutex
@@ -35,7 +44,7 @@ type Process struct {
 
 func NewProcess(config ProcessConfig) (*Process, error) {
 	if len(config.Command) == 0 || !filepath.IsAbs(config.Command[0]) || config.Probe == nil || config.ResetAssets == nil {
-		return nil, errors.New("process command, readiness probe, and reset hook are required")
+		return nil, errProcessConfig
 	}
 	config.Command = append([]string(nil), config.Command...)
 	config.Environment = append([]string{}, config.Environment...)
@@ -51,7 +60,7 @@ func (p *Process) Start(ctx context.Context) error {
 		select {
 		case <-p.done:
 		default:
-			return errors.New("backend process already running")
+			return errProcessRunning
 		}
 	}
 	command := exec.Command(p.config.Command[0], p.config.Command[1:]...)
@@ -129,7 +138,7 @@ func (p *Process) Reset(ctx context.Context) error {
 		select {
 		case <-p.done:
 		default:
-			return errors.New("stop backend before resetting assets")
+			return errProcessNotDone
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -147,7 +156,7 @@ func HTTPProbe(endpoint string) (func(context.Context) error, error) {
 	}
 	ip := net.ParseIP(parsed.Hostname())
 	if parsed.Scheme != "http" || ip == nil || !ip.IsLoopback() || parsed.Port() == "" || parsed.User != nil || parsed.Fragment != "" {
-		return nil, errors.New("readiness requires a loopback HTTP endpoint with an explicit port")
+		return nil, errProbeEndpoint
 	}
 	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return func(ctx context.Context) error {
@@ -161,7 +170,7 @@ func HTTPProbe(endpoint string) (func(context.Context) error, error) {
 		}
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusOK {
-			return fmt.Errorf("backend readiness HTTP %d", response.StatusCode)
+			return fmt.Errorf("%w: HTTP %d", errProbeStatusCode, response.StatusCode)
 		}
 		return nil
 	}, nil

@@ -29,6 +29,14 @@ const (
 	ackID                = "ack"
 )
 
+// Sentinels returned by the stub handlers in this file.
+var (
+	errBadDecodedRequest  = errors.New("bad decoded request")
+	errSecretBackendToken = errors.New("secret backend token")
+	errMissingFirstCall   = errors.New("missing first request context")
+	errMissingAck         = errors.New("missing acknowledgement")
+)
+
 func register(t *testing.T, r *Registry, method string, h Handler) {
 	t.Helper()
 	if err := r.Register(method, h); err != nil {
@@ -61,7 +69,7 @@ func TestRESTDispatchPreservesEscapedResourcesAndIdentity(t *testing.T) {
 	register(t, r, "storage.objects.get", func(call Call, input any) (any, error) {
 		req := input.(*RESTRequest)
 		if req.Path["bucket"] != "bucket" || req.Path["object"] != "folder/a%?.txt" || req.Headers.Get(authorizationHeader) != "" {
-			return nil, errors.New("bad decoded request")
+			return nil, errBadDecodedRequest
 		}
 		calls <- call
 		return &RESTResponse{JSON: map[string]any{"name": req.Path["object"]}}, nil
@@ -149,7 +157,7 @@ func TestRESTErrorsPreserveDetailsAndHideInternalFailures(t *testing.T) {
 		err     error
 		code    int
 		message string
-	}{{permissionError(), 403, "Missing permission"}, {errors.New("secret backend token"), 500, "Internal provider error"}, {context.Canceled, 499, "context canceled"}} {
+	}{{permissionError(), 403, "Missing permission"}, {errSecretBackendToken, 500, "Internal provider error"}, {context.Canceled, 499, "context canceled"}} {
 		r := NewRegistry()
 		register(t, r, "storage.objects.get", func(Call, any) (any, error) { return nil, tc.err })
 		server := httptest.NewServer(New(r, nil))
@@ -258,7 +266,7 @@ func TestStreamingPullBidirectionalDeliveryAndCancellation(t *testing.T) {
 					return err
 				}
 				if first.GetSubscription() != streamSubscription || call.Project != "synthetic" || call.Resource != first.GetSubscription() {
-					return errors.New("missing first request context")
+					return errMissingFirstCall
 				}
 				if err := stream.Send(&pb.StreamingPullResponse{ReceivedMessages: []*pb.ReceivedMessage{{AckId: ackID, Message: &pb.PubsubMessage{Data: []byte("payload")}}}}); err != nil {
 					return err
@@ -268,7 +276,7 @@ func TestStreamingPullBidirectionalDeliveryAndCancellation(t *testing.T) {
 					return err
 				}
 				if len(second.GetAckIds()) != 1 || second.GetAckIds()[0] != ackID {
-					return errors.New("missing acknowledgement")
+					return errMissingAck
 				}
 				close(received)
 				<-call.Context.Done()

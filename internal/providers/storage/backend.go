@@ -24,12 +24,16 @@ func (b *memoryBackend) Start(ctx context.Context) error {
 	}
 	return err
 }
+
+// errBackendStopped reports a readiness probe after Stop.
+var errBackendStopped = errors.New("storage backend is stopped")
+
 func (b *memoryBackend) Ready(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if b.server == nil {
-		return errors.New("Storage backend is stopped")
+		return errBackendStopped
 	}
 	return nil
 }

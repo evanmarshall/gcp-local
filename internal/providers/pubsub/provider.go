@@ -22,6 +22,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// errProviderShape rejects an incomplete provider construction.
+var errProviderShape = errors.New("pub/sub requires registry, backend manager, index, and iam")
+
 // serviceName is the registered service key for Pub/Sub backends and index entries.
 const serviceName = "pubsub"
 
@@ -48,7 +51,7 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 }
 func newProvider(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, factory func(state.Scope) (backend.Backend, error)) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
-		return nil, errors.New("Pub/Sub requires registry, backend manager, index, and IAM")
+		return nil, errProviderShape
 	}
 	p := &Provider{manager: manager, index: index, iam: engine}
 	if err := registerPermissions(engine); err != nil {

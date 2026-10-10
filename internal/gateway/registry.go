@@ -3,6 +3,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -11,6 +12,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+)
+
+// Registration sentinels; every wrapper keeps the method name for diagnosis.
+var (
+	errUnaryRegistration  = errors.New("invalid unary registration")
+	errStreamRegistration = errors.New("invalid stream registration")
+	errDuplicateMethod    = errors.New("duplicate registration")
 )
 
 type PrincipalState string
@@ -77,10 +85,10 @@ func (r *Registry) Register(method string, handler Handler) error {
 	defer r.mu.Unlock()
 	info, ok := r.contracts[method]
 	if !ok || info.streaming || handler == nil {
-		return fmt.Errorf("invalid unary registration: %s", method)
+		return fmt.Errorf("%w: %s", errUnaryRegistration, method)
 	}
 	if r.unary[method] != nil {
-		return fmt.Errorf("duplicate registration: %s", method)
+		return fmt.Errorf("%w: %s", errDuplicateMethod, method)
 	}
 	r.unary[method] = handler
 	return nil
@@ -90,10 +98,10 @@ func (r *Registry) RegisterStream(method string, handler StreamHandler) error {
 	defer r.mu.Unlock()
 	info, ok := r.contracts[method]
 	if !ok || !info.streaming || handler == nil {
-		return fmt.Errorf("invalid stream registration: %s", method)
+		return fmt.Errorf("%w: %s", errStreamRegistration, method)
 	}
 	if r.stream[method] != nil {
-		return fmt.Errorf("duplicate registration: %s", method)
+		return fmt.Errorf("%w: %s", errDuplicateMethod, method)
 	}
 	r.stream[method] = handler
 	return nil

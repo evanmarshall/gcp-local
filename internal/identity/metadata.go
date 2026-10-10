@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+// Metadata sentinels.
+var (
+	errMetadataSubject = errors.New("metadata requires an enrolled service account")
+	errMetadataToken   = errors.New("unsupported metadata token parameter")
+)
+
 // fieldScopes is the metadata and identity field name for the granted scopes.
 const fieldScopes = "scopes"
 
@@ -15,7 +21,7 @@ const fieldScopes = "scopes"
 func (s *Service) Metadata(subject string) (http.Handler, error) {
 	p, ok := s.principals[subject]
 	if !ok || !strings.HasPrefix(subject, "serviceAccount:") {
-		return nil, errors.New("metadata requires an enrolled service account")
+		return nil, errMetadataSubject
 	}
 	email := strings.TrimPrefix(subject, "serviceAccount:")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +96,7 @@ func parseMetadataQuery(r *http.Request) (string, error) {
 	}
 	for key, values := range r.Form {
 		if key != fieldScopes || len(values) != 1 {
-			return "", errors.New("unsupported metadata token parameter")
+			return "", errMetadataToken
 		}
 	}
 	return r.Form.Get("scopes"), nil

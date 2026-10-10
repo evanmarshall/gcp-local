@@ -9,6 +9,12 @@ import (
 
 const Global = "global"
 
+// Scope sentinels.
+var (
+	errScopeIdentity = errors.New("an explicit project and location are required")
+	errScopeGlobal   = errors.New("this service uses a global scope")
+)
+
 type Scope struct {
 	Project  string `json:"project"`
 	Location string `json:"location"`
@@ -18,7 +24,7 @@ var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 func (s Scope) Validate() error {
 	if !identifier.MatchString(s.Project) || !identifier.MatchString(s.Location) {
-		return errors.New("an explicit project and location are required")
+		return errScopeIdentity
 	}
 	return nil
 }
@@ -27,7 +33,7 @@ func GlobalScope(s Scope) error {
 		return err
 	}
 	if s.Location != Global {
-		return errors.New("this service uses a global scope")
+		return errScopeGlobal
 	}
 	return nil
 }

@@ -12,6 +12,12 @@ import (
 //go:embed roles/*.json
 var roleFiles embed.FS
 
+// Role snapshot sentinels.
+var (
+	errRoleChecksum = errors.New("predefined role snapshot checksum mismatch")
+	errRoleSnapshot = errors.New("invalid predefined role snapshot")
+)
+
 func loadRoles() (map[string]map[string]bool, error) {
 	var manifest struct {
 		Roles []struct{ File, Name, SHA256 string }
@@ -31,7 +37,7 @@ func loadRoles() (map[string]map[string]bool, error) {
 		}
 		sum := sha256.Sum256(raw)
 		if hex.EncodeToString(sum[:]) != entry.SHA256 {
-			return nil, errors.New("predefined role snapshot checksum mismatch")
+			return nil, errRoleChecksum
 		}
 		var role struct {
 			Name, Stage         string
@@ -41,7 +47,7 @@ func loadRoles() (map[string]map[string]bool, error) {
 			return nil, err
 		}
 		if role.Name != entry.Name || role.Stage != "GA" || len(role.IncludedPermissions) == 0 {
-			return nil, errors.New("invalid predefined role snapshot")
+			return nil, errRoleSnapshot
 		}
 		permissions := map[string]bool{}
 		for _, permission := range role.IncludedPermissions {

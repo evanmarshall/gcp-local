@@ -53,9 +53,28 @@ type Engine struct {
 	order       []string
 }
 
+// errPlanExists rejects a second permission plan for one method.
+var errPlanExists = errors.New("method already has a permission plan")
+
+// Engine sentinels for registration and hierarchy validation.
+var (
+	errIndexRequired    = errors.New("resource index is required")
+	errRuleIncomplete   = errors.New("method and baseline permissions are required")
+	errBaselineUnknown  = errors.New("baseline permission is outside the pinned roles")
+	errFeatureRequired  = errors.New("feature and additional permissions are required")
+	errFeatureUnknown   = errors.New("feature permission is outside the pinned roles")
+	errTargetParent     = errors.New("target parent disagrees with the resource index")
+	errTargetShape      = errors.New("resource ownership or target shape is unverified")
+	errHierarchyCycle   = errors.New("resource hierarchy contains a cycle")
+	errHierarchyProject = errors.New("resource hierarchy crosses project ownership")
+	errHierarchyRoot    = errors.New("resource hierarchy has no known root")
+	errHierarchyMissing = errors.New("resource hierarchy is incomplete")
+	errHierarchyDepth   = errors.New("resource hierarchy exceeds the supported depth")
+)
+
 func New(index *state.Index) (*Engine, error) {
 	if index == nil {
-		return nil, errors.New("resource index is required")
+		return nil, errIndexRequired
 	}
 	roles, err := loadRoles()
 	if err != nil {
@@ -65,7 +84,7 @@ func New(index *state.Index) (*Engine, error) {
 }
 func (e *Engine) Register(method string, rule Rule) error {
 	if method == "" || len(rule.Baseline) == 0 {
-		return errors.New("method and baseline permissions are required")
+		return errRuleIncomplete
 	}
 	known := func(permission string) bool {
 		for _, role := range e.roles {
@@ -78,16 +97,16 @@ func (e *Engine) Register(method string, rule Rule) error {
 	copy := Rule{Baseline: append([]string(nil), rule.Baseline...), When: map[string][]string{}}
 	for _, permission := range rule.Baseline {
 		if !known(permission) {
-			return fmt.Errorf("baseline permission is outside the pinned roles: %s", permission)
+			return fmt.Errorf("%w: %s", errBaselineUnknown, permission)
 		}
 	}
 	for feature, permissions := range rule.When {
 		if feature == "" || len(permissions) == 0 {
-			return errors.New("feature and additional permissions are required")
+			return errFeatureRequired
 		}
 		for _, permission := range permissions {
 			if !known(permission) {
-				return fmt.Errorf("feature permission is outside the pinned roles: %s", permission)
+				return fmt.Errorf("%w: %s", errFeatureUnknown, permission)
 			}
 		}
 		copy.When[feature] = append([]string(nil), permissions...)
@@ -257,12 +276,12 @@ func (e *Engine) ancestry(target Target) ([]state.Resource, error) {
 	resource, found := e.index.Get(target.Name)
 	if found {
 		if target.Parent != "" && target.Parent != resource.Parent {
-			return nil, errors.New("Target parent disagrees with the resource index")
+			return nil, errTargetParent
 		}
 	} else {
 		parent, ok := e.index.Get(target.Parent)
 		if !ok || parent.Service != "storage" || parent.Kind != "bucket" || !strings.HasPrefix(target.Name, parent.Name+"/objects/") || target.Name == parent.Name+"/objects/" {
-			return nil, errors.New("Resource ownership or target shape is unverified")
+			return nil, errTargetShape
 		}
 		resource = parent // Object data stays in the backend; bucket anchors its IAM.
 	}
@@ -271,25 +290,25 @@ func (e *Engine) ancestry(target Target) ([]state.Resource, error) {
 	var result []state.Resource
 	for len(result) < 128 {
 		if seen[resource.Name] {
-			return nil, errors.New("Resource hierarchy contains a cycle")
+			return nil, errHierarchyCycle
 		}
 		seen[resource.Name] = true
 		if resource.Scope.Project != "" && resource.Scope.Project != project {
-			return nil, errors.New("Resource hierarchy crosses project ownership")
+			return nil, errHierarchyProject
 		}
 		result = append(result, resource)
 		if resource.Parent == "" {
 			if resource.Kind != "project" && resource.Kind != "organization" {
-				return nil, errors.New("Resource hierarchy has no known root")
+				return nil, errHierarchyRoot
 			}
 			return result, nil
 		}
 		resource, found = e.index.Get(resource.Parent)
 		if !found {
-			return nil, errors.New("Resource hierarchy is incomplete")
+			return nil, errHierarchyMissing
 		}
 	}
-	return nil, errors.New("Resource hierarchy exceeds the supported depth")
+	return nil, errHierarchyDepth
 }
 func cloneDecision(value Decision) Decision {
 	value.Principal.Scopes = append([]string(nil), value.Principal.Scopes...)

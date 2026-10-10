@@ -10,6 +10,20 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
+// Configuration sentinels; Load reports the first violated bootstrap rule.
+var (
+	errConfigMode      = errors.New("iam configuration must be a regular owner-only file")
+	errConfigOpen      = errors.New("unable to open iam configuration")
+	errConfigInvalid   = errors.New("invalid iam configuration")
+	errConfigTrailing  = errors.New("iam configuration contains trailing data")
+	errConfigHierarchy = errors.New("bootstrap only distinct resource-manager hierarchy nodes")
+	errConfigProject   = errors.New("project name and scope disagree")
+	errConfigRoot      = errors.New("organization must be a canonical root")
+	errConfigFolder    = errors.New("folder must have a canonical name and parent")
+	errConfigKind      = errors.New("unsupported hierarchy node kind")
+	errConfigDuplicate = errors.New("duplicate local service account name or unique id")
+)
+
 type Config struct {
 	Resources       []state.Resource    `json:"resources"`
 	Policies        map[string]Policy   `json:"policies"`
@@ -24,22 +38,22 @@ type Config struct {
 func Load(path string) (*Engine, *state.Index, error) {
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		return nil, nil, errors.New("IAM configuration must be a regular owner-only file")
+		return nil, nil, errConfigMode
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, nil, errors.New("Unable to open IAM configuration")
+		return nil, nil, errConfigOpen
 	}
 	defer file.Close()
 	var config Config
 	decoder := json.NewDecoder(io.LimitReader(file, 2<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&config); err != nil {
-		return nil, nil, errors.New("Invalid IAM configuration")
+		return nil, nil, errConfigInvalid
 	}
 	var trailing any
 	if decoder.Decode(&trailing) != io.EOF {
-		return nil, nil, errors.New("IAM configuration contains trailing data")
+		return nil, nil, errConfigTrailing
 	}
 	index := state.NewIndex()
 	engine, err := New(index)
@@ -49,25 +63,25 @@ func Load(path string) (*Engine, *state.Index, error) {
 	seen := map[string]bool{}
 	for _, resource := range config.Resources {
 		if resource.Service != "resourcemanager" || resource.Scope.Location != state.Global || seen[resource.Name] {
-			return nil, nil, errors.New("Bootstrap only distinct resource-manager hierarchy nodes")
+			return nil, nil, errConfigHierarchy
 		}
 		seen[resource.Name] = true
 		prefix := "//cloudresourcemanager.googleapis.com/"
 		switch resource.Kind {
 		case "project":
 			if resource.Name != prefix+"projects/"+resource.Scope.Project {
-				return nil, nil, errors.New("Project name and scope disagree")
+				return nil, nil, errConfigProject
 			}
 		case "organization":
 			if !strings.HasPrefix(resource.Name, prefix+"organizations/") || resource.Parent != "" {
-				return nil, nil, errors.New("Organization must be a canonical root")
+				return nil, nil, errConfigRoot
 			}
 		case "folder":
 			if !strings.HasPrefix(resource.Name, prefix+"folders/") || resource.Parent == "" {
-				return nil, nil, errors.New("Folder must have a canonical name and parent")
+				return nil, nil, errConfigFolder
 			}
 		default:
-			return nil, nil, errors.New("Unsupported hierarchy node kind")
+			return nil, nil, errConfigKind
 		}
 		if err := index.Put("resourcemanager", resource); err != nil {
 			return nil, nil, err
@@ -85,7 +99,7 @@ func Load(path string) (*Engine, *state.Index, error) {
 			return nil, nil, err
 		}
 		if seen[resource.Name] || accountIDs[account.UniqueID] {
-			return nil, nil, errors.New("Duplicate local service account name or unique ID")
+			return nil, nil, errConfigDuplicate
 		}
 		seen[resource.Name], accountIDs[account.UniqueID] = true, true
 		if err := index.Put("iam", resource); err != nil {
