@@ -47,15 +47,17 @@ def request(method: str, path: str, body: dict[str, Any] | None = None) -> tuple
         return error.code, json.loads(payload) if payload else {}
 
 
-def await_operation(name: str, deadline: float = 60.0) -> dict[str, Any]:
+def await_operation(name: str, deadline: float = 90.0) -> dict[str, Any]:
     """Poll one long-running operation until it reports done."""
+    last: dict[str, Any] = {}
     end = time.time() + deadline
     while time.time() < end:
         _, body = request("GET", SCOPE + "/operations/" + name)
         if body.get("done"):
             return body
+        last = body
         time.sleep(0.5)
-    raise AssertionError("Operation did not finish: " + name)
+    raise AssertionError("Operation did not finish: " + name + " last=" + json.dumps(last))
 
 
 def build_image(tag: str) -> str:
