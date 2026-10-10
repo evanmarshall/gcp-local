@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
                 cleanup(
                     ["cleanup", "--profile", args.profile, "--manifest", str(path), "--allow-live"]
                 )
-        except Exception:
+        except Exception:  # noqa: BLE001 -- any manifest defect must count as a failure
             failures += 1
             print(
                 "An owned manifest still needs cleanup; retain the run's "
