@@ -107,7 +107,7 @@ def deploy_worker() -> None:
         "name": bucket, "location": "US-CENTRAL1",
         "iamConfiguration": {"uniformBucketLevelAccess": {"enabled": True}},
     })
-    assert status == 200, "bucket create failed: " + json.dumps(body if isinstance(body, dict) else {})
+    assert status == 200, "bucket create failed: " + json.dumps(body)[:200]
     status, _ = rest("GET", "/storage/v1/b/" + bucket + "/iam")
     assert status == 200
     # Grant the worker storage.objects.create on the bucket.
