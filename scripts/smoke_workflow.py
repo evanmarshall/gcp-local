@@ -119,9 +119,9 @@ def deploy_worker() -> None:
     status, body = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
     assert status == 200, "bucket grant failed: " + json.dumps(body)[:200]
 
-    status, _ = rest("POST", "/v1/projects/" + PROJECT + "/topics",
-                     {"name": "projects/" + PROJECT + "/topics/workflow"})
-    assert status == 200, "topic create failed"
+    status, body = rest("POST", "/v1/projects/" + PROJECT + "/topics",
+                        {"name": "projects/" + PROJECT + "/topics/workflow"})
+    assert status == 200, "topic create failed: " + json.dumps(body)[:200]
     status, service = rest("POST", SCOPE + "/services", {
         "name": SCOPE + "/services/worker",
         "template": {"containers": [{"image": WORKER_IMAGE, "containerPort": 8080}],
