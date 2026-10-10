@@ -92,6 +92,7 @@ type serveOptions struct {
 	listen, grpcListen, metadataListen string
 	shutdown                           time.Duration
 	iamPath, identityPath              string
+	runSocket                          string
 	services, pubsubJava, pubsubJAR    string
 	metadataPrincipal                  string
 	showVersion                        bool
@@ -110,6 +111,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
+	flags.StringVar(&options.runSocket, "run-docker-socket", "", "Docker engine socket for Cloud Run containers; empty refuses launch")
 	flags.StringVar(&options.metadataListen, "metadata-listen", "", "optional per-workload loopback metadata listener")
 	flags.StringVar(&options.metadataPrincipal, "metadata-principal", "", "enrolled service account bound to the metadata listener")
 	flags.BoolVar(&options.showVersion, "version", false, "print the build version")
@@ -220,8 +222,13 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 		}
 	}
 	if selected["run"] {
-		// The container runtime is provider-owned; restricted hosts refuse launch.
-		if _, err := runprovider.New(ctx, registry, server.Backends, index, engine, runprovider.NoopRuntime{}); err != nil {
+		// The container runtime is provider-owned. Without an explicit Docker
+		// socket the provider refuses every container launch.
+		var runtime runprovider.Runtime = runprovider.NoopRuntime{}
+		if options.runSocket != "" {
+			runtime = runprovider.NewDockerRuntime(options.runSocket)
+		}
+		if _, err := runprovider.New(ctx, registry, server.Backends, index, engine, runtime); err != nil {
 			return fmt.Errorf("register the Cloud Run provider: %w", err)
 		}
 	}
