@@ -74,7 +74,11 @@ func storageRoutes(check bool) []byte {
 	var walk func(resource)
 	walk = func(r resource) {
 		for _, m := range r.Methods {
-			routes = append(routes, route{m.ID, m.Verb, "/storage/v1/" + m.Path, len(m.Request) > 0, false})
+			// A method with media upload protocols serves every body shape on
+			// its plain path too (uploadType=media posts raw bytes), so the
+			// plain row passes the body through for the provider to parse.
+			jsonBody := len(m.Request) > 0 && m.Media == nil
+			routes = append(routes, route{m.ID, m.Verb, "/storage/v1/" + m.Path, jsonBody, m.Media != nil})
 			if m.Download {
 				routes = append(routes, route{m.ID, m.Verb, "/download/storage/v1/" + m.Path, false, false})
 			}

@@ -91,7 +91,8 @@ def build_image(tag: str) -> str:
     return tag
 
 
-def write_configs(project: str = "demo-run", extra_roles: list[str] | None = None) -> Path:
+def write_configs(project: str = "demo-run", extra_roles: list[str] | None = None,
+                  accounts: list[str] | None = None) -> Path:
     """Write an owner-only IAM configuration and return its directory."""
     roles = extra_roles or []
     directory = Path(tempfile.mkdtemp())
@@ -100,7 +101,9 @@ def write_configs(project: str = "demo-run", extra_roles: list[str] | None = Non
     resource = "//cloudresourcemanager.googleapis.com/projects/" + project
     iam = {
         "resources": [{"name": resource, "service": "resourcemanager", "kind": "project",
-                       "number": "000000000001",
+                       # A real-shaped numeric project number: the push
+                       # contract requires one without leading zeros.
+                       "number": "123456789012",
                        "scope": {"project": project, "location": "global"}}],
         # The smoke drives the control plane without a local identity mount,
         # so its fixture principal is allUsers; the invoker contract under test
@@ -109,6 +112,12 @@ def write_configs(project: str = "demo-run", extra_roles: list[str] | None = Non
             {"role": "roles/run.admin", "members": ["allUsers"]},
         ] + [{"role": role, "members": ["allUsers"]} for role in roles]}},
     }
+    if accounts:
+        iam["service_accounts"] = [
+            {"project": project, "email": email,
+             "unique_id": str(10**15 + (sum(map(ord, email)) % (10**15 - 1)))}
+            for email in accounts
+        ]
     path = directory / "iam.json"
     path.write_text(json.dumps(iam))
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -121,6 +130,15 @@ def start_core(
     pubsub_jar: str = "", extra_flags: Sequence[str] = (),
 ) -> subprocess.Popen:
     """Start the core with the selected providers and revision runtime."""
+    # A stale server from an earlier crashed run would answer health checks
+    # with a different identity config and poison the run; fail loudly here.
+    try:
+        urllib.request.urlopen("http://127.0.0.1:" + str(port) + "/_local/health", timeout=1)
+        raise RuntimeError("Port " + str(port) + " is already served by an earlier run")
+    except urllib.error.HTTPError as error:
+        raise RuntimeError("Port " + str(port) + " is already served by an earlier run") from error
+    except (urllib.error.URLError, TimeoutError, OSError):
+        pass
     logs = Path(tempfile.gettempdir()) / ("gcp-local-core-" + str(port) + ".log")
     log_handle = logs.open("w")
     process = subprocess.Popen(

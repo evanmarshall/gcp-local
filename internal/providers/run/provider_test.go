@@ -541,3 +541,12 @@ func TestDeleteCancelsServiceReaper(t *testing.T) {
 		t.Fatalf("reapers after delete = %d", len(h.provider.reapers))
 	}
 }
+
+func TestInvocationAcceptsBareServiceRoot(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	recorder := h.invoke(http.MethodPost, "/_run/svc-demo-run.us-central1.run.app", nil)
+	if recorder.Code == 404 {
+		t.Fatalf("bare service root was not routed: %s", recorder.Body.String())
+	}
+}

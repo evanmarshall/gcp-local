@@ -34,8 +34,14 @@ def store(bucket: str, name: str, payload: bytes) -> None:
     )
     request.add_header("Authorization", "Bearer " + metadata_token())
     request.add_header("Content-Type", "application/octet-stream")
-    with urllib.request.urlopen(request, timeout=15) as response:
-        assert response.status == 200
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            assert response.status == 200
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(
+            "store failed: " + str(error.code) + " " + error.read().decode()[:200]) from None
+    """Upload one object with the workload's service account credentials."""
+
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -48,7 +54,11 @@ class Handler(BaseHTTPRequestHandler):
             envelope = json.loads(body)
             payload = base64.urlsafe_b64decode(envelope["message"]["data"])
             bucket = envelope["message"]["attributes"]["bucket"]
-            store(bucket, envelope["message"]["message_id"] + ".txt", payload)
+                        # Real Pub/Sub push envelopes carry camelCase JSON fields. The
+            # object name is the publisher's messageId attribute, not the
+            # server-assigned message id.
+            attributes = envelope["message"]["attributes"]
+            store(bucket, attributes["messageId"] + ".txt", payload)
             code, reply = 200, b"stored"
         except Exception as error:  # noqa: BLE001 -- the push agent reads the status only
             code, reply = 500, str(error).encode()

@@ -1,6 +1,7 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -72,9 +73,15 @@ func splitInvocation(path string) (string, string, error) {
 	if !strings.HasPrefix(path, invocationPath) {
 		return "", "", status.Error(codes.NotFound, "No service is bound to this path")
 	}
+	// A push delivery may target the service root without a trailing path:
+	// the fragment defaults to "/" (the real surface treats the bare host
+	// URL as the service root).
 	rest := strings.TrimPrefix(path, invocationPath)
 	host, fragment, found := strings.Cut(rest, "/")
-	if !found {
+	if !found && rest != "" {
+		return rest, "/", nil
+	}
+	if !found || host == "" {
 		return "", "", status.Error(codes.NotFound, "No service is bound to this path")
 	}
 	if fragment == "" {
@@ -116,7 +123,20 @@ func (p *Provider) forward(w http.ResponseWriter, r *http.Request, serving servi
 		writeInvocationError(w, status.Error(codes.Internal, "The revision address is not a loopback endpoint"))
 		return
 	}
-	target, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+serving.address+path, r.Body) //nolint:gosec // the address is the provider-owned loopback container port and the path is a single local URL path
+	// The incoming body may be chunked (an unknown-length reader makes
+	// NewRequest re-chunk it and drop Content-Length), and plain HTTP
+	// servers that size their read by Content-Length then see an empty
+	// body. Buffer the bounded invocation body and forward it fixed-length.
+	body, bodyErr := io.ReadAll(io.LimitReader(r.Body, invocationBodyLimit+1))
+	if bodyErr != nil {
+		writeInvocationError(w, status.Error(codes.Internal, "Read the invocation body"))
+		return
+	}
+	if int64(len(body)) > invocationBodyLimit {
+		writeInvocationError(w, status.Error(codes.InvalidArgument, "The invocation body exceeds the supported size"))
+		return
+	}
+	target, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+serving.address+path, bytes.NewReader(body)) //nolint:gosec // the address is the provider-owned loopback container port and the path is a single local URL path
 
 	if err != nil {
 		writeInvocationError(w, status.Error(codes.Internal, "Build the container request"))
@@ -196,11 +216,16 @@ func (p *Provider) authorizeToken(r *http.Request, bearer string, serving servin
 	if email == "" {
 		return status.Error(codes.Unauthenticated, "The ID token names no service account")
 	}
+	// The verified token mints from this runtime's key for cloud-platform
+	// workloads; the acting principal inherits that verified scope set.
 	call := gateway.Call{
-		Context:   r.Context(),
-		Method:    methodServicesInvoke,
-		Project:   serving.project,
-		Principal: gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + claims.Email},
+		Context: r.Context(),
+		Method:  methodServicesInvoke,
+		Project: serving.project,
+		Principal: gateway.Principal{
+			State: gateway.Authenticated, Subject: "serviceAccount:" + claims.Email,
+			Scopes: []string{identity.CloudPlatform},
+		},
 	}
 	target := iam.Target{Name: resource(serving.project, serving.location, kindService, serving.id)}
 	decision, authorizeErr := p.engine.Authorize(call, target, nil)
@@ -335,3 +360,6 @@ func (p *Provider) coldStart(_ context.Context, serving servingRef) bool {
 	}
 	return true
 }
+
+// invocationBodyLimit bounds the buffered invocation request body.
+const invocationBodyLimit = 32 << 20

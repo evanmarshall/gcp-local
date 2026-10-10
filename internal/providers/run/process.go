@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +12,12 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+// Sentinel errors for the revision process states the watcher distinguishes.
+var (
+	errProcessGone   = errors.New("the revision process is gone")
+	errProcessExited = errors.New("the revision process exited")
 )
 
 // ProcessRuntime launches Cloud Run revisions as local processes for hosts
@@ -42,16 +49,23 @@ func (p *ProcessRuntime) Start(ctx context.Context, spec StartSpec) (Started, er
 	if !ok {
 		return Started{}, status.Errorf(codes.Unimplemented, "No process command is mapped for image %s", spec.Image)
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	var listen net.ListenConfig
+	listener, err := listen.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return Started{}, fmt.Errorf("allocate the revision port: %w", err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return Started{}, status.Errorf(codes.Internal, "The revision port is not a TCP address")
+	}
+	port := addr.Port
 	if closeErr := listener.Close(); closeErr != nil {
 		return Started{}, fmt.Errorf("reserve the revision port: %w", closeErr)
 	}
-	// The revision outlives the launch request; Stop owns termination.
-	run := exec.Command(command[0], command[1:]...) //nolint:gosec // the operator maps commands explicitly
+	// The revision outlives the launch request; Stop owns termination. The
+	// detached context satisfies CommandContext without coupling the
+	// revision lifetime to the launch request.
+	run := exec.CommandContext(context.WithoutCancel(ctx), command[0], command[1:]...) //nolint:gosec // the operator maps commands explicitly
 	run.Env = append(append(os.Environ(), spec.Env...), "PORT="+strconv.Itoa(port))
 	if err := run.Start(); err != nil {
 		return Started{}, fmt.Errorf("launch the revision process: %w", err)
@@ -65,24 +79,24 @@ func (p *ProcessRuntime) Start(ctx context.Context, spec StartSpec) (Started, er
 
 // Ready reports whether the revision process has exited, with its status.
 // A process the runtime no longer tracks reports exited.
-func (p *ProcessRuntime) Ready(ctx context.Context, container string) error {
+func (p *ProcessRuntime) Ready(_ context.Context, container string) error {
 	run, ok := p.lookup(container)
 	if !ok {
-		return fmt.Errorf("the revision process is gone")
+		return errProcessGone
 	}
 	state, waitErr := run.Process.Wait()
 	switch {
 	case waitErr == nil && !state.Success():
-		return fmt.Errorf("the revision process exited: %s", state.String())
+		return fmt.Errorf("%w: %s", errProcessExited, state.String())
 	case waitErr != nil:
-		return fmt.Errorf("the revision process is gone: %w", waitErr)
+		return fmt.Errorf("%w: %w", errProcessGone, waitErr)
 	}
 	return nil
 }
 
 // Stop terminates the revision process. A process the runtime no longer
 // tracks is success.
-func (p *ProcessRuntime) Stop(ctx context.Context, container string) error {
+func (p *ProcessRuntime) Stop(_ context.Context, container string) error {
 	run, ok := p.lookup(container)
 	if !ok {
 		return nil

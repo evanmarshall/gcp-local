@@ -68,7 +68,7 @@ var StorageRoutes = []Route{
 	{"storage.objects.update", "PUT", "/storage/v1/b/{bucket}/o/{object}", true, false},
 	{"storage.objects.move", "POST", "/storage/v1/b/{bucket}/o/{sourceObject}/moveTo/o/{destinationObject}", false, false},
 	{"storage.objects.list", "GET", "/storage/v1/b/{bucket}/o", false, false},
-	{"storage.objects.insert", "POST", "/storage/v1/b/{bucket}/o", true, false},
+	{"storage.objects.insert", "POST", "/storage/v1/b/{bucket}/o", false, true},
 	{"storage.buckets.operations.advanceRelocateBucket", "POST", "/storage/v1/b/{bucket}/operations/{operationId}/advanceRelocateBucket", true, false},
 	{"storage.buckets.operations.cancel", "POST", "/storage/v1/b/{bucket}/operations/{operationId}/cancel", false, false},
 	{"storage.buckets.operations.get", "GET", "/storage/v1/b/{bucket}/operations/{operationId}", false, false},

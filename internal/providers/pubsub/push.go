@@ -301,6 +301,7 @@ func (p *Provider) pushMessage(ctx context.Context, call gateway.Call, config *p
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 	_ = response.Body.Close()
+
 	switch response.StatusCode {
 	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
 		return true

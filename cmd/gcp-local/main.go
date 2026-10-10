@@ -131,9 +131,13 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 // bridge gateway address so containers can reach it, and returns the dialable
 // host:port.
 func workloadMetadataBind(handler http.Handler) (string, func(), error) {
+	// Container revisions reach the handler through the Docker bridge. The
+	// dockerless process runtime reaches loopback directly, so without a
+	// bridge the handler binds loopback; the exposure is the local user
+	// session, which is the restricted-guest trust boundary anyway.
 	bind := "172.17.0.1"
 	if !bridgeExists(bind) {
-		return "", nil, errNoMetadataBridge
+		bind = "127.0.0.1"
 	}
 	var listen net.ListenConfig
 	listener, err := listen.Listen(context.Background(), "tcp", net.JoinHostPort(bind, "0"))
@@ -148,9 +152,6 @@ func workloadMetadataBind(handler http.Handler) (string, func(), error) {
 	}()
 	return listener.Addr().String(), func() { _ = server.Close(); <-done }, nil
 }
-
-// errNoMetadataBridge reports a host without a Docker bridge to bind on.
-var errNoMetadataBridge = errors.New("no Docker bridge interface for the metadata listener")
 
 // bridgeExists reports whether the interface owns the given address.
 func bridgeExists(address string) bool {
@@ -346,9 +347,11 @@ func assembleRun(ctx context.Context, options serveOptions, selected map[string]
 	if identities != nil {
 		// Workload identity: each revision's configured service account gets
 		// its own metadata handler bound on the container-reachable bridge
-		// address. Without an identity config the feature stays off.
+		// address. Without an identity config the feature stays off. The same
+		// key set verifies the invocation audience tokens.
 		config.Metadata = identities.Metadata
 		config.MetadataBind = workloadMetadataBind
+		config.Tokens = identities.IDTokens
 	}
 	provider, err := runprovider.New(ctx, config, registry, server.Backends, index, engine, runtime)
 	if err != nil {
@@ -392,6 +395,9 @@ func main() {
 	os.Exit(code)
 }
 
+// errRunProcessShape rejects a malformed run-process flag value.
+var errRunProcessShape = errors.New("run-process expects image=command")
+
 // processMap collects repeatable image=command flags.
 type processMap struct {
 	target *map[string]string
@@ -407,7 +413,7 @@ func (m processMap) String() string {
 func (m processMap) Set(value string) error {
 	image, command, found := strings.Cut(value, "=")
 	if !found || image == "" || command == "" {
-		return errors.New("run-process expects image=command")
+		return errRunProcessShape
 	}
 	if *m.target == nil {
 		*m.target = map[string]string{}
