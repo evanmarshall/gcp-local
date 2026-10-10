@@ -137,7 +137,7 @@ def object_lifecycle(clients: list, principals: list[dict[str, str]]) -> None:
     policy = bucket.get_iam_policy(requested_policy_version=1)
     policy.bindings.clear()
     bucket.set_iam_policy(policy)
-    expect_denied(lambda: blob.delete())
+    expect_denied(blob.delete)
     admin_blob = bucket.blob(blob.name)
     assert admin_blob.download_as_bytes() == b"replacement"
     admin_blob.delete(retry=None)
