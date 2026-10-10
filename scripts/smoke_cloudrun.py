@@ -8,6 +8,7 @@ offline validation suite.
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -62,8 +63,8 @@ def await_operation(name: str, deadline: float = 90.0) -> dict[str, Any]:
     raise AssertionError("Operation did not finish: " + name + " last=" + json.dumps(last))
 
 
-def build_image(tag: str) -> str:
-    """Build the acceptance image: a tiny HTTP server echoing K_SERVICE."""
+def build_image(tag: str, *, dockerless: bool) -> tuple[str, str]:
+    """Build the acceptance image, or stage its server for the process runtime."""
     context = Path(tempfile.mkdtemp())
     (context / "server.py").write_text(
         "import os\nfrom http.server import BaseHTTPRequestHandler, HTTPServer\n\n"
@@ -84,11 +85,15 @@ def build_image(tag: str) -> str:
         "EXPOSE 8080\n"
         'ENTRYPOINT ["python3", "/server.py"]\n'
     )
+    command = "python3 " + str(context / "server.py")
+    if dockerless:
+        # The process runtime runs the same server file directly.
+        return tag, command
     build = subprocess.run(
         [DOCKER, "build", "-t", tag, str(context)], check=True, capture_output=True
     )
     assert build.returncode == 0
-    return tag
+    return tag, ""
 
 
 def write_configs(project: str = "demo-run", extra_roles: list[str] | None = None,
@@ -221,7 +226,7 @@ def create_and_grant() -> None:
     assert "served by acceptance" in body, body
 
 
-def update_and_delete(before: str) -> None:
+def update_and_delete(before: str, *, dockerless: bool) -> None:
     """Update the service to a new revision, then delete it and require cleanup."""
     status, operation = request(
         "PATCH",
@@ -241,8 +246,16 @@ def update_and_delete(before: str) -> None:
 
     status, _ = request("DELETE", SCOPE + "/services/acceptance")
     assert status == 200
-    after = subprocess.check_output([DOCKER, "ps", "-aq"], text=True)
-    assert after == before, "Cloud Run delete left a container behind"
+    if not dockerless:
+        after = subprocess.check_output([DOCKER, "ps", "-aq"], text=True)
+        assert after == before, "Cloud Run delete left a container behind"
+
+
+def containers_before(*, dockerless: bool) -> str:
+    """Snapshot the container list for the leak check; empty when dockerless."""
+    if dockerless:
+        return ""
+    return subprocess.check_output([DOCKER, "ps", "-aq"], text=True)
 
 
 def main() -> int:
@@ -257,13 +270,15 @@ def main() -> int:
         check=True,
         capture_output=True,
     )
-    build_image(IMAGE)
-    before = subprocess.check_output([DOCKER, "ps", "-aq"], text=True)
+    dockerless = shutil.which(DOCKER) is None
+    image, process_command = build_image(IMAGE, dockerless=dockerless)
+    extra = () if not dockerless else ("--run-process", image + "=" + process_command)
+    before = containers_before(dockerless=dockerless)
     iam_path = write_configs()
-    core = start_core(binary, iam_path)
+    core = start_core(binary, iam_path, extra_flags=extra)
     try:
         create_and_grant()
-        update_and_delete(before)
+        update_and_delete(before, dockerless=dockerless)
     finally:
         core.terminate()
         core.wait(timeout=10)
