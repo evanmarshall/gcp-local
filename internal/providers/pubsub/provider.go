@@ -169,19 +169,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Pub/Sub request")
 	}
-	if call.Method != publisher+"ListTopics" && call.Method != subscriber+"ListSubscriptions" {
-		project, err := resourceName(call.Resource, "")
-		if err != nil {
-			return nil, err
-		}
-		if project != call.Project {
-			return nil, invalid("Resource project mismatch")
-		}
-	}
-	if err := validate(request); err != nil {
-		return nil, err
-	}
-	if err := p.authorize(call, request); err != nil {
+	if err := p.preflight(call, request); err != nil {
 		return nil, err
 	}
 	var response proto.Message
@@ -198,69 +186,121 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		if err != nil {
 			return err
 		}
-		creating := call.Method == publisher+"CreateTopic" || call.Method == subscriber+"CreateSubscription"
-		deleting := call.Method == publisher+"DeleteTopic" || call.Method == subscriber+"DeleteSubscription"
+		creating, deleting := mutationKind(call.Method)
 		if creating {
 			if _, found := p.index.Get(canonical(call.Resource)); found {
 				return status.Error(codes.AlreadyExists, "Pub/Sub resource already exists")
 			}
 		}
-		forwarded := request
-		var push *pb.PushConfig
-		if subscription, ok := request.(*pb.Subscription); ok && subscription.GetPushConfig() != nil {
-			if p.pushCount(scopeOf(call)) >= 32 {
-				return status.Error(codes.ResourceExhausted, "Local limit is 32 push subscriptions per project")
-			}
-			push, err = cloneMessage(subscription.GetPushConfig())
-			if err != nil {
-				return err
-			}
-			forwardedSubscription, cloneErr := cloneMessage(subscription)
-			if cloneErr != nil {
-				return cloneErr
-			}
-			forwardedSubscription.PushConfig = nil // The unauthenticated emulator must never make HTTP deliveries.
-			forwarded = forwardedSubscription
+		forwarded, push, splitErr := p.splitPushConfig(call, request)
+		if splitErr != nil {
+			return splitErr
 		}
 		response, err = invoke(session, b, call.Method, forwarded)
 		if err == nil && call.Method == subscriber+"Pull" {
 			err = p.authorize(call, request)
 		}
-		if creating || deleting {
+		if !creating && !deleting {
 			if err == nil {
-				if creating {
-					if err := p.publish(call); err != nil {
-						return err
-					}
-					if push != nil {
-						if err := p.startPush(session, call, push); err != nil {
-							return err
-						}
-					}
-					p.restorePush(response)
-					return nil
-				}
-				return p.forget(call)
+				p.restorePush(response)
 			}
-			if ambiguous(err) {
-				p.reconcile(session, b, call)
-				if creating && push != nil {
-					_, failed := p.poisoned.Load(scopeOf(call))
-					if _, found := p.index.Get(canonical(call.Resource)); found && !failed {
-						if err := p.startPush(session, call, push); err != nil {
-							return err
-						}
-					}
-				}
-			}
+			return err
 		}
-		if err == nil {
-			p.restorePush(response)
-		}
-		return err
+		return p.settleMutation(session, b, call, response, push, creating, err)
 	})
 	return response, err
 }
+
+// preflight applies the checks that must run before any backend session opens.
+func (p *Provider) preflight(call gateway.Call, request proto.Message) error {
+	if call.Method != publisher+"ListTopics" && call.Method != subscriber+"ListSubscriptions" {
+		project, err := resourceName(call.Resource, "")
+		if err != nil {
+			return err
+		}
+		if project != call.Project {
+			return invalid("Resource project mismatch")
+		}
+	}
+	if err := validate(request); err != nil {
+		return err
+	}
+	return p.authorize(call, request)
+}
+
+// mutationKind classifies a method by whether it changes index-owned state.
+func mutationKind(method string) (bool, bool) {
+	creating := method == publisher+"CreateTopic" || method == subscriber+"CreateSubscription"
+	deleting := method == publisher+"DeleteTopic" || method == subscriber+"DeleteSubscription"
+	return creating, deleting
+}
+
+// splitPushConfig strips the push configuration from the forwarded request: the
+// unauthenticated emulator must never make HTTP deliveries itself. The provider
+// owns the push worker and mints its identity.
+func (p *Provider) splitPushConfig(call gateway.Call, request proto.Message) (proto.Message, *pb.PushConfig, error) {
+	subscription, ok := request.(*pb.Subscription)
+	if !ok || subscription.GetPushConfig() == nil {
+		return request, nil, nil
+	}
+	if p.pushCount(scopeOf(call)) >= maxPushSubscriptions {
+		return nil, nil, status.Error(codes.ResourceExhausted, "Local limit is 32 push subscriptions per project")
+	}
+	push, err := cloneMessage(subscription.GetPushConfig())
+	if err != nil {
+		return nil, nil, err
+	}
+	forwarded, err := cloneMessage(subscription)
+	if err != nil {
+		return nil, nil, err
+	}
+	forwarded.PushConfig = nil
+	return forwarded, push, nil
+}
+
+// settleMutation reconciles the provider index and push worker after a create or
+// delete. An ambiguous backend outcome is resolved by reading the resource back
+// rather than assuming success.
+func (p *Provider) settleMutation(session context.Context, b driver, call gateway.Call, response proto.Message, push *pb.PushConfig, creating bool, invokeErr error) error {
+	if invokeErr == nil {
+		if !creating {
+			return p.forget(call)
+		}
+		if err := p.publish(call); err != nil {
+			return err
+		}
+		if push != nil {
+			if err := p.startPush(session, call, push); err != nil {
+				return err
+			}
+		}
+		p.restorePush(response)
+		return nil
+	}
+	if !ambiguous(invokeErr) {
+		return invokeErr
+	}
+	p.reconcile(session, b, call)
+	if creating && push != nil && p.mutationLanded(call) {
+		if err := p.startPush(session, call, push); err != nil {
+			return err
+		}
+	}
+	return invokeErr
+}
+
+// mutationLanded reports whether an ambiguous create is confirmed in the index
+// and this scope has not been marked poisoned by a previous failure.
+func (p *Provider) mutationLanded(call gateway.Call) bool {
+	if _, failed := p.poisoned.Load(scopeOf(call)); failed {
+		return false
+	}
+	_, found := p.index.Get(canonical(call.Resource))
+	return found
+}
+
+// maxPushSubscriptions bounds the push workers one project may hold.
+const maxPushSubscriptions = 32
 
 func invoke(ctx context.Context, b driver, method string, request proto.Message) (proto.Message, error) {
 	for _, descriptor := range generated.PubSubMethods {

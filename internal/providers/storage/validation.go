@@ -31,10 +31,11 @@ type uploadRequest struct {
 
 // Query parameter names that appear in more than one option list.
 const (
-	queryProject           = "project"
-	queryIfGenerationMatch = "ifGenerationMatch"
-	queryIfMetaMatch       = "ifMetagenerationMatch"
-	queryIfMetaNotMatch    = "ifMetagenerationNotMatch"
+	queryProject              = "project"
+	queryIfGenerationMatch    = "ifGenerationMatch"
+	queryIfGenerationNotMatch = "ifGenerationNotMatch"
+	queryIfMetaMatch          = "ifMetagenerationMatch"
+	queryIfMetaNotMatch       = "ifMetagenerationNotMatch"
 )
 
 // queryOptions lists the documented query parameters each method may carry.
@@ -43,9 +44,9 @@ var queryOptions = map[string][]string{
 	MethodBucketsList:         {queryProject, "prefix", "maxResults", "pageToken"},
 	MethodBucketsGetIamPolicy: {"optionsRequestedPolicyVersion"},
 	MethodBucketsPatch:        {queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsInsert:       {"uploadType", "name", queryIfGenerationMatch, "ifGenerationNotMatch", queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsGet:          {"generation", queryIfGenerationMatch, "ifGenerationNotMatch", queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsDelete:       {"generation", queryIfGenerationMatch, "ifGenerationNotMatch", queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsInsert:       {"uploadType", "name", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsGet:          {"generation", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsDelete:       {"generation", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsList:         {"prefix", "delimiter", "maxResults", "pageToken", "startOffset", "endOffset", "versions"},
 }
 
