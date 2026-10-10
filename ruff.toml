@@ -30,9 +30,11 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-# Tests assert aggressively, spawn controlled subprocesses, and use fixtures
-# with framework-mandated signatures.
-"tests/**" = ["ANN", "S101", "SLF001", "T20", "S603"]
+# Tests assert aggressively, spawn controlled subprocesses, use fixtures
+# with framework-mandated signatures, and name tests to describe intent:
+# a docstring would restate the test name. INP001 is pytest's package-free
+# rootdir convention; PT009/PT018 keep unittest-style and compound assertions.
+"tests/**" = ["ANN", "D", "INP001", "S101", "SLF001", "T20", "S603", "PT009", "PT018"]
 "**/testdata/**" = ["ANN", "D", "S", "T20", "INP"]
 # The skill scripts and the validation harness are executed as standalone CLIs.
 # Smoke scripts assert their own invariants: the assertion failure is the signal.

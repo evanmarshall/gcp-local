@@ -1,7 +1,7 @@
 import json
 import runpy
 from pathlib import Path
-from types import SimpleNamespace as NS
+from types import SimpleNamespace as ns  # noqa: N813 -- short alias keeps fake constructors readable
 
 import pytest
 
@@ -18,12 +18,16 @@ from gcp_validation.pubsub import (
 )
 
 
+def _unused(*args: object) -> None:
+    """Deliberately ignore matcher callbacks."""
+
+
 class SyntheticClient:
     """Fixture-failure tests only; no service or cloud fidelity evidence."""
 
     target = Target.select("local", project="project-a", endpoint="http://127.0.0.1:4567")
     sandbox = None
-    members = {"allowed": "serviceAccount:allowed@project-a.iam.gserviceaccount.com"}
+    members = {"allowed": "serviceAccount:allowed@project-a.iam.gserviceaccount.com"}  # noqa: RUF012 -- class-level constant
 
     def __init__(self):
         self.resources, self.calls, self.messages = {}, [], []
@@ -32,50 +36,82 @@ class SyntheticClient:
     def verify_project(self):
         pass
 
-    def call(self, actor, kind, method, request, timeout=10):
+    def call(self, actor, kind, method, request, timeout=10):  # noqa: ARG002 -- parity with the real client
         self.calls.append((actor, kind, method, request))
         if actor == "denied":
-            if self.bad_denied_write and method == "publish":
-                self.messages.append(
-                    NS(ack_id="bad-ack", message=NS(message_id="bad-id", **request["messages"][0]))
-                )
-            raise RPCFailure("PERMISSION_DENIED")
-        if method.startswith("list_"):
-            return NS(
-                **{kind + "s": [value for (k, _), value in self.resources.items() if k == kind]},
-                next_page_token="",
-            )
-        if method.startswith("create_"):
-            value = NS(**request)
-            self.resources[kind, request["name"]] = value
-            if self.ambiguous_create:
-                raise RPCFailure("DEADLINE_EXCEEDED")
-            return value
-        if method.startswith("get_") and method != "get_iam_policy":
-            try:
-                return self.resources[kind, request[kind]]
-            except KeyError:
-                raise RPCFailure("NOT_FOUND") from None
-        if method.startswith("delete_"):
-            if self.fail_delete:
-                raise RPCFailure("UNAVAILABLE")
-            del self.resources[kind, request[kind]]
-            return NS()
-        if method == "get_iam_policy":
-            return NS(bindings=[], etag=b"local-etag")
-        if method == "publish":
+            return self.denied(method, request)
+        return self.dispatch(kind, method, request)
+
+    def denied(self, method, request):
+        """Reject as the real service would, keeping the poisoned message first."""
+        if self.bad_denied_write and method == "publish":
             self.messages.append(
-                NS(ack_id="ack", message=NS(message_id="msg-1", **request["messages"][0]))
+                ns(ack_id="bad-ack", message=ns(message_id="bad-id", **request["messages"][0]))
             )
-            return NS(message_ids=["msg-1"])
+        raise RPCFailure("PERMISSION_DENIED")
+
+    def dispatch(self, kind, method, request):
+        """Answer the method families of the generated Pub/Sub client."""
+        if method.startswith("list_"):
+            return self.list(kind)
+        if method.startswith("create_"):
+            return self.create(kind, request)
+        if method.startswith("get_") and method != "get_iam_policy":
+            return self.get(kind, request)
+        if method.startswith("delete_"):
+            return self.delete(kind, request)
+        if method == "publish":
+            return self.publish(request)
+        return self.default(method)
+
+    def create(self, kind, request):
+        """Store the resource, maybe failing like an ambiguous commit."""
+        value = ns(**request)
+        self.resources[kind, request["name"]] = value
+        if self.ambiguous_create:
+            raise RPCFailure("DEADLINE_EXCEEDED")
+        return value
+
+    def get(self, kind, request):
+        """Return the stored resource or the service's not-found error."""
+        try:
+            return self.resources[kind, request[kind]]
+        except KeyError:
+            raise RPCFailure("NOT_FOUND") from None
+
+    def list(self, kind):
+        """Page the resources of one kind."""
+        return ns(
+            **{kind + "s": [value for (k, _), value in self.resources.items() if k == kind]},
+            next_page_token="",
+        )
+
+    def delete(self, kind, request):
+        """Delete or fail with the service's transient error."""
+        if self.fail_delete:
+            raise RPCFailure("UNAVAILABLE")
+        del self.resources[kind, request[kind]]
+        return ns()
+
+    def publish(self, request):
+        """Record the message and echo its id like the real backend."""
+        self.messages.append(
+            ns(ack_id="ack", message=ns(message_id="msg-1", **request["messages"][0]))
+        )
+        return ns(message_ids=["msg-1"])
+
+    def default(self, method):
+        """Drain queued messages on pull; answer everything else with an empty result."""
         if method == "pull":
             values, self.messages = self.messages, []
-            return NS(received_messages=values)
-        return NS()
+            return ns(received_messages=values)
+        if method == "get_iam_policy":
+            return ns(bindings=[], etag=b"local-etag")
+        return ns()
 
 
 def test_separate_pubsub_approval_is_required(tmp_path):
-    sandbox = NS(project="project-a", project_number="123456")
+    sandbox = ns(project="project-a", project_number="123456")
     with pytest.raises(ValueError, match="separate explicitly approved"):
         LiveScope.load(None, sandbox)
     value = {
@@ -98,11 +134,11 @@ def test_separate_pubsub_approval_is_required(tmp_path):
     assert LiveScope.load(path, sandbox).project == sandbox.project
     value["services"] = ["storage"]
     path.write_text(json.dumps(value))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must match the approved project"):
         LiveScope.load(path, sandbox)
     value["services"], value["project"] = ["pubsub"], "foreign-project"
     path.write_text(json.dumps(value))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must match the approved project"):
         LiveScope.load(path, sandbox)
 
 
@@ -120,10 +156,10 @@ def test_planner_keeps_cloud_scope_unapproved_and_grants_separate():
     plan = runpy.run_path(str(Path(__file__).resolve().parents[2] / "scripts/plan_pubsub.py"))[
         "plan"
     ]
-    profile = NS(
+    profile = ns(
         project="project-a",
         project_number="123456",
-        identities={"fixture": NS(email="fixture@project-a.iam.gserviceaccount.com")},
+        identities={"fixture": ns(email="fixture@project-a.iam.gserviceaccount.com")},
     )
     result = plan(profile, "owner@example.com")
     assert result["scope"]["approved"] is False
@@ -158,7 +194,7 @@ def test_owned_lifecycle_and_scoped_grants(tmp_path):
     observations = {}
     try:
         fixture.setup()
-        run_scenario(fixture, NS(match=lambda key, value: observations.setdefault(key, value)))
+        run_scenario(fixture, ns(match=observations.setdefault))
     finally:
         fixture.cleanup()
     assert client.resources == {}
@@ -183,7 +219,7 @@ def test_scenario_and_cleanup_reject_corruption(tmp_path, corruption):
     if corruption == "denied_write":
         client.bad_denied_write = True
         with pytest.raises(AssertionError):
-            run_scenario(fixture, NS(match=lambda *args: None))
+            run_scenario(fixture, ns(match=_unused))
         fixture.cleanup()
     else:
         value = client.resources["subscription", fixture.subscription]
@@ -241,7 +277,7 @@ def test_bounds_project_lock_and_occupied_sandbox(tmp_path):
         first.publish(b"small")
     assert len(client.calls) == before
     first.cleanup()
-    client.resources["topic", "foreign"] = NS(name="foreign")
+    client.resources["topic", "foreign"] = ns(name="foreign")
     third = PubSubFixture(client, tmp_path)
     with pytest.raises(Inconclusive, match="occupied"):
         third.setup()
