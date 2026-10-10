@@ -174,7 +174,10 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	var response *gateway.RESTResponse
 	err = p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(ctx context.Context, driver backend.Backend) error {
 		call.Context = ctx
-		b := driver.(*memoryBackend)
+		b, backendErr := backendOf(driver)
+		if backendErr != nil {
+			return backendErr
+		}
 		if !projectMethod {
 			resource, ok := p.index.Get(BucketResource(bucket))
 			if !ok || resource.Scope != scope {
@@ -191,7 +194,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 			}
 			switch result.Status {
 			case 200:
-				current = result.JSON.(map[string]any)
+				payload, payloadErr := jsonObject(result.JSON)
+				if payloadErr != nil {
+					return payloadErr
+				}
+				current = payload
 				features[objectExistsCondition] = true
 			case 404:
 				features[objectExistsCondition] = false
@@ -347,18 +354,23 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 			return nil, err
 		}
 		if response.Status == 200 {
-			body := response.JSON.(map[string]any)
-			if items, ok := body["items"].([]any); ok {
-				for _, item := range items {
-					p.bucketMetadata(scope, item.(map[string]any))
-				}
+			body, bodyErr := jsonObject(response.JSON)
+			if bodyErr != nil {
+				return nil, bodyErr
+			}
+			for _, item := range itemList(body["items"]) {
+				p.bucketMetadata(scope, item)
 			}
 		}
 		return response, nil
 	case MethodBucketsGet:
 		response, err := b.forward(ctx, "GET", path, r.Query, nil, nil)
 		if err == nil && response.Status == 200 {
-			p.bucketMetadata(scope, response.JSON.(map[string]any))
+			body, bodyErr := jsonObject(response.JSON)
+			if bodyErr != nil {
+				return nil, bodyErr
+			}
+			p.bucketMetadata(scope, body)
 		}
 		return response, err
 	case MethodBucketsDelete:
@@ -387,7 +399,11 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.C
 		if response.Status != 200 {
 			return response, nil
 		}
-		current = response.JSON.(map[string]any)
+		body, bodyErr := jsonObject(response.JSON)
+		if bodyErr != nil {
+			return nil, bodyErr
+		}
+		current = body
 	}
 	if response, err := preconditions(r, current, call.Method); response != nil || err != nil {
 		return response, err

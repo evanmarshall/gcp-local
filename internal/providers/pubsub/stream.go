@@ -61,7 +61,11 @@ func (p *Provider) stream(call gateway.Call, downstream gateway.Stream) error {
 		}
 		ctx, cancel := context.WithCancel(metadata.NewOutgoingContext(ctx, metadata.MD{}))
 		defer cancel()
-		upstream, err := pb.NewSubscriberClient(active.(driver).client()).StreamingPull(ctx)
+		b, err := driverOf(active)
+		if err != nil {
+			return err
+		}
+		upstream, err := pb.NewSubscriberClient(b.client()).StreamingPull(ctx)
 		if err != nil {
 			return fmt.Errorf("open the upstream stream: %w", err)
 		}

@@ -194,7 +194,10 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		if err := p.authorize(call, request); err != nil {
 			return err
 		}
-		b := active.(driver)
+		b, err := driverOf(active)
+		if err != nil {
+			return err
+		}
 		creating := call.Method == publisher+"CreateTopic" || call.Method == subscriber+"CreateSubscription"
 		deleting := call.Method == publisher+"DeleteTopic" || call.Method == subscriber+"DeleteSubscription"
 		if creating {
@@ -202,15 +205,20 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 				return status.Error(codes.AlreadyExists, "Pub/Sub resource already exists")
 			}
 		}
-		var err error
 		forwarded := request
 		var push *pb.PushConfig
 		if subscription, ok := request.(*pb.Subscription); ok && subscription.GetPushConfig() != nil {
 			if p.pushCount(scopeOf(call)) >= 32 {
 				return status.Error(codes.ResourceExhausted, "Local limit is 32 push subscriptions per project")
 			}
-			push = proto.Clone(subscription.GetPushConfig()).(*pb.PushConfig)
-			copy := proto.Clone(subscription).(*pb.Subscription)
+			push, err = cloneMessage(subscription.GetPushConfig())
+			if err != nil {
+				return err
+			}
+			copy, cloneErr := cloneMessage(subscription)
+			if cloneErr != nil {
+				return cloneErr
+			}
 			copy.PushConfig = nil // The unauthenticated emulator must never make HTTP deliveries.
 			forwarded = copy
 		}
@@ -225,7 +233,9 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 						return err
 					}
 					if push != nil {
-						p.startPush(call, push)
+						if err := p.startPush(call, push); err != nil {
+							return err
+						}
 					}
 					p.restorePush(response)
 					return nil
@@ -237,7 +247,9 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 				if creating && push != nil {
 					_, failed := p.poisoned.Load(scopeOf(call))
 					if _, found := p.index.Get(canonical(call.Resource)); found && !failed {
-						p.startPush(call, push)
+						if err := p.startPush(call, push); err != nil {
+							return err
+						}
 					}
 				}
 			}

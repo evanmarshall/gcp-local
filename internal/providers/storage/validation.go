@@ -298,7 +298,11 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 		}
 		return wireError(409, "conflict", "Bucket name is already owned"), nil
 	}
-	p.bucketMetadata(scope, response.JSON.(map[string]any))
+	body, bodyErr := jsonObject(response.JSON)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
+	p.bucketMetadata(scope, body)
 	return response, nil
 }
 func (p *Provider) bucketMetadata(scope state.Scope, value map[string]any) {

@@ -80,34 +80,48 @@ func (p *Provider) authorizePush(call gateway.Call, config *pb.PushConfig) error
 func (p *Provider) pushCount(scope state.Scope) int {
 	count := 0
 	p.pushes.Range(func(_, value any) bool {
-		if value.(*pushSubscription).scope == scope {
+		if worker, ok := pushWorker(value); ok && worker.scope == scope {
 			count++
 		}
 		return true
 	})
 	return count
 }
-func (p *Provider) startPush(call gateway.Call, config *pb.PushConfig) {
+func (p *Provider) startPush(call gateway.Call, config *pb.PushConfig) error {
+	cloned, err := cloneMessage(config)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	worker := &pushSubscription{scope: scopeOf(call), config: proto.Clone(config).(*pb.PushConfig), cancel: cancel, done: make(chan struct{})}
+	worker := &pushSubscription{scope: scopeOf(call), config: cloned, cancel: cancel, done: make(chan struct{})}
 	p.pushes.Store(canonical(call.Resource), worker)
 	go func() {
 		defer close(worker.done)
 		defer cancel()
 		// The subscription was authorized before creation. The worker owns its
 		// queue; it mints under the service agent, never the creator or an admin.
+		// A session failure ends this worker, so the error is not actionable here.
 		_ = p.manager.Session(ctx, keyOf(call), func(ctx context.Context, active backend.Backend) error {
-			p.deliver(ctx, active.(driver), call, worker.config)
+			b, err := driverOf(active)
+			if err != nil {
+				return err
+			}
+			p.deliver(ctx, b, call, worker.config)
 			return ctx.Err()
 		})
 	}()
+	return nil
 }
 func (p *Provider) stopPush(name string) error {
 	value, ok := p.pushes.Load(name)
 	if !ok {
 		return nil
 	}
-	worker := value.(*pushSubscription)
+	worker, ok := pushWorker(value)
+	if !ok {
+		p.pushes.Delete(name)
+		return nil
+	}
 	worker.cancel()
 	select {
 	case <-worker.done:
@@ -120,8 +134,13 @@ func (p *Provider) stopPush(name string) error {
 func (p *Provider) resetPush(scope state.Scope) error {
 	var result error
 	p.pushes.Range(func(key, value any) bool {
-		if value.(*pushSubscription).scope == scope {
-			result = p.stopPush(key.(string))
+		if worker, ok := pushWorker(value); ok && worker.scope == scope {
+			name, ok := key.(string)
+			if !ok {
+				result = errMessageType
+				return false
+			}
+			result = p.stopPush(name)
 		}
 		return result == nil
 	})
@@ -133,7 +152,9 @@ func (p *Provider) restorePush(response proto.Message) {
 			return
 		}
 		if value, ok := p.pushes.Load(canonical(subscription.GetName())); ok {
-			subscription.PushConfig = proto.Clone(value.(*pushSubscription).config).(*pb.PushConfig)
+			if worker, ok := pushWorker(value); ok {
+				subscription.PushConfig, _ = cloneMessage(worker.config)
+			}
 		}
 	}
 	switch response := response.(type) {
@@ -206,7 +227,14 @@ func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, con
 			}
 			continue
 		}
-		messages := result.(*pb.PullResponse).GetReceivedMessages()
+		pulled, ok := result.(*pb.PullResponse)
+		if !ok {
+			if !pause() {
+				return
+			}
+			continue
+		}
+		messages := pulled.GetReceivedMessages()
 		if len(messages) == 0 {
 			if !pause() {
 				return

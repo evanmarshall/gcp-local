@@ -27,7 +27,10 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	if err != nil || response.Status != 200 {
 		return response, err
 	}
-	current := response.JSON.(map[string]any)
+	current, bodyErr := jsonObject(response.JSON)
+	if bodyErr != nil {
+		return nil, bodyErr
+	}
 	p.bucketMetadata(scope, current)
 	if failed, err := preconditions(r, current, "storage.buckets.patch"); failed != nil || err != nil {
 		return failed, err
@@ -59,9 +62,10 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 		}
 		metadata["labels"] = labels
 	}
-	generation, _ := strconv.ParseUint(current["metageneration"].(string), 10, 64)
+	generationText, _ := current["metageneration"].(string)
+	generation, _ := strconv.ParseUint(generationText, 10, 64)
 	metadata["metageneration"] = strconv.FormatUint(generation+1, 10)
-	metadata["etag"] = objectETag(name, metadata["metageneration"].(string))
+	metadata["etag"] = objectETag(name, strconv.FormatUint(generation+1, 10))
 	metadata["updated"] = time.Now().UTC().Format(time.RFC3339Nano)
 	encoded, _ := json.Marshal(metadata)
 	if err := p.catalog.UpdateMetadata(scope, name, string(encoded)); err != nil {

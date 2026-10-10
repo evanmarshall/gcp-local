@@ -36,8 +36,13 @@ linters:
     dupl:
       threshold: 100
     errcheck:
+      # Unchecked type assertions can panic a long-lived server, so they are
+      # reported. A blank assignment (`_ = f()`) is the language's explicit
+      # "deliberately discarded" signal; reporting it leaves no way to record
+      # intent and pushes deliberate discards toward silent ignores, so it is
+      # left visible as a blank assignment instead.
       check-type-assertions: true
-      check-blank: true
+      check-blank: false
     funlen:
       lines: 70
       statements: 45

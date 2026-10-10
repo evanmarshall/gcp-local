@@ -121,7 +121,10 @@ type RPC struct { Method, ResourceField, ResourcePattern string; Streaming bool;
 			input, output := goType(m.Input()), goType(m.Output())
 			field, pattern := "", ""
 			if proto.HasExtension(m.Options(), annotations.E_Http) {
-				rule := proto.GetExtension(m.Options(), annotations.E_Http).(*annotations.HttpRule)
+				rule, ok := proto.GetExtension(m.Options(), annotations.E_Http).(*annotations.HttpRule)
+				if !ok {
+					panic("method " + methodName + " has a non-HTTP annotation")
+				}
 				path := rule.GetGet() + rule.GetPost() + rule.GetPut() + rule.GetPatch() + rule.GetDelete()
 				if match := resourceVariable.FindStringSubmatch(path); match != nil {
 					field, pattern = match[1], match[2]
