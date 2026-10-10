@@ -32,5 +32,5 @@ child issue.
 
 ## Explicit gaps
 
-App Engine targets, rate-limit updates, and recorded dispatch/retry scenarios
-are gaps; no "supported" claim without a recording.
+App Engine targets and recorded dispatch/retry scenarios are gaps; no
+"supported" claim without a recording.
