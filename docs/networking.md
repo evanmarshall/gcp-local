@@ -25,7 +25,10 @@ a cloud-fidelity claim (issue #16 tracks the recording work).
 
 Networks carry peerings (addPeering/removePeering). The reachability analyzer
 resolves cross-network flows through a directed peering and records it in the
-trace; without a peering the flow reports unsupported.
+trace; without a peering the flow reports unsupported. Firewall evaluation
+covers both directions: ingress rules of the destination network and egress
+rules of the source network, merged in priority order; a term without ports
+matches every port of its protocol.
 
 ## Explicit gaps
 
