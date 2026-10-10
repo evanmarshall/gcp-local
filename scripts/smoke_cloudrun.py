@@ -194,9 +194,13 @@ def update_and_delete(before: str) -> None:
     assert status == 200, operation
     if "name" in operation and "template" not in operation:
         await_operation(operation["name"])
-    code, body = invoke(HOST)
-    assert code == 200, (code, body)
-    assert "served by acceptance" in body, body
+    end = time.time() + 30
+    while True:
+        code, body = invoke(HOST)
+        if code == 200 and "served by acceptance" in body:
+            break
+        assert time.time() < end, (code, body)
+        time.sleep(0.5)
 
     status, _ = request("DELETE", SCOPE + "/services/acceptance")
     assert status == 200
