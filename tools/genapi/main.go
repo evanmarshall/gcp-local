@@ -386,6 +386,7 @@ func cloudTasksRoutes(_ bool) []byte {
 	const (
 		verbGET    = "GET"
 		verbPOST   = "POST"
+		verbPATCH  = "PATCH"
 		verbDELETE = "DELETE"
 		base       = "/v2beta3/projects/{project}/locations/{location}"
 	)
@@ -397,7 +398,7 @@ func cloudTasksRoutes(_ bool) []byte {
 		{"cloudtasks.queues.create", verbPOST, base + "/queues", true, false},
 		{"cloudtasks.queues.list", verbGET, base + "/queues", false, false},
 		{"cloudtasks.queues.get", verbGET, base + "/queues/{queue}", false, false},
-		{"cloudtasks.queues.update", "PATCH", base + "/queues/{queue}", true, false},
+		{"cloudtasks.queues.update", verbPATCH, base + "/queues/{queue}", true, false},
 		{"cloudtasks.queues.delete", verbDELETE, base + "/queues/{queue}", false, false},
 		{"cloudtasks.queues.pause", verbPOST, base + "/queues/{queue}:pause", false, false},
 		{"cloudtasks.queues.resume", verbPOST, base + "/queues/{queue}:resume", false, false},
