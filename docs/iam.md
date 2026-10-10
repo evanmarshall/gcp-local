@@ -12,7 +12,7 @@ The first policy set supports unconditional version-1 allow bindings for exact u
 
 The engine stores each policy once, with its owning service/scope, returns copies, and checks supplied etags on replacement. Storage API handlers own authorization and wire-format validation around policy operations. Service reset removes that service's resource policies/coverage markers for the selected scope while retaining project/organization policy configuration. Persistence remains unsupported.
 
-Conditions, groups, custom roles, unpinned roles, and advanced deny/PAB/org-policy/VPC-SC evaluation are unsupported. `MarkUnsupported` retains known advanced configuration as a fail-closed marker; even an otherwise matching allow cannot bypass it. The absence of such a local marker models absence in this local configuration, not proof that a real project's policies are absent.
+Conditions (v3, CEL, fail-closed), deny rules (v3, deny-overrides-allow), and principal access boundary policies (service-agent bounds) are evaluated locally; they are local-modeled, not cloud-recorded. Groups, custom roles, and unpinned roles remain unsupported. `MarkUnsupported` retains known advanced configuration as a fail-closed marker; even an otherwise matching allow cannot bypass it. The absence of such a local marker models absence in this local configuration, not proof that a real project's policies are absent.
 
 ## Role snapshots
 
