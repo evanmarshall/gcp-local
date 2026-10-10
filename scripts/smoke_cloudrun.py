@@ -8,7 +8,6 @@ offline validation suite.
 
 import json
 import os
-import secrets
 import stat
 import subprocess
 import sys
@@ -93,15 +92,16 @@ def write_configs() -> Path:
     directory.chmod(stat.S_IRWXU)
     project = "demo-run"
     resource = "//cloudresourcemanager.googleapis.com/projects/" + project
-    principal = "serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"
     iam = {
         "resources": [{"name": resource, "service": "resourcemanager", "kind": "project",
                        "number": "000000000001",
                        "scope": {"project": project, "location": "global"}}],
-        "policies": {resource: {"bindings": [{"role": "roles/run.admin", "members": [principal]}]}},
-        "service_accounts": [{"project": project,
-                              "email": principal.split(":")[1],
-                              "unique_id": str(secrets.randbelow(10**15) + 10**15)}],
+        # The smoke drives the control plane without a local identity mount,
+        # so its fixture principal is allUsers; the invoker contract under test
+        # is enforced per service, not here.
+        "policies": {resource: {"bindings": [
+            {"role": "roles/run.admin", "members": ["allUsers"]},
+        ]}},
     }
     path = directory / "iam.json"
     path.write_text(json.dumps(iam))
