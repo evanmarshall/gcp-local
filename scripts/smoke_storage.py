@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -27,44 +28,150 @@ def private_json(path: Path, value: object) -> None:
     path.chmod(0o600)
 
 
+def write_identity_configs(directory: Path) -> list[dict[str, str]]:
+    """Write the synthetic identity and IAM configs and return the principals."""
+    principals = [
+        {
+            "subject": f"serviceAccount:{actor}@synthetic.iam.gserviceaccount.com",
+            "project": "synthetic",
+            "subject_token": secrets.token_urlsafe(40),
+        }
+        for actor in ("fixture", "allowed", "denied")
+    ]
+    private_json(directory / "identity.json", {"principals": principals})
+    project = "//cloudresourcemanager.googleapis.com/projects/synthetic"
+    private_json(
+        directory / "iam.json",
+        {
+            "resources": [
+                {
+                    "name": project,
+                    "service": "resourcemanager",
+                    "kind": "project",
+                    "number": "123456",
+                    "scope": {"project": "synthetic", "location": "global"},
+                }
+            ],
+            "policies": {
+                project: {
+                    "bindings": [
+                        {"role": "roles/storage.admin", "members": [principals[0]["subject"]]}
+                    ]
+                }
+            },
+        },
+    )
+    return principals
+
+
+def build_clients(
+    directory: Path,
+    principals: list[dict[str, str]],
+    endpoint: str,
+    transport_session: "requests.Session",
+) -> tuple[list, list, list]:
+    """Build one authenticated Storage client per principal over the local endpoint."""
+    clients, sessions = [], []
+    transport = Request(session=transport_session)
+    for principal in principals:
+        actor = principal["subject"].split(":")[1].split("@")[0]
+        subject = directory / (actor + ".txt")
+        subject.write_text(principal["subject_token"])
+        subject.chmod(0o600)
+        adc = directory / (actor + ".json")
+        private_json(
+            adc,
+            {
+                "type": "external_account",
+                "audience": "//gcp-local/identity",
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "token_url": endpoint + "/v1/token",
+                "credential_source": {"file": str(subject)},
+            },
+        )
+        with patch.dict(
+            os.environ,
+            {"GOOGLE_APPLICATION_CREDENTIALS": str(adc), "GOOGLE_CLOUD_PROJECT": "synthetic"},
+        ):
+            credentials, selected = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"], request=transport
+            )
+        assert selected == "synthetic"
+        session = AuthorizedSession(credentials, auth_request=transport)
+        session.trust_env = False
+        sessions.append(session)
+        clients.append(
+            storage.Client(
+                project=selected,
+                credentials=credentials,
+                _http=session,
+                client_options={"api_endpoint": endpoint},
+            )
+        )
+    return clients, sessions, [credentials]
+
+
+def object_lifecycle(clients: list, principals: list[dict[str, str]]) -> None:
+    """Exercise grant, write, replacement, precondition, and revocation."""
+    fixture, allowed, denied = clients
+    bucket = fixture.bucket("sdk-authenticated-bucket")
+    bucket.iam_configuration.uniform_bucket_level_access_enabled = True
+    bucket.iam_configuration.public_access_prevention = "enforced"
+    bucket.soft_delete_policy.retention_duration_seconds = 0
+    bucket = fixture.create_bucket(bucket, location="us-central1", retry=None)
+    policy = bucket.get_iam_policy(requested_policy_version=1)
+    policy.bindings.append(
+        {"role": "roles/storage.objectUser", "members": {principals[1]["subject"]}}
+    )
+    bucket.set_iam_policy(policy)
+    blob = allowed.bucket(bucket.name).blob("nested/name %?.txt")
+    blob.upload_from_string(b"original", if_generation_match=0, retry=None)
+    original_generation = blob.generation
+    assert blob.download_as_bytes() == b"original"
+    expect_denied(lambda: denied.bucket(bucket.name).blob(blob.name).upload_from_string(b"denied"))
+    blob.upload_from_string(b"replacement", if_generation_match=original_generation, retry=None)
+    assert blob.generation != original_generation
+    expect_precondition(
+        lambda: blob.upload_from_string(b"stale", if_generation_match=original_generation)
+    )
+    policy = bucket.get_iam_policy(requested_policy_version=1)
+    policy.bindings.clear()
+    bucket.set_iam_policy(policy)
+    expect_denied(lambda: blob.delete())
+    admin_blob = bucket.blob(blob.name)
+    assert admin_blob.download_as_bytes() == b"replacement"
+    admin_blob.delete(retry=None)
+    bucket.delete(retry=None)
+    assert list(fixture.list_buckets()) == []
+
+
+def expect_denied(action: Callable[[], object]) -> None:
+    """Require a Forbidden from the action."""
+    try:
+        action()
+    except Forbidden:
+        return
+    raise AssertionError("Denied action succeeded")
+
+
+def expect_precondition(action: Callable[[], object]) -> None:
+    """Require a PreconditionFailed from the action."""
+    try:
+        action()
+    except PreconditionFailed:
+        return
+    raise AssertionError("Stale precondition succeeded")
+
+
 def main() -> int:
     """Exercise the storage runner end to end against the local emulator."""
-    assert sys.platform == "linux" and os.environ.get("GCP_LOCAL_ISOLATED") == "1"
+    assert sys.platform == "linux"
+    assert os.environ.get("GCP_LOCAL_ISOLATED") == "1"
     assert {name for _, name in socket.if_nameindex()} == {"lo"}
     root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="gcp-local-storage-") as temporary:
         directory = Path(temporary)
-        principals = [
-            {
-                "subject": f"serviceAccount:{actor}@synthetic.iam.gserviceaccount.com",
-                "project": "synthetic",
-                "subject_token": secrets.token_urlsafe(40),
-            }
-            for actor in ("fixture", "allowed", "denied")
-        ]
-        private_json(directory / "identity.json", {"principals": principals})
-        project = "//cloudresourcemanager.googleapis.com/projects/synthetic"
-        private_json(
-            directory / "iam.json",
-            {
-                "resources": [
-                    {
-                        "name": project,
-                        "service": "resourcemanager",
-                        "kind": "project",
-                        "number": "123456",
-                        "scope": {"project": "synthetic", "location": "global"},
-                    }
-                ],
-                "policies": {
-                    project: {
-                        "bindings": [
-                            {"role": "roles/storage.admin", "members": [principals[0]["subject"]]}
-                        ]
-                    }
-                },
-            },
-        )
+        principals = write_identity_configs(directory)
         process = subprocess.Popen(
             [
                 str(root / "bin/gcp-local"),
@@ -85,7 +192,7 @@ def main() -> int:
         )
         lines, events = [], queue.Queue()
 
-        def logs():
+        def logs() -> None:
             for line in process.stdout:
                 lines.append(line)
                 events.put(line)
@@ -100,102 +207,26 @@ def main() -> int:
             origin = urlsplit(endpoint).netloc
 
             class LocalSession(requests.Session):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.trust_env = False
 
-                def request(self, method, url, **kwargs):
+                def request(self, method: str, url: str, **kwargs: object) -> "requests.Response":
                     parsed = urlsplit(url)
-                    assert parsed.scheme == "http" and parsed.netloc == origin
+                    assert parsed.scheme == "http"
+                    assert parsed.netloc == origin
                     kwargs["allow_redirects"] = False
                     kwargs.setdefault("timeout", 5)
                     return super().request(method, url, **kwargs)
 
             transport_session = LocalSession()
             sessions.append(transport_session)
-            transport = Request(session=transport_session)
-            for principal in principals:
-                actor = principal["subject"].split(":")[1].split("@")[0]
-                subject = directory / (actor + ".txt")
-                subject.write_text(principal["subject_token"])
-                subject.chmod(0o600)
-                adc = directory / (actor + ".json")
-                private_json(
-                    adc,
-                    {
-                        "type": "external_account",
-                        "audience": "//gcp-local/identity",
-                        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
-                        "token_url": endpoint + "/v1/token",
-                        "credential_source": {"file": str(subject)},
-                    },
-                )
-                with patch.dict(
-                    os.environ,
-                    {
-                        "GOOGLE_APPLICATION_CREDENTIALS": str(adc),
-                        "GOOGLE_CLOUD_PROJECT": "synthetic",
-                    },
-                ):
-                    credentials, selected = google.auth.default(
-                        scopes=["https://www.googleapis.com/auth/cloud-platform"], request=transport
-                    )
-                assert selected == "synthetic"
-                session = AuthorizedSession(credentials, auth_request=transport)
-                session.trust_env = False
-                sessions.append(session)
-                clients.append(
-                    storage.Client(
-                        project=selected,
-                        credentials=credentials,
-                        _http=session,
-                        client_options={"api_endpoint": endpoint},
-                    )
-                )
-            fixture, allowed, denied = clients
-            bucket = fixture.bucket("sdk-authenticated-bucket")
-            bucket.iam_configuration.uniform_bucket_level_access_enabled = True
-            bucket.iam_configuration.public_access_prevention = "enforced"
-            bucket.soft_delete_policy.retention_duration_seconds = 0
-            bucket = fixture.create_bucket(bucket, location="us-central1", retry=None)
-            policy = bucket.get_iam_policy(requested_policy_version=1)
-            policy.bindings.append(
-                {"role": "roles/storage.objectUser", "members": {principals[1]["subject"]}}
+            clients, _sessions, _creds = build_clients(
+                directory, principals, endpoint, transport_session
             )
-            bucket.set_iam_policy(policy)
-            blob = allowed.bucket(bucket.name).blob("nested/name %?.txt")
-            blob.upload_from_string(b"original", if_generation_match=0, retry=None)
-            original_generation = blob.generation
-            assert blob.download_as_bytes() == b"original"
-            try:
-                denied.bucket(bucket.name).blob(blob.name).upload_from_string(b"denied", retry=None)
-                raise AssertionError("Denied upload succeeded")
-            except Forbidden:
-                pass
-            blob.upload_from_string(
-                b"replacement", if_generation_match=original_generation, retry=None
-            )
-            assert blob.generation != original_generation
-            try:
-                blob.upload_from_string(
-                    b"stale", if_generation_match=original_generation, retry=None
-                )
-                raise AssertionError("Stale generation succeeded")
-            except PreconditionFailed:
-                pass
-            policy = bucket.get_iam_policy(requested_policy_version=1)
-            policy.bindings.clear()
-            bucket.set_iam_policy(policy)
-            try:
-                blob.delete(retry=None)
-                raise AssertionError("Revoked deletion succeeded")
-            except Forbidden:
-                pass
-            admin_blob = bucket.blob(blob.name)
-            assert admin_blob.download_as_bytes() == b"replacement"
-            admin_blob.delete(retry=None)
-            bucket.delete(retry=None)
-            assert list(fixture.list_buckets()) == []
+            sessions.extend(_sessions)
+            object_lifecycle(clients, principals)
+            # A raw bearer token is not an identity: it must be rejected.
             assert (
                 transport_session.get(
                     endpoint + "/storage/v1/b?project=synthetic",
@@ -203,13 +234,13 @@ def main() -> int:
                 ).status_code
                 == 401
             )
-            assert all(client._credentials.token.startswith("gl.") for client in clients)
+            assert all(client._credentials.token.startswith("gl.") for client in clients)  # noqa: SLF001 -- probing the issued token form
             process.terminate()
             assert process.wait(timeout=12) == 0
             reader.join(timeout=2)
             text = "".join(lines)
             assert all(principal["subject_token"] not in text for principal in principals)
-            assert all(client._credentials.token not in text for client in clients)
+            assert all(client._credentials.token not in text for client in clients)  # noqa: SLF001 -- verifying redaction
         finally:
             for client in clients:
                 client.close()
@@ -224,6 +255,7 @@ def main() -> int:
         "Production binary: local ADC, SDK bucket/object CRUD, "
         "replacement, revocation, and cleanup passed."
     )
+    return 0
 
 
 if __name__ == "__main__":
