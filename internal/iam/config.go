@@ -82,19 +82,27 @@ func Load(path string) (*Engine, *state.Index, error) {
 			return nil, nil, err
 		}
 	}
+	if err := engine.publishSignalFamilies(config); err != nil {
+		return nil, nil, err
+	}
+	return engine, index, nil
+}
+
+// publishSignalFamilies loads the org-policy and perimeter declarations.
+func (e *Engine) publishSignalFamilies(config Config) error {
 	for resource, declaration := range config.OrgPolicies {
 		for _, constraint := range declaration.Constraints {
-			if err := engine.MarkOrgPolicy(resource, constraint, declaration.DryRun); err != nil {
-				return nil, nil, err
+			if err := e.MarkOrgPolicy(resource, constraint, declaration.DryRun); err != nil {
+				return err
 			}
 		}
 	}
 	for name, resources := range config.Perimeters {
-		if err := engine.MarkPerimeter(name, resources); err != nil {
-			return nil, nil, err
+		if err := e.MarkPerimeter(name, resources); err != nil {
+			return err
 		}
 	}
-	return engine, index, nil
+	return nil
 }
 
 // decodeConfig reads one JSON object, rejecting unknown fields and trailing data.
