@@ -119,7 +119,7 @@ def install_java() -> str:
     return java
 
 
-def write_identity(project: str) -> Path:
+def write_identity(project: str) -> tuple[Path, str]:
     """Write the owner-only identity config with the workflow principals."""
     directory = Path(tempfile.mkdtemp())
     directory.chmod(stat.S_IRWXU)
@@ -131,7 +131,7 @@ def write_identity(project: str) -> Path:
     path = directory / "server.json"
     path.write_text(json.dumps({"token_lifetime_seconds": 3600, "principals": principals}))
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    return path
+    return path, principals[0]["subject_token"]
 
 
 def await_operation(name: str, deadline: float = 90.0) -> dict[str, Any]:
