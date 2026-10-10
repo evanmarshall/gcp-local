@@ -131,15 +131,35 @@ func parseUpload(r *gateway.RESTRequest) (*uploadRequest, error) {
 // media part. Caller-supplied metadata is restricted to fields the provider
 // actually mirrors, and anything else is an explicit coverage gap.
 func parseMultipart(r *gateway.RESTRequest, payload []byte, u *uploadRequest) error {
-	kind, params, err := mime.ParseMediaType(r.Headers.Get("Content-Type"))
-	if err != nil || kind != "multipart/related" || params["boundary"] == "" {
-		return status.Error(codes.InvalidArgument, "Expected multipart/related upload")
+	boundary, err := multipartBoundary(r.Headers.Get("Content-Type"))
+	if err != nil {
+		return err
 	}
-	reader := multipart.NewReader(bytes.NewReader(payload), params["boundary"])
+	reader := multipart.NewReader(bytes.NewReader(payload), boundary)
 	metadata, err := reader.NextPart()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "Missing object metadata")
 	}
+	if err := readMetadataPart(r, metadata, u); err != nil {
+		return err
+	}
+	if err := readMediaPart(reader); err != nil {
+		return err
+	}
+	return nil
+}
+
+// multipartBoundary extracts the boundary of a multipart/related content type.
+func multipartBoundary(contentType string) (string, error) {
+	kind, params, err := mime.ParseMediaType(contentType)
+	if err != nil || kind != "multipart/related" || params["boundary"] == "" {
+		return "", status.Error(codes.InvalidArgument, "Expected multipart/related upload")
+	}
+	return params["boundary"], nil
+}
+
+// readMetadataPart validates the metadata part of a multipart upload.
+func readMetadataPart(r *gateway.RESTRequest, metadata *multipart.Part, u *uploadRequest) error {
 	data, err := io.ReadAll(io.LimitReader(metadata, (64<<10)+1))
 	if err != nil || len(data) > 64<<10 {
 		return status.Error(codes.InvalidArgument, "Object metadata exceeds supported size")
@@ -148,9 +168,11 @@ func parseMultipart(r *gateway.RESTRequest, payload []byte, u *uploadRequest) er
 	if json.Unmarshal(data, &value) != nil || value == nil {
 		return status.Error(codes.InvalidArgument, "Invalid object metadata")
 	}
-	if err := applyUploadMetadata(r, value, u); err != nil {
-		return err
-	}
+	return applyUploadMetadata(r, value, u)
+}
+
+// readMediaPart drains the media part and rejects a third part.
+func readMediaPart(reader *multipart.Reader) error {
 	media, err := reader.NextPart()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "Missing object media")
