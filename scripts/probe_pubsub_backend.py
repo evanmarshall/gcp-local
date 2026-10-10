@@ -121,7 +121,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / "toolchains/pubsub.json").read_text())
     command, java_version = java_command(root)
-    port = int(command[-1].split("=")[1])
+    port = int(command[-2].split("=")[1])
     checks, samples = [], []
     with tempfile.TemporaryDirectory(prefix="gcp-local-pubsub-") as directory:
         for restart in (False, True):

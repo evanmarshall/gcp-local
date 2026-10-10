@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 
 // fakeRuntime records container calls and fails launches on demand.
 type fakeRuntime struct {
+	mu       sync.Mutex
 	started  []StartSpec
 	running  map[string]error
 	stopped  []string
@@ -33,6 +35,8 @@ func newFakeRuntime() *fakeRuntime {
 }
 
 func (f *fakeRuntime) Start(_ context.Context, spec StartSpec) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.failNext != nil {
 		err := f.failNext
 		f.failNext = nil
@@ -45,10 +49,14 @@ func (f *fakeRuntime) Start(_ context.Context, spec StartSpec) (string, error) {
 }
 
 func (f *fakeRuntime) Ready(_ context.Context, container string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.running[container]
 }
 
 func (f *fakeRuntime) Stop(_ context.Context, container string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, container)
 	delete(f.running, container)
 	return nil

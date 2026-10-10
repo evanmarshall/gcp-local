@@ -61,7 +61,10 @@ def check_cli(arguments: list[str]) -> None:
     """Dispatch the requested history validation mode."""
     if arguments == ["--pre-push"]:
         check_push(sys.stdin)
+    elif len(arguments) == 1:
+        check_linear(arguments[0])
     elif len(arguments) == 2:
+        # The pre-push hook passes the range endpoints; CI passes one revision.
         check_linear(arguments[1])
     else:
         raise ValueError("Usage: check_history.py REVISION | --pre-push")
