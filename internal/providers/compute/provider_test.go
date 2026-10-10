@@ -21,6 +21,7 @@ const (
 	testFirewall  = "fw-1"
 	testAllowed   = "allowed"
 	testProject   = "demo-net"
+	testKindProj  = "project"
 	testSubnetOne = "subnet-1"
 	testTCP       = "tcp"
 	// verdictUnknown is the analyzer's unresolved result.
@@ -44,7 +45,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	if err := index.Put("resourcemanager", state.Resource{
 		Name: "//cloudresourcemanager.googleapis.com/projects/demo-net", Service: "resourcemanager",
-		Kind: "project", Number: "123456", Scope: state.Scope{Project: testProject, Location: state.Global},
+		Kind: testKindProj, Number: "123456", Scope: state.Scope{Project: testProject, Location: state.Global},
 	}); err != nil {
 		t.Fatalf("register the project: %v", err)
 	}

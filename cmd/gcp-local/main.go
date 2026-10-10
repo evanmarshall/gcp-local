@@ -281,9 +281,11 @@ func assembleCompute(ctx context.Context, selected map[string]bool, registry *ga
 	if !selected["compute"] {
 		return nil
 	}
-	if _, err := computeprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+	provider, err := computeprovider.New(ctx, registry, server.Backends, index, engine)
+	if err != nil {
 		return fmt.Errorf("register the Compute provider: %w", err)
 	}
+	server.Analyzer = provider.Analyzer()
 	return nil
 }
 
