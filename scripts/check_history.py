@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Reject merge commits and unsafe main updates without modifying Git state."""
 
-import subprocess
 import shutil
+import subprocess
 import sys
 
 GIT = shutil.which("git") or "git"

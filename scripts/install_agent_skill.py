@@ -4,8 +4,8 @@
 import argparse
 import hashlib
 import json
-import subprocess
 import shutil
+import subprocess
 from pathlib import Path
 
 GIT = shutil.which("git") or "git"

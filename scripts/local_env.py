@@ -7,9 +7,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
-import shutil
 import sys
 import time
 from pathlib import Path

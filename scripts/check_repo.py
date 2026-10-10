@@ -2,8 +2,8 @@
 """Check repository documentation, YAML, and discoverable skill metadata."""
 
 import re
-import subprocess
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
