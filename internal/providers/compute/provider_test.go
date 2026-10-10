@@ -20,6 +20,7 @@ const (
 	testNetwork   = "vpc-1"
 	testFirewall  = "fw-1"
 	testAllowed   = "allowed"
+	testProject   = "demo-net"
 	testSubnetOne = "subnet-1"
 	testTCP       = "tcp"
 	// verdictUnknown is the analyzer's unresolved result.
@@ -43,7 +44,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	if err := index.Put("resourcemanager", state.Resource{
 		Name: "//cloudresourcemanager.googleapis.com/projects/demo-net", Service: "resourcemanager",
-		Kind: "project", Number: "123456", Scope: state.Scope{Project: "demo-net", Location: state.Global},
+		Kind: "project", Number: "123456", Scope: state.Scope{Project: testProject, Location: state.Global},
 	}); err != nil {
 		t.Fatalf("register the project: %v", err)
 	}
@@ -200,7 +201,7 @@ func TestReachabilityDistinguishesVerdicts(t *testing.T) {
 	})
 	analyze := func(source, dest, protocol string, port int) Reachability {
 		spec := map[string]any{
-			"project": "demo-net", "sourceIp": source, "destIp": dest,
+			"project": testProject, "sourceIp": source, "destIp": dest,
 			"protocol": protocol, "port": port,
 		}
 		encoded, _ := json.Marshal(spec) //nolint:errchkjson // plain map bodies //nolint:errchkjson // plain map bodies
@@ -242,7 +243,7 @@ func (h *harness) analyzer() http.Handler { return h.analyzerHandler }
 func TestUnimplementedTopologyReportsUnsupported(t *testing.T) {
 	h := newHarness(t)
 	spec := map[string]any{
-		"project": "demo-net", "sourceIp": "10.0.0.5", "destIp": "10.0.16.9",
+		"project": testProject, "sourceIp": "10.0.0.5", "destIp": "10.0.16.9",
 		"protocol": testTCP, "port": 443,
 	}
 	encoded, _ := json.Marshal(spec) //nolint:errchkjson // plain map bodies
