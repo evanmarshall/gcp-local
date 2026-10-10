@@ -20,7 +20,20 @@ type Policy struct {
 	Version   int        `json:"version"`
 	Bindings  []Binding  `json:"bindings"`
 	DenyRules []DenyRule `json:"denyRules,omitempty"`
-	ETag      string     `json:"etag"`
+	// PAB is the principal access boundary policy attached to this resource.
+	PAB  *PABPolicy `json:"principalAccessBoundary,omitempty"`
+	ETag string     `json:"etag"`
+}
+
+// PABPolicy bounds the cloud resources service agents of this hierarchy may
+// touch; a service-agent request outside every bound fails closed.
+type PABPolicy struct {
+	Rules []PABRule `json:"rules"`
+}
+
+// PABRule is one boundary rule: a resource list its service agents stay in.
+type PABRule struct {
+	BoundCloudResources []string `json:"boundCloudResources"`
 }
 
 // DenyRule is one v3 deny rule: a principal set that must not use a
@@ -50,6 +63,7 @@ type storedPolicy struct {
 	scope      state.Scope
 	conditions []conditionGuard
 	denies     []storedDeny
+	pab        *PABPolicy
 }
 
 func clonePolicy(p Policy) Policy {
@@ -156,7 +170,7 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	policy.ETag = base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(e.revision, 10)))
 	e.policies[resource] = storedPolicy{
 		policy: policy, owner: owner.Service, scope: owner.Scope,
-		conditions: compiledConditions, denies: compiledDenies,
+		conditions: compiledConditions, denies: compiledDenies, pab: policy.PAB,
 	}
 	return clonePolicy(policy), nil
 }

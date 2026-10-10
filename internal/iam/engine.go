@@ -150,6 +150,9 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 	if refused {
 		return finish(outcomeUnsupported, refusal, codes.Unimplemented)
 	}
+	if violation := e.pabViolation(ancestors, call); violation != "" {
+		return finish(outcomeDeny, violation, codes.PermissionDenied)
+	}
 	denied := e.collectChecks(&decision, permissions, ancestors, decision.Principal)
 	return finalize(finish, decision, denied, complete)
 }
@@ -531,4 +534,29 @@ func (e *Engine) denialPhase(ancestors []state.Resource, permission string, prin
 		}
 	}
 	return denyMatch, excepted
+}
+
+// pabViolation reports whether a service-agent request falls outside every
+// principal access boundary configured on the ancestor chain. Only
+// service-agent principals are bounded; user and workload principals are not.
+func (e *Engine) pabViolation(ancestors []state.Resource, call gateway.Call) string {
+	if !strings.Contains(call.Principal.Subject, ".iam.gserviceaccount.com") ||
+		!strings.HasPrefix(call.Principal.Subject, "serviceAgent:") {
+		return ""
+	}
+	for _, ancestor := range ancestors {
+		stored := e.policies[ancestor.Name]
+		if stored.pab == nil {
+			continue
+		}
+		for _, rule := range stored.pab.Rules {
+			for _, bound := range rule.BoundCloudResources {
+				if strings.Contains(call.Resource, bound) {
+					return ""
+				}
+			}
+		}
+		return "The request is outside every principal access boundary bound at " + ancestor.Name
+	}
+	return ""
 }
