@@ -66,6 +66,7 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	generation, _ := strconv.ParseUint(generationText, 10, 64)
 	metadata["metageneration"] = strconv.FormatUint(generation+1, 10)
 	metadata["etag"] = objectETag(name, strconv.FormatUint(generation+1, 10))
+	delete(metadata, "rpo")
 	metadata["updated"] = time.Now().UTC().Format(time.RFC3339Nano)
 	encoded, err := json.Marshal(metadata)
 	if err != nil {

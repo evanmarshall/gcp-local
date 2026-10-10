@@ -285,8 +285,19 @@ func decodeBackendJSON(payload []byte, response *gateway.RESTResponse) {
 		response.JSON = map[string]any{}
 		return
 	}
+	if value == nil {
+		// An empty 2xx payload carries no document.
+		response.JSON = map[string]any{}
+		return
+	}
 	response.JSON = value
 	removeBackendLinks(value)
+	// Real GCS reports rpo only for multi-region and dual-region buckets;
+	// the recorded single-region snapshot carries rpo null. The fake backend
+	// echoes the create body, so null the field here: the Terraform provider
+	// treats an explicit null as unset, while an absent key coerces to "".
+	// The multi-region shape is an explicit gap until it has its own recording.
+	value["rpo"] = nil
 	if etag, ok := value["etag"].(string); ok {
 		response.Headers.Set("ETag", `"`+etag+`"`)
 	}

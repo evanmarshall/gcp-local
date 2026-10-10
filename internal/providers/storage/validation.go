@@ -393,6 +393,10 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	metadata["projectNumber"] = project.Number
 	metadata["metageneration"] = "1"
 	metadata["etag"] = objectETag(request.Name, "1")
+	// Real GCS reports rpo only for multi-region and dual-region buckets;
+	// the recorded single-region snapshot carries rpo null, so the mirrored
+	// metadata drops the request echo. The multi-region shape is a gap.
+	delete(metadata, "rpo")
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Unable to encode the bucket metadata")
