@@ -626,7 +626,7 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 	record.Template = template
 	record.UpdatedAt = now
 	record.Revisions[revisionID] = revision
-	record.Traffic = map[string]int{revisionID: 100}
+	record.Traffic = p.resolveTraffic(body.Traffic, revisionID)
 	// The real surface returns a long-running operation for the rollout.
 	operationName := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/rel-" + record.Name
 	_ = p.scopes.With(scope, func(s *scopeState) error {
@@ -780,4 +780,26 @@ func (p *Provider) serviceURI(scope state.Scope, id string) string {
 		base = "http://127.0.0.1"
 	}
 	return strings.TrimSuffix(base, "/") + invocationPath + hostOf(scope, id)
+}
+
+// resolveTraffic honors a requested traffic split when its percents sum to
+// 100 and name known revisions; otherwise all traffic shifts to the latest.
+func (p *Provider) resolveTraffic(requested []trafficEntry, revisionID string) map[string]int {
+	split := map[string]int{}
+	total := 0
+	for _, entry := range requested {
+		name := entry.Revision
+		if entry.LatestRevision {
+			name = revisionID
+		}
+		if name == "" || entry.Percent <= 0 || entry.Percent > 100 {
+			return map[string]int{revisionID: 100}
+		}
+		split[name] += entry.Percent
+		total += entry.Percent
+	}
+	if total != 100 {
+		return map[string]int{revisionID: 100}
+	}
+	return split
 }

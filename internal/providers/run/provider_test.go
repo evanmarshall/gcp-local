@@ -462,3 +462,68 @@ func TestOperationDeleteAcknowledgesTerminalOperations(t *testing.T) {
 		t.Fatalf("missing operation delete status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestUpdateSplitsTrafficAcrossRevisions(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
+		"template": map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
+		"traffic": []any{
+			map[string]any{"revision": "svc-00001", "percent": 90},
+			map[string]any{"latestRevision": true, "percent": 10},
+		},
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("update status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/services/svc", nil)
+	var service struct {
+		Traffic []struct {
+			Revision string `json:"revision"`
+			Percent  int    `json:"percent"`
+		} `json:"traffic"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &service); err != nil {
+		t.Fatalf("decode service: %v", err)
+	}
+	total := 0
+	byRevision := map[string]int{}
+	for _, entry := range service.Traffic {
+		total += entry.Percent
+		byRevision[entry.Revision] = entry.Percent
+	}
+	if total != 100 || byRevision["svc-00001"] != 90 {
+		t.Fatalf("traffic = %+v", service.Traffic)
+	}
+}
+
+func TestUpdateRejectsBadTrafficSplit(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
+		"template": map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
+		"traffic": []any{
+			map[string]any{keyName: "svc-00001", "percent": 90},
+			map[string]any{"latestRevision": true, "percent": 90},
+		},
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("update status = %d", recorder.Code)
+	}
+	recorder = h.invoke(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/services/svc", nil)
+	var service struct {
+		Traffic []struct {
+			Percent int `json:"percent"`
+		} `json:"traffic"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &service); err != nil {
+		t.Fatalf("decode service: %v", err)
+	}
+	total := 0
+	for _, entry := range service.Traffic {
+		total += entry.Percent
+	}
+	if total != 100 {
+		t.Fatalf("bad split fell back to %d percent", total)
+	}
+}

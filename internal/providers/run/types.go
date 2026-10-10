@@ -46,6 +46,15 @@ type requestEnvelope struct {
 	Labels      map[string]any `json:"labels"`
 	Annotations map[string]any `json:"annotations"`
 	LaunchStage string         `json:"launchStage"`
+	Traffic     []trafficEntry `json:"traffic,omitempty"`
+}
+
+// trafficEntry is one requested traffic split entry.
+type trafficEntry struct {
+	Revision       string `json:"revision"`
+	Percent        int    `json:"percent"`
+	Tag            string `json:"tag,omitempty"`
+	LatestRevision bool   `json:"latestRevision,omitempty"`
 }
 
 // decodeRequest reads one service body. Unknown fields fail before container work.
