@@ -46,7 +46,7 @@ def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        Path(args.detached_probe).write_text(Path("/proc/self/ns/pid").readlink())
+        Path(args.detached_probe).write_text(str(Path("/proc/self/ns/pid").readlink()))
         time.sleep(60)
         return
     if args.probe:

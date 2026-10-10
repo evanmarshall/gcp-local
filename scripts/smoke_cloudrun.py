@@ -101,7 +101,6 @@ def start_core(binary: Path) -> subprocess.Popen:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        check=False,
     )
     end = time.time() + 20
     while time.time() < end:

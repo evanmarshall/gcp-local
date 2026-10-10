@@ -29,7 +29,11 @@ def assert_isolated() -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    """Validate the runner options and the embedded server command."""
+    """Validate the runner options and the embedded server command.
+
+    The raw argv is kept on the namespace: the re-exec must forward the
+    provider options, not only the test command.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--server-json", help="JSON argv for a provider started inside the same namespace"
@@ -39,8 +43,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
-    command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    if not command or not 1 <= args.timeout <= 1800:
+    args.raw_argv = list(argv)
+    args.test_command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not args.test_command or not 1 <= args.timeout <= 1800:
         parser.error("Supply a command and timeout between 1 and 1800 seconds")
     if args.server_json:
         check_server(parser, args)
@@ -78,9 +83,7 @@ def reenter_isolated(args: argparse.Namespace) -> None:
     # Terraform and other helpers may create their own process groups. A
     # private PID namespace also removes detached descendants when this
     # runner exits, including after timeout or a killed test process.
-    original = list(args.command)
-    if args.command[:1] == ["--"]:
-        original = args.command[1:]
+    original = list(args.raw_argv)
     os.execvp(  # noqa: S606 -- the argv list form, not a shell command string
         UNSHARE,
         [
@@ -162,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             server = subprocess.Popen(json.loads(args.server_json), env=env, start_new_session=True)
             children.append(server)
             await_provider(server, args)
-        test = subprocess.Popen(args.command, env=env, start_new_session=True)
+        test = subprocess.Popen(args.test_command, env=env, start_new_session=True)
         children.append(test)
         return test.wait(timeout=args.timeout)
     except subprocess.TimeoutExpired:
