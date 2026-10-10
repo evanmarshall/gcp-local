@@ -1,0 +1,20 @@
+{
+ "description": "Read and write BigQuery datasets, tables, and rows.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "bigquery.datasets.create",
+  "bigquery.datasets.delete",
+  "bigquery.datasets.get",
+  "bigquery.datasets.list",
+  "bigquery.datasets.update",
+  "bigquery.tables.create",
+  "bigquery.tables.delete",
+  "bigquery.tables.get",
+  "bigquery.tables.list",
+  "bigquery.tables.update",
+  "bigquery.tabledata.insertAll",
+  "bigquery.tables.getData"
+ ],
+ "name": "roles/bigquery.dataEditor",
+ "stage": "GA"
+}

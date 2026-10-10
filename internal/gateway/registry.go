@@ -67,36 +67,43 @@ type Registry struct {
 
 func NewRegistry() *Registry {
 	r := &Registry{contracts: map[string]methodInfo{}, unary: map[string]Handler{}, stream: map[string]StreamHandler{}}
-	for _, route := range generated.StorageRoutes {
-		r.contracts[route.Method] = methodInfo{service: "storage"}
+	r.registerRoutes()
+	r.registerPubSub()
+	return r
+}
+
+// registerRoutes binds every generated REST route table to its service.
+func (r *Registry) registerRoutes() {
+	tables := []struct {
+		routes  []generated.Route
+		service string
+	}{
+		{generated.StorageRoutes, "storage"},
+		{generated.RunRoutes, "run"},
+		{generated.ComputeRoutes, "compute"},
+		{generated.SecretManagerRoutes, "secretmanager"},
+		{generated.CloudKMSRoutes, "cloudkms"},
+		{generated.FirestoreRoutes, "firestore"},
+		{generated.BigQueryRoutes, "bigquery"},
+		{generated.CloudTasksRoutes, "cloudtasks"},
 	}
-	for _, route := range generated.RunRoutes {
-		r.contracts[route.Method] = methodInfo{service: "run"}
+	for _, table := range tables {
+		for _, route := range table.routes {
+			r.contracts[route.Method] = methodInfo{service: table.service}
+		}
 	}
-	for _, route := range generated.ComputeRoutes {
-		r.contracts[route.Method] = methodInfo{service: "compute"}
-	}
-	for _, route := range generated.SecretManagerRoutes {
-		r.contracts[route.Method] = methodInfo{service: "secretmanager"}
-	}
-	for _, route := range generated.CloudKMSRoutes {
-		r.contracts[route.Method] = methodInfo{service: "cloudkms"}
-	}
-	for _, route := range generated.FirestoreRoutes {
-		r.contracts[route.Method] = methodInfo{service: "firestore"}
-	}
-	for _, route := range generated.CloudTasksRoutes {
-		r.contracts[route.Method] = methodInfo{service: "cloudtasks"}
-	}
+}
+
+// registerPubSub binds the streaming gRPC surfaces. Pub/Sub is the current
+// implementation owner for IAMPolicy gRPC; its handler rejects other service
+// resource names instead of forwarding them.
+func (r *Registry) registerPubSub() {
 	for _, rpc := range generated.PubSubMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "pubsub", streaming: rpc.Streaming}
 	}
-	// Pub/Sub is the current implementation owner for IAMPolicy gRPC. Its
-	// handler rejects other service resource names instead of forwarding them.
 	for _, rpc := range generated.IAMMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "pubsub"}
 	}
-	return r
 }
 func (r *Registry) Register(method string, handler Handler) error {
 	r.mu.Lock()

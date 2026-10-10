@@ -142,6 +142,16 @@
    "file": "datastore.viewer.json",
    "name": "roles/datastore.viewer",
    "sha256": "c262ee7529751d4c877ebe5e4c5f5e0249fea94cc3c21bcc9ef6462d2e5e729a"
+  },
+  {
+   "file": "bigquery.dataEditor.json",
+   "name": "roles/bigquery.dataEditor",
+   "sha256": "d01fa831e69192be05d690171c022d4f9f2655a02ea71b6408f8889895b03dfa"
+  },
+  {
+   "file": "bigquery.dataViewer.json",
+   "name": "roles/bigquery.dataViewer",
+   "sha256": "3184a0663ea3c4c37363d2ef0642c6f6abeee83dd99939fbb66a685b01cc80b0"
   }
  ]
 }

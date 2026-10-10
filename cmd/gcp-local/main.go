@@ -19,6 +19,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
 	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
@@ -113,7 +114,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcListen, "grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery")
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
@@ -275,6 +276,9 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleFirestore(ctx, selected, registry, server, index, engine); err != nil {
 		return err
 	}
+	if err := assembleBigQuery(ctx, selected, registry, server, index, engine); err != nil {
+		return err
+	}
 	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
 }
 
@@ -352,6 +356,17 @@ func assembleFirestore(ctx context.Context, selected map[string]bool, registry *
 	}
 	if _, err := firestoreprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Firestore provider: %w", err)
+	}
+	return nil
+}
+
+// assembleBigQuery registers the BigQuery provider.
+func assembleBigQuery(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["bigquery"] {
+		return nil
+	}
+	if _, err := bigqueryprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the BigQuery provider: %w", err)
 	}
 	return nil
 }
