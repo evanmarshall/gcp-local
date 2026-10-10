@@ -47,6 +47,7 @@ const (
 	keyPort        = "port"
 	keyIPCIDR      = "ipCidrRange"
 	keyProject     = "project"
+	keySourceIP    = "sourceIp"
 	keyProtocol    = "protocol"
 )
 

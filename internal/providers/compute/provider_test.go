@@ -17,16 +17,19 @@ import (
 
 // Names and keys repeated across the lifecycle tests.
 const (
-	testNetwork     = "vpc-1"
-	testFirewall    = "fw-1"
-	testAllowed     = "allowed"
-	testProject     = "demo-net"
-	testKindProj    = "project"
-	testSubnetOne   = "subnet-1"
-	testPeerNetwork = "peer-net"
-	testPeerSubnet  = "peer-subnet"
-	testPeering     = "peering-1"
-	testTCP         = "tcp"
+	testNetwork        = "vpc-1"
+	testFirewall       = "fw-1"
+	testAllowed        = "allowed"
+	testProject        = "demo-net"
+	testKindProj       = "project"
+	testSubnetOne      = "subnet-1"
+	testPeerNetwork    = "peer-net"
+	testPeerSubnet     = "peer-subnet"
+	testPeering        = "peering-1"
+	testTCP            = "tcp"
+	testSubnetCIDR     = "10.0.0.0/20"
+	verdictDropped     = "dropped"
+	verdictUnsupported = "unsupported"
 	// verdictUnknown is the analyzer's unresolved result.
 	verdictUnknown = "unknown"
 )
@@ -88,7 +91,7 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 func TestNetworkLifecycleAndDependencyDeletion(t *testing.T) {
 	h := newHarness(t)
 	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
-		keyName: testNetwork, "autoCreateSubnetworks": false,
+		keyName: testNetwork, keyAutoSubnets: false,
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("network create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -98,7 +101,7 @@ func TestNetworkLifecycleAndDependencyDeletion(t *testing.T) {
 		t.Fatalf("network get status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
-		keyName: testSubnetOne, keyNetwork: testNetwork, "ipCidrRange": "10.0.0.0/20",
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("subnetwork create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -193,10 +196,10 @@ func TestOperationsCompleteAndList(t *testing.T) {
 func TestReachabilityDistinguishesVerdicts(t *testing.T) {
 	h := newHarness(t)
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
-		keyName: testNetwork, "autoCreateSubnetworks": false,
+		keyName: testNetwork, keyAutoSubnets: false,
 	})
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
-		keyName: testSubnetOne, keyNetwork: testNetwork, "ipCidrRange": "10.0.0.0/20",
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
 	})
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: testFirewall, keyNetwork: testNetwork, "direction": "INGRESS",
@@ -205,8 +208,8 @@ func TestReachabilityDistinguishesVerdicts(t *testing.T) {
 	})
 	analyze := func(source, dest, protocol string, port int) Reachability {
 		spec := map[string]any{
-			"project": testProject, "sourceIp": source, "destIp": dest,
-			"protocol": protocol, "port": port,
+			keyProject: testProject, keySourceIP: source, keyDestIP: dest,
+			keyProtocol: protocol, keyPort: port,
 		}
 		encoded, _ := json.Marshal(spec) //nolint:errchkjson // plain map bodies //nolint:errchkjson // plain map bodies
 		request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/_local/networking/reachability", bytes.NewReader(encoded))
@@ -224,11 +227,11 @@ func TestReachabilityDistinguishesVerdicts(t *testing.T) {
 		t.Fatalf("permitted flow = %+v", verdict)
 	}
 	verdict = analyze("10.0.0.5", "10.0.0.9", testTCP, 80)
-	if verdict.Result != "dropped" {
+	if verdict.Result != verdictDropped {
 		t.Fatalf("unpermitted flow = %+v", verdict)
 	}
 	verdict = analyze("192.0.2.1", "10.0.0.9", testTCP, 443)
-	if verdict.Result != "dropped" {
+	if verdict.Result != verdictDropped {
 		// A source outside the modeled topology is an unknown endpoint, not a
 		// decided flow; a modeled foreign source needs its own subnet fixture.
 		if verdict.Result != verdictUnknown {
@@ -248,8 +251,8 @@ func (h *harness) analyzer() http.Handler { return h.analyzerHandler }
 func (h *harness) analyzeFlow(source, dest, protocol string, port int) Reachability {
 	h.t.Helper()
 	spec := map[string]any{
-		"project": testProject, "sourceIp": source, "destIp": dest,
-		"protocol": protocol, "port": port,
+		keyProject: testProject, keySourceIP: source, keyDestIP: dest,
+		keyProtocol: protocol, keyPort: port,
 	}
 	encoded, _ := json.Marshal(spec) //nolint:errchkjson // plain map bodies
 	request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/_local/networking/reachability", bytes.NewReader(encoded))
@@ -265,8 +268,8 @@ func (h *harness) analyzeFlow(source, dest, protocol string, port int) Reachabil
 func TestUnimplementedTopologyReportsUnsupported(t *testing.T) {
 	h := newHarness(t)
 	spec := map[string]any{
-		"project": testProject, "sourceIp": "10.0.0.5", "destIp": "10.0.16.9",
-		"protocol": testTCP, "port": 443,
+		keyProject: testProject, keySourceIP: "10.0.0.5", keyDestIP: "10.0.16.9",
+		keyProtocol: testTCP, keyPort: 443,
 	}
 	encoded, _ := json.Marshal(spec) //nolint:errchkjson // plain map bodies
 	request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/_local/networking/reachability", bytes.NewReader(encoded))
@@ -284,16 +287,16 @@ func TestUnimplementedTopologyReportsUnsupported(t *testing.T) {
 func TestCrossNetworkFlowsViaPeering(t *testing.T) {
 	h := newHarness(t)
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
-		keyName: testNetwork, "autoCreateSubnetworks": false,
+		keyName: testNetwork, keyAutoSubnets: false,
 	})
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
-		keyName: testPeerNetwork, "autoCreateSubnetworks": false,
+		keyName: testPeerNetwork, keyAutoSubnets: false,
 	})
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
-		keyName: testSubnetOne, keyNetwork: testNetwork, "ipCidrRange": "10.0.0.0/20",
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
 	})
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
-		keyName: testPeerSubnet, keyNetwork: testPeerNetwork, "ipCidrRange": "10.1.0.0/20",
+		keyName: testPeerSubnet, keyNetwork: testPeerNetwork, keyIPCIDR: "10.1.0.0/20",
 	})
 	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks/"+testNetwork+"/addPeering", map[string]any{
 		keyName: testPeering, keyPeerNetwork: testPeerNetwork,
@@ -302,7 +305,7 @@ func TestCrossNetworkFlowsViaPeering(t *testing.T) {
 		t.Fatalf("addPeering status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 	verdict := h.analyzeFlow("10.0.0.5", "10.1.0.9", testTCP, 443)
-	if verdict.Result != "dropped" {
+	if verdict.Result != verdictDropped {
 		t.Fatalf("peered flow verdict = %+v", verdict)
 	}
 	if len(verdict.Trace) != 1 || verdict.Trace[0] != "peering/peering-1 to peer-net" {
@@ -315,7 +318,7 @@ func TestCrossNetworkFlowsViaPeering(t *testing.T) {
 		t.Fatalf("removePeering status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 	verdict = h.analyzeFlow("10.0.0.5", "10.1.0.9", testTCP, 443)
-	if verdict.Result != "unsupported" {
+	if verdict.Result != verdictUnsupported {
 		t.Fatalf("unpeered flow verdict = %+v", verdict)
 	}
 }
