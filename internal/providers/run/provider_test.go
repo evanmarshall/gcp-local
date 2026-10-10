@@ -73,8 +73,10 @@ const serviceReference = "projects/demo-project/locations/us-central1/services/s
 
 // imageReference is the test container image; testImageKey is its body key.
 const (
-	imageReference = "example.local/svc:1"
-	testImageKey   = "image"
+	imageReference    = "example.local/svc:1"
+	testImageKey      = "image"
+	testFirstRevision = "svc-00001"
+	keyPercent        = "percent"
 )
 
 // Test-body keys repeated across the service documents.
@@ -357,7 +359,7 @@ func TestWorkloadEnvInjectsServiceIdentity(t *testing.T) {
 	record := &serviceRecord{Name: "svc", Template: templateShape{
 		Container: containerSpec{Image: "img", Port: 8080, Env: map[string]string{"APP_ENV": "local"}},
 	}}
-	revision := &revisionRecord{ID: "svc-00001", Template: record.Template}
+	revision := &revisionRecord{ID: testFirstRevision, Template: record.Template}
 	env := workloadEnv(record, revision)
 	for _, want := range []string{"K_SERVICE=svc", "K_REVISION=svc-00001", "PORT=8080", "APP_ENV=local"} {
 		if !containsEntry(env, want) {
@@ -469,8 +471,8 @@ func TestUpdateSplitsTrafficAcrossRevisions(t *testing.T) {
 	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
 		"template": map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
 		"traffic": []any{
-			map[string]any{"revision": "svc-00001", "percent": 90},
-			map[string]any{"latestRevision": true, "percent": 10},
+			map[string]any{"revision": testFirstRevision, keyPercent: 90},
+			map[string]any{"latestRevision": true, keyPercent: 10},
 		},
 	})
 	if recorder.Code != 200 {
@@ -492,7 +494,7 @@ func TestUpdateSplitsTrafficAcrossRevisions(t *testing.T) {
 		total += entry.Percent
 		byRevision[entry.Revision] = entry.Percent
 	}
-	if total != 100 || byRevision["svc-00001"] != 90 {
+	if total != 100 || byRevision[testFirstRevision] != 90 {
 		t.Fatalf("traffic = %+v", service.Traffic)
 	}
 }
@@ -503,8 +505,8 @@ func TestUpdateRejectsBadTrafficSplit(t *testing.T) {
 	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
 		"template": map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
 		"traffic": []any{
-			map[string]any{keyName: "svc-00001", "percent": 90},
-			map[string]any{"latestRevision": true, "percent": 90},
+			map[string]any{keyName: testFirstRevision, keyPercent: 90},
+			map[string]any{"latestRevision": true, keyPercent: 90},
 		},
 	})
 	if recorder.Code != 200 {
