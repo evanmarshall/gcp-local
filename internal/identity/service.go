@@ -21,7 +21,7 @@ import (
 )
 
 const Audience = "//gcp-local/identity"
-const AccessTokenType = "urn:ietf:params:oauth:token-type:access_token"
+const AccessTokenType = "urn:ietf:params:oauth:token-type:access_token" //nolint:gosec // a public token-type URN, not a credential
 const CloudPlatform = "https://www.googleapis.com/auth/cloud-platform"
 
 var DefaultScopes = []string{CloudPlatform, "https://www.googleapis.com/auth/devstorage.full_control", "https://www.googleapis.com/auth/devstorage.read_write", "https://www.googleapis.com/auth/devstorage.read_only"}
@@ -86,7 +86,7 @@ func Load(path string) (Config, error) {
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		return config, errIdentityMode
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // the operator selects the config path explicitly
 	if err != nil {
 		return config, errIdentityOpen
 	}

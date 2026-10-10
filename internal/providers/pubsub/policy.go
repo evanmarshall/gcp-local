@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -95,6 +98,9 @@ func (p *Provider) policy(call gateway.Call, raw any) (any, error) {
 	etag, err := base64.StdEncoding.DecodeString(result.ETag)
 	if err != nil {
 		return nil, fmt.Errorf("decode policy etag: %w", err)
+	}
+	if result.Version < 0 || result.Version > math.MaxInt32 {
+		return nil, status.Error(codes.Internal, "Policy version is outside the wire range")
 	}
 	response := &iampb.Policy{Version: int32(result.Version), Etag: etag}
 	for _, binding := range result.Bindings {

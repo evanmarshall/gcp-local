@@ -40,14 +40,14 @@ func TestProcessFixture(t *testing.T) {
 	if err != nil {
 		os.Exit(24)
 	}
-	directory := os.Getenv("GCP_LOCAL_FIXTURE_DIR")
+	directory := os.Getenv("GCP_LOCAL_FIXTURE_DIR") //nolint:gosec // the fixture harness owns this directory
 	if os.WriteFile(filepath.Join(directory, "address"), []byte(listener.Addr().String()), 0600) != nil {
 		os.Exit(25)
 	}
 	if os.WriteFile(filepath.Join(directory, "payload"), []byte("owned data"), 0600) != nil {
 		os.Exit(26)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/exit" {
 			os.Exit(27)
 		}
@@ -105,7 +105,7 @@ func newFixture(t *testing.T, mode string) *fixture {
 				<-ctx.Done()
 				return ctx.Err()
 			}
-			address, err := os.ReadFile(filepath.Join(directory, "address"))
+			address, err := os.ReadFile(filepath.Join(directory, "address")) //nolint:gosec // the fixture harness owns this directory
 			if err != nil {
 				return fmt.Errorf("read address: %w", err)
 			}
@@ -304,7 +304,7 @@ func TestReadinessDetectsUnexpectedExit(t *testing.T) {
 	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+string(address)+"/exit", nil)
 	response, _ := client.Do(request)
 	if response != nil {
-		response.Body.Close()
+		_ = response.Body.Close()
 	}
 	if _, err := manager.Require(context.Background(), key("project-a")); err == nil {
 		t.Fatal("crashed backend remained ready")
@@ -362,7 +362,7 @@ func TestHTTPProbeRejectsExternalOrRedirectedReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "https://storage.googleapis.com/")
 		w.WriteHeader(http.StatusFound)
 	})}

@@ -41,7 +41,7 @@ func Load(path string) (*Engine, *state.Index, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		return nil, nil, errConfigMode
 	}
-	file, err := os.Open(path)
+	file, err := os.Open(path) //nolint:gosec // the operator selects the config path explicitly
 	if err != nil {
 		return nil, nil, errConfigOpen
 	}

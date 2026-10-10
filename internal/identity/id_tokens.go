@@ -23,8 +23,8 @@ import (
 
 // This issuer is deliberately local. Tokens never claim Google's signing
 // authority. Applications configure this issuer and the runtime's public key.
-const IDTokenIssuer = "https://identity.gcp-local.invalid"
-const generateIDToken = "iam.serviceAccounts.generateIdToken"
+const IDTokenIssuer = "https://identity.gcp-local.invalid"    //nolint:gosec // a public local issuer URL, not a credential
+const generateIDToken = "iam.serviceAccounts.generateIdToken" //nolint:gosec // an RPC method name, not a credential
 
 type IDClaims struct {
 	Issuer        string `json:"iss"`

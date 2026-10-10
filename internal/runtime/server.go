@@ -74,16 +74,16 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 	if httpListener == nil || grpcListener == nil || (s.Metadata == nil) != (listeners.Metadata == nil) {
 		for _, listener := range []net.Listener{httpListener, grpcListener, listeners.Metadata} {
 			if listener != nil {
-				listener.Close()
+				_ = listener.Close()
 			}
 		}
 		return errListeners
 	}
 	closeListeners := func() {
-		httpListener.Close()
-		grpcListener.Close()
+		_ = httpListener.Close()
+		_ = grpcListener.Close()
 		if listeners.Metadata != nil {
-			listeners.Metadata.Close()
+			_ = listeners.Metadata.Close()
 		}
 	}
 

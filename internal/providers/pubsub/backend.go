@@ -82,7 +82,7 @@ func (b *emulator) Start(ctx context.Context) error {
 	}
 	endpoint := listener.Addr().String()
 	_, port, _ := net.SplitHostPort(endpoint)
-	listener.Close()
+	_ = listener.Close()
 	b.directory, err = os.MkdirTemp("", "gcp-local-pubsub-")
 	if err != nil {
 		return fmt.Errorf("create the emulator data directory: %w", err)

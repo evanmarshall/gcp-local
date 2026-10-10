@@ -210,7 +210,7 @@ func TestRESTCancellationReachesProvider(t *testing.T) {
 		defer close(completed)
 		resp, _ := server.Client().Do(req)
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 	}()
 	wait(t, entered)

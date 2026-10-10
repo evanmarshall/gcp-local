@@ -201,7 +201,7 @@ func goType(d protoreflect.MessageDescriptor) string {
 	panic("Unknown external message type: " + string(d.FullName()))
 }
 func read(path string, dst any) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // generator input from this repository
 	must(err)
 	must(json.Unmarshal(raw, dst))
 }
@@ -215,12 +215,12 @@ func write(name string, raw []byte, check bool) {
 	must(err)
 	path := filepath.Join("api/generated", name)
 	if check {
-		current, err := os.ReadFile(path)
+		current, err := os.ReadFile(path) //nolint:gosec // generated output inside this repository
 		must(err)
 		if !bytes.Equal(current, formatted) {
 			panic("Generated output differs: " + path)
 		}
 		return
 	}
-	must(os.WriteFile(path, formatted, 0644))
+	must(os.WriteFile(path, formatted, 0644)) //nolint:gosec // a committed source file needs group/other read
 }

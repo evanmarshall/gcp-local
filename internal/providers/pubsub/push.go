@@ -261,7 +261,7 @@ func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, con
 						response, err := client.Do(request)
 						if err == nil {
 							_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-							response.Body.Close()
+							_ = response.Body.Close()
 							switch response.StatusCode {
 							case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent:
 								accepted = true

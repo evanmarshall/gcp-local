@@ -63,7 +63,7 @@ func (p *Process) Start(ctx context.Context) error {
 			return errProcessRunning
 		}
 	}
-	command := exec.Command(p.config.Command[0], p.config.Command[1:]...)
+	command := exec.Command(p.config.Command[0], p.config.Command[1:]...) //nolint:gosec // the operator supplies the pinned backend command
 	command.Dir = p.config.Directory
 	command.Env = p.config.Environment
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

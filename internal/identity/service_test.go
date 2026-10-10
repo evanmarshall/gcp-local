@@ -19,7 +19,7 @@ import (
 // testProjectName is the fixture project used by the identity service tests.
 const testProjectName = "synthetic"
 
-const subjectSecret = "gls.synthetic-secret-for-local-test-only-0123456789"
+const subjectSecret = "gls.synthetic-secret-for-local-test-only-0123456789" //nolint:gosec // a published test fixture, not a credential
 const appSubject = "serviceAccount:app@synthetic.iam.gserviceaccount.com"
 
 func service(t *testing.T) (*Service, *atomic.Int64) {
@@ -212,7 +212,7 @@ func TestConfigurationRequiresExplicitPrivateEnrollment(t *testing.T) {
 	if _, err := Load(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0644); err != nil {
+	if err := os.Chmod(path, 0644); err != nil { //nolint:gosec // the test asserts that a non-private config is rejected
 		t.Fatal(err)
 	}
 	if _, err := Load(path); err == nil {

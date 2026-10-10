@@ -137,7 +137,7 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	}
 	grpcListener, err := net.Listen("tcp", *grpcAddress)
 	if err != nil {
-		listener.Close()
+		_ = listener.Close()
 		fmt.Fprintln(errors, "Unable to bind the requested gRPC listener:", err)
 		return 1
 	}
@@ -145,8 +145,8 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	if metadataHandler != nil {
 		listeners.Metadata, err = net.Listen("tcp", *metadataAddress)
 		if err != nil {
-			listener.Close()
-			grpcListener.Close()
+			_ = listener.Close()
+			_ = grpcListener.Close()
 			fmt.Fprintln(errors, "Unable to bind the requested metadata listener:", err)
 			return 1
 		}

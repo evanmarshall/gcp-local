@@ -42,7 +42,7 @@ func start(t *testing.T, s *Server) (string, context.CancelFunc, <-chan error) {
 	}
 	grpcListener, err := listenTestAddress()
 	if err != nil {
-		listener.Close()
+		_ = listener.Close()
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -63,7 +63,7 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 		}
 		var body map[string]any
 		err = json.NewDecoder(response.Body).Decode(&body)
-		response.Body.Close()
+		_ = response.Body.Close()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -138,7 +138,7 @@ func TestShutdownDeadlineClosesBlockedRequest(t *testing.T) {
 		client := &http.Client{Timeout: time.Second}
 		r, _ := client.Get(url)
 		if r != nil {
-			r.Body.Close()
+			_ = r.Body.Close()
 		}
 	}()
 	<-entered
@@ -166,7 +166,7 @@ func TestDiagnosticsDoNotDispatchProviders(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		response.Body.Close()
+		_ = response.Body.Close()
 	}
 	if calls.Load() != 0 {
 		t.Fatal("diagnostics reached provider")
@@ -209,7 +209,7 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 			}
 			grpcListener, err := listenTestAddress()
 			if err != nil {
-				httpListener.Close()
+				_ = httpListener.Close()
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
@@ -254,7 +254,7 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 				t.Fatal("RPC context not cancelled")
 			}
 			if next, err := net.DialTimeout("tcp", grpcListener.Addr().String(), time.Second); err == nil {
-				next.Close()
+				_ = next.Close()
 				t.Fatal("gRPC listener remained open")
 			}
 		})
@@ -283,7 +283,7 @@ func TestRuntimeShutdownStopsManagedBackends(t *testing.T) {
 	}
 	var body struct{ Backends []backend.Status }
 	err = json.NewDecoder(response.Body).Decode(&body)
-	response.Body.Close()
+	_ = response.Body.Close()
 	if err != nil {
 		t.Fatal(err)
 	}
