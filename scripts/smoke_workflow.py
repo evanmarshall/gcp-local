@@ -89,11 +89,8 @@ def write_adc(project: str, subject_token: str) -> Path:
     directory.chmod(stat.S_IRWXU)
     (directory / "subject.txt").write_text(subject_token)
     adc = {
-        "type": "external_account_authorized_user",
-        "audience": (
-            "//iam.googleapis.com/projects/" + project
-            + "/locations/global/workloadIdentityPools/gcp-local/providers/local"
-        ),
+        "type": "external_account",
+        "audience": "//gcp-local/identity",
         "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
         "token_url": "http://127.0.0.1:" + str(SERVE_SOCKET) + "/v1/token",
         "credential_source": {"file": str(directory / "subject.txt")},
