@@ -21,11 +21,19 @@ func validateStream(request *pb.StreamingPullRequest, first bool) error {
 		if _, err := resourceName(request.GetSubscription(), "subscriptions"); err != nil {
 			return err
 		}
-	} else if request.GetSubscription() != "" || request.GetClientId() != "" || request.GetMaxOutstandingMessages() != 0 || request.GetMaxOutstandingBytes() != 0 {
+		return validateStreamFlow(request)
+	}
+	if request.GetSubscription() != "" || request.GetClientId() != "" || request.GetMaxOutstandingMessages() != 0 || request.GetMaxOutstandingBytes() != 0 {
 		return invalid("Subscription, client ID, and flow control belong only in the first request")
 	}
-	if err := validateStreamFlow(request); err != nil {
-		return err
+	return validateStreamFlow(request)
+}
+
+// validateStreamFlow rejects negative flow-control values, mismatched
+// ack-deadline arrays, and out-of-range deadlines.
+func validateStreamFlow(request *pb.StreamingPullRequest) error {
+	if request.GetMaxOutstandingMessages() < 0 || request.GetMaxOutstandingBytes() < 0 || len(request.GetModifyDeadlineSeconds()) != len(request.GetModifyDeadlineAckIds()) {
+		return invalid("Invalid streaming flow control or ack deadlines")
 	}
 	for _, seconds := range request.GetModifyDeadlineSeconds() {
 		if seconds < 0 || seconds > 600 {
@@ -34,15 +42,6 @@ func validateStream(request *pb.StreamingPullRequest, first bool) error {
 	}
 	if deadline := request.GetStreamAckDeadlineSeconds(); deadline != 0 && (deadline < 10 || deadline > 600) {
 		return invalid("Stream ack deadline must be 10 through 600 seconds")
-	}
-	return nil
-}
-
-// validateStreamFlow rejects negative flow-control values and mismatched
-// ack-deadline arrays.
-func validateStreamFlow(request *pb.StreamingPullRequest) error {
-	if request.GetMaxOutstandingMessages() < 0 || request.GetMaxOutstandingBytes() < 0 || len(request.GetModifyDeadlineSeconds()) != len(request.GetModifyDeadlineAckIds()) {
-		return invalid("Invalid streaming flow control or ack deadlines")
 	}
 	return nil
 }

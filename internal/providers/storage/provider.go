@@ -429,34 +429,55 @@ func (p *Provider) readBucketPolicy(bucket string) (*gateway.RESTResponse, error
 
 // writeBucketPolicy validates and stores one bucket IAM policy.
 func (p *Provider) writeBucketPolicy(bucket string, r *gateway.RESTRequest) (*gateway.RESTResponse, error) {
-	var request struct {
-		iam.Policy
-		ResourceID string `json:"resourceId"`
-		Kind       string `json:"kind"`
+	request, err := decodeBucketPolicy(bucket, r.JSON)
+	if err != nil {
+		return nil, err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(r.JSON))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&request) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
-	}
-	if request.ResourceID != "" && request.ResourceID != "/b/"+bucket && request.ResourceID != "projects/_/buckets/"+bucket {
-		return nil, status.Error(codes.InvalidArgument, "Policy resource disagrees with bucket")
-	}
-	if request.Kind != "" && request.Kind != "storage#policy" {
-		return nil, status.Error(codes.InvalidArgument, "Invalid policy kind")
-	}
-	for _, binding := range request.Bindings {
-		for _, member := range binding.Members {
-			if member == "allUsers" || member == "allAuthenticatedUsers" {
-				return wireError(412, "conditionNotMet", "The bucket is subject to public access prevention."), nil
-			}
-		}
+	if public, refused := policyBindsPublic(request.Bindings); refused {
+		return public, nil
 	}
 	result, err := p.iam.SetPolicy(BucketResource(bucket), request.Policy)
 	if err != nil {
 		return nil, fmt.Errorf("write bucket policy: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: result}, nil
+}
+
+// bucketPolicyEnvelope is the wire shape of a bucket IAM policy write.
+type bucketPolicyEnvelope struct {
+	iam.Policy
+	ResourceID string `json:"resourceId"`
+	Kind       string `json:"kind"`
+}
+
+// decodeBucketPolicy reads and shapes one bucket IAM policy body.
+func decodeBucketPolicy(bucket string, body []byte) (bucketPolicyEnvelope, error) {
+	var request bucketPolicyEnvelope
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&request) != nil {
+		return bucketPolicyEnvelope{}, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+	}
+	if request.ResourceID != "" && request.ResourceID != "/b/"+bucket && request.ResourceID != "projects/_/buckets/"+bucket {
+		return bucketPolicyEnvelope{}, status.Error(codes.InvalidArgument, "Policy resource disagrees with bucket")
+	}
+	if request.Kind != "" && request.Kind != "storage#policy" {
+		return bucketPolicyEnvelope{}, status.Error(codes.InvalidArgument, "Invalid policy kind")
+	}
+	return request, nil
+}
+
+// policyBindsPublic reports whether a policy grants allUsers or all
+// authenticated users, which public access prevention forbids.
+func policyBindsPublic(bindings []iam.Binding) (*gateway.RESTResponse, bool) {
+	for _, binding := range bindings {
+		for _, member := range binding.Members {
+			if member == "allUsers" || member == "allAuthenticatedUsers" {
+				return wireError(412, "conditionNotMet", "The bucket is subject to public access prevention."), true
+			}
+		}
+	}
+	return nil, false
 }
 
 // listBuckets mirrors every returned bucket into the provider-owned catalog.
