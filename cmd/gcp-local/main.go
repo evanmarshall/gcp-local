@@ -27,10 +27,10 @@ var version = "dev"
 
 func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	if len(args) > 0 && args[0] == "health" {
-		return health(args[1:], output, errors)
+		return health(ctx, args[1:], output, errors)
 	}
 	if len(args) > 0 && args[0] == "why-denied" {
-		return whyDenied(args[1:], output, errors)
+		return whyDenied(ctx, args[1:], output, errors)
 	}
 	flags := flag.NewFlagSet("gcp-local", flag.ContinueOnError)
 	flags.SetOutput(errors)

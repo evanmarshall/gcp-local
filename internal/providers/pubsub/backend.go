@@ -75,7 +75,8 @@ func (b *emulator) Start(ctx context.Context) error {
 	if err := b.config.validate(); err != nil {
 		return err
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	var listen net.ListenConfig
+	listener, err := listen.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("listen for the emulator port: %w", err)
 	}

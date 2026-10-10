@@ -21,8 +21,14 @@ func TestVersionAndInvalidConfiguration(t *testing.T) {
 	}
 }
 
+// listenTestAddress opens a loopback listener through the context-aware API.
+func listenTestAddress() (net.Listener, error) {
+	var listen net.ListenConfig
+	return listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+}
+
 func TestBindFailureIsReported(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := listenTestAddress()
 	if err != nil {
 		t.Fatal(err)
 	}

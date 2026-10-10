@@ -36,7 +36,7 @@ func TestProcessFixture(t *testing.T) {
 	if mode == "ignore-term" {
 		signal.Ignore(syscall.SIGTERM)
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := listenTestAddress()
 	if err != nil {
 		os.Exit(24)
 	}
@@ -74,6 +74,12 @@ type fixture struct {
 	failReset  atomic.Bool
 	blockProbe atomic.Bool
 	resets     atomic.Int32
+}
+
+// listenTestAddress opens a loopback listener through the context-aware API.
+func listenTestAddress() (net.Listener, error) {
+	var listen net.ListenConfig
+	return listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
 }
 
 // Sentinels returned by the test's injected failures.
@@ -295,7 +301,8 @@ func TestReadinessDetectsUnexpectedExit(t *testing.T) {
 	}
 	address, _ := os.ReadFile(filepath.Join(fixture.directory, "address"))
 	client := http.Client{Timeout: time.Second}
-	response, _ := client.Get("http://" + string(address) + "/exit")
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+string(address)+"/exit", nil)
+	response, _ := client.Do(request)
 	if response != nil {
 		response.Body.Close()
 	}
@@ -351,7 +358,7 @@ func TestHTTPProbeRejectsExternalOrRedirectedReadiness(t *testing.T) {
 			t.Fatalf("accepted %q", endpoint)
 		}
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := listenTestAddress()
 	if err != nil {
 		t.Fatal(err)
 	}

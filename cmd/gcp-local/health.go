@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 	"time"
 )
 
-func health(args []string, output, errors io.Writer) int {
+func health(ctx context.Context, args []string, output, errors io.Writer) int {
 	flags := flag.NewFlagSet("health", flag.ContinueOnError)
 	flags.SetOutput(errors)
 	endpoint := flags.String("endpoint", "http://127.0.0.1:4566", "local health endpoint")
@@ -29,7 +30,12 @@ func health(args []string, output, errors io.Writer) int {
 		return 2
 	}
 	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	response, err := client.Get(*endpoint + "/_local/health")
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, *endpoint+"/_local/health", nil)
+	if err != nil {
+		fmt.Fprintln(errors, "gcp-local is not ready")
+		return 1
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		fmt.Fprintln(errors, "Unable to reach gcp-local")
 		return 1

@@ -59,7 +59,7 @@ func setup(t *testing.T) *fixture {
 }
 func (f *fixture) request(actor, method, path string, body []byte, expected int) *httptest.ResponseRecorder {
 	f.t.Helper()
-	r := httptest.NewRequest(method, path, bytes.NewReader(body))
+	r := httptest.NewRequestWithContext(context.Background(), method, path, bytes.NewReader(body))
 	if actor != "" {
 		r.Header.Set("Authorization", "Bearer "+actor)
 	}
@@ -159,7 +159,7 @@ func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 		go func(project string) {
 			defer group.Done()
 			body := `{"name":"contended-bucket","location":"US-CENTRAL1","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0"}}`
-			r := httptest.NewRequest(http.MethodPost, "/storage/v1/b?project="+project, strings.NewReader(body))
+			r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/storage/v1/b?project="+project, strings.NewReader(body))
 			r.Header.Set("Authorization", "Bearer admin@"+project+".test")
 			w := httptest.NewRecorder()
 			f.g.ServeHTTP(w, r)

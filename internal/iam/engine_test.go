@@ -21,6 +21,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// getWithContext issues a context-aware GET against a local test server.
+func getWithContext(url string) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(request)
+}
+
 // mustWriteFile writes a fixture file or fails the test.
 func mustWriteFile(t *testing.T, path string, content []byte) {
 	t.Helper()
@@ -279,7 +288,7 @@ func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 	}
 	server := httptest.NewServer(engine)
 	defer server.Close()
-	response, err := http.Get(server.URL + "/_local/iam/decisions/" + first.ID)
+	response, err := getWithContext(server.URL + "/_local/iam/decisions/" + first.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

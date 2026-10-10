@@ -25,16 +25,22 @@ var (
 	errProviderReached   = errors.New("diagnostics reached provider")
 )
 
+// listenTestAddress opens a loopback listener through the context-aware API.
+func listenTestAddress() (net.Listener, error) {
+	var listen net.ListenConfig
+	return listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+}
+
 // healthPath is the local readiness endpoint asserted across runtime tests.
 const healthPath = "/_local/health"
 
 func start(t *testing.T, s *Server) (string, context.CancelFunc, <-chan error) {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := listenTestAddress()
 	if err != nil {
 		t.Fatal(err)
 	}
-	grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+	grpcListener, err := listenTestAddress()
 	if err != nil {
 		listener.Close()
 		t.Fatal(err)
@@ -197,11 +203,11 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 				timeout = 30 * time.Millisecond
 			}
 			s := WithGateway("test", timeout, gateway.New(registry, nil))
-			httpListener, err := net.Listen("tcp", "127.0.0.1:0")
+			httpListener, err := listenTestAddress()
 			if err != nil {
 				t.Fatal(err)
 			}
-			grpcListener, err := net.Listen("tcp", "127.0.0.1:0")
+			grpcListener, err := listenTestAddress()
 			if err != nil {
 				httpListener.Close()
 				t.Fatal(err)

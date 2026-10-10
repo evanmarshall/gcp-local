@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-func whyDenied(args []string, output, errors io.Writer) int {
+func whyDenied(ctx context.Context, args []string, output, errors io.Writer) int {
 	flags := flag.NewFlagSet("why-denied", flag.ContinueOnError)
 	flags.SetOutput(errors)
 	endpoint := flags.String("endpoint", "http://127.0.0.1:4566", "local diagnostics endpoint")
@@ -36,7 +37,12 @@ func whyDenied(args []string, output, errors io.Writer) int {
 		return 2
 	}
 	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	response, err := client.Get(*endpoint + "/_local/iam/decisions/" + flags.Arg(0))
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, *endpoint+"/_local/iam/decisions/"+flags.Arg(0), nil)
+	if err != nil {
+		fmt.Fprintln(errors, "Decision unavailable; it may be unknown or evicted")
+		return 1
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		fmt.Fprintln(errors, "Unable to reach local IAM diagnostics")
 		return 1

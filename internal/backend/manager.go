@@ -137,7 +137,7 @@ func (m *Manager) Session(ctx context.Context, key Key, operation func(context.C
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	stopCancel := context.AfterFunc(m.sessionLifetime, cancel)
+	stopCancel := context.AfterFunc(m.sessionLifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
 	defer func() { stopCancel(); cancel() }()
 	if m.sessionLifetime.Err() != nil {
 		i.release()
@@ -232,7 +232,7 @@ func (m *Manager) Use(ctx context.Context, key Key, operation func(context.Conte
 	defer instance.release()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stopCancel := context.AfterFunc(m.lifetime, cancel)
+	stopCancel := context.AfterFunc(m.lifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
 	defer stopCancel()
 	active, err := m.require(ctx, key, instance)
 	if err != nil {
@@ -260,13 +260,13 @@ func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Bac
 	if phase == Ready {
 		probe, cancel := context.WithTimeout(ctx, m.startTimeout)
 		defer cancel()
-		stopCancel := context.AfterFunc(m.lifetime, cancel)
+		stopCancel := context.AfterFunc(m.lifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
 		defer stopCancel()
 		if err := instance.backend.Ready(probe); err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			m.fail(instance, "readiness")
+			m.fail(instance, "readiness") //nolint:contextcheck // cleanup must outlive the cancelled request
 			return nil, fmt.Errorf("backend readiness: %w", err)
 		}
 		return instance.backend, nil
@@ -274,7 +274,7 @@ func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Bac
 	instance.phase(Starting, "")
 	deadline, cancel := context.WithTimeout(ctx, m.startTimeout)
 	defer cancel()
-	stopCancel := context.AfterFunc(m.lifetime, cancel)
+	stopCancel := context.AfterFunc(m.lifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
 	defer stopCancel()
 	if instance.backend == nil {
 		instance.backend, err = instance.definition.New(key.Scope)
@@ -288,7 +288,7 @@ func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Bac
 		}
 	}
 	if err := instance.backend.Start(deadline); err != nil {
-		m.fail(instance, "start")
+		m.fail(instance, "start") //nolint:contextcheck // cleanup must outlive the cancelled request
 		return nil, fmt.Errorf("backend start: %w", err)
 	}
 	timer := time.NewTicker(20 * time.Millisecond)
@@ -300,12 +300,12 @@ func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Bac
 			return instance.backend, nil
 		}
 		if errors.Is(err, ErrProcessExited) {
-			m.fail(instance, "readiness")
+			m.fail(instance, "readiness") //nolint:contextcheck // cleanup must outlive the cancelled request
 			return nil, fmt.Errorf("backend readiness: %w", err)
 		}
 		select {
 		case <-deadline.Done():
-			m.fail(instance, "readiness timeout")
+			m.fail(instance, "readiness timeout") //nolint:contextcheck // cleanup must outlive the cancelled request
 			return nil, deadline.Err()
 		case <-timer.C:
 		}
@@ -339,7 +339,7 @@ func (m *Manager) Preload(ctx context.Context, keys []Key) error {
 func (m *Manager) Reset(ctx context.Context, key Key) error {
 	ctx, cancel := context.WithTimeout(ctx, m.stopTimeout)
 	defer cancel()
-	stopCancel := context.AfterFunc(m.lifetime, cancel)
+	stopCancel := context.AfterFunc(m.lifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
 	defer stopCancel()
 	instance, err := m.get(key)
 	if err != nil {

@@ -23,7 +23,7 @@ func TestWhyDeniedUsesOnlyExplicitLocalDiagnostics(t *testing.T) {
 	}
 	for _, args := range [][]string{{endpointFlag, "https://iam.googleapis.com", id}, {endpointFlag, server.URL, "invalid"}, {endpointFlag, server.URL + "/other", id}} {
 		output.Reset()
-		if code := whyDenied(args, &output, &output); code != 2 {
+		if code := whyDenied(t.Context(), args, &output, &output); code != 2 {
 			t.Fatal("accepted unsafe endpoint or ID")
 		}
 	}
@@ -33,7 +33,7 @@ func TestWhyDeniedUsesOnlyExplicitLocalDiagnostics(t *testing.T) {
 	}))
 	defer redirect.Close()
 	output.Reset()
-	if code := whyDenied([]string{endpointFlag, redirect.URL, id}, &output, &output); code != 1 {
+	if code := whyDenied(t.Context(), []string{endpointFlag, redirect.URL, id}, &output, &output); code != 1 {
 		t.Fatal("followed diagnostics redirect")
 	}
 }

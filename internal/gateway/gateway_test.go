@@ -22,6 +22,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// listenTestAddress opens a loopback listener through the context-aware API.
+func listenTestAddress() (net.Listener, error) {
+	var listen net.ListenConfig
+	return listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+}
+
 const (
 	authorizationHeader  = "Authorization"
 	bucketCollectionPath = "/storage/v1/b"
@@ -45,7 +51,7 @@ func register(t *testing.T, r *Registry, method string, h Handler) {
 }
 func request(t *testing.T, client *http.Client, method, url, body string, headers http.Header) (int, map[string]any, http.Header) {
 	t.Helper()
-	req, err := http.NewRequest(method, url, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), method, url, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +220,7 @@ func TestRESTCancellationReachesProvider(t *testing.T) {
 }
 func grpcClient(t *testing.T, g *Gateway) *grpc.ClientConn {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := listenTestAddress()
 	if err != nil {
 		t.Fatal(err)
 	}
