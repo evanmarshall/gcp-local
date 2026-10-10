@@ -158,3 +158,31 @@ func TestTaskOnMissingQueueIsRefused(t *testing.T) {
 		t.Fatalf("task on missing queue status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestQueueIAMPolicyGrantsAndReads(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{"name": testQueue})
+	recorder := h.invoke(http.MethodGet, basePrefix+"/queues/"+testQueue+":getIamPolicy", nil)
+	if recorder.Code != 200 {
+		t.Fatalf("getIamPolicy status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+":setIamPolicy", map[string]any{
+		"policy": map[string]any{"bindings": []any{map[string]any{
+			"role":    "roles/cloudtasks.enqueuer",
+			"members": []any{"serviceAccount:enqueuer@" + testProject + ".iam.gserviceaccount.com"},
+		}}},
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("setIamPolicy status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodGet, basePrefix+"/queues/"+testQueue+":getIamPolicy", nil)
+	var policy struct {
+		Bindings []map[string]any `json:"bindings"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &policy); err != nil {
+		t.Fatalf("decode policy: %v", err)
+	}
+	if len(policy.Bindings) != 1 {
+		t.Fatalf("policy = %v", policy)
+	}
+}

@@ -20,7 +20,8 @@ const maxAttempts = 5
 func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodQueuesCreate, methodQueuesGet, methodQueuesList, methodQueuesDelete,
-		methodQueuesPause, methodQueuesResume, methodQueuesPurge:
+		methodQueuesPause, methodQueuesResume, methodQueuesPurge,
+		methodQueuesGetIam, methodQueuesSetIam:
 		return p.executeQueue(call, request, scope)
 	case methodTasksCreate, methodTasksGet, methodTasksList, methodTasksDelete, methodTasksRun:
 		return p.executeTask(call, request, scope)
@@ -172,6 +173,12 @@ func (p *Provider) createQueue(request *gateway.RESTRequest, scope state.Scope) 
 	if conflict != nil {
 		return conflict, nil
 	}
+	if err := p.index.Put(serviceName, state.Resource{
+		Name: queueResource(scope.Project, request.Path["location"], id), Service: serviceName,
+		Kind: "queue", Parent: projectResource(scope.Project), Scope: scope,
+	}); err != nil {
+		return nil, fmt.Errorf("index the queue: %w", err)
+	}
 	return &gateway.RESTResponse{JSON: queueDocument(scope.Project, request.Path["location"], p.mustQueue(scope, id))}, nil
 }
 
@@ -241,6 +248,7 @@ func (p *Provider) deleteQueue(request *gateway.RESTRequest, scope state.Scope) 
 		}
 		return nil
 	})
+	_ = p.index.Remove(serviceName, scope, queueResource(scope.Project, request.Path["location"], id))
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
