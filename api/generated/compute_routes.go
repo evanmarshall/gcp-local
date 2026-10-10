@@ -21,6 +21,8 @@ var ComputeRoutes = []Route{
 	{"compute.routes.get", "GET", "/compute/v1/projects/{project}/global/routes/{route}", false, false},
 	{"compute.routes.delete", "DELETE", "/compute/v1/projects/{project}/global/routes/{route}", false, false},
 	{"networkmanagement.connectivityTests.run", "POST", "/v1/projects/{project}/locations/global/connectivityTests:run", true, false},
+	{"networkmanagement.connectivityTests.create", "POST", "/v1/projects/{project}/locations/global/connectivityTests", true, false},
+	{"networkmanagement.connectivityTests.list", "GET", "/v1/projects/{project}/locations/global/connectivityTests", false, false},
 	{"networkmanagement.connectivityTests.get", "GET", "/v1/projects/{project}/locations/global/connectivityTests/{test}", false, false},
 	{"networkmanagement.connectivityTests.delete", "DELETE", "/v1/projects/{project}/locations/global/connectivityTests/{test}", false, false},
 	{"compute.networks.addPeering", "POST", "/compute/v1/projects/{project}/global/networks/{network}/addPeering", true, false},

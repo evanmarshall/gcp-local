@@ -473,3 +473,53 @@ func TestConnectivityTestSurfaceReportsVerdicts(t *testing.T) {
 		t.Fatalf("delete status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+func TestNamedConnectivityTestsStoreAndReevaluate(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testNetwork, keyAutoSubnets: false,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
+		keyName: testFirewall, keyNetwork: testNetwork, keyDirection: "INGRESS",
+		testAllowed:     []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
+		keySourceRanges: []any{testSourceCIDR},
+	})
+	body := func() map[string]any {
+		return map[string]any{
+			"name":        "projects/demo-net/locations/global/connectivityTests/check-web",
+			"source":      map[string]any{"ipAddress": "10.0.0.5"},
+			"destination": map[string]any{"ipAddress": "10.0.0.9"},
+			"protocol":    testTCP,
+			"port":        443,
+		}
+	}
+	recorder := h.invoke(http.MethodPost, "/v1/projects/demo-net/locations/global/connectivityTests", body())
+	if recorder.Code != 200 {
+		t.Fatalf("create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodPost, "/v1/projects/demo-net/locations/global/connectivityTests", body())
+	if recorder.Code != 409 {
+		t.Fatalf("duplicate create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodGet, "/v1/projects/demo-net/locations/global/connectivityTests/check-web", nil)
+	if recorder.Code != 200 {
+		t.Fatalf("get status = %d", recorder.Code)
+	}
+	recorder = h.invoke(http.MethodGet, "/v1/projects/demo-net/locations/global/connectivityTests", nil)
+	var listing struct {
+		Tests []map[string]any `json:"connectivityTests"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listing); err != nil {
+		t.Fatalf("decode listing: %v", err)
+	}
+	if len(listing.Tests) != 1 {
+		t.Fatalf("listing = %v", listing)
+	}
+	recorder = h.invoke(http.MethodDelete, "/v1/projects/demo-net/locations/global/connectivityTests/check-web", nil)
+	if recorder.Code != 501 {
+		t.Fatalf("delete status = %d", recorder.Code)
+	}
+}

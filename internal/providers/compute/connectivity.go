@@ -3,6 +3,7 @@ package compute
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -12,6 +13,7 @@ import (
 
 // connectivityRequest is the posted Connectivity Tests flow specification.
 type connectivityRequest struct {
+	Name   string `json:"name"`
 	Source struct {
 		IPAddress string `json:"ipAddress"`
 		Network   string `json:"network"`
@@ -69,8 +71,14 @@ func (p *Provider) deleteConnectivity() (*gateway.RESTResponse, error) {
 }
 
 // executeConnectivity dispatches the connectivity test methods.
-func (p *Provider) executeConnectivity(call gateway.Call, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+func (p *Provider) executeConnectivity(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
+	case methodConnectivityCreate:
+		return p.createConnectivity(request, scope)
+	case methodConnectivityList:
+		return p.listConnectivity(scope)
+	case methodConnectivityGet:
+		return p.getConnectivity(request, scope)
 	case methodConnectivityRun:
 		return p.runConnectivity(request)
 	case methodConnectivityDelete:
@@ -82,3 +90,92 @@ func (p *Provider) executeConnectivity(call gateway.Call, request *gateway.RESTR
 
 // unusedState guards the state import while the scope model stays global.
 var _ = state.GlobalScope
+
+// namedTest is one stored connectivity test with its flow specification.
+type namedTest struct {
+	Name      string    `json:"name"`
+	Source    string    `json:"source"`
+	Dest      string    `json:"destination"`
+	Protocol  string    `json:"protocol"`
+	Port      int       `json:"port"`
+	CreatedAt time.Time `json:"createTime"`
+}
+
+// createConnectivity stores a named test and immediately evaluates it.
+func (p *Provider) createConnectivity(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	var spec connectivityRequest
+	if json.Unmarshal(request.JSON, &spec) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid connectivity test specification")
+	}
+	name := lastSegment(spec.Name)
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "A connectivity test requires a name")
+	}
+	record := &namedTest{
+		Name: name, Source: spec.Source.IPAddress, Dest: spec.Destination.IPAddress,
+		Protocol: strings.ToLower(strings.TrimSpace(spec.Protocol)), Port: spec.Port,
+		CreatedAt: time.Now(),
+	}
+	var conflict bool
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		if s.connectivity[name] == nil {
+			s.connectivity[name] = record
+		} else {
+			conflict = true
+		}
+		return nil
+	})
+	if conflict {
+		return nil, status.Errorf(codes.AlreadyExists, "connectivity test %q already exists", name)
+	}
+	verdict := p.analyze(reachabilityRequest{
+		Project: request.Path["project"], SourceIP: record.Source, DestIP: record.Dest,
+		Protocol: record.Protocol, Port: record.Port,
+	})
+	return &gateway.RESTResponse{JSON: p.connectivityDocument(scope.Project+"/locations/global/connectivityTests/"+name, verdict)}, nil
+}
+
+// getConnectivity re-evaluates one stored test.
+func (p *Provider) getConnectivity(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	var record *namedTest
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		record = s.connectivity[request.Path["test"]]
+		return nil
+	})
+	if record == nil {
+		return nil, status.Errorf(codes.NotFound, "connectivity test %q is not found", request.Path["test"])
+	}
+	verdict := p.analyze(reachabilityRequest{
+		Project: request.Path["project"], SourceIP: record.Source, DestIP: record.Dest,
+		Protocol: record.Protocol, Port: record.Port,
+	})
+	return &gateway.RESTResponse{JSON: p.connectivityDocument(scope.Project+"/locations/global/connectivityTests/"+record.Name, verdict)}, nil
+}
+
+// listConnectivity returns the stored tests with fresh evaluations.
+func (p *Provider) listConnectivity(scope state.Scope) (*gateway.RESTResponse, error) {
+	var records []*namedTest
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		for _, record := range s.connectivity {
+			records = append(records, record)
+		}
+		return nil
+	})
+	items := make([]any, 0, len(records))
+	for _, record := range records {
+		verdict := p.analyze(reachabilityRequest{
+			Project: scope.Project, SourceIP: record.Source, DestIP: record.Dest,
+			Protocol: record.Protocol, Port: record.Port,
+		})
+		items = append(items, p.connectivityDocument(scope.Project+"/locations/global/connectivityTests/"+record.Name, verdict))
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{"connectivityTests": items}}, nil
+}
+
+// lastSegment extracts the trailing identifier of a full resource name.
+func lastSegment(name string) string {
+	if index := strings.LastIndex(name, "/"); index >= 0 {
+		return name[index+1:]
+	}
+	return name
+}

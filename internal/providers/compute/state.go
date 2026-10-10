@@ -70,23 +70,26 @@ type routeRecord struct {
 
 // scopeState is one project/location slice of provider state.
 type scopeState struct {
-	networks    map[string]*networkRecord
-	subnetworks map[string]*subnetworkRecord
-	firewalls   map[string]*firewallRecord
-	routes      map[string]*routeRecord
-	operations  map[string]*operationRecord
-	generation  int64
+	connectivity map[string]*namedTest
+	networks     map[string]*networkRecord
+	subnetworks  map[string]*subnetworkRecord
+	firewalls    map[string]*firewallRecord
+	routes       map[string]*routeRecord
+	operations   map[string]*operationRecord
+	generation   int64
 }
 
 func newScopeState() scopeState {
 	return scopeState{
-		networks: map[string]*networkRecord{}, subnetworks: map[string]*subnetworkRecord{},
+		connectivity: map[string]*namedTest{},
+		networks:     map[string]*networkRecord{}, subnetworks: map[string]*subnetworkRecord{},
 		firewalls: map[string]*firewallRecord{}, routes: map[string]*routeRecord{},
 		operations: map[string]*operationRecord{},
 	}
 }
 
 func (s *scopeState) reset() {
+	s.connectivity = map[string]*namedTest{}
 	s.networks = map[string]*networkRecord{}
 	s.subnetworks = map[string]*subnetworkRecord{}
 	s.firewalls = map[string]*firewallRecord{}
