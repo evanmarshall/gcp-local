@@ -128,7 +128,13 @@ func (d *DockerRuntime) Start(ctx context.Context, spec StartSpec) (string, erro
 		_ = d.Stop(ctx, created.ID)
 		return "", status.Errorf(codes.Internal, "The engine exposed no port for %s", key)
 	}
-	return bindings[0].HostIP + ":" + bindings[0].HostPort, nil
+	// A published port binds every interface; the loopback form is the one
+	// the invocation proxy may dial.
+	host := bindings[0].HostIP
+	if host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return host + ":" + bindings[0].HostPort, nil
 }
 
 // Ready blocks until the container exits and reports its failure, or nil while
