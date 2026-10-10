@@ -7,7 +7,6 @@ grant on the synthetic project; the boundaries under test (invocation and the
 worker's Storage write) use real per-identity grants.
 """
 
-import base64
 import json
 import os
 import secrets
@@ -22,7 +21,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from smoke_cloudrun import build_image, start_core, write_configs  # harness helpers
+import google.auth
+import pubsub_v1
+from google.auth.transport.grpc import secure_authorized_channel
+from smoke_cloudrun import SERVE_SOCKET, build_image, start_core, write_configs  # helpers
+
+PUBSUB_GRPC_PORT = SERVE_SOCKET + 1
+
 
 REPO = Path(__file__).resolve().parents[1]
 SERVE_SOCKET = 9298
@@ -32,6 +37,24 @@ SCOPE = "/v2/projects/" + PROJECT + "/locations/us-central1"
 WORKER_IMAGE = "gcp-local/workflow:latest"
 WORKER_EMAIL = "worker@" + PROJECT + ".iam.gserviceaccount.com"
 ENDPOINT = BASE + "/_run/worker-" + PROJECT + ".us-central1.run.app"
+
+
+class LocalChannelClients:
+    """Pub/Sub clients pinned to the local gRPC gateway only."""
+
+    def __init__(self, credentials: google.auth.credentials.Credentials, port: int) -> None:
+        """Pin both clients to the local gRPC gateway channel."""
+        channel = secure_authorized_channel(
+            credentials, None, "127.0.0.1:" + str(port))
+        self.publisher = pubsub_v1.PublisherClient(channel=channel)
+        self.subscriber = pubsub_v1.SubscriberClient(channel=channel)
+
+
+def sdk_credentials(adc: Path) -> google.auth.credentials.Credentials:
+    """Load the fixture ADC bundle pinned to the local endpoint."""
+    credentials, _ = google.auth.load_credentials_from_file(
+        str(adc), scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    return credentials
 
 
 def rest(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
@@ -58,6 +81,30 @@ def rest(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[in
     except urllib.error.HTTPError as error:
         payload = error.read()
         return error.code, json.loads(payload) if payload else {}
+
+
+def write_adc(project: str) -> Path:
+    """Write the developer fixture ADC bundle for the local token exchange."""
+    directory = Path(tempfile.mkdtemp())
+    directory.chmod(stat.S_IRWXU)
+    subject = "gls." + secrets.token_urlsafe(32)
+    # The subject token must match the developer principal written above.
+    _ = project
+    (directory / "subject.txt").write_text(subject)
+    adc = {
+        "type": "external_account_authorized_user",
+        "audience": (
+            "//iam.googleapis.com/projects/" + project
+            + "/locations/global/workloadIdentityPools/gcp-local/providers/local"
+        ),
+        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        "token_url": "http://127.0.0.1:" + str(SERVE_SOCKET) + "/v1/token",
+        "credential_source": {"file": str(directory / "subject.txt")},
+    }
+    path = directory / "adc.json"
+    path.write_text(json.dumps(adc))
+    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return path
 
 
 def install_java() -> str:
@@ -100,7 +147,7 @@ def await_operation(name: str, deadline: float = 90.0) -> dict[str, Any]:
     raise AssertionError("Operation did not finish: " + name + " last=" + json.dumps(last))
 
 
-def deploy_worker() -> None:
+def deploy_worker(clients: LocalChannelClients) -> str:
     """Create the bucket, topic, push subscription, and the worker service."""
     bucket = "workflow-" + PROJECT
     status, body = rest("POST", "/storage/v1/b?project=" + PROJECT, {
@@ -119,9 +166,7 @@ def deploy_worker() -> None:
     status, body = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
     assert status == 200, "bucket grant failed: " + json.dumps(body)[:200]
 
-    status, body = rest("POST", "/v1/projects/" + PROJECT + "/topics",
-                        {"name": "projects/" + PROJECT + "/topics/workflow"})
-    assert status == 200, "topic create failed: " + json.dumps(body)[:200]
+    clients.publisher.create_topic(request={"name": pubsub_v1.TopicName(PROJECT, "workflow")})
     status, service = rest("POST", SCOPE + "/services", {
         "name": SCOPE + "/services/worker",
         "template": {"containers": [{"image": WORKER_IMAGE, "containerPort": 8080}],
@@ -139,27 +184,25 @@ def deploy_worker() -> None:
         {"role": "roles/run.invoker", "members": ["serviceAccount:" + WORKER_EMAIL]})
     status, _ = rest("POST", SCOPE + "/services/worker:setIamPolicy", {"policy": policy})
     assert status == 200
-    status, _ = rest("POST", "/v1/projects/" + PROJECT + "/subscriptions", {
-        "name": "projects/" + PROJECT + "/subscriptions/workflow-push",
-        "topic": "projects/" + PROJECT + "/topics/workflow",
-        "pushConfig": {"pushEndpoint": ENDPOINT,
-                       "oidcToken": {"serviceAccountEmail": WORKER_EMAIL,
-                                     "audience": ENDPOINT}},
-        "ackDeadlineSeconds": 10,
+    clients.subscriber.create_subscription(request={
+        "name": pubsub_v1.SubscriptionName(PROJECT, "workflow-push"),
+        "topic": pubsub_v1.TopicName(PROJECT, "workflow"),
+        "pushConfig": pubsub_v1.PushConfig(
+            push_endpoint=ENDPOINT,
+            oidc_token=pubsub_v1.PushConfig.OidcToken(
+                service_account_email=WORKER_EMAIL, audience=ENDPOINT),
+        ),
+        "ack_deadline_seconds": 10,
     })
-    assert status == 200, "subscription create failed"
     return bucket
 
 
-def publish(bucket: str, payload: str, message_id: str) -> int:
-    """Publish one message and return the number of delivery attempts observed."""
-    topic = "projects/" + PROJECT + "/topics/workflow"
-    status, _ = rest("POST", topic + ":publish", {
-        "messages": [{"data": base64.urlsafe_b64encode(payload.encode()).decode(),
-                      "attributes": {"bucket": bucket}, "messageId": message_id}],
-    })
-    assert status == 200, "publish failed"
-    return status
+def publish(clients: LocalChannelClients, bucket: str, payload: str, message_id: str) -> None:
+    """Publish one message through the SDK client."""
+    future = clients.publisher.publish(
+        pubsub_v1.TopicName(PROJECT, "workflow"), payload.encode(),
+        bucket=bucket, messageId=message_id)
+    assert future.result(timeout=15), "publish failed"
 
 
 def stored_object(bucket: str, name: str) -> tuple[int, str]:
@@ -185,12 +228,12 @@ def expect_object(bucket: str, message_id: str, payload: str) -> None:
     raise AssertionError("The worker did not store the object: " + message_id)
 
 
-def denial_cycle(bucket: str) -> None:
+def denial_cycle(clients: LocalChannelClients, bucket: str) -> None:
     """Revoke the worker's Storage grant, expect the write to fail, then restore."""
     status, _ = rest("PUT", "/storage/v1/b/" + bucket + "/iam",
                      {"bindings": [], "resourceId": "/b/" + bucket, "kind": "storage#policy"})
     assert status == 200, "revoke failed"
-    publish(bucket, "denied-payload", "denied-msg")
+    publish(clients, bucket, "denied-payload", "denied-msg")
     end = time.time() + 30
     while time.time() < end:
         status, _ = stored_object(bucket, "denied-msg.txt")
@@ -204,7 +247,7 @@ def denial_cycle(bucket: str) -> None:
               "resourceId": "/b/" + bucket, "kind": "storage#policy"}
     status, _ = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
     assert status == 200, "restore failed"
-    publish(bucket, "restored-payload", "restored-msg")
+    publish(clients, bucket, "restored-payload", "restored-msg")
     expect_object(bucket, "restored-msg", "restored-payload")
 
 
@@ -224,13 +267,16 @@ def main() -> int:
     before = subprocess.check_output([docker, "ps", "-aq"], text=True)
     iam_path = write_configs(PROJECT, ["roles/pubsub.admin", "roles/storage.admin"])
     identity_path = write_identity(PROJECT)
+    identity_path, developer_token = write_identity(PROJECT)
+    adc = write_adc(PROJECT, developer_token)
     core = start_core(binary, iam_path, identity_path, port=SERVE_SOCKET,
                       services="storage,pubsub,run", pubsub_java=java, pubsub_jar=jar)
+    clients = LocalChannelClients(sdk_credentials(adc), PUBSUB_GRPC_PORT)
     try:
-        bucket = deploy_worker()
-        publish(bucket, "workflow-payload", "wf-msg-1")
+        bucket = deploy_worker(clients)
+        publish(clients, bucket, "workflow-payload", "wf-msg-1")
         expect_object(bucket, "wf-msg-1", "workflow-payload")
-        denial_cycle(bucket)
+        denial_cycle(clients, bucket)
         status, _ = rest("DELETE", SCOPE + "/services/worker")
         assert status == 200
         docker = os.environ.get("DOCKER", "docker")
