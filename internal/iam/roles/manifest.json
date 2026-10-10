@@ -1,122 +1,122 @@
 {
-  "source": "https://iam.googleapis.com/v1/roles/{role}",
-  "recorded_at": "2026-10-05",
-  "scope": "Read-only predefined Storage, Pub/Sub, service-account, and Cloud Run, Compute Engine networking, Secret Manager, and Cloud Tasks role definitions; no resource mutation or grant",
-  "roles": [
-    {
-      "file": "storage.admin.json",
-      "name": "roles/storage.admin",
-      "sha256": "dfe4cc58d8e989889be3210e0c5fe691ee15cdb7f57acb0f4eb956c29f92fa84"
-    },
-    {
-      "file": "storage.objectUser.json",
-      "name": "roles/storage.objectUser",
-      "sha256": "e9155375d0b7739a436e79ac192f621001a2c04e752022e42a03a920c6258eee"
-    },
-    {
-      "file": "storage.objectViewer.json",
-      "name": "roles/storage.objectViewer",
-      "sha256": "469367b5c8f0dbdc39bdfe23838ce33423ec473ca32db3565fa8cab611a0cca6"
-    },
-    {
-      "file": "storage.objectCreator.json",
-      "name": "roles/storage.objectCreator",
-      "sha256": "513fff80b0a597719850b948d5e33d5970f027d1db2fd34ac7d6028f6c243d1c"
-    },
-    {
-      "file": "pubsub.admin.json",
-      "name": "roles/pubsub.admin",
-      "sha256": "3a938305bb99c1ca1b70b7c93183f15bbed3f43dcc987279c73447a73f0cb6a7"
-    },
-    {
-      "file": "pubsub.publisher.json",
-      "name": "roles/pubsub.publisher",
-      "sha256": "9a6d023589cc824dd059d3b3899c3447b91d0737b39dd5de11432064daba61ab"
-    },
-    {
-      "file": "pubsub.subscriber.json",
-      "name": "roles/pubsub.subscriber",
-      "sha256": "6de29ead3b21468492b39620d0f5e3d51e44938197436bc818743917157e7eb2"
-    },
-    {
-      "file": "pubsub.viewer.json",
-      "name": "roles/pubsub.viewer",
-      "sha256": "ff3decd54fae7f9e17ddd08dcfedbcf146cb660b18a68032c790df8517608400"
-    },
-    {
-      "file": "iam.serviceAccountUser.json",
-      "name": "roles/iam.serviceAccountUser",
-      "sha256": "d3a8433206951eb861c3c4740685dd37e996b6af325daf27f29e24274624523e"
-    },
-    {
-      "file": "iam.serviceAccountTokenCreator.json",
-      "name": "roles/iam.serviceAccountTokenCreator",
-      "sha256": "64dc45c85e756f2f0bd4f90ae12b342ca845c4a4d33b0a153e5b56c36fc284e9"
-    },
-    {
-      "file": "run.admin.json",
-      "name": "roles/run.admin",
-      "sha256": "7637967dda5fcb340fd5fca8de82ddbc099eb00e6350af5107280bbb0a657208"
-    },
-    {
-      "file": "run.developer.json",
-      "name": "roles/run.developer",
-      "sha256": "cd616087891bc5770d3833e0ee8276431893ac9f07c57b2adec1471b86ab05ad"
-    },
-    {
-      "file": "run.invoker.json",
-      "name": "roles/run.invoker",
-      "sha256": "8ef5b78f8e8b7f5e921b78b77442e06a08a9bcbadae0f801d960e64a3bbf5109"
-    },
-    {
-      "file": "run.viewer.json",
-      "name": "roles/run.viewer",
-      "sha256": "dec4dfdbf4f04a2f9c2d151951a7b1fe066d8d9aa211c4345ed9774b178928a2"
-    },
-    {
-      "file": "compute.admin.json",
-      "name": "roles/compute.admin",
-      "sha256": "7dffd7068ada504ae27f9678afc92f0c284114bb2688e932dabd306e4ab5de57"
-    },
-    {
-      "file": "compute.networkAdmin.json",
-      "name": "roles/compute.networkAdmin",
-      "sha256": "24f89640dd6908e4fc19dd35db8718749318640811a7d5e242d032f4cf7e1687"
-    },
-    {
-      "file": "compute.viewer.json",
-      "name": "roles/compute.viewer",
-      "sha256": "4dd540cf796f2e9d900d6140883cf4c176951632651bca535c35d2aa30b8a9aa"
-    },
-    {
-      "file": "secretmanager.admin.json",
-      "name": "roles/secretmanager.admin",
-      "sha256": "07c4b78cd9588198a2635eb5307a3ec3c4a498253affeaed9e8746596758dc90"
-    },
-    {
-      "file": "secretmanager.secretAccessor.json",
-      "name": "roles/secretmanager.secretAccessor",
-      "sha256": "d3c35c282f8db6a20ff99fe056bff65ed8678bd6f4a51d7836ecbaa40ac19354"
-    },
-    {
-      "file": "secretmanager.viewer.json",
-      "name": "roles/secretmanager.viewer",
-      "sha256": "2b0d58eb9b8b0b8151890fb8ab1c8de729337be537235b1c1f92c3a7d44e563c"
-    },
-    {
-      "file": "cloudtasks.admin.json",
-      "name": "roles/cloudtasks.admin",
-      "sha256": "ac3dd366a0af611c8d33b142a3cf6275f63076ffaceb65d4da57ddd7b3dcde08"
-    },
-    {
-      "file": "cloudtasks.enqueuer.json",
-      "name": "roles/cloudtasks.enqueuer",
-      "sha256": "f7e01f683341a20f3258cafca37cee2f368d8904a96431a179e993e2ac1bc646"
-    },
-    {
-      "file": "networkmanagement.viewer.json",
-      "name": "roles/networkmanagement.viewer",
-      "sha256": "be413c3bb5ec84e7c9c5f5cfd7d177acf276ed22b8329fcd68e956929a55b2be"
-    }
-  ]
+ "source": "https://iam.googleapis.com/v1/roles/{role}",
+ "recorded_at": "2026-10-05",
+ "scope": "Read-only predefined Storage, Pub/Sub, service-account, and Cloud Run, Compute Engine networking, Secret Manager, and Cloud Tasks role definitions; no resource mutation or grant",
+ "roles": [
+  {
+   "file": "storage.admin.json",
+   "name": "roles/storage.admin",
+   "sha256": "dfe4cc58d8e989889be3210e0c5fe691ee15cdb7f57acb0f4eb956c29f92fa84"
+  },
+  {
+   "file": "storage.objectUser.json",
+   "name": "roles/storage.objectUser",
+   "sha256": "e9155375d0b7739a436e79ac192f621001a2c04e752022e42a03a920c6258eee"
+  },
+  {
+   "file": "storage.objectViewer.json",
+   "name": "roles/storage.objectViewer",
+   "sha256": "469367b5c8f0dbdc39bdfe23838ce33423ec473ca32db3565fa8cab611a0cca6"
+  },
+  {
+   "file": "storage.objectCreator.json",
+   "name": "roles/storage.objectCreator",
+   "sha256": "513fff80b0a597719850b948d5e33d5970f027d1db2fd34ac7d6028f6c243d1c"
+  },
+  {
+   "file": "pubsub.admin.json",
+   "name": "roles/pubsub.admin",
+   "sha256": "3a938305bb99c1ca1b70b7c93183f15bbed3f43dcc987279c73447a73f0cb6a7"
+  },
+  {
+   "file": "pubsub.publisher.json",
+   "name": "roles/pubsub.publisher",
+   "sha256": "9a6d023589cc824dd059d3b3899c3447b91d0737b39dd5de11432064daba61ab"
+  },
+  {
+   "file": "pubsub.subscriber.json",
+   "name": "roles/pubsub.subscriber",
+   "sha256": "6de29ead3b21468492b39620d0f5e3d51e44938197436bc818743917157e7eb2"
+  },
+  {
+   "file": "pubsub.viewer.json",
+   "name": "roles/pubsub.viewer",
+   "sha256": "ff3decd54fae7f9e17ddd08dcfedbcf146cb660b18a68032c790df8517608400"
+  },
+  {
+   "file": "iam.serviceAccountUser.json",
+   "name": "roles/iam.serviceAccountUser",
+   "sha256": "d3a8433206951eb861c3c4740685dd37e996b6af325daf27f29e24274624523e"
+  },
+  {
+   "file": "iam.serviceAccountTokenCreator.json",
+   "name": "roles/iam.serviceAccountTokenCreator",
+   "sha256": "64dc45c85e756f2f0bd4f90ae12b342ca845c4a4d33b0a153e5b56c36fc284e9"
+  },
+  {
+   "file": "run.admin.json",
+   "name": "roles/run.admin",
+   "sha256": "7637967dda5fcb340fd5fca8de82ddbc099eb00e6350af5107280bbb0a657208"
+  },
+  {
+   "file": "run.developer.json",
+   "name": "roles/run.developer",
+   "sha256": "cd616087891bc5770d3833e0ee8276431893ac9f07c57b2adec1471b86ab05ad"
+  },
+  {
+   "file": "run.invoker.json",
+   "name": "roles/run.invoker",
+   "sha256": "8ef5b78f8e8b7f5e921b78b77442e06a08a9bcbadae0f801d960e64a3bbf5109"
+  },
+  {
+   "file": "run.viewer.json",
+   "name": "roles/run.viewer",
+   "sha256": "dec4dfdbf4f04a2f9c2d151951a7b1fe066d8d9aa211c4345ed9774b178928a2"
+  },
+  {
+   "file": "compute.admin.json",
+   "name": "roles/compute.admin",
+   "sha256": "8574f22a1ef7ddea05cff7cacd0b011ac87d524047a030dd0e26ebf7670cd761"
+  },
+  {
+   "file": "compute.networkAdmin.json",
+   "name": "roles/compute.networkAdmin",
+   "sha256": "8cd85460868e5b78fe706debd73b81ac0b69a81656aacd2a3568fdddb44c05a6"
+  },
+  {
+   "file": "compute.viewer.json",
+   "name": "roles/compute.viewer",
+   "sha256": "4dd540cf796f2e9d900d6140883cf4c176951632651bca535c35d2aa30b8a9aa"
+  },
+  {
+   "file": "secretmanager.admin.json",
+   "name": "roles/secretmanager.admin",
+   "sha256": "07c4b78cd9588198a2635eb5307a3ec3c4a498253affeaed9e8746596758dc90"
+  },
+  {
+   "file": "secretmanager.secretAccessor.json",
+   "name": "roles/secretmanager.secretAccessor",
+   "sha256": "d3c35c282f8db6a20ff99fe056bff65ed8678bd6f4a51d7836ecbaa40ac19354"
+  },
+  {
+   "file": "secretmanager.viewer.json",
+   "name": "roles/secretmanager.viewer",
+   "sha256": "2b0d58eb9b8b0b8151890fb8ab1c8de729337be537235b1c1f92c3a7d44e563c"
+  },
+  {
+   "file": "cloudtasks.admin.json",
+   "name": "roles/cloudtasks.admin",
+   "sha256": "ac3dd366a0af611c8d33b142a3cf6275f63076ffaceb65d4da57ddd7b3dcde08"
+  },
+  {
+   "file": "cloudtasks.enqueuer.json",
+   "name": "roles/cloudtasks.enqueuer",
+   "sha256": "f7e01f683341a20f3258cafca37cee2f368d8904a96431a179e993e2ac1bc646"
+  },
+  {
+   "file": "networkmanagement.viewer.json",
+   "name": "roles/networkmanagement.viewer",
+   "sha256": "be413c3bb5ec84e7c9c5f5cfd7d177acf276ed22b8329fcd68e956929a55b2be"
+  }
+ ]
 }

@@ -86,6 +86,7 @@ func methodNames() []string {
 		methodFirewallsCreate, methodFirewallsGet, methodFirewallsList, methodFirewallsDelete,
 		methodFirewallsUpdate,
 		methodRoutesCreate, methodRoutesGet, methodRoutesList, methodRoutesDelete,
+		methodRoutersCreate, methodRoutersGet, methodRoutersList, methodRoutersDelete,
 		methodConnectivityCreate, methodConnectivityRun,
 		methodConnectivityList, methodConnectivityGet, methodConnectivityDelete,
 		methodOperationsGet, methodOperationsList, methodRegionOperationsGet,

@@ -33,6 +33,8 @@ const (
 	verdictUnsupported = "unsupported"
 	testSourceCIDR     = "10.0.0.0/8"
 	keyDirection       = "direction"
+	keyNats            = "nats"
+	keySourceSubnets   = "sourceSubnetworkIpRanges"
 	keySourceRanges    = "sourceRanges"
 )
 
@@ -521,5 +523,71 @@ func TestNamedConnectivityTestsStoreAndReevaluate(t *testing.T) {
 	recorder = h.invoke(http.MethodDelete, "/v1/projects/demo-net/locations/global/connectivityTests/check-web", nil)
 	if recorder.Code != 501 {
 		t.Fatalf("delete status = %d", recorder.Code)
+	}
+}
+
+func TestRouterLifecycleWithNAT(t *testing.T) {
+	h := newHarness(t)
+	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testNetwork, keyAutoSubnets: false,
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("network create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("subnetwork create status = %d", recorder.Code)
+	}
+	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
+		keyName: "router-1", keyNetwork: testNetwork,
+		keyNats: []any{map[string]any{keyName: "nat-1", keySourceSubnets: []any{testSubnetOne}}},
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("router create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	recorder = h.invoke(http.MethodGet, "/compute/v1/projects/demo-net/regions/us-central1/routers/router-1", nil)
+	if recorder.Code != 200 {
+		t.Fatalf("router get status = %d", recorder.Code)
+	}
+	// A NAT referencing a missing subnetwork is refused.
+	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
+		keyName: "router-2", keyNetwork: testNetwork,
+		keyNats: []any{map[string]any{keyName: "nat-2", keySourceSubnets: []any{"missing-subnet"}}},
+	})
+	if recorder.Code != 400 {
+		t.Fatalf("missing subnetwork NAT status = %d", recorder.Code)
+	}
+	recorder = h.invoke(http.MethodDelete, "/compute/v1/projects/demo-net/regions/us-central1/routers/router-1", nil)
+	if recorder.Code != 200 {
+		t.Fatalf("router delete status = %d", recorder.Code)
+	}
+}
+
+func TestAnalyzerEvaluatesNATEgress(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testNetwork, keyAutoSubnets: false,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
+		keyName: "router-1", keyNetwork: testNetwork,
+		keyNats: []any{map[string]any{keyName: "nat-1", keySourceSubnets: []any{testSubnetOne}}},
+	})
+	verdict := h.analyzeFlow("10.0.1.5", "203.0.113.9", testTCP, 443)
+	if verdict.Result != "reachable" || len(verdict.Trace) != 1 {
+		t.Fatalf("NAT egress verdict = %+v", verdict)
+	}
+	if !strings.Contains(verdict.Trace[0], "nat/nat-1") {
+		t.Fatalf("trace = %+v", verdict.Trace)
+	}
+	// Without a NAT covering the subnet the same flow stays unknown.
+	h.invoke(http.MethodDelete, "/compute/v1/projects/demo-net/regions/us-central1/routers/router-1", nil)
+	verdict = h.analyzeFlow("10.0.1.5", "203.0.113.9", testTCP, 443)
+	if verdict.Result != verdictUnknown {
+		t.Fatalf("un-NATed external flow verdict = %+v", verdict)
 	}
 }

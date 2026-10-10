@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,6 +67,20 @@ func (p *Provider) analyze(request reachabilityRequest) Reachability {
 	destination, destUnknown := p.locate(scope, request.DestIP, request.DestTags, false)
 	unknown = append(unknown, destUnknown...)
 	if len(unknown) > 0 {
+		// A destination outside the modeled topology can still be evaluated
+		// when the source subnet is explicitly covered by a NAT gateway: the
+		// resource exists in the topology, so the flow is reachable through
+		// it rather than an unexplained pass.
+		if !source.networkMatched {
+			return Reachability{Result: verdictUnknown, Reason: "The topology does not resolve every endpoint", Unknown: unknown}
+		}
+		if nat, covered := p.natCovers(scope, source); covered {
+			return Reachability{
+				Result: verdictReachable,
+				Reason: "The source subnet is NAT-translated for external egress",
+				Trace:  []string{"nat/" + nat + " external egress from " + source.subnet},
+			}
+		}
 		return Reachability{Result: verdictUnknown, Reason: "The topology does not resolve every endpoint", Unknown: unknown}
 	}
 	if source.network == "" || destination.network == "" {
@@ -75,7 +90,7 @@ func (p *Provider) analyze(request reachabilityRequest) Reachability {
 	if source.network != destination.network {
 		peering, found := p.peeringBetween(scope, source.network, destination.network)
 		if !found {
-			return unsupported("Cross-network flows require a modeled peering; NAT is not modeled")
+			return unsupported("Cross-network flows require a modeled peering")
 		}
 		trace = append(trace, "peering/"+peering.Name+" to "+peering.PeerNetwork)
 	}
@@ -87,6 +102,8 @@ type endpoint struct {
 	network string
 	subnet  string
 	tags    []string
+	// networkMatched reports whether the address resolved into any subnet.
+	networkMatched bool
 }
 
 // locate resolves one endpoint from the topology; misses report unknown reasons.
@@ -108,7 +125,7 @@ func (p *Provider) locate(scope state.Scope, ip string, tags []string, isSource 
 			if !cidrContains(subnet.IPCIDRRange, parsed) {
 				continue
 			}
-			result = endpoint{network: subnet.Network, subnet: name}
+			result = endpoint{network: subnet.Network, subnet: name, networkMatched: true}
 			if isSource {
 				result.tags = tags
 			}
@@ -167,8 +184,11 @@ func (p *Provider) applyFirewalls(scope state.Scope, request reachabilityRequest
 	return p.matchRules(scope, request, source, destination, trace)
 }
 
-// verdictUnknown is the analyzer's unresolved result.
-const verdictUnknown = "unknown"
+// verdict literals shared by the analyzer and connectivity surfaces.
+const (
+	verdictUnknown   = "unknown"
+	verdictReachable = "reachable"
+)
 
 // matchRules walks the modeled rules in precedence order: ingress rules of
 // the destination network, egress rules of the source network.
@@ -314,3 +334,33 @@ func portMatches(ports any, port int) bool {
 
 // stateGlobal re-exports the global scope sentinel for readability.
 const stateGlobal = "global"
+
+// natCovers reports whether one NAT gateway explicitly covers the source
+// subnet (named coverage or ALL_SUBNETWORKS_ALL_IP_RANGES) and returns the
+// gateway name.
+func (p *Provider) natCovers(scope state.Scope, source endpoint) (string, bool) {
+	var covered string
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		for _, router := range s.routers {
+			if router.Network == source.network {
+				covered = natCovering(router.NATs, source.subnet)
+			}
+			if covered != "" {
+				return nil
+			}
+		}
+		return nil
+	})
+	return covered, covered != ""
+}
+
+// natCovering returns the NAT gateway name that covers one subnet.
+func natCovering(nats []natRecord, subnet string) string {
+	for _, nat := range nats {
+		if slices.Contains(nat.SourceSubnetworks, allSubnetworks) ||
+			slices.Contains(nat.SourceSubnetworks, subnet) {
+			return nat.Name
+		}
+	}
+	return ""
+}
