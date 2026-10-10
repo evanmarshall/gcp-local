@@ -42,6 +42,12 @@ const (
 	keyDescription = "description"
 	keyCode        = "code"
 	keyPorts       = "ports"
+	keyAutoSubnets = "autoCreateSubnetworks"
+	keyDestIP      = "destIp"
+	keyPort        = "port"
+	keyIPCIDR      = "ipCidrRange"
+	keyProject     = "project"
+	keyProtocol    = "protocol"
 )
 
 // wireHost is the canonical self-link host of the recorded compute contract.
