@@ -117,6 +117,21 @@
    "file": "networkmanagement.viewer.json",
    "name": "roles/networkmanagement.viewer",
    "sha256": "be413c3bb5ec84e7c9c5f5cfd7d177acf276ed22b8329fcd68e956929a55b2be"
+  },
+  {
+   "file": "cloudkms.admin.json",
+   "name": "roles/cloudkms.admin",
+   "sha256": "b3c6346d6939df54686abf29485206662d42c0c82ddebd0e8ce59553d4d1968a"
+  },
+  {
+   "file": "cloudkms.cryptoKeyEncrypterDecrypter.json",
+   "name": "roles/cloudkms.cryptoKeyEncrypterDecrypter",
+   "sha256": "67c32019ecf027bb6e6695975b2920760cfd3040c536a6d2eb9dbef196d0ca9b"
+  },
+  {
+   "file": "cloudkms.viewer.json",
+   "name": "roles/cloudkms.viewer",
+   "sha256": "2cbdf41ba6e287fc38bdca18378fdc4bd4a0869a0580dae83301bcc71ab203d2"
   }
  ]
 }

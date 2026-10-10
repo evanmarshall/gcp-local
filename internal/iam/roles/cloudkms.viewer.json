@@ -1,0 +1,17 @@
+{
+ "description": "Read key rings, crypto keys, and versions.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "cloudkms.cryptoKeyVersions.get",
+  "cloudkms.cryptoKeyVersions.list",
+  "cloudkms.cryptoKeys.get",
+  "cloudkms.cryptoKeys.getIamPolicy",
+  "cloudkms.cryptoKeys.list",
+  "cloudkms.keyRings.get",
+  "cloudkms.keyRings.getIamPolicy",
+  "cloudkms.keyRings.list",
+  "cloudkms.locations.list"
+ ],
+ "name": "roles/cloudkms.viewer",
+ "stage": "GA"
+}

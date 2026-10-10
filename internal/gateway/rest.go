@@ -83,6 +83,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func contracts() []generated.Route {
 	routes := append(append(append([]generated.Route(nil), generated.StorageRoutes...), generated.RunRoutes...), generated.ComputeRoutes...)
 	routes = append(routes, generated.SecretManagerRoutes...)
+	routes = append(routes, generated.CloudKMSRoutes...)
 	routes = append(routes, generated.CloudTasksRoutes...)
 	sort.SliceStable(routes, func(i, j int) bool {
 		left, right := strings.Contains(routes[i].Path, ":"), strings.Contains(routes[j].Path, ":")
