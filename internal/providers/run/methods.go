@@ -455,12 +455,15 @@ func (p *Provider) watch(scope state.Scope, id, operationName string) {
 		if revision == nil || revision.Address == "" {
 			return
 		}
-		deadline := time.Now().Add(readinessTimeout)
-		for time.Now().Before(deadline) {
+		// The runtime's Ready blocks until the container exits, so a single
+		// watcher races the readiness probe instead of joining the loop.
+		go func() {
 			if exited := p.runtime.Ready(base, revision.Container); exited != nil {
 				p.finishOperation(scope, operationName, 2, exited.Error())
-				return
 			}
+		}()
+		deadline := time.Now().Add(readinessTimeout)
+		for time.Now().Before(deadline) {
 			if serving(revision.Address) {
 				p.finishOperation(scope, operationName, 0, "")
 				return
