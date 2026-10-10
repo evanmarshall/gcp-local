@@ -1,7 +1,7 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
   "recorded_at": "2026-10-05",
-  "scope": "Read-only predefined Storage, Pub/Sub, and service-account role definitions; no resource mutation or grant",
+  "scope": "Read-only predefined Storage, Pub/Sub, service-account, and Cloud Run role definitions; no resource mutation or grant",
   "roles": [
     {
       "file": "storage.admin.json",
@@ -52,6 +52,26 @@
       "file": "iam.serviceAccountTokenCreator.json",
       "name": "roles/iam.serviceAccountTokenCreator",
       "sha256": "64dc45c85e756f2f0bd4f90ae12b342ca845c4a4d33b0a153e5b56c36fc284e9"
+    },
+    {
+      "file": "run.admin.json",
+      "name": "roles/run.admin",
+      "sha256": "7637967dda5fcb340fd5fca8de82ddbc099eb00e6350af5107280bbb0a657208"
+    },
+    {
+      "file": "run.developer.json",
+      "name": "roles/run.developer",
+      "sha256": "cd616087891bc5770d3833e0ee8276431893ac9f07c57b2adec1471b86ab05ad"
+    },
+    {
+      "file": "run.invoker.json",
+      "name": "roles/run.invoker",
+      "sha256": "8ef5b78f8e8b7f5e921b78b77442e06a08a9bcbadae0f801d960e64a3bbf5109"
+    },
+    {
+      "file": "run.viewer.json",
+      "name": "roles/run.viewer",
+      "sha256": "dec4dfdbf4f04a2f9c2d151951a7b1fe066d8d9aa211c4345ed9774b178928a2"
     }
   ]
 }

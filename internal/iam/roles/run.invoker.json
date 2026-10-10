@@ -1,0 +1,11 @@
+{
+  "description": "Ability to invoke a deployed Cloud Run service or job.",
+  "etag": "AA==",
+  "includedPermissions": [
+    "run.jobs.run",
+    "run.routes.invoke"
+  ],
+  "name": "roles/run.invoker",
+  "stage": "GA",
+  "title": "Cloud Run Invoker"
+}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/api/generated"
@@ -44,22 +45,8 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 		registry = NewRegistry()
 	}
 	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]generated.RPC{}}
-	variables := regexp.MustCompile(`\{([^{}]+)\}`)
-	for _, contract := range generated.StorageRoutes {
-		compiled := compiledRoute{contract: contract}
-		var pattern strings.Builder
-		pattern.WriteString("^")
-		last := 0
-		for _, bounds := range variables.FindAllStringSubmatchIndex(contract.Path, -1) {
-			pattern.WriteString(regexp.QuoteMeta(contract.Path[last:bounds[0]]))
-			pattern.WriteString("([^/]+)")
-			compiled.names = append(compiled.names, contract.Path[bounds[2]:bounds[3]])
-			last = bounds[1]
-		}
-		pattern.WriteString(regexp.QuoteMeta(contract.Path[last:]))
-		pattern.WriteString("$")
-		compiled.expression = regexp.MustCompile(pattern.String())
-		g.routes = append(g.routes, compiled)
+	for _, contract := range contracts() {
+		g.routes = append(g.routes, compileRoute(contract))
 	}
 	for _, rpc := range generated.PubSubMethods {
 		g.rpcs[rpc.Method] = rpc
@@ -89,6 +76,38 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeError(w, gap("this REST API method"))
+}
+
+// contracts returns the REST route tables, custom-method suffixes first so the
+// generic variable pattern cannot swallow the literal ":method" suffix.
+func contracts() []generated.Route {
+	routes := append(append([]generated.Route(nil), generated.StorageRoutes...), generated.RunRoutes...)
+	sort.SliceStable(routes, func(i, j int) bool {
+		left, right := strings.Contains(routes[i].Path, ":"), strings.Contains(routes[j].Path, ":")
+		return left && !right
+	})
+	return routes
+}
+
+// variables is the REST path template variable shape.
+var variables = regexp.MustCompile(`\{([^{}]+)\}`)
+
+// compileRoute turns one wire contract into its match table entry.
+func compileRoute(contract generated.Route) compiledRoute {
+	compiled := compiledRoute{contract: contract}
+	var pattern strings.Builder
+	pattern.WriteString("^")
+	last := 0
+	for _, bounds := range variables.FindAllStringSubmatchIndex(contract.Path, -1) {
+		pattern.WriteString(regexp.QuoteMeta(contract.Path[last:bounds[0]]))
+		pattern.WriteString("([^/]+)")
+		compiled.names = append(compiled.names, contract.Path[bounds[2]:bounds[3]])
+		last = bounds[1]
+	}
+	pattern.WriteString(regexp.QuoteMeta(contract.Path[last:]))
+	pattern.WriteString("$")
+	compiled.expression = regexp.MustCompile(pattern.String())
+	return compiled
 }
 
 // matches reports whether a request selects a route by method and path shape.

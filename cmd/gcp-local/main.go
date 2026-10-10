@@ -20,8 +20,10 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
+	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
+	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
 var version = "dev"
@@ -131,7 +133,7 @@ func assemble(ctx context.Context, options serveOptions) (*core.Server, core.Lis
 		server.Identity = identities
 	}
 	if options.iamPath != "" {
-		engine, err := assembleIAM(options, registry, server, identities)
+		engine, err := assembleIAM(ctx, options, registry, server, identities)
 		if err != nil {
 			return nil, core.Listeners{}, err
 		}
@@ -182,7 +184,7 @@ func metadataHandler(identities *identity.Service, options serveOptions) (http.H
 }
 
 // assembleIAM loads the IAM engine and registers the selected providers.
-func assembleIAM(options serveOptions, registry *gateway.Registry, server *core.Server, identities *identity.Service) (*iam.Engine, error) {
+func assembleIAM(ctx context.Context, options serveOptions, registry *gateway.Registry, server *core.Server, identities *identity.Service) (*iam.Engine, error) {
 	engine, index, err := iam.Load(options.iamPath)
 	if err != nil {
 		return nil, fmt.Errorf("load the IAM configuration: %w", err)
@@ -193,22 +195,37 @@ func assembleIAM(options serveOptions, registry *gateway.Registry, server *core.
 			selected[service] = true
 		}
 	}
+	if err := assembleServices(ctx, options, selected, registry, server, index, engine, identities); err != nil {
+		return nil, err
+	}
+	return engine, nil
+}
+
+// assembleServices registers each selected provider with its dependencies.
+func assembleServices(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service) error {
 	if selected["storage"] {
 		if _, err := storage.New(registry, server.Backends, index, engine); err != nil {
-			return nil, fmt.Errorf("register the Storage provider: %w", err)
+			return fmt.Errorf("register the Storage provider: %w", err)
 		}
 	}
 	if selected["pubsub"] {
 		tokens, err := identity.NewIDTokens(engine, index)
 		if err != nil {
-			return nil, fmt.Errorf("mint the ID-token keys: %w", err)
+			return fmt.Errorf("mint the ID-token keys: %w", err)
 		}
 		identities.IDTokens = tokens
-		if _, err := pubsub.New(registry, server.Backends, index, engine, pubsub.Config{Java: options.pubsubJava, JAR: options.pubsubJAR, IDTokens: tokens}); err != nil {
-			return nil, fmt.Errorf("register the Pub/Sub provider: %w", err)
+		config := pubsub.Config{Java: options.pubsubJava, JAR: options.pubsubJAR, IDTokens: tokens}
+		if _, err := pubsub.New(registry, server.Backends, index, engine, config); err != nil {
+			return fmt.Errorf("register the Pub/Sub provider: %w", err)
 		}
 	}
-	return engine, nil
+	if selected["run"] {
+		// The container runtime is provider-owned; restricted hosts refuse launch.
+		if _, err := runprovider.New(ctx, registry, server.Backends, index, engine, runprovider.NoopRuntime{}); err != nil {
+			return fmt.Errorf("register the Cloud Run provider: %w", err)
+		}
+	}
+	return nil
 }
 
 // bindListeners binds HTTP, gRPC, and optionally the metadata listener. Any
