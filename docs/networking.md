@@ -36,3 +36,10 @@ Routers, Cloud NAT, PSA/PSC, and Cloud SQL configuration are not implemented
 and are never reported as reachable; the reachability analyzer (#17) lists
 them as unsupported rather than approximating them. Recorded Connectivity
 Tests scenarios remain pending (#35).
+
+## Connectivity Tests surface
+
+`POST /v1/projects/{p}/locations/global/connectivityTests:run` evaluates one
+flow through the analyzer and returns REACHABLE/UNREACHABLE/AMBIGUOUS with the
+deciding-rule trace. The response marks itself `local-modeled`; recorded
+Connectivity Tests scenarios remain pending (#35).
