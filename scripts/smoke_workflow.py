@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 import google.auth
-import pubsub_v1
 from google.auth.transport.grpc import secure_authorized_channel
+from google.cloud import pubsub_v1
 from smoke_cloudrun import SERVE_SOCKET, build_image, start_core, write_configs  # helpers
 
 PUBSUB_GRPC_PORT = SERVE_SOCKET + 1
