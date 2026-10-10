@@ -55,6 +55,7 @@ func mustWriteFile(t *testing.T, path string, content []byte) {
 const testProject = "project-a"
 
 // testObjectGet is the read permission exercised by the engine tests.
+const testCloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 const testObjectGet = "storage.objects.get"
 
 // testViewerRole is the object-viewer role used by the condition tests.
@@ -118,7 +119,7 @@ func set(t *testing.T, e *iam.Engine, resource, role string, members ...string) 
 	return policy
 }
 func call(method, subject, project string) gateway.Call {
-	return gateway.Call{Context: context.Background(), Method: method, Project: testProject, Location: state.Global, TraceID: "same-client-trace", Principal: gateway.Principal{State: gateway.Authenticated, Subject: subject, Project: project, Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}}
+	return gateway.Call{Context: context.Background(), Method: method, Project: testProject, Location: state.Global, TraceID: "same-client-trace", Principal: gateway.Principal{State: gateway.Authenticated, Subject: subject, Project: project, Scopes: []string{testCloudPlatformScope}}}
 }
 func object() iam.Target {
 	return iam.Target{Name: storage.BucketResource("bucket-a") + "/objects/object.txt", Parent: storage.BucketResource("bucket-a")}
@@ -439,7 +440,7 @@ func TestPrincipalAccessBoundaryBoundsServiceAgents(t *testing.T) {
 	read := call("storage.objects.get", fixture, testProject)
 	read.Principal = gateway.Principal{
 		State: gateway.Authenticated, Subject: agent,
-		Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"},
+		Scopes: []string{testCloudPlatformScope},
 	}
 	pab := iam.Policy{
 		Version: 3,
@@ -458,7 +459,7 @@ func TestPrincipalAccessBoundaryBoundsServiceAgents(t *testing.T) {
 	user := call("storage.objects.get", fixture, testProject)
 	user.Principal = gateway.Principal{
 		State: gateway.Authenticated, Subject: "user:person@example.com",
-		Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"},
+		Scopes: []string{testCloudPlatformScope},
 	}
 	if _, err := engine.SetPolicy(projectA, iam.Policy{
 		Bindings: []iam.Binding{{Role: "roles/storage.objectViewer", Members: []string{"user:person@example.com"}}},
