@@ -293,7 +293,7 @@ const idleTimeout = 5 * time.Minute
 func (p *Provider) startReaper(scope state.Scope, id string) {
 	watch, cancel := context.WithCancel(context.Background())
 	p.reaperMu.Lock()
-	p.reapers[scope.Project] = cancel
+	p.reapers[scope.Project+"/"+id] = cancel
 	p.reaperMu.Unlock()
 	go func() {
 		defer cancel()

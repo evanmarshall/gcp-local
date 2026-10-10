@@ -529,3 +529,15 @@ func TestUpdateRejectsBadTrafficSplit(t *testing.T) {
 		t.Fatalf("bad split fell back to %d percent", total)
 	}
 }
+
+func TestDeleteCancelsServiceReaper(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	if len(h.provider.reapers) != 1 {
+		t.Fatalf("reapers after create = %d", len(h.provider.reapers))
+	}
+	h.invoke(http.MethodDelete, "/v2/projects/demo-project/locations/us-central1/services/svc", nil)
+	if len(h.provider.reapers) != 0 {
+		t.Fatalf("reapers after delete = %d", len(h.provider.reapers))
+	}
+}

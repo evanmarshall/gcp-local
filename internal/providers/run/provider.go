@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,7 +106,7 @@ func (emptyBackend) Restore(context.Context) error  { return backend.ErrPersiste
 func (p *Provider) stopReapers(scope state.Scope) {
 	p.reaperMu.Lock()
 	for key, cancel := range p.reapers {
-		if key == scope.Project {
+		if strings.HasPrefix(key, scope.Project+"/") {
 			cancel()
 			delete(p.reapers, key)
 		}
