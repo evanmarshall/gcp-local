@@ -112,6 +112,11 @@
       "file": "cloudtasks.enqueuer.json",
       "name": "roles/cloudtasks.enqueuer",
       "sha256": "f7e01f683341a20f3258cafca37cee2f368d8904a96431a179e993e2ac1bc646"
+    },
+    {
+      "file": "networkmanagement.viewer.json",
+      "name": "roles/networkmanagement.viewer",
+      "sha256": "be413c3bb5ec84e7c9c5f5cfd7d177acf276ed22b8329fcd68e956929a55b2be"
     }
   ]
 }

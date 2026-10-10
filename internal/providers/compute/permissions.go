@@ -28,6 +28,9 @@ var permissions = map[string]string{
 	methodRoutesDelete:          "compute.routes.delete",
 	methodNetworksAddPeering:    "compute.networks.addPeering",
 	methodNetworksRemovePeering: "compute.networks.removePeering",
+	methodConnectivityRun:       "networkmanagement.connectivitytests.rerun",
+	methodConnectivityGet:       "networkmanagement.connectivitytests.get",
+	methodConnectivityDelete:    "networkmanagement.connectivitytests.delete",
 	methodOperationsGet:         "compute.globalOperations.get",
 	methodOperationsList:        "compute.globalOperations.list",
 	methodRegionOperationsGet:   "compute.regionOperations.get",
@@ -54,6 +57,9 @@ const (
 	methodRoutesDelete          = "compute.routes.delete"
 	methodNetworksAddPeering    = "compute.networks.addPeering"
 	methodNetworksRemovePeering = "compute.networks.removePeering"
+	methodConnectivityRun       = "networkmanagement.connectivityTests.run"
+	methodConnectivityGet       = "networkmanagement.connectivityTests.get"
+	methodConnectivityDelete    = "networkmanagement.connectivityTests.delete"
 	methodOperationsGet         = "compute.globalOperations.get"
 	methodOperationsList        = "compute.globalOperations.list"
 	methodRegionOperationsGet   = "compute.regionOperations.get"
@@ -68,6 +74,7 @@ func methodNames() []string {
 		methodFirewallsCreate, methodFirewallsGet, methodFirewallsList, methodFirewallsDelete,
 		methodFirewallsUpdate,
 		methodRoutesCreate, methodRoutesGet, methodRoutesList, methodRoutesDelete,
+		methodConnectivityRun, methodConnectivityGet, methodConnectivityDelete,
 		methodOperationsGet, methodOperationsList, methodRegionOperationsGet,
 	}
 }

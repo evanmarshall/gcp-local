@@ -32,7 +32,7 @@ type reachabilityRequest struct {
 }
 
 // Analyzer returns the local reachability surface. It reads only the modeled
-// topology: unresolved values and missing topology report "unknown", never a
+// topology: unresolved values and missing topology report verdictUnknown, never a
 // pass, and features without modeled resources report "unsupported".
 func (p *Provider) Analyzer() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,10 +66,10 @@ func (p *Provider) analyze(request reachabilityRequest) Reachability {
 	destination, destUnknown := p.locate(scope, request.DestIP, request.DestTags, false)
 	unknown = append(unknown, destUnknown...)
 	if len(unknown) > 0 {
-		return Reachability{Result: "unknown", Reason: "The topology does not resolve every endpoint", Unknown: unknown}
+		return Reachability{Result: verdictUnknown, Reason: "The topology does not resolve every endpoint", Unknown: unknown}
 	}
 	if source.network == "" || destination.network == "" {
-		return Reachability{Result: "unknown", Reason: "Both endpoints must resolve into a modeled network"}
+		return Reachability{Result: verdictUnknown, Reason: "Both endpoints must resolve into a modeled network"}
 	}
 	trace := []string{}
 	if source.network != destination.network {
@@ -166,6 +166,9 @@ func (p *Provider) peeringBetween(scope state.Scope, source, destination string)
 func (p *Provider) applyFirewalls(scope state.Scope, request reachabilityRequest, source, destination endpoint, trace *[]string) (string, string) {
 	return p.matchRules(scope, request, source, destination, trace)
 }
+
+// verdictUnknown is the analyzer's unresolved result.
+const verdictUnknown = "unknown"
 
 // matchRules walks the modeled rules in precedence order: ingress rules of
 // the destination network, egress rules of the source network.

@@ -34,8 +34,6 @@ const (
 	testSourceCIDR     = "10.0.0.0/8"
 	keyDirection       = "direction"
 	keySourceRanges    = "sourceRanges"
-	// verdictUnknown is the analyzer's unresolved result.
-	verdictUnknown = "unknown"
 )
 
 // harness drives the provider through the gateway.
@@ -60,7 +58,10 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("register the project: %v", err)
 	}
 	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/demo-net", iam.Policy{
-		Bindings: []iam.Binding{{Role: "roles/compute.admin", Members: []string{"serviceAccount:actor@demo-net.iam.gserviceaccount.com"}}},
+		Bindings: []iam.Binding{
+			{Role: "roles/compute.admin", Members: []string{"serviceAccount:actor@demo-net.iam.gserviceaccount.com"}},
+			{Role: "roles/networkmanagement.viewer", Members: []string{"serviceAccount:actor@demo-net.iam.gserviceaccount.com"}},
+		},
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)
 	}
@@ -410,4 +411,65 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, "/compute/v1/projects/demo-net/global/firewalls")
 	probe(http.MethodGet, "/compute/v1/projects/demo-net/global/routes")
 	probe(http.MethodGet, "/compute/v1/projects/demo-net/global/operations")
+}
+
+func TestConnectivityTestSurfaceReportsVerdicts(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testNetwork, keyAutoSubnets: false,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: testSubnetCIDR,
+	})
+	spec := func(source, dest string) map[string]any {
+		h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
+			keyName: testFirewall, keyNetwork: testNetwork, "direction": "INGRESS",
+			testAllowed:     []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
+			keySourceRanges: []any{testSourceCIDR},
+		})
+		return map[string]any{
+			"source":      map[string]any{"ipAddress": source},
+			"destination": map[string]any{"ipAddress": dest},
+			"protocol":    testTCP,
+			"port":        443,
+		}
+	}
+	recorder := h.invoke(http.MethodPost, "/v1/projects/demo-net/locations/global/connectivityTests:run", spec("10.0.0.5", "10.0.0.9"))
+	if recorder.Code != 200 {
+		t.Fatalf("run status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var result struct {
+		ReachabilityDetails struct {
+			Result string `json:"result"`
+			Traces []struct {
+				Steps []string `json:"steps"`
+			} `json:"traces"`
+		} `json:"reachabilityDetails"`
+		Provenance string `json:"provenance"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.ReachabilityDetails.Result != "REACHABLE" || len(result.ReachabilityDetails.Traces) == 0 {
+		t.Fatalf("details = %+v", result.ReachabilityDetails)
+	}
+	if result.Provenance != "local-modeled; no cloud recording backs this surface" {
+		t.Fatalf("provenance = %s", result.Provenance)
+	}
+	recorder = h.invoke(http.MethodPost, "/v1/projects/demo-net/locations/global/connectivityTests:run", spec("10.0.0.5", "10.0.99.1"))
+	var ambiguous struct {
+		ReachabilityDetails struct {
+			Result string `json:"result"`
+		} `json:"reachabilityDetails"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &ambiguous); err != nil {
+		t.Fatalf("decode ambiguous: %v", err)
+	}
+	if ambiguous.ReachabilityDetails.Result != "AMBIGUOUS" {
+		t.Fatalf("unresolved result = %s", ambiguous.ReachabilityDetails.Result)
+	}
+	recorder = h.invoke(http.MethodDelete, "/v1/projects/demo-net/locations/global/connectivityTests/any", nil)
+	if recorder.Code != 501 {
+		t.Fatalf("delete status = %d body %s", recorder.Code, recorder.Body.String())
+	}
 }
