@@ -20,6 +20,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -43,7 +44,12 @@ func main() {
 			number = "000000000002"
 		}
 		must(index.Put("resourcemanager", state.Resource{Name: name, Service: "resourcemanager", Kind: "project", Number: number, Scope: state.Scope{Project: project, Location: state.Global}}))
-		_, err := engine.SetPolicy(name, iam.Policy{Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}}}})
+		_, err := engine.SetPolicy(name, iam.Policy{Bindings: []iam.Binding{
+			{Role: "roles/storage.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			// The KMS acceptance case drives key rings and crypto keys with
+			// the same fixture principal.
+			{Role: "roles/cloudkms.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+		}})
 		must(err)
 	}
 	resolver := func(ctx context.Context, token string) (gateway.Principal, error) {
@@ -62,6 +68,8 @@ func main() {
 	server := core.WithGateway("conformance", 5*time.Second, gateway.New(registry, resolver))
 	server.IAM = engine
 	_, err = storage.New(registry, server.Backends, index, engine)
+	must(err)
+	_, err = cloudkms.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	if *trace || *fault {
 		handler := server.HTTP.Handler

@@ -413,7 +413,8 @@ func cloudKMSRoutes(_ bool) []byte {
 	}
 	rows := []row{
 		{"cloudkms.locations.list", verbGET, base, false, false},
-		{"cloudkms.keyRings.create", verbPOST, base + "/keyRings", true, false},
+		// The real create reads only the keyRingId query; the body is optional.
+		{"cloudkms.keyRings.create", verbPOST, base + "/keyRings", false, false},
 		{"cloudkms.keyRings.list", verbGET, base + "/keyRings", false, false},
 		{"cloudkms.keyRings.get", verbGET, base + "/keyRings/{keyRing}", false, false},
 		{"cloudkms.keyRings.getIamPolicy", verbGET, base + "/keyRings/{keyRing}:getIamPolicy", false, false},

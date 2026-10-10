@@ -4,7 +4,7 @@ package generated
 // CloudKMSRoutes is the Cloud KMS v1 route table slice.
 var CloudKMSRoutes = []Route{
 	{"cloudkms.locations.list", "GET", "/v1/projects/{project}/locations/{location}", false, false},
-	{"cloudkms.keyRings.create", "POST", "/v1/projects/{project}/locations/{location}/keyRings", true, false},
+	{"cloudkms.keyRings.create", "POST", "/v1/projects/{project}/locations/{location}/keyRings", false, false},
 	{"cloudkms.keyRings.list", "GET", "/v1/projects/{project}/locations/{location}/keyRings", false, false},
 	{"cloudkms.keyRings.get", "GET", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}", false, false},
 	{"cloudkms.keyRings.getIamPolicy", "GET", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}:getIamPolicy", false, false},
