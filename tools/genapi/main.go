@@ -408,6 +408,8 @@ func cloudTasksRoutes(_ bool) []byte {
 		{"cloudtasks.tasks.get", verbGET, base + "/queues/{queue}/tasks/{task}", false, false},
 		{"cloudtasks.tasks.delete", verbDELETE, base + "/queues/{queue}/tasks/{task}", false, false},
 		{"cloudtasks.tasks.run", verbPOST, base + "/queues/{queue}/tasks/{task}:run", false, false},
+		{"cloudtasks.queues.getIamPolicy", verbGET, base + "/queues/{queue}:getIamPolicy", false, false},
+		{"cloudtasks.queues.setIamPolicy", verbPOST, base + "/queues/{queue}:setIamPolicy", true, false},
 		{"cloudtasks.locations.list", verbGET, "/v2beta3/projects/{project}/locations", false, false},
 	}
 	var body strings.Builder

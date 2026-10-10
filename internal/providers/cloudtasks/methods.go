@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -49,6 +50,10 @@ func (p *Provider) executeQueue(call gateway.Call, request *gateway.RESTRequest,
 		return p.setQueueState(request, scope, "RUNNING")
 	case methodQueuesPurge:
 		return p.purgeQueue(request, scope)
+	case methodQueuesGetIam:
+		return p.getQueueIam(scope, request)
+	case methodQueuesSetIam:
+		return p.setQueueIam(request, scope)
 	default:
 		return nil, gap("this method is not implemented")
 	}
@@ -258,4 +263,28 @@ func (p *Provider) purgeQueue(request *gateway.RESTRequest, scope state.Scope) (
 		return nil
 	})
 	return &gateway.RESTResponse{JSON: queueDocument(scope.Project, request.Path["location"], record)}, nil
+}
+
+// getQueueIam returns the stored queue policy.
+func (p *Provider) getQueueIam(scope state.Scope, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+	policy, err := p.engine.GetPolicy(queueResource(scope.Project, request.Path["location"], request.Path["queue"]))
+	if err != nil {
+		return nil, fmt.Errorf("read queue policy: %w", err)
+	}
+	return &gateway.RESTResponse{JSON: policy}, nil
+}
+
+// setQueueIam stores one unconditional version-1 queue policy.
+func (p *Provider) setQueueIam(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	var envelope struct {
+		Policy iam.Policy `json:"policy"`
+	}
+	if json.Unmarshal(request.JSON, &envelope) != nil {
+		return nil, statusInvalid("Invalid IAM policy")
+	}
+	policy, err := p.engine.SetPolicy(queueResource(scope.Project, request.Path["location"], request.Path["queue"]), envelope.Policy)
+	if err != nil {
+		return nil, fmt.Errorf("write queue policy: %w", err)
+	}
+	return &gateway.RESTResponse{JSON: policy}, nil
 }

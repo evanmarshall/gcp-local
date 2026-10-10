@@ -31,6 +31,8 @@ const (
 	methodTasksList     = "cloudtasks.tasks.list"
 	methodTasksDelete   = "cloudtasks.tasks.delete"
 	methodTasksRun      = "cloudtasks.tasks.run"
+	methodQueuesGetIam  = "cloudtasks.queues.getIamPolicy"
+	methodQueuesSetIam  = "cloudtasks.queues.setIamPolicy"
 	methodLocationsList = "cloudtasks.locations.list"
 )
 
@@ -48,6 +50,8 @@ var permissions = map[string]string{
 	methodTasksList:     "cloudtasks.tasks.list",
 	methodTasksDelete:   "cloudtasks.tasks.delete",
 	methodTasksRun:      "cloudtasks.tasks.run",
+	methodQueuesGetIam:  "cloudtasks.queues.getIamPolicy",
+	methodQueuesSetIam:  "cloudtasks.queues.setIamPolicy",
 	methodLocationsList: "cloudtasks.locations.list",
 }
 
