@@ -57,6 +57,12 @@ type unsupportedPolicy struct {
 	scope    state.Scope
 }
 
+// orgPolicyRecord is one stored constraint; dryRun keeps it advisory.
+type orgPolicyRecord struct {
+	constraint string
+	dryRun     bool
+}
+
 type storedPolicy struct {
 	policy     Policy
 	owner      string

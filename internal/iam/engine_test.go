@@ -470,3 +470,43 @@ func TestPrincipalAccessBoundaryBoundsServiceAgents(t *testing.T) {
 		t.Fatalf("bounded-policy removal still denied the user: %v", err)
 	}
 }
+
+func TestOrgPolicyAndVPCSCSignalDistinctFromIAMDenial(t *testing.T) {
+	engine, _ := setup(t)
+	// A granted user read plus a dry-run org-policy violation and a perimeter.
+	if err := engine.MarkOrgPolicy(projectA, "constraints/storage.publicAccessPrevention", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.MarkPerimeter("local-perimeter", []string{projectA, object().Parent}); err != nil {
+		t.Fatal(err)
+	}
+	read := call("storage.objects.get", fixture, testProject)
+	decision, err := engine.Authorize(read, object(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The perimeter covers both the bucket and the project, so the bucket
+	// contributes one vpc-sc signal and the project contributes the org-policy
+	// violation plus a second perimeter signal.
+	if len(decision.Signals) != 3 {
+		t.Fatalf("signals = %+v", decision.Signals)
+	}
+	byFamily := map[string]iam.Signal{}
+	for _, signal := range decision.Signals {
+		byFamily[signal.Family] = signal
+	}
+	if byFamily["org-policy"].Verdict != "dry-run violation" {
+		t.Fatalf("org-policy signal = %+v", byFamily["org-policy"])
+	}
+	if byFamily["vpc-sc"].Detail != "local-perimeter" {
+		t.Fatalf("vpc-sc signal = %+v", byFamily["vpc-sc"])
+	}
+	// The IAM check itself stays an allow: signals never replace IAM verdicts.
+	if decision.Checks[0].Allowed == false {
+		t.Fatalf("IAM check = %+v", decision.Checks[0])
+	}
+	// An unregistered constraint resource is refused.
+	if err := engine.MarkOrgPolicy("missing", "constraints/x", true); status.Code(err) != codes.NotFound {
+		t.Fatalf("missing resource = %v", err)
+	}
+}

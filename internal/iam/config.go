@@ -30,6 +30,16 @@ type Config struct {
 	Policies        map[string]Policy   `json:"policies"`
 	Unsupported     map[string][]string `json:"unsupported,omitempty"`
 	ServiceAccounts []ServiceAccount    `json:"service_accounts,omitempty"`
+	// OrgPolicies declares constraints per resource; dryRun keeps them advisory.
+	OrgPolicies map[string]OrgPolicyDeclaration `json:"org_policies,omitempty"`
+	// Perimeters declares VPC-SC perimeters by name over listed resources.
+	Perimeters map[string][]string `json:"vpcsc_perimeters,omitempty"`
+}
+
+// OrgPolicyDeclaration is one resource's constraint set with a dry-run mode.
+type OrgPolicyDeclaration struct {
+	Constraints []string `json:"constraints"`
+	DryRun      bool     `json:"dry_run"`
 }
 
 // Load creates a fresh index/engine so a rejected bootstrap cannot publish a
@@ -69,6 +79,18 @@ func Load(path string) (*Engine, *state.Index, error) {
 	}
 	for resource, features := range config.Unsupported {
 		if err := engine.MarkUnsupported(resource, features); err != nil {
+			return nil, nil, err
+		}
+	}
+	for resource, declaration := range config.OrgPolicies {
+		for _, constraint := range declaration.Constraints {
+			if err := engine.MarkOrgPolicy(resource, constraint, declaration.DryRun); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	for name, resources := range config.Perimeters {
+		if err := engine.MarkPerimeter(name, resources); err != nil {
 			return nil, nil, err
 		}
 	}

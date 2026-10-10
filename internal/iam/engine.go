@@ -42,6 +42,18 @@ type Decision struct {
 	Reason    string            `json:"reason"`
 	Complete  bool              `json:"complete"`
 	Checks    []Check           `json:"checks"`
+	// Signals carry non-IAM policy families evaluated alongside the request.
+	// They are dry-run observations, never enforcement, and stay distinct from
+	// IAM denial so no precedence order is implied between families.
+	Signals []Signal `json:"signals,omitempty"`
+}
+
+// Signal records one non-IAM policy family's observation on a decision.
+type Signal struct {
+	Family   string `json:"family"`
+	Verdict  string `json:"verdict"`
+	Detail   string `json:"detail"`
+	Resource string `json:"resource"`
 }
 type Engine struct {
 	mu          sync.Mutex
@@ -50,6 +62,8 @@ type Engine struct {
 	rules       map[string]Rule
 	policies    map[string]storedPolicy
 	unsupported map[string]unsupportedPolicy
+	orgPolicies map[string][]orgPolicyRecord
+	perimeters  map[string][]string
 	revision    uint64
 	decisions   map[string]Decision
 	order       []string
@@ -92,7 +106,7 @@ func New(index *state.Index) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, decisions: map[string]Decision{}}, nil
+	return &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string][]orgPolicyRecord{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}}, nil
 }
 func (e *Engine) Register(method string, plan Rule) error {
 	rule, err := e.validateRule(plan)
@@ -154,6 +168,7 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 		return finish(outcomeDeny, violation, codes.PermissionDenied)
 	}
 	denied := e.collectChecks(&decision, permissions, ancestors, decision.Principal)
+	e.collectSignals(ancestors, &decision)
 	return finalize(finish, decision, denied, complete)
 }
 
@@ -559,4 +574,62 @@ func (e *Engine) pabViolation(ancestors []state.Resource, call gateway.Call) str
 		return "The request is outside every principal access boundary bound at " + ancestor.Name
 	}
 	return ""
+}
+
+// MarkOrgPolicy stores one org-policy constraint on a resource. The
+// constraint is reported in traces as a dry-run signal; nothing enforces it.
+func (e *Engine) MarkOrgPolicy(resource string, constraint string, dryRun bool) error {
+	if _, ok := e.index.Get(resource); !ok {
+		return status.Error(codes.NotFound, "Org-policy resource is not registered")
+	}
+	if constraint == "" {
+		return status.Error(codes.InvalidArgument, "Org-policy constraint is required")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.orgPolicies[resource] = append(e.orgPolicies[resource], orgPolicyRecord{constraint: constraint, dryRun: dryRun})
+	return nil
+}
+
+// MarkPerimeter records one VPC Service Controls perimeter over resources.
+// Membership is reported in traces as a dry-run signal; nothing enforces it.
+func (e *Engine) MarkPerimeter(name string, resources []string) error {
+	if name == "" || len(resources) == 0 {
+		return status.Error(codes.InvalidArgument, "A perimeter requires a name and resources")
+	}
+	for _, resource := range resources {
+		if _, ok := e.index.Get(resource); !ok {
+			return status.Error(codes.NotFound, "Perimeter resource is not registered: "+resource)
+		}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, resource := range resources {
+		e.perimeters[resource] = append(e.perimeters[resource], name)
+	}
+	return nil
+}
+
+// collectSignals observes the non-IAM families along the ancestor chain.
+// Each family reports independently; the order here is presentation, not
+// precedence, and no family blocks or replaces an IAM verdict.
+func (e *Engine) collectSignals(ancestors []state.Resource, decision *Decision) {
+	for _, ancestor := range ancestors {
+		for _, record := range e.orgPolicies[ancestor.Name] {
+			verdict := "violation"
+			if record.dryRun {
+				verdict = "dry-run violation"
+			}
+			decision.Signals = append(decision.Signals, Signal{
+				Family: "org-policy", Verdict: verdict,
+				Detail: record.constraint, Resource: ancestor.Name,
+			})
+		}
+		if perimeters := e.perimeters[ancestor.Name]; len(perimeters) > 0 {
+			decision.Signals = append(decision.Signals, Signal{
+				Family: "vpc-sc", Verdict: "inside-perimeter",
+				Detail: strings.Join(perimeters, ","), Resource: ancestor.Name,
+			})
+		}
+	}
 }
