@@ -80,12 +80,14 @@ SECRET_KEYS = {
 }
 
 
-def load_provenance(baseline: Path) -> dict[str, object]:
+def load_provenance(baseline: Path) -> tuple[dict[str, object], str]:
     """Read a baseline's provenance record, converting any defect to Unverified."""
     try:
         manifest = json.loads((baseline / "provenance.json").read_text())
+        snapshot_hash = sha256(baseline / "case.snapshot.json")
     except (OSError, ValueError):
-        raise Unverified("Missing or unreadable baseline provenance") from None
+        raise Unverified("Missing or unreadable baseline evidence") from None
+    return manifest, snapshot_hash
     if not isinstance(manifest, dict):
         raise Unverified("Baseline provenance is not a mapping")
     recorded_at = manifest.get("recorded_at")
@@ -172,8 +174,7 @@ class SnapshotCase:
         if source not in {"gcp", "synthetic"}:
             raise ValueError("Unknown evidence source")
         if mode != "record":
-            snapshot_hash = sha256(self.baseline / "case.snapshot.json")
-            manifest = load_provenance(self.baseline)
+            manifest, snapshot_hash = load_provenance(self.baseline)
             expected = asdict(scenario)
             # SDK/provider/backend versions can differ locally: report both. The
             # scenario revision binds the behavior contract, not emulator versions.
