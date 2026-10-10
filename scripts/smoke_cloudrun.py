@@ -80,6 +80,7 @@ def build_image(tag: str) -> str:
         "FROM " + ACCEPT_IMAGE + "\n"
         "COPY server.py /server.py\n"
         "ENV PORT=8080\n"
+        "EXPOSE 8080\n"
         'ENTRYPOINT ["python3", "/server.py"]\n'
     )
     build = subprocess.run(
