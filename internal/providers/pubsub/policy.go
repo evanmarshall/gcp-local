@@ -3,8 +3,10 @@ package pubsub
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
@@ -77,7 +79,7 @@ func validatePolicyOptions(options *iampb.GetPolicyOptions) error {
 	if err := fields(options, "requested_policy_version"); err != nil {
 		return err
 	}
-	if version := options.GetRequestedPolicyVersion(); version != 0 && version != 1 {
+	if version := options.GetRequestedPolicyVersion(); version != 0 && version != 1 && version != 3 {
 		return gap("requested IAM policy version")
 	}
 	return nil
@@ -99,10 +101,15 @@ func decodeSetPolicy(r *iampb.SetIamPolicyRequest) (*iam.Policy, error) {
 		if binding == nil {
 			return nil, invalid("Missing IAM binding")
 		}
-		if err := fields(binding, "role", "members"); err != nil {
+		if err := fields(binding, "role", "members", "condition"); err != nil {
 			return nil, err
 		}
-		policy.Bindings = append(policy.Bindings, iam.Binding{Role: binding.GetRole(), Members: append([]string(nil), binding.GetMembers()...)})
+		bindingShape := iam.Binding{Role: binding.GetRole(), Members: append([]string(nil), binding.GetMembers()...)}
+		if condition := binding.GetCondition(); condition != nil {
+			// The expr proto carries the CEL source text verbatim.
+			bindingShape.Condition = json.RawMessage(`{"expression":` + strconv.Quote(condition.GetExpression()) + `}`)
+		}
+		policy.Bindings = append(policy.Bindings, bindingShape)
 	}
 	return &policy, nil
 }
