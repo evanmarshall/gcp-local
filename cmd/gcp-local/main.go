@@ -19,11 +19,11 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
-	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
-	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
+	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
+	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -96,6 +96,7 @@ type serveOptions struct {
 	shutdown                           time.Duration
 	iamPath, identityPath              string
 	runSocket                          string
+	runProcess                         map[string]string
 	services, pubsubJava, pubsubJAR    string
 	metadataPrincipal                  string
 	showVersion                        bool
@@ -115,6 +116,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
 	flags.StringVar(&options.runSocket, "run-docker-socket", "", "Docker engine socket for Cloud Run containers; empty refuses launch")
+	flags.Var(processMap{&options.runProcess}, "run-process", "dockerless revision launch: image=command; repeatable; commands run as local processes")
 	flags.StringVar(&options.metadataListen, "metadata-listen", "", "optional per-workload loopback metadata listener")
 	flags.StringVar(&options.metadataPrincipal, "metadata-principal", "", "enrolled service account bound to the metadata listener")
 	flags.BoolVar(&options.showVersion, "version", false, "print the build version")
@@ -333,6 +335,12 @@ func assembleRun(ctx context.Context, options serveOptions, selected map[string]
 	var runtime runprovider.Runtime = runprovider.NoopRuntime{}
 	if options.runSocket != "" {
 		runtime = runprovider.NewDockerRuntime(options.runSocket)
+	} else if len(options.runProcess) > 0 {
+		commands := map[string][]string{}
+		for image, command := range options.runProcess {
+			commands[image] = strings.Fields(command)
+		}
+		runtime = runprovider.NewProcessRuntime(commands)
 	}
 	config := runprovider.Config{BaseURL: "http://" + options.listen}
 	if identities != nil {
@@ -382,4 +390,28 @@ func main() {
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)
+}
+
+// processMap collects repeatable image=command flags.
+type processMap struct {
+	target *map[string]string
+}
+
+func (m processMap) String() string {
+	if m.target == nil {
+		return ""
+	}
+	return ""
+}
+
+func (m processMap) Set(value string) error {
+	image, command, found := strings.Cut(value, "=")
+	if !found || image == "" || command == "" {
+		return errors.New("run-process expects image=command")
+	}
+	if *m.target == nil {
+		*m.target = map[string]string{}
+	}
+	(*m.target)[image] = command
+	return nil
 }

@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Any
 
 import google.auth
+import grpc
 from google.auth.transport.grpc import secure_authorized_channel
+from google.auth.transport.requests import Request
 from google.cloud import pubsub_v1
 from google.pubsub_v1.services.publisher.transports.grpc import PublisherGrpcTransport
 from google.pubsub_v1.services.subscriber.transports.grpc import SubscriberGrpcTransport
@@ -46,8 +48,13 @@ class LocalChannelClients:
 
     def __init__(self, credentials: google.auth.credentials.Credentials, port: int) -> None:
         """Pin both clients to the local gRPC gateway channel."""
+        # The core's gRPC listener is plaintext loopback; the validation
+        # runner uses the same local credentials shape against it.
+        # The auth request object is required: without it the credential
+        # cannot refresh and every call retries unauthenticated forever.
         channel = secure_authorized_channel(
-            credentials, None, "127.0.0.1:" + str(port))
+            credentials, Request(), "127.0.0.1:" + str(port),
+            ssl_credentials=grpc.local_channel_credentials())
         self.publisher = pubsub_v1.PublisherClient(
             transport=PublisherGrpcTransport(channel=channel))
         self.subscriber = pubsub_v1.SubscriberClient(
@@ -258,16 +265,26 @@ def main() -> int:
     subprocess.run(
         ["/bin/sh", str(REPO / "scripts/go.sh"), "build", "-o", str(binary), "./cmd/gcp-local"],
         check=True, capture_output=True)
-    build_image(WORKER_IMAGE)
+    dockerless = shutil.which(os.environ.get("DOCKER", "docker")) is None
+    if dockerless:
+        # Restricted guest: the worker runs as a local process through the
+        # dockerless revision runtime. The container packaging acceptance
+        # still runs on host Docker in CI.
+        worker = str(REPO / "examples" / "workflow" / "worker.py")
+        extra = ("--run-process", WORKER_IMAGE + "=python3 " + worker)
+    else:
+        build_image(WORKER_IMAGE)
+        extra = ()
     java = install_java()
     jar = str(REPO / ".tools/pubsub/emulator.jar")
     docker = os.environ.get("DOCKER", "docker")
-    before = subprocess.check_output([docker, "ps", "-aq"], text=True)
+    before = "" if dockerless else subprocess.check_output([docker, "ps", "-aq"], text=True)
     iam_path = write_configs(PROJECT, ["roles/pubsub.admin", "roles/storage.admin"])
     identity_path, developer_token = write_identity(PROJECT)
     adc = write_adc(PROJECT, developer_token)
     core = start_core(binary, iam_path, identity_path, port=SERVE_SOCKET,
-                      services="storage,pubsub,run", pubsub_java=java, pubsub_jar=jar)
+                      services="storage,pubsub,run", pubsub_java=java, pubsub_jar=jar,
+                      extra_flags=extra)
     clients = LocalChannelClients(sdk_credentials(adc), PUBSUB_GRPC_PORT)
     try:
         bucket = deploy_worker(clients)
@@ -276,9 +293,10 @@ def main() -> int:
         denial_cycle(clients, bucket)
         status, _ = rest("DELETE", SCOPE + "/services/worker")
         assert status == 200
-        docker = os.environ.get("DOCKER", "docker")
-        after = subprocess.check_output([docker, "ps", "-aq"], text=True)
-        assert after == before, "The workflow left a container behind"
+        if not dockerless:
+            docker = os.environ.get("DOCKER", "docker")
+            after = subprocess.check_output([docker, "ps", "-aq"], text=True)
+            assert after == before, "The workflow left a container behind"
     finally:
         core.terminate()
         core.wait(timeout=10)

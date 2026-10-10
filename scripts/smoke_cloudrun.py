@@ -15,6 +15,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -117,9 +118,11 @@ def write_configs(project: str = "demo-run", extra_roles: list[str] | None = Non
 def start_core(
     binary: Path, iam_path: Path, identity_path: Path | None = None,
     port: int = SERVE_SOCKET, services: str = "run", pubsub_java: str = "",
-    pubsub_jar: str = "",
+    pubsub_jar: str = "", extra_flags: Sequence[str] = (),
 ) -> subprocess.Popen:
-    """Start the core with the selected providers and Docker runtime."""
+    """Start the core with the selected providers and revision runtime."""
+    logs = Path(tempfile.gettempdir()) / ("gcp-local-core-" + str(port) + ".log")
+    log_handle = logs.open("w")
     process = subprocess.Popen(
         [
             str(binary),
@@ -134,13 +137,19 @@ def start_core(
             *(("--pubsub-jar", pubsub_jar) if pubsub_jar else ()),
             "--services",
             services,
-            "--run-docker-socket",
-            "/var/run/docker.sock",
+            *(("--run-docker-socket", "/var/run/docker.sock") if not any(
+                flag == "--run-process" for flag in extra_flags
+            ) else ()),
+            *extra_flags,
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # File-backed logs: a chatty child (the Java emulator) must never
+        # fill an unread pipe and block the server or its children.
+        stdout=subprocess.DEVNULL,
+        stderr=log_handle,
         text=True,
     )
+    # The handle stays open for the child; the parent does not need it.
+    log_handle.close()
     end = time.time() + 20
     while time.time() < end:
         try:
