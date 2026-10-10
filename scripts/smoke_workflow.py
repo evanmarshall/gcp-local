@@ -105,7 +105,6 @@ def deploy_worker() -> None:
     bucket = "workflow-" + PROJECT
     status, body = rest("POST", "/storage/v1/b?project=" + PROJECT, {
         "name": bucket, "location": "US-CENTRAL1",
-        "iamConfiguration": {"uniformBucketLevelAccess": {"enabled": True}},
     })
     assert status == 200, "bucket create failed: " + json.dumps(body)[:200]
     status, _ = rest("GET", "/storage/v1/b/" + bucket + "/iam")
