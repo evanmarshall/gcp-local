@@ -1,0 +1,14 @@
+{
+  "description": "Create tasks in queues.",
+  "etag": "AA==",
+  "includedPermissions": [
+    "cloudtasks.locations.get",
+    "cloudtasks.locations.list",
+    "cloudtasks.queues.get",
+    "cloudtasks.queues.list",
+    "cloudtasks.tasks.create"
+  ],
+  "name": "roles/cloudtasks.enqueuer",
+  "stage": "GA",
+  "title": "Cloud Tasks Enqueuer"
+}

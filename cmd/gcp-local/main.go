@@ -20,6 +20,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
+	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
@@ -260,6 +261,9 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleSecretManager(ctx, selected, registry, server, index, engine); err != nil {
 		return err
 	}
+	if err := assembleCloudTasks(ctx, selected, registry, server, index, engine); err != nil {
+		return err
+	}
 	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
 }
 
@@ -300,6 +304,21 @@ func assembleSecretManager(ctx context.Context, selected map[string]bool, regist
 	}
 	if _, err := secretmanagerprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Secret Manager provider: %w", err)
+	}
+	return nil
+}
+
+// assembleCloudTasks registers the Cloud Tasks provider and its dispatcher.
+func assembleCloudTasks(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["cloudtasks"] {
+		return nil
+	}
+	tokens, err := identity.NewIDTokens(engine, index)
+	if err != nil {
+		return fmt.Errorf("mint the cloudtasks ID-token keys: %w", err)
+	}
+	if _, err := cloudtasksprovider.New(ctx, cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Cloud Tasks provider: %w", err)
 	}
 	return nil
 }
