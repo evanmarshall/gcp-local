@@ -37,35 +37,30 @@ func encodeErrorBody(body map[string]any) []byte {
 	return encoded
 }
 
+// statusHTTP maps a wire status to the HTTP code a REST client expects.
+var statusHTTP = map[codes.Code]int{
+	codes.InvalidArgument: 400, codes.FailedPrecondition: 400, codes.OutOfRange: 400,
+	codes.Unauthenticated: 401, codes.PermissionDenied: 403, codes.NotFound: 404,
+	codes.AlreadyExists: 409, codes.Aborted: 409, codes.ResourceExhausted: 429,
+	codes.Canceled: 499, codes.Unimplemented: 501, codes.Unavailable: 503, codes.DeadlineExceeded: 504,
+}
+
+// statusNames renames the wire statuses whose Google spelling differs.
+var statusNames = map[codes.Code]string{
+	codes.Canceled: "CANCELLED", codes.InvalidArgument: "INVALID_ARGUMENT",
+	codes.DeadlineExceeded: "DEADLINE_EXCEEDED", codes.NotFound: "NOT_FOUND",
+	codes.AlreadyExists: "ALREADY_EXISTS", codes.PermissionDenied: "PERMISSION_DENIED",
+	codes.ResourceExhausted: "RESOURCE_EXHAUSTED", codes.FailedPrecondition: "FAILED_PRECONDITION",
+	codes.OutOfRange: "OUT_OF_RANGE", codes.DataLoss: "DATA_LOSS",
+}
+
 func writeError(w http.ResponseWriter, err error) {
 	s := status.Convert(normalizeError(err))
-	code := http.StatusInternalServerError
-	switch s.Code() {
-	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange:
-		code = 400
-	case codes.Unauthenticated:
-		code = 401
-	case codes.PermissionDenied:
-		code = 403
-	case codes.NotFound:
-		code = 404
-	case codes.AlreadyExists, codes.Aborted:
-		code = 409
-	case codes.ResourceExhausted:
-		code = 429
-	case codes.Canceled:
-		code = 499
-	case codes.Unimplemented:
-		code = 501
-	case codes.Unavailable:
-		code = 503
-	case codes.DeadlineExceeded:
-		code = 504
-	default:
-		// Every other status stays 500; the wire status name still describes it.
+	code := http.StatusInternalServerError // Every unmapped status stays 500.
+	if mapped, ok := statusHTTP[s.Code()]; ok {
+		code = mapped
 	}
-	names := map[codes.Code]string{codes.Canceled: "CANCELLED", codes.InvalidArgument: "INVALID_ARGUMENT", codes.DeadlineExceeded: "DEADLINE_EXCEEDED", codes.NotFound: "NOT_FOUND", codes.AlreadyExists: "ALREADY_EXISTS", codes.PermissionDenied: "PERMISSION_DENIED", codes.ResourceExhausted: "RESOURCE_EXHAUSTED", codes.FailedPrecondition: "FAILED_PRECONDITION", codes.OutOfRange: "OUT_OF_RANGE", codes.DataLoss: "DATA_LOSS"}
-	name := names[s.Code()]
+	name := statusNames[s.Code()]
 	if name == "" {
 		name = strings.ToUpper(s.Code().String())
 	}

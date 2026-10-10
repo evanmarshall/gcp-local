@@ -16,30 +16,46 @@ type Resolver func(context.Context, string) (Principal, error)
 
 var traceParent = regexp.MustCompile(`^00-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$`)
 
-func (g *Gateway) newCall(ctx context.Context, method string, authorization, trace []string) (Call, error) {
-	call := Call{Context: ctx, Method: method, Location: "global", Principal: Principal{State: Anonymous}}
+// traceID keeps a well-formed W3C traceparent, or generates a fresh ID.
+func traceID(trace []string) string {
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
-		return call, status.Error(codes.Internal, "Unable to create trace context")
+		return ""
 	}
-	call.TraceID = hex.EncodeToString(id)
-	if len(trace) == 1 {
-		if match := traceParent.FindStringSubmatch(trace[0]); match != nil && match[1] != "00000000000000000000000000000000" {
-			call.TraceID = match[1]
-		}
+	generated := hex.EncodeToString(id)
+	if len(trace) != 1 {
+		return generated
 	}
+	if match := traceParent.FindStringSubmatch(trace[0]); match != nil && match[1] != "00000000000000000000000000000000" {
+		return match[1]
+	}
+	return generated
+}
+
+// bearerToken extracts the bearer credential from a single Authorization header.
+func bearerToken(authorization []string) (string, bool) {
+	fields := strings.Fields(authorization[0])
+	if len(authorization) != 1 || len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+		return "", false
+	}
+	return fields[1], true
+}
+
+func (g *Gateway) newCall(ctx context.Context, method string, authorization, trace []string) (Call, error) {
+	call := Call{Context: ctx, Method: method, Location: "global", Principal: Principal{State: Anonymous}}
+	call.TraceID = traceID(trace)
 	if len(authorization) == 0 {
 		return call, nil
 	}
-	fields := strings.Fields(authorization[0])
-	if len(authorization) != 1 || len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+	bearer, ok := bearerToken(authorization)
+	if !ok {
 		return call, status.Error(codes.Unauthenticated, "Malformed authorization header")
 	}
 	if g.resolve == nil {
 		call.Principal.State = Unknown
 		return call, nil
 	}
-	principal, err := g.resolve(ctx, fields[1])
+	principal, err := g.resolve(ctx, bearer)
 	if err != nil {
 		return call, normalizeError(err)
 	}
