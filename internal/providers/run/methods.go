@@ -716,7 +716,9 @@ func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope) 
 	return &gateway.RESTResponse{JSON: p.revisionDocument(scope, record, revision)}, nil
 }
 
-// revisionDelete removes one revision that serves no traffic.
+// revisionDelete removes one revision that serves no traffic. A reaped
+// revision (container stopped) cannot be deleted through the runtime stop
+// path; deleting it now is still correct since nothing serves it.
 func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	p.recordMu.Lock()
 	defer p.recordMu.Unlock()
