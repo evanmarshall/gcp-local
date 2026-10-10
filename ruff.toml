@@ -45,7 +45,7 @@ ignore = [
 # PT017 does not apply: these are standalone programs, not pytest cases.
 "scripts/**" = ["INP", "T20", "S101", "S603", "PT017"]
 "skills/**" = ["INP", "T20"]
-"examples/**" = ["INP", "T20"]
+"examples/**" = ["D102", "INP", "S101", "S104", "S310", "T20"]
 "conftest.py" = ["INP"]
 # The vulture whitelist is a declaration file: bare names are undefined loads on purpose.
 "quality/vulture-whitelist.py" = ["ALL"]

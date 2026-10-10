@@ -90,8 +90,9 @@ def build_image(tag: str) -> str:
     return tag
 
 
-def write_configs() -> Path:
+def write_configs(project: str = "demo-run", extra_roles: list[str] | None = None) -> Path:
     """Write an owner-only IAM configuration and return its directory."""
+    roles = extra_roles or []
     directory = Path(tempfile.mkdtemp())
     directory.chmod(stat.S_IRWXU)
     project = "demo-run"
@@ -105,7 +106,7 @@ def write_configs() -> Path:
         # is enforced per service, not here.
         "policies": {resource: {"bindings": [
             {"role": "roles/run.admin", "members": ["allUsers"]},
-        ]}},
+        ] + [{"role": role, "members": ["allUsers"]} for role in roles]}},
     }
     path = directory / "iam.json"
     path.write_text(json.dumps(iam))
@@ -113,19 +114,21 @@ def write_configs() -> Path:
     return path
 
 
-def start_core(binary: Path, iam_path: Path) -> subprocess.Popen:
-    """Start the core with the run provider and Docker runtime."""
+def start_core(
+    binary: Path, iam_path: Path, port: int = SERVE_SOCKET, services: str = "run"
+) -> subprocess.Popen:
+    """Start the core with the selected providers and Docker runtime."""
     process = subprocess.Popen(
         [
             str(binary),
             "--listen",
-            "127.0.0.1:" + str(SERVE_SOCKET),
+            "127.0.0.1:" + str(port),
             "--grpc-listen",
-            "127.0.0.1:" + str(SERVE_SOCKET + 1),
+            "127.0.0.1:" + str(port + 1),
             "--iam-config",
             str(iam_path),
             "--services",
-            "run",
+            services,
             "--run-docker-socket",
             "/var/run/docker.sock",
         ],
@@ -137,7 +140,9 @@ def start_core(binary: Path, iam_path: Path) -> subprocess.Popen:
     while time.time() < end:
         try:
             # The health URL is a fixed loopback address built above.
-            with urllib.request.urlopen(BASE + "/_local/health", timeout=2) as response:  # noqa: S310 -- fixed loopback base
+            with urllib.request.urlopen(
+                "http://127.0.0.1:" + str(port) + "/_local/health", timeout=2
+            ) as response:
                 if json.loads(response.read()).get("ready"):
                     return process
         except (urllib.error.URLError, TimeoutError, OSError):

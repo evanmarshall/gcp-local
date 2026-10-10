@@ -9,7 +9,7 @@ services:
     command:
       - -listen=0.0.0.0:4566
       - -grpc-listen=0.0.0.0:4567
-      - -services=storage,pubsub
+      - -services=storage,pubsub,run
       - -identity-config=/config/identity.json
       - -iam-config=/config/iam.json
       - -pubsub-java=/usr/bin/java
