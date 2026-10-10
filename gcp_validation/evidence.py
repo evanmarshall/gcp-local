@@ -87,6 +87,8 @@ def load_provenance(baseline: Path) -> tuple[dict[str, object], str]:
         snapshot_hash = sha256(baseline / "case.snapshot.json")
     except (OSError, ValueError):
         raise Unverified("Missing or unreadable baseline evidence") from None
+    if not isinstance(manifest, dict):
+        raise Unverified("Baseline provenance is not a mapping")
     return manifest, snapshot_hash
     if not isinstance(manifest, dict):
         raise Unverified("Baseline provenance is not a mapping")
