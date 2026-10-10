@@ -25,7 +25,9 @@ ROLES = {
     # checksummed manifest snapshot is promoted.
     "run": ("run.admin", "run.developer", "run.invoker", "run.viewer"),
     "compute": ("compute.admin", "compute.networkAdmin", "compute.viewer"),
-    "secretmanager": ("secretmanager.admin", "secretmanager.secretAccessor", "secretmanager.viewer"),
+    "secretmanager": (
+        "secretmanager.admin", "secretmanager.secretAccessor", "secretmanager.viewer",
+    ),
     "cloudtasks": ("cloudtasks.admin", "cloudtasks.enqueuer"),
     "networkmanagement": ("networkmanagement.viewer",),
 }
