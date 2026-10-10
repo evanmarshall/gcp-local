@@ -30,15 +30,8 @@ type Index struct {
 
 func NewIndex() *Index { return &Index{resources: map[string]Resource{}} }
 func (i *Index) Put(owner string, resource Resource) error {
-	if resource.Service == "resourcemanager" && (resource.Kind == "organization" || resource.Kind == "folder") {
-		if resource.Scope.Project != "" || resource.Scope.Location != Global {
-			return errGlobalHierarchy
-		}
-	} else if err := resource.Scope.Validate(); err != nil {
+	if err := validatePut(owner, resource); err != nil {
 		return err
-	}
-	if owner == "" || resource.Service != owner || resource.Kind == "" || !strings.HasPrefix(resource.Name, "//") {
-		return errResourceOwner
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -48,6 +41,30 @@ func (i *Index) Put(owner string, resource Resource) error {
 	i.resources[resource.Name] = resource
 	return nil
 }
+// validatePut applies the shape rules that do not depend on index state.
+// Global hierarchy nodes are the only entries allowed outside a project scope.
+func validatePut(owner string, resource Resource) error {
+	global := resource.Service == "resourcemanager" && (resource.Kind == "organization" || resource.Kind == "folder")
+	if global {
+		if resource.Scope.Project != "" || resource.Scope.Location != Global {
+			return errGlobalHierarchy
+		}
+		return nil
+	}
+	if err := resource.Scope.Validate(); err != nil {
+		return err
+	}
+	return validateOwner(owner, resource)
+}
+
+// validateOwner checks that the publishing service owns the resource name shape.
+func validateOwner(owner string, resource Resource) error {
+	if owner == "" || resource.Service != owner || resource.Kind == "" || !strings.HasPrefix(resource.Name, "//") {
+		return errResourceOwner
+	}
+	return nil
+}
+
 func (i *Index) Get(name string) (Resource, bool) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
