@@ -66,7 +66,7 @@ func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (
 		}
 		return nil, notFound(kindNetwork, request.Path["network"])
 	}
-	return p.newOperation(scope, "global", "", "addPeering", request.Path["network"])
+	return p.newOperation(scope, "global", "", "addPeering", selfLink(scope.Project, "networks", request.Path["network"]))
 }
 
 // removePeering deletes one named peering of a network.
@@ -96,7 +96,7 @@ func (p *Provider) removePeering(request *gateway.RESTRequest, scope state.Scope
 	if !removed {
 		return nil, notFound("peerings", name)
 	}
-	return p.newOperation(scope, "global", "", "removePeering", request.Path["network"])
+	return p.newOperation(scope, "global", "", "removePeering", selfLink(scope.Project, "networks", request.Path["network"]))
 }
 
 // createNetwork validates and stores one network, then reports its operation.
@@ -128,7 +128,7 @@ func (p *Provider) createNetwork(request *gateway.RESTRequest, scope state.Scope
 	}); indexErr != nil {
 		return nil, gap("index the network")
 	}
-	return p.newOperation(scope, "global", "", "insert", created.Name)
+	return p.newOperation(scope, "global", "", "insert", selfLink(scope.Project, "networks", created.Name))
 }
 
 // getNetwork returns one network document.
@@ -180,7 +180,7 @@ func (p *Provider) deleteNetwork(_ gateway.Call, request *gateway.RESTRequest, s
 		return nil, status.Error(codes.FailedPrecondition, errDependency.Error())
 	}
 	_ = p.index.Remove(serviceName, scope, globalName(scope.Project, kindNetwork, name))
-	return p.newOperation(scope, "global", "", "delete", name)
+	return p.newOperation(scope, "global", "", "delete", selfLink(scope.Project, "networks", name))
 }
 
 // Sentinel record states for the shared handlers.
@@ -249,7 +249,7 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 	}); indexErr != nil {
 		return nil, gap("index the subnetwork")
 	}
-	return p.newOperation(scope, "region", created.Region, "insert", created.Name)
+	return p.newOperation(scope, "region", created.Region, "insert", regionalSelfLink(scope.Project, created.Region, "subnetworks", created.Name))
 }
 
 // getSubnetwork returns one subnetwork document.
@@ -285,7 +285,7 @@ func (p *Provider) deleteSubnetwork(request *gateway.RESTRequest, scope state.Sc
 		return nil
 	})
 	_ = p.index.Remove(serviceName, scope, regionalName(project, region, kindSubnetwork, name))
-	return p.newOperation(scope, "region", region, "delete", name)
+	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, "subnetworks", name))
 }
 
 // networkName strips a full network self-link or name into the plain name.
@@ -353,7 +353,7 @@ func (p *Provider) writeFirewall(call gateway.Call, request *gateway.RESTRequest
 		Name: globalName(project, kindFirewall, name), Service: serviceName,
 		Kind: kindFirewall, Parent: projectResource(project), Scope: scope,
 	})
-	return p.newOperation(scope, "global", "", "insert", name)
+	return p.newOperation(scope, "global", "", "insert", firewallTarget(scope, kindFirewall, name))
 }
 
 // storeFirewall validates and stores one firewall record under the scope lock.
@@ -428,7 +428,7 @@ func (p *Provider) deleteGlobal(scope state.Scope, kind, name string, remove fun
 		return nil
 	})
 	_ = p.index.Remove(serviceName, scope, globalName(project, kind, name))
-	return p.newOperation(scope, "global", "", "delete", name)
+	return p.newOperation(scope, "global", "", "delete", selfLink(scope.Project, "networks", name))
 }
 
 // textOr returns the first non-empty text of the field and the fallback.
@@ -490,7 +490,7 @@ func (p *Provider) createRoute(request *gateway.RESTRequest, scope state.Scope) 
 		Name: globalName(project, kindRoute, name), Service: serviceName,
 		Kind: kindRoute, Parent: projectResource(project), Scope: scope,
 	})
-	return p.newOperation(scope, "global", "", "insert", name)
+	return p.newOperation(scope, "global", "", "insert", firewallTarget(scope, kindFirewall, name))
 }
 
 // getRoute returns one route document.
@@ -521,4 +521,12 @@ func (p *Provider) deleteRoute(request *gateway.RESTRequest, scope state.Scope) 
 	name := request.Path["route"]
 	remove := func(s *scopeState) { delete(s.routes, name) }
 	return p.deleteGlobal(scope, kindRoute, name, remove)
+}
+
+// firewallTarget selects the collection for a global insert/delete target.
+func firewallTarget(scope state.Scope, kind, name string) string {
+	if kind == kindFirewall {
+		return selfLink(scope.Project, "firewalls", name)
+	}
+	return selfLink(scope.Project, "routes", name)
 }

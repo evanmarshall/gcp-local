@@ -3,6 +3,7 @@ package compute
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -260,6 +261,12 @@ func (p *Provider) operationsList(_ *gateway.RESTRequest, _ state.Scope, kind st
 // newOperation registers the completed compute operation for a realized
 // mutation: the record stores the outcome, and reads report it as DONE.
 func (p *Provider) newOperation(scope state.Scope, kind, region, opType, target string) (*gateway.RESTResponse, error) {
+	return p.newOperationAt(scope, kind, region, opType, target, time.Now())
+}
+
+// newOperationAt records one realized mutation as a DONE operation stamped at
+// the given moment.
+func (p *Provider) newOperationAt(scope state.Scope, kind, region, opType, target string, now time.Time) (*gateway.RESTResponse, error) {
 	var generation int64
 	if scopeErr := p.scopes.With(scope, func(s *scopeState) error {
 		generation = s.nextGeneration()
@@ -270,7 +277,7 @@ func (p *Provider) newOperation(scope state.Scope, kind, region, opType, target 
 	suffix := strconv.FormatInt(generation, 10)
 	record := &operationRecord{
 		ID: "op-" + suffix, Name: "operation-" + suffix, Kind: kind, Region: region,
-		Type: opType, Target: target, Created: p.clock(), Done: true,
+		Type: opType, Target: target, Created: now, Done: true,
 	}
 	p.mu.Lock()
 	p.records[scope.Project+"/"+kind+"/"+record.Name] = record
