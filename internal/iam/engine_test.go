@@ -401,3 +401,30 @@ func TestConditionalBindingsFailClosedAndGrant(t *testing.T) {
 		t.Fatalf("unmatched condition did not deny: %v", err)
 	}
 }
+
+func TestDenyRulesOverrideAllowBindings(t *testing.T) {
+	engine, _ := setup(t)
+	read := call("storage.objects.get", fixture, testProject)
+	deny := iam.Policy{Version: 3, DenyRules: []iam.DenyRule{{
+		DeniedPrincipals:  []string{fixture},
+		DeniedPermissions: []string{"storage.objects.get"},
+	}}}
+	if _, err := engine.SetPolicy(object().Parent, deny); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("deny did not override the allow: %v", err)
+	}
+	// An exception principal for the same rule restores the allow.
+	deny.DenyRules[0].ExceptionPrincipals = []string{fixture}
+	if _, err := engine.SetPolicy(object().Parent, deny); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := engine.Authorize(read, object(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decision.Checks[0].Allowed || len(decision.Checks[0].Conditions) == 0 {
+		t.Fatalf("exception did not restore the allow: %+v", decision.Checks[0])
+	}
+}

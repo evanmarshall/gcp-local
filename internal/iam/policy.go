@@ -17,9 +17,26 @@ type Binding struct {
 	Condition json.RawMessage `json:"condition,omitempty"`
 }
 type Policy struct {
-	Version  int       `json:"version"`
-	Bindings []Binding `json:"bindings"`
-	ETag     string    `json:"etag"`
+	Version   int        `json:"version"`
+	Bindings  []Binding  `json:"bindings"`
+	DenyRules []DenyRule `json:"denyRules,omitempty"`
+	ETag      string     `json:"etag"`
+}
+
+// DenyRule is one v3 deny rule: a principal set that must not use a
+// permission set, with optional exceptions and a denial condition.
+type DenyRule struct {
+	DeniedPrincipals     []string        `json:"deniedPrincipals"`
+	ExceptionPrincipals  []string        `json:"exceptionPrincipals,omitempty"`
+	DeniedPermissions    []string        `json:"deniedPermissions"`
+	ExceptionPermissions []string        `json:"exceptionPermissions,omitempty"`
+	DenialCondition      json.RawMessage `json:"denialCondition,omitempty"`
+}
+
+// storedDeny is a compiled deny rule.
+type storedDeny struct {
+	rule      DenyRule
+	condition *evaluated
 }
 type unsupportedPolicy struct {
 	features []string
@@ -32,6 +49,7 @@ type storedPolicy struct {
 	owner      string
 	scope      state.Scope
 	conditions []conditionGuard
+	denies     []storedDeny
 }
 
 func clonePolicy(p Policy) Policy {
@@ -70,11 +88,32 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 				return Policy{}, status.Error(codes.Unimplemented, "Bindings with conditions require policy version 3")
 			}
 		}
+		if len(policy.DenyRules) > 0 {
+			return Policy{}, status.Error(codes.Unimplemented, "Deny rules require policy version 3")
+		}
+	}
+	for _, rule := range policy.DenyRules {
+		if len(rule.DeniedPrincipals) == 0 || len(rule.DeniedPermissions) == 0 {
+			return Policy{}, status.Error(codes.InvalidArgument, "A deny rule requires denied principals and permissions")
+		}
 	}
 	if len(policy.Bindings) > 1000 {
 		return Policy{}, status.Error(codes.InvalidArgument, "Policy has too many bindings")
 	}
 	var compiledConditions []conditionGuard
+	var compiledDenies []storedDeny
+	for index, rule := range policy.DenyRules {
+		compiled := storedDeny{rule: rule}
+		if len(rule.DenialCondition) > 0 {
+			condition, compileErr := compileCondition(rule.DenialCondition)
+			if compileErr != nil {
+				return Policy{}, status.Error(codes.Unimplemented, compileErr.Error())
+			}
+			compiled.condition = condition
+		}
+		_ = index
+		compiledDenies = append(compiledDenies, compiled)
+	}
 	for _, binding := range policy.Bindings {
 		if len(binding.Condition) > 0 {
 			compiled, compileErr := compileCondition(binding.Condition)
@@ -116,7 +155,8 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	}
 	policy.ETag = base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(e.revision, 10)))
 	e.policies[resource] = storedPolicy{
-		policy: policy, owner: owner.Service, scope: owner.Scope, conditions: compiledConditions,
+		policy: policy, owner: owner.Service, scope: owner.Scope,
+		conditions: compiledConditions, denies: compiledDenies,
 	}
 	return clonePolicy(policy), nil
 }

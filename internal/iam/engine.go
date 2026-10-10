@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -357,9 +358,23 @@ func (e *Engine) collectChecks(decision *Decision, permissions []string, ancesto
 		}
 		seen[permission] = true
 		check := Check{Permission: permission, Target: decision.Method, Policies: []string{}}
+		denyMatch, excepted := "", false
 		for _, ancestor := range ancestors {
 			check.Policies = append(check.Policies, ancestor.Name)
-			e.matchBindings(&check, ancestor.Name, permission, principal)
+			if denyMatch == "" {
+				denyMatch, excepted = e.matchDenies(ancestor.Name, permission, principal)
+			}
+		}
+		switch {
+		case denyMatch != "" && !excepted:
+			check.Conditions = append(check.Conditions, "denied by "+denyMatch)
+		case excepted:
+			check.Conditions = append(check.Conditions, "denial excepted for "+principal.Subject)
+		}
+		if denyMatch == "" || excepted {
+			for _, ancestor := range ancestors {
+				e.matchBindings(&check, ancestor.Name, permission, principal)
+			}
 		}
 		decision.Checks = append(decision.Checks, check)
 		if !check.Allowed && denied == "" {
@@ -457,4 +472,49 @@ func (e *Engine) Decision(id string) (Decision, bool) {
 	defer e.mu.Unlock()
 	decision, ok := e.decisions[id]
 	return cloneDecision(decision), ok
+}
+
+// matchDenies returns the first deny rule that matches one permission check,
+// honoring exceptions; deny policies override allow bindings.
+func (e *Engine) matchDenies(policyName, permission string, principal gateway.Principal) (string, bool) {
+	stored := e.policies[policyName]
+	for _, deny := range stored.denies {
+		if permissionDeniedBy(deny.rule, permission, principal) {
+			return "deny rule on " + policyName, false
+		}
+		if principalExcepted(deny.rule, principal) {
+			return "deny rule on " + policyName, true
+		}
+	}
+	return "", false
+}
+
+// principalExcepted reports whether the principal is exempted from a rule.
+func principalExcepted(rule DenyRule, principal gateway.Principal) bool {
+	return slices.Contains(rule.ExceptionPrincipals, principal.Subject)
+}
+
+// permissionDeniedBy reports whether one deny rule denies the check.
+func permissionDeniedBy(rule DenyRule, permission string, principal gateway.Principal) bool {
+	if principal.State != gateway.Authenticated || principalExcepted(rule, principal) {
+		return false
+	}
+	return permissionDenied(permission, rule) && principalDenied(rule, principal)
+}
+
+// permissionDenied reports whether the rule covers one permission.
+func permissionDenied(permission string, rule DenyRule) bool {
+	if slices.Contains(rule.ExceptionPermissions, permission) {
+		return false
+	}
+	return slices.Contains(rule.DeniedPermissions, permission) ||
+		slices.ContainsFunc(rule.DeniedPermissions, func(denied string) bool {
+			return strings.HasSuffix(denied, "*") && strings.HasPrefix(permission, strings.TrimSuffix(denied, "*"))
+		})
+}
+
+// principalDenied reports whether the rule covers one authenticated principal.
+func principalDenied(rule DenyRule, principal gateway.Principal) bool {
+	return slices.Contains(rule.DeniedPrincipals, principal.Subject) ||
+		slices.Contains(rule.DeniedPrincipals, "principalSet://all")
 }
