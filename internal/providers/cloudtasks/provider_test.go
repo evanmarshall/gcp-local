@@ -25,6 +25,7 @@ const (
 	testKeyBody    = "body"
 	testMethodPOST = "POST"
 	testKeyRequest = "httpRequest"
+	testKeyMethod  = "method"
 )
 
 // harness drives the provider through the gateway.
@@ -121,7 +122,7 @@ func TestTaskLifecycleAndDispatch(t *testing.T) {
 	}))
 	defer target.Close()
 	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{
-		testKeyRequest: map[string]any{testKeyURL: target.URL, "method": testMethodPOST},
+		testKeyRequest: map[string]any{testKeyURL: target.URL, testKeyMethod: testMethodPOST},
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("task create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -155,7 +156,7 @@ func TestTaskLifecycleAndDispatch(t *testing.T) {
 func TestTaskOnMissingQueueIsRefused(t *testing.T) {
 	h := newHarness(t)
 	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/missing/tasks", map[string]any{
-		testKeyRequest: map[string]any{testKeyURL: "http://127.0.0.1:1/", "method": testMethodPOST},
+		testKeyRequest: map[string]any{testKeyURL: "http://127.0.0.1:1/", testKeyMethod: testMethodPOST},
 	})
 	if recorder.Code != 404 {
 		t.Fatalf("task on missing queue status = %d body %s", recorder.Code, recorder.Body.String())
@@ -200,7 +201,7 @@ func TestScheduledTaskWaitsThenDispatches(t *testing.T) {
 	schedule := time.Now().Add(2 * time.Second).UTC().Format(time.RFC3339)
 	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{
 		"scheduleTime": schedule,
-		testKeyRequest: map[string]any{testKeyURL: target.URL, "method": testMethodPOST},
+		testKeyRequest: map[string]any{testKeyURL: target.URL, testKeyMethod: testMethodPOST},
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("scheduled task create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -231,7 +232,7 @@ func TestInvalidScheduleTimeIsRefused(t *testing.T) {
 	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
 	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{
 		"scheduleTime": "not-a-time",
-		testKeyRequest: map[string]any{testKeyURL: "http://127.0.0.1:1/", "method": testMethodPOST},
+		testKeyRequest: map[string]any{testKeyURL: "http://127.0.0.1:1/", testKeyMethod: testMethodPOST},
 	})
 	if recorder.Code != 400 {
 		t.Fatalf("invalid schedule status = %d body %s", recorder.Code, recorder.Body.String())
