@@ -54,6 +54,9 @@ func mustWriteFile(t *testing.T, path string, content []byte) {
 
 const testProject = "project-a"
 
+// testObjectGet is the read permission exercised by the engine tests.
+const testObjectGet = "storage.objects.get"
+
 // testViewerRole is the object-viewer role used by the condition tests.
 const testViewerRole = "roles/storage.objectViewer"
 
@@ -122,7 +125,7 @@ func object() iam.Target {
 }
 func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", allowed, testProject)
+	read := call(testObjectGet, allowed, testProject)
 	decision, err := engine.Authorize(read, object(), nil)
 	if err != nil || decision.Outcome != "allow" || decision.Checks[0].GrantPolicy != object().Parent {
 		t.Fatalf("%+v %v", decision, err)
@@ -133,11 +136,11 @@ func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
 		t.Fatal(err)
 	}
-	inherited, err := engine.Authorize(call("storage.objects.get", fixture, testProject), object(), nil)
+	inherited, err := engine.Authorize(call(testObjectGet, fixture, testProject), object(), nil)
 	if err != nil || inherited.Checks[0].GrantPolicy != projectA {
 		t.Fatalf("%+v %v", inherited, err)
 	}
-	foreign := call("storage.objects.get", peer, projectBName)
+	foreign := call(testObjectGet, peer, projectBName)
 	if _, err := engine.Authorize(foreign, object(), nil); status.Code(err) != codes.PermissionDenied {
 		t.Fatal("caller-project role leaked into resource project:", err)
 	}
@@ -200,7 +203,7 @@ func TestReplacementCannotOmitBaselineOrUnresolvedState(t *testing.T) {
 }
 func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", fixture, testProject)
+	read := call(testObjectGet, fixture, testProject)
 	if err := engine.MarkUnsupported(org, []string{"deny", "principal-access-boundary"}); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +226,7 @@ func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal(err)
 	}
-	read.Method = "storage.objects.get"
+	read.Method = testObjectGet
 	read.Principal.Scopes = []string{"https://www.googleapis.com/auth/devstorage.read_only"}
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal("claimed unverified narrow scopes")
@@ -231,7 +234,7 @@ func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 }
 func TestAnonymousPublicBindingsAndInvalidCredentials(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", "forged-admin", testProject)
+	read := call(testObjectGet, "forged-admin", testProject)
 	read.Principal.State = gateway.Anonymous
 	if result, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unauthenticated || result.Principal.Subject != "" {
 		t.Fatal("anonymous caller became administrator")
@@ -254,7 +257,7 @@ func TestAnonymousPublicBindingsAndInvalidCredentials(t *testing.T) {
 }
 func TestHierarchyGapsAndOwnershipMismatchFailClosed(t *testing.T) {
 	engine, index := setup(t)
-	read := call("storage.objects.get", fixture, testProject)
+	read := call(testObjectGet, fixture, testProject)
 	target := object()
 	target.Parent = projectB
 	if _, err := engine.Authorize(read, target, nil); status.Code(err) != codes.Unimplemented {
@@ -298,13 +301,13 @@ func TestPolicyETagsCopiesAndScopedCleanup(t *testing.T) {
 	if len(fresh.Bindings) != 0 {
 		t.Fatal("reset retained resource policy")
 	}
-	if _, err := engine.Authorize(call("storage.objects.get", fixture, testProject), object(), nil); err != nil {
+	if _, err := engine.Authorize(call(testObjectGet, fixture, testProject), object(), nil); err != nil {
 		t.Fatal("reset retained unsupported marker or erased project policy:", err)
 	}
 }
 func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", peer, projectBName)
+	read := call(testObjectGet, peer, projectBName)
 	first, _ := engine.Authorize(read, object(), nil)
 	second, _ := engine.Authorize(read, object(), nil)
 	if first.ID == second.ID || first.ID == read.TraceID {
@@ -321,7 +324,7 @@ func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Outcome != "deny" || result.Checks[0].Permission != "storage.objects.get" || len(result.Checks[0].Policies) != 4 || result.Principal.Subject != peer {
+	if result.Outcome != "deny" || result.Checks[0].Permission != testObjectGet || len(result.Checks[0].Policies) != 4 || result.Principal.Subject != peer {
 		t.Fatalf("%+v", result)
 	}
 	snapshot, _ := engine.Decision(first.ID)
@@ -334,12 +337,12 @@ func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 }
 func TestConcurrentPoliciesAndBoundedDecisionRetention(t *testing.T) {
 	engine, _ := setup(t)
-	first, _ := engine.Authorize(call("storage.objects.get", allowed, testProject), object(), nil)
+	first, _ := engine.Authorize(call(testObjectGet, allowed, testProject), object(), nil)
 	var group sync.WaitGroup
 	for range 20 {
 		group.Go(func() {
 			for range 60 {
-				_, _ = engine.Authorize(call("storage.objects.get", allowed, testProject), object(), nil)
+				_, _ = engine.Authorize(call(testObjectGet, allowed, testProject), object(), nil)
 			}
 		})
 	}
@@ -367,7 +370,7 @@ func TestBootstrapIsExplicitAndRejectsIncompleteHierarchy(t *testing.T) {
 
 func TestConditionalBindingsFailClosedAndGrant(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", fixture, testProject)
+	read := call(testObjectGet, fixture, testProject)
 	// A true expression grants; a false expression fails closed with a trace.
 	conditional := func(expression string) iam.Policy {
 		condition, _ := json.Marshal(map[string]string{"title": "test", "expression": expression}) //nolint:errchkjson // plain string map
@@ -394,7 +397,7 @@ func TestConditionalBindingsFailClosedAndGrant(t *testing.T) {
 	if len(decision.Checks[0].Conditions) == 0 {
 		t.Fatalf("no condition trace: %+v", decision.Checks[0])
 	}
-	if _, err := engine.SetPolicy(object().Parent, conditional(`"1" == "2"`)); err != nil {
+	if _, err := engine.SetPolicy(object().Parent, conditional("1 == 2")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
@@ -404,10 +407,10 @@ func TestConditionalBindingsFailClosedAndGrant(t *testing.T) {
 
 func TestDenyRulesOverrideAllowBindings(t *testing.T) {
 	engine, _ := setup(t)
-	read := call("storage.objects.get", fixture, testProject)
+	read := call(testObjectGet, fixture, testProject)
 	deny := iam.Policy{Version: 3, DenyRules: []iam.DenyRule{{
 		DeniedPrincipals:  []string{fixture},
-		DeniedPermissions: []string{"storage.objects.get"},
+		DeniedPermissions: []string{testObjectGet},
 	}}}
 	if _, err := engine.SetPolicy(object().Parent, deny); err != nil {
 		t.Fatal(err)

@@ -357,31 +357,32 @@ func (e *Engine) collectChecks(decision *Decision, permissions []string, ancesto
 			continue
 		}
 		seen[permission] = true
-		check := Check{Permission: permission, Target: decision.Method, Policies: []string{}}
-		denyMatch, excepted := "", false
-		for _, ancestor := range ancestors {
-			check.Policies = append(check.Policies, ancestor.Name)
-			if denyMatch == "" {
-				denyMatch, excepted = e.matchDenies(ancestor.Name, permission, principal)
-			}
-		}
-		switch {
-		case denyMatch != "" && !excepted:
-			check.Conditions = append(check.Conditions, "denied by "+denyMatch)
-		case excepted:
-			check.Conditions = append(check.Conditions, "denial excepted for "+principal.Subject)
-		}
-		if denyMatch == "" || excepted {
-			for _, ancestor := range ancestors {
-				e.matchBindings(&check, ancestor.Name, permission, principal)
-			}
-		}
+		check := e.evaluatePermission(decision, ancestors, permission, principal)
 		decision.Checks = append(decision.Checks, check)
 		if !check.Allowed && denied == "" {
 			denied = permission
 		}
 	}
 	return denied
+}
+
+// evaluatePermission runs the deny phase and, unless denied, the allow
+// bindings for one permission, returning the recorded check.
+func (e *Engine) evaluatePermission(decision *Decision, ancestors []state.Resource, permission string, principal gateway.Principal) Check {
+	check := Check{Permission: permission, Target: decision.Method, Policies: []string{}}
+	denyMatch, excepted := e.denialPhase(ancestors, permission, principal, &check)
+	switch {
+	case denyMatch != "" && !excepted:
+		check.Conditions = append(check.Conditions, "denied by "+denyMatch)
+	case excepted:
+		check.Conditions = append(check.Conditions, "denial excepted for "+principal.Subject)
+	}
+	if denyMatch == "" || excepted {
+		for _, ancestor := range ancestors {
+			e.matchBindings(&check, ancestor.Name, permission, principal)
+		}
+	}
+	return check
 }
 
 // matchBindings records the first binding that grants one permission at one
@@ -517,4 +518,17 @@ func permissionDenied(permission string, rule DenyRule) bool {
 func principalDenied(rule DenyRule, principal gateway.Principal) bool {
 	return slices.Contains(rule.DeniedPrincipals, principal.Subject) ||
 		slices.Contains(rule.DeniedPrincipals, "principalSet://all")
+}
+
+// denialPhase scans the ancestor chain for a matching deny rule and records
+// the considered policies on the check.
+func (e *Engine) denialPhase(ancestors []state.Resource, permission string, principal gateway.Principal, check *Check) (string, bool) {
+	denyMatch, excepted := "", false
+	for _, ancestor := range ancestors {
+		check.Policies = append(check.Policies, ancestor.Name)
+		if denyMatch == "" {
+			denyMatch, excepted = e.matchDenies(ancestor.Name, permission, principal)
+		}
+	}
+	return denyMatch, excepted
 }
