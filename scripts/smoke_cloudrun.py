@@ -52,7 +52,8 @@ def await_operation(name: str, deadline: float = 90.0) -> dict[str, Any]:
     last: dict[str, Any] = {}
     end = time.time() + deadline
     while time.time() < end:
-        _, body = request("GET", SCOPE + "/operations/" + name)
+        # The operation name is already the full relative resource path.
+        _, body = request("GET", "/v2/" + name)
         if body.get("done"):
             return body
         last = body
