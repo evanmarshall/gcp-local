@@ -164,7 +164,7 @@ def deploy_worker(clients: LocalChannelClients) -> str:
     status, body = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
     assert status == 200, "bucket grant failed: " + json.dumps(body)[:200]
 
-    clients.publisher.create_topic(request={"name": pubsub_v1.TopicName(PROJECT, "workflow")})
+    clients.publisher.create_topic(request={"name": "projects/" + PROJECT + "/topics/workflow"})
     status, service = rest("POST", SCOPE + "/services", {
         "name": SCOPE + "/services/worker",
         "template": {"containers": [{"image": WORKER_IMAGE, "containerPort": 8080}],
@@ -183,8 +183,8 @@ def deploy_worker(clients: LocalChannelClients) -> str:
     status, _ = rest("POST", SCOPE + "/services/worker:setIamPolicy", {"policy": policy})
     assert status == 200
     clients.subscriber.create_subscription(request={
-        "name": pubsub_v1.SubscriptionName(PROJECT, "workflow-push"),
-        "topic": pubsub_v1.TopicName(PROJECT, "workflow"),
+        "name": "projects/" + PROJECT + "/subscriptions/workflow-push",
+        "topic": "projects/" + PROJECT + "/topics/workflow",
         "pushConfig": pubsub_v1.PushConfig(
             push_endpoint=ENDPOINT,
             oidc_token=pubsub_v1.PushConfig.OidcToken(
@@ -198,7 +198,7 @@ def deploy_worker(clients: LocalChannelClients) -> str:
 def publish(clients: LocalChannelClients, bucket: str, payload: str, message_id: str) -> None:
     """Publish one message through the SDK client."""
     future = clients.publisher.publish(
-        pubsub_v1.TopicName(PROJECT, "workflow"), payload.encode(),
+        "projects/" + PROJECT + "/topics/workflow", payload.encode(),
         bucket=bucket, messageId=message_id)
     assert future.result(timeout=15), "publish failed"
 
