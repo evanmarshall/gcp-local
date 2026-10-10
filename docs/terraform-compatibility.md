@@ -1,14 +1,18 @@
 # Terraform compatibility
 
-Three adapted upstream Google provider acceptance cases now pass against the authenticated Storage provider. They exercise the released **google 8.5.0** plugin with **Terraform 1.16.5** and **terraform-plugin-testing 1.15.0**. The [selection manifest](../tests/terraform/selection.json) pins exact IDs, source hashes, and limits; the [adapter audit](../tests/terraform/audit.md) accounts for fixture, credential, helper, endpoint, and assertion changes.
+Seven adapted upstream Google provider acceptance cases now pass across five services: authenticated Storage, Cloud KMS, Secret Manager, Cloud Tasks, and Firestore documents. They exercise the released **google 8.5.0** plugin with **Terraform 1.16.5** and **terraform-plugin-testing 1.15.0**. The [selection manifest](../tests/terraform/selection.json) pins exact IDs, source hashes, and limits; the [adapter audit](../tests/terraform/audit.md) accounts for fixture, credential, helper, endpoint, and assertion changes.
 
 | Upstream test ID | Passing local coverage |
 | --- | --- |
 | `TestAccStorageBucket_basic` | Create/read, numeric project number and timestamps, regional defaults, project-qualified import, refresh, unchanged plan, destroy |
 | `TestAccStorageBucket_labels` | Add/change/remove labels, import/state checks, refresh, unchanged plan after each configuration, destroy |
 | `TestAccStorageObject_recreate` | Small multipart upload, upstream CRC32C checks, replacement after file-content change, refresh, unchanged plan, destroy |
+| `TestAccKMSKeyRingCryptoKey` | Key ring create/read, crypto key with rotation period and primary version, version destroy on key destroy, post-destroy verification |
+| `TestAccSecretManagerSecretAndVersion` | Secret create with replication policy, version add with payload access, enable/destroy cycle, destroy with 404 confirmation |
+| `TestAccCloudTasksQueueLifecycle` | Queue create with rate limits, PATCH update to new limits, delete, post-destroy 404 |
+| `TestAccFirestoreDocument` | Document create in a collection, refresh, unchanged plan, destroy with 404 confirmation |
 
-The adapter retains the upstream checks except for the documented single-region RPO expectation and import handling for the injected ownership default label. These are serial, owned fixtures with bounded cleanup. No Terraform execution against real GCP is claimed. Seven separate recorded Storage scenarios cover the relevant API outcomes, including multipart request shapes, label updates, stale metageneration rejection, and nonmutation after denied updates. Selected mutations are synchronous; asynchronous polling and other services remain unsupported.
+The adapter retains the upstream checks except for the documented single-region RPO expectation and import handling for the injected ownership default label. These are serial, owned fixtures with bounded cleanup. No Terraform execution against real GCP is claimed. Seven separate recorded Storage scenarios cover the relevant API outcomes, including multipart request shapes, label updates, stale metageneration rejection, and nonmutation after denied updates. The KMS, Secret Manager, Cloud Tasks, and Firestore slices are locally modeled without cloud recordings (their issues track the recording work); the Terraform cases verify each control-plane contract with the released provider, not recorded cloud behavior. Selected mutations are synchronous; asynchronous polling and the remaining services remain unsupported.
 
 ## Run the suite
 
