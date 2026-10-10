@@ -144,7 +144,6 @@ func (p *Provider) getNetwork(request *gateway.RESTRequest, scope state.Scope) (
 
 // listNetworks returns the scope's networks.
 func (p *Provider) listNetworks(scope state.Scope) (*gateway.RESTResponse, error) {
-	items := []any{}
 	var networks []*networkRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		for name := range s.networks {
@@ -152,6 +151,7 @@ func (p *Provider) listNetworks(scope state.Scope) (*gateway.RESTResponse, error
 		}
 		return nil
 	})
+	items := make([]any, 0, len(networks))
 	for _, record := range networks {
 		items = append(items, p.networkDocument(scope.Project, record, p.subnetworksOf(scope.Project, record.Name)))
 	}
