@@ -89,9 +89,6 @@ def load_provenance(baseline: Path) -> tuple[dict[str, object], str]:
         raise Unverified("Missing or unreadable baseline evidence") from None
     if not isinstance(manifest, dict):
         raise Unverified("Baseline provenance is not a mapping")
-    return manifest, snapshot_hash
-    if not isinstance(manifest, dict):
-        raise Unverified("Baseline provenance is not a mapping")
     recorded_at = manifest.get("recorded_at")
     stamp = None
     if isinstance(recorded_at, str):
@@ -105,7 +102,7 @@ def load_provenance(baseline: Path) -> tuple[dict[str, object], str]:
         Scenario(**manifest["scenario"])
     except (TypeError, ValueError, KeyError):
         raise Unverified("Baseline provenance does not describe a scenario") from None
-    return manifest
+    return manifest, snapshot_hash
 
 
 def check_observation(value: object) -> None:
