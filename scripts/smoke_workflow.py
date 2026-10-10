@@ -10,8 +10,11 @@ worker's Storage write) use real per-identity grants.
 import base64
 import json
 import os
+import secrets
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -54,6 +57,21 @@ def rest(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[in
     except urllib.error.HTTPError as error:
         payload = error.read()
         return error.code, json.loads(payload) if payload else {}
+
+
+def write_identity(project: str) -> Path:
+    """Write the owner-only identity config with the workflow principals."""
+    directory = Path(tempfile.mkdtemp())
+    directory.chmod(stat.S_IRWXU)
+    principals = [
+        {"subject": "serviceAccount:" + email, "project": project,
+         "subject_token": "gls." + secrets.token_urlsafe(32)}
+        for email in ("developer@" + project, WORKER_EMAIL)
+    ]
+    path = directory / "server.json"
+    path.write_text(json.dumps({"token_lifetime_seconds": 3600, "principals": principals}))
+    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return path
 
 
 def await_operation(name: str, deadline: float = 90.0) -> dict[str, Any]:
@@ -187,7 +205,8 @@ def main() -> int:
     build_image(WORKER_IMAGE)
     before = subprocess.check_output([os.environ.get("DOCKER", "docker"), "ps", "-aq"], text=True)
     iam_path = write_configs(PROJECT, ["roles/pubsub.admin"])
-    core = start_core(binary, iam_path,
+    identity_path = write_identity(PROJECT)
+    core = start_core(binary, iam_path, identity_path,
                       port=SERVE_SOCKET, services="storage,pubsub,run")
     try:
         bucket = deploy_worker()
