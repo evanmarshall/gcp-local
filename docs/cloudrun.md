@@ -17,6 +17,9 @@ here is a cloud-fidelity claim yet (#13 tracks that work).
 - Create and update return a `google.longrunning.Operation`. The operation
   completes from actual container readiness: a container that exits before
   readiness fails the operation with its exit status.
+- Revisions scale to zero: a container idle past 5 minutes is stopped, and
+  the next invocation cold-starts it. Update and delete also return/update
+  through long-running operations.
 
 ## Containers
 
