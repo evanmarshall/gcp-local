@@ -52,7 +52,10 @@ func TestExchangeExpiryAndPrincipalStates(t *testing.T) {
 	if code != 200 {
 		t.Fatal(body)
 	}
-	token := body["access_token"].(string)
+	token, ok := body["access_token"].(string)
+	if !ok {
+		t.Fatalf("missing access token: %v", body)
+	}
 	if !strings.HasPrefix(token, "gl.") || body["expires_in"] != float64(600) {
 		t.Fatal("invalid access token contract")
 	}
@@ -74,7 +77,11 @@ func TestExchangeExpiryAndPrincipalStates(t *testing.T) {
 	if next["access_token"] == token {
 		t.Fatal("refresh reused old handle")
 	}
-	p, _ = s.Resolve(context.Background(), next["access_token"].(string))
+	nextToken, ok := next["access_token"].(string)
+	if !ok {
+		t.Fatalf("missing refreshed token: %v", next)
+	}
+	p, _ = s.Resolve(context.Background(), nextToken)
 	if p.State != gateway.Authenticated {
 		t.Fatal(p)
 	}
@@ -137,8 +144,14 @@ func TestMetadataIsBoundToOnePrincipal(t *testing.T) {
 		}
 		if response.Code == 200 {
 			var body map[string]any
-			json.Unmarshal(response.Body.Bytes(), &body)
-			p, _ := s.Resolve(context.Background(), body["access_token"].(string))
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			token, ok := body["access_token"].(string)
+			if !ok {
+				t.Fatalf("missing access token: %v", body)
+			}
+			p, _ := s.Resolve(context.Background(), token)
 			if p.Subject != appSubject {
 				t.Fatal("metadata selected another account")
 			}
@@ -156,7 +169,10 @@ func TestMetadataIsBoundToOnePrincipal(t *testing.T) {
 func TestInspectionDoesNotExposeTokensAndInvalidTokensStayUnauthenticated(t *testing.T) {
 	s, clock := service(t)
 	_, body := exchange(t, s, form())
-	token := body["access_token"].(string)
+	token, ok := body["access_token"].(string)
+	if !ok {
+		t.Fatalf("missing access token: %v", body)
+	}
 	for _, tc := range []struct {
 		token  string
 		status int
@@ -169,7 +185,9 @@ func TestInspectionDoesNotExposeTokensAndInvalidTokensStayUnauthenticated(t *tes
 		}
 		s.ServeHTTP(response, request)
 		var value map[string]any
-		json.Unmarshal(response.Body.Bytes(), &value)
+		if err := json.Unmarshal(response.Body.Bytes(), &value); err != nil {
+			t.Fatal(err)
+		}
 		if response.Code != tc.status || value["state"] != string(tc.state) {
 			t.Fatal(value)
 		}
@@ -188,17 +206,25 @@ func TestInspectionDoesNotExposeTokensAndInvalidTokensStayUnauthenticated(t *tes
 }
 func TestConfigurationRequiresExplicitPrivateEnrollment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "identity.json")
-	os.WriteFile(path, []byte(`{"principals":[]}`), 0600)
+	if err := os.WriteFile(path, []byte(`{"principals":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Load(path); err != nil {
 		t.Fatal(err)
 	}
-	os.Chmod(path, 0644)
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("read nonprivate credential config")
 	}
-	os.Chmod(path, 0600)
+	if err := os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
 	link := path + "-link"
-	os.Symlink(path, link)
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Load(link); err == nil {
 		t.Fatal("read symlinked credential config")
 	}

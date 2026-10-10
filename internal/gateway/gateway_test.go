@@ -67,7 +67,10 @@ func TestRESTDispatchPreservesEscapedResourcesAndIdentity(t *testing.T) {
 	r := NewRegistry()
 	calls := make(chan Call, 1)
 	register(t, r, "storage.objects.get", func(call Call, input any) (any, error) {
-		req := input.(*RESTRequest)
+		req, ok := input.(*RESTRequest)
+		if !ok {
+			return nil, errBadDecodedRequest
+		}
 		if req.Path["bucket"] != "bucket" || req.Path["object"] != "folder/a%?.txt" || req.Headers.Get(authorizationHeader) != "" {
 			return nil, errBadDecodedRequest
 		}
@@ -163,13 +166,20 @@ func TestRESTErrorsPreserveDetailsAndHideInternalFailures(t *testing.T) {
 		server := httptest.NewServer(New(r, nil))
 		code, body, _ := request(t, server.Client(), "GET", server.URL+"/storage/v1/b/bucket/o/object", "", nil)
 		server.Close()
-		detail := body["error"].(map[string]any)
+		detail, ok := body["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("error body is not an object: %v", body)
+		}
 		if code != tc.code || detail["message"] != tc.message {
 			t.Fatalf("%d %v", code, body)
 		}
 		if code == 403 {
-			details := detail["details"].([]any)
-			if details[0].(map[string]any)["reason"] != "IAM_PERMISSION_DENIED" {
+			details, ok := detail["details"].([]any)
+			if !ok || len(details) == 0 {
+				t.Fatalf("missing error details: %v", detail)
+			}
+			first, ok := details[0].(map[string]any)
+			if !ok || first["reason"] != "IAM_PERMISSION_DENIED" {
 				t.Fatal(details)
 			}
 		}
@@ -209,7 +219,7 @@ func grpcClient(t *testing.T, g *Gateway) *grpc.ClientConn {
 		t.Fatal(err)
 	}
 	server := g.NewGRPCServer()
-	go server.Serve(listener)
+	go func() { _ = server.Serve(listener) }()
 	client, err := grpc.NewClient("passthrough:///"+listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +235,11 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 			return nil, permissionError()
 		}
 		calls <- call
-		return &pb.Topic{Name: input.(*pb.GetTopicRequest).GetTopic()}, nil
+		request, ok := input.(*pb.GetTopicRequest)
+		if !ok {
+			return nil, errBadDecodedRequest
+		}
+		return &pb.Topic{Name: request.GetTopic()}, nil
 	})
 	client := pb.NewPublisherClient(grpcClient(t, New(r, nil)))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -246,7 +260,8 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 	}
 	_, err = client.GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/synthetic/topics/denied"})
 	s := status.Convert(err)
-	if s.Code() != codes.PermissionDenied || s.Details()[0].(*errdetails.ErrorInfo).GetReason() != "IAM_PERMISSION_DENIED" {
+	info, ok := s.Details()[0].(*errdetails.ErrorInfo)
+	if s.Code() != codes.PermissionDenied || !ok || info.GetReason() != "IAM_PERMISSION_DENIED" {
 		t.Fatal(s)
 	}
 	_, err = client.ListTopics(ctx, &pb.ListTopicsRequest{Project: "projects/synthetic"})
@@ -346,7 +361,7 @@ func TestStreamMissingInitialMessageAndWrongResponseType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream.CloseSend()
+	_ = stream.CloseSend()
 	_, err = stream.Recv()
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatal(err)
@@ -355,7 +370,7 @@ func TestStreamMissingInitialMessageAndWrongResponseType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream.Send(&pb.StreamingPullRequest{Subscription: streamSubscription})
+	_ = stream.Send(&pb.StreamingPullRequest{Subscription: streamSubscription})
 	_, err = stream.Recv()
 	if status.Code(err) != codes.Internal {
 		t.Fatal(err)

@@ -164,7 +164,12 @@ func TestAmbiguousCreateReconcilesOrBlocksUntilReset(t *testing.T) {
 				if !readable {
 					return status.Error(codes.Unavailable, "injected read failure")
 				}
-				response.(*pb.Topic).Name = request.(*pb.GetTopicRequest).GetTopic()
+				topic, ok := response.(*pb.Topic)
+				ask, askOK := request.(*pb.GetTopicRequest)
+				if !ok || !askOK {
+					return status.Error(codes.Internal, "unexpected fixture types")
+				}
+				topic.Name = ask.GetTopic()
 				return nil
 			}
 			_, err := registry.Invoke(call(publisher+"CreateTopic", testTopic, owner), &pb.Topic{Name: testTopic})

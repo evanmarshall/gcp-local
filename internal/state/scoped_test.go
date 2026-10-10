@@ -37,7 +37,7 @@ func TestProjectAndLocationIsolationAndConcurrentAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, scope := range []Scope{a, b, c} {
-		store.With(scope, func(value *map[string]int) error {
+		if err := store.With(scope, func(value *map[string]int) error {
 			expected := 1
 			if scope == a {
 				expected = 0
@@ -46,7 +46,9 @@ func TestProjectAndLocationIsolationAndConcurrentAccess(t *testing.T) {
 				t.Errorf("reset crossed scope: %v", scope)
 			}
 			return nil
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if store.With(Scope{Project: testProject}, func(*map[string]int) error { return nil }) == nil {
 		t.Fatal("accepted implicit location")

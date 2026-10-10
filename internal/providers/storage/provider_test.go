@@ -186,7 +186,12 @@ func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 			t.Fatal("compensation left a foreign backend bucket")
 		}
 		err := f.p.manager.Use(context.Background(), backend.Key{Service: "storage", Scope: state.Scope{Project: project, Location: state.Global}}, func(ctx context.Context, driver backend.Backend) error {
-			if driver.(*memoryBackend).server.URL() != "" {
+			backend, ok := driver.(*memoryBackend)
+			if !ok {
+				t.Error("unexpected backend type")
+				return nil
+			}
+			if backend.server.URL() != "" {
 				t.Error("API backend opened a listener")
 			}
 			return nil

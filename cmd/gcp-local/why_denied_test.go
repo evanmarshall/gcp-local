@@ -14,7 +14,7 @@ func TestWhyDeniedUsesOnlyExplicitLocalDiagnostics(t *testing.T) {
 			t.Error("wrong decision route")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"outcome":"deny","reason":"Missing permission: storage.objects.get"}`))
+		_, _ = w.Write([]byte(`{"outcome":"deny","reason":"Missing permission: storage.objects.get"}`))
 	}))
 	defer server.Close()
 	var output bytes.Buffer

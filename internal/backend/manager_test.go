@@ -267,7 +267,7 @@ func TestStartupAndReadinessFailuresAreCleanedAndReported(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			manager := backend.NewManager(200*time.Millisecond, time.Second)
 			fixture := newFixture(t, mode)
-			manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+			_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
 			if _, err := manager.Require(context.Background(), key("project-a")); err == nil {
 				t.Fatal("failed process reported ready")
 			}
@@ -289,7 +289,7 @@ func TestStartupAndReadinessFailuresAreCleanedAndReported(t *testing.T) {
 func TestReadinessDetectsUnexpectedExit(t *testing.T) {
 	manager := backend.NewManager(2*time.Second, time.Second)
 	fixture := newFixture(t, "ready")
-	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+	_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
 	if _, err := manager.Require(context.Background(), key("project-a")); err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestReadinessDetectsUnexpectedExit(t *testing.T) {
 func TestShutdownCancelsStartingBackend(t *testing.T) {
 	manager := backend.NewManager(10*time.Second, time.Second)
 	fixture := newFixture(t, "unready")
-	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+	_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
 	result := make(chan error, 1)
 	go func() { _, err := manager.Require(context.Background(), key("project-a")); result <- err }()
 	deadline := time.Now().Add(2 * time.Second)
@@ -333,7 +333,7 @@ func TestShutdownCancelsStartingBackend(t *testing.T) {
 func TestProcessDeadlineForcesTermination(t *testing.T) {
 	fixture := newFixture(t, "ignore-term")
 	manager := backend.NewManager(2*time.Second, 30*time.Millisecond)
-	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+	_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
 	if _, err := manager.Require(context.Background(), key("project-a")); err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestHTTPProbeRejectsExternalOrRedirectedReadiness(t *testing.T) {
 		w.Header().Set("Location", "https://storage.googleapis.com/")
 		w.WriteHeader(http.StatusFound)
 	})}
-	go server.Serve(listener)
+	go func() { _ = server.Serve(listener) }()
 	defer server.Close()
 	probe, err := backend.HTTPProbe("http://" + listener.Addr().String())
 	if err != nil {
@@ -373,7 +373,7 @@ func TestHTTPProbeRejectsExternalOrRedirectedReadiness(t *testing.T) {
 func TestCancelledProbeKeepsHealthyBackend(t *testing.T) {
 	manager := backend.NewManager(time.Second, time.Second)
 	fixture := newFixture(t, "ready")
-	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
+	_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: func(state.Scope) error { return nil }})
 	if _, err := manager.Require(context.Background(), key("project-a")); err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestResetWaitsForProviderMutationAndShutdownCancelsUse(t *testing.T) {
 	manager := backend.NewManager(time.Second, time.Second)
 	fixture := newFixture(t, "ready")
 	scope := key("project-a")
-	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: catalog.Reset})
+	_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return fixture.process, nil }, AfterReset: catalog.Reset})
 	entered, release := make(chan struct{}), make(chan struct{})
 	operation := make(chan error, 1)
 	go func() {
@@ -445,7 +445,7 @@ func TestSessionsAllowPublishingAndDrainBeforeReset(t *testing.T) {
 	manager := backend.NewManager(time.Second, time.Second)
 	f := newFixture(t, "ready")
 	var ended atomic.Bool
-	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return f.process, nil }, AfterReset: func(state.Scope) error {
+	_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return f.process, nil }, AfterReset: func(state.Scope) error {
 		if !ended.Load() {
 			return errResetCrossed
 		}
@@ -497,7 +497,7 @@ func TestSessionResetTimeoutRetainsMetadataAndAllowsRetry(t *testing.T) {
 	manager := backend.NewManager(time.Second, 50*time.Millisecond)
 	f := newFixture(t, "ready")
 	var resets atomic.Int32
-	manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return f.process, nil }, AfterReset: func(state.Scope) error { resets.Add(1); return nil }})
+	_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return f.process, nil }, AfterReset: func(state.Scope) error { resets.Add(1); return nil }})
 	entered, release := make(chan struct{}), make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
