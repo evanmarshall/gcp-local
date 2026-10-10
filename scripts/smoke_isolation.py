@@ -46,7 +46,7 @@ def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        Path(args.detached_probe).write_text(os.readlink("/proc/self/ns/pid"))
+        Path(args.detached_probe).write_text(Path("/proc/self/ns/pid").readlink())
         time.sleep(60)
         return
     if args.probe:
@@ -120,7 +120,7 @@ def main() -> int:
         namespace = namespace_file.read_text()
         for path in Path("/proc").glob("[0-9]*/ns/pid"):
             try:
-                current = os.readlink(path)
+                current = path.readlink()
             except (FileNotFoundError, PermissionError):
                 continue
             assert current != namespace, "A detached test descendant survived its runner"

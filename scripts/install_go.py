@@ -40,8 +40,8 @@ def main() -> int:
         raise SystemExit(
             "Existing .tools/go does not match this pin; move it aside before installing"
         )
-    with tempfile.TemporaryDirectory(prefix="go-install-", dir=tools) as temporary:
-        temporary = Path(temporary)
+    with tempfile.TemporaryDirectory(prefix="go-install-", dir=tools) as raw:
+        temporary = Path(raw)
         archive = temporary / "archive.tar.gz"
         with (
             urlopen("https://go.dev/dl/" + entry["filename"], timeout=60) as source,
@@ -60,7 +60,8 @@ def main() -> int:
                     or not (member.isfile() or member.isdir())
                 ):
                     raise SystemExit("Unexpected path or file type in Go archive")
-            source.extractall(temporary)
+            # members are pre-validated against traversal and file types above.
+            source.extractall(temporary)  # noqa: S202 -- validated archive members
         unpacked = temporary / "go"
         if (unpacked / "VERSION").read_text().splitlines()[0] != manifest["version"]:
             raise SystemExit("Go archive version mismatch")

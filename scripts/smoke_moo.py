@@ -23,7 +23,7 @@ def run(args: list[str], cwd: Path = ROOT, timeout: int = 120) -> str:
     return result.stdout
 
 
-def check_http(port: int, expected: bool) -> None:
+def check_http(port: int, *, expected: object) -> None:
     """Require one HTTP probe to succeed and one to be refused."""
     opener = build_opener(ProxyHandler({}))
     deadline = time.monotonic() + 15
@@ -33,11 +33,12 @@ def check_http(port: int, expected: bool) -> None:
                 actual = response.read().decode().strip()
             if actual != expected:
                 raise AssertionError(f"Port {port}: expected {expected!r}, got {actual!r}")
-            return
         except OSError:
             if time.monotonic() >= deadline:
                 raise
             time.sleep(0.25)
+        else:
+            return
 
 
 def main() -> int:
@@ -61,7 +62,7 @@ def main() -> int:
                 machines.append((handle, tree, label))
                 run(["moo", "new", handle, "from", "base"], cwd=tree)
 
-            def start_server(machine):
+            def start_server(machine: tuple) -> None:
                 handle, tree, label = machine
                 command = (
                     "set -eu; "
@@ -89,7 +90,7 @@ def main() -> int:
                     raise AssertionError(f"Missing port forwarding for {handle}")
                 port = int(match.group(1))
                 ports.append(port)
-                check_http(port, label)
+                check_http(port, expected=label)
             if ports[0] == ports[1]:
                 raise AssertionError("Two machines share a host port")
             print(
@@ -110,26 +111,26 @@ def main() -> int:
                 ],
                 cwd=tree,
             )
-            check_http(ports[0], "changed")
-            check_http(ports[1], "right")
+            check_http(ports[0], expected="changed")
+            check_http(ports[1], expected="right")
             run(["moo", "new", handle], cwd=tree)
             restored = run(
                 ["moo", "run", handle, "--", "cat /var/tmp/gcp-local-smoke/index.html"], cwd=tree
             )
             if restored.strip() != "left":
                 raise AssertionError("Saved state was not restored")
-            check_http(ports[1], "right")
+            check_http(ports[1], expected="right")
             print("PASS: snapshot restore without changing the other machine", flush=True)
         finally:
             for handle, tree, _ in reversed(machines):
                 try:
                     run(["moo", "drop", handle, "--force", "--snapshots"], cwd=tree)
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 -- cleanup must collect every failure
                     cleanup_errors.append(f"{handle}: {exc}")
             for tree in reversed(worktrees):
                 try:
                     run(["git", "worktree", "remove", "--force", str(tree)])
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 -- cleanup must collect every failure
                     cleanup_errors.append(f"{tree}: {exc}")
             if cleanup_errors:
                 raise RuntimeError("Smoke cleanup failed:\n" + "\n".join(cleanup_errors))

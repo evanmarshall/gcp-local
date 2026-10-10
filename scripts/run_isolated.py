@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import signal
+import contextlib
 import subprocess
 import sys
 import time
@@ -99,10 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     def stop_all() -> None:
         """Stop every process this script started."""
         for child in reversed(children):
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
         for child in reversed(children):
             try:
                 child.wait(timeout=5)
@@ -110,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                 os.killpg(child.pid, signal.SIGKILL)
                 child.wait()
 
-    def interrupted(signum: int, frame: object) -> None:
+    def interrupted(signum: int, frame: object) -> None:  # noqa: ARG001 -- signal contract
         """Handle a termination signal by stopping the isolation."""
         raise KeyboardInterrupt
 
