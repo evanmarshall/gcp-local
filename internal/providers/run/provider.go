@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -19,6 +21,10 @@ import (
 // Provider owns the Cloud Run v2 control plane and its container lifecycle.
 type Provider struct {
 	index   *state.Index
+	tokens  *identity.IDTokens
+	baseURL string
+	hosts   map[string]hostEntry
+	hostMu  sync.RWMutex
 	engine  *iam.Engine
 	runtime Runtime
 	scopes  *state.Store[scopeState]
@@ -32,7 +38,7 @@ var errProviderShape = errors.New("run requires registry, manager, index, iam, a
 // container readiness, evaluated by the per-service worker in methods.go. Reset
 // cleanup runs under an uncancellable child of the provider context so it can
 // outlive a shutdown that cancels the serving context.
-func New(ctx context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, runtime Runtime) (*Provider, error) {
+func New(ctx context.Context, config Config, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, runtime Runtime) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil || runtime == nil {
 		return nil, errProviderShape
 	}
@@ -40,8 +46,9 @@ func New(ctx context.Context, registry *gateway.Registry, manager *backend.Manag
 		return nil, err
 	}
 	p := &Provider{
-		index: index, engine: engine, runtime: runtime,
+		index: index, engine: engine, runtime: runtime, tokens: config.Tokens, baseURL: config.BaseURL,
 		scopes: state.NewStore(newScopeState, state.Scope.Validate),
+		hosts:  map[string]hostEntry{},
 		clock:  time.Now,
 	}
 	if err := manager.Register(serviceName, backend.Definition{

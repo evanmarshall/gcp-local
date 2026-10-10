@@ -191,7 +191,7 @@ func (p *Provider) serviceDocument(scope state.Scope, record *serviceRecord) map
 		"ingress":               record.Ingress,
 		"template":              templateDocument(record),
 		"traffic":               traffic,
-		"uri":                   serviceURI(scope, record.Name),
+		"uri":                   p.serviceURI(scope, record.Name),
 		"latestCreatedRevision": latestRevision(record).ID,
 		"latestReadyRevision":   latestRevision(record).ID,
 		"conditions":            []any{map[string]any{keyType: "Ready", "state": ready, "message": detail}},
@@ -410,6 +410,7 @@ func (p *Provider) launchOperation(scope state.Scope, id string) *gateway.RESTRe
 		s.operations[operationName] = &operationRecord{Name: operationName, CreatedAt: p.clock()}
 		return nil
 	})
+	p.indexHost(scope, id)
 	p.watch(scope, id, operationName)
 	return &gateway.RESTResponse{JSON: operationDocument(p.operation(scope, operationName))}
 }
@@ -517,6 +518,7 @@ func (p *Provider) delete(call gateway.Call, scope state.Scope, record *serviceR
 	}); err != nil {
 		return nil, fmt.Errorf("clear the service: %w", err)
 	}
+	p.forgetHost(scope, name)
 	if err := p.index.Remove(serviceName, scope, resource(scope.Project, scope.Location, kindService, name)); err != nil {
 		return nil, fmt.Errorf("unindex the service: %w", err)
 	}
@@ -625,7 +627,11 @@ func (p *Provider) operationDelete() (*gateway.RESTResponse, error) {
 }
 
 // serviceURI returns the local invocation URL of one service. The loopback
-// path mirrors the run.app hostname shape on the shared local listener.
-func serviceURI(scope state.Scope, id string) string {
-	return "http://127.0.0.1/_run/" + id + "-" + scope.Project + "." + scope.Location + ".run.app"
+// host mirrors the run.app hostname shape on the shared local listener.
+func (p *Provider) serviceURI(scope state.Scope, id string) string {
+	base := p.baseURL
+	if base == "" {
+		base = "http://127.0.0.1"
+	}
+	return strings.TrimSuffix(base, "/") + invocationPath + hostOf(scope, id)
 }

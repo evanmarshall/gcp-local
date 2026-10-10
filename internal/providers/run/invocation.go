@@ -1,0 +1,273 @@
+package run
+
+import (
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/evanmarshall/gcp-local/internal/identity"
+)
+
+// Config carries the invocation-time dependencies of the run provider.
+type Config struct {
+	// Tokens verifies local ID tokens minted for service audiences.
+	Tokens *identity.IDTokens
+	// BaseURL is the loopback base of the serving listener, for service URIs.
+	BaseURL string
+}
+
+// invocationPath is the local serving prefix, one level below the local
+// administrative namespace so it never collides with a service contract.
+const invocationPath = "/_run/"
+
+// Invocation serves the local traffic surface of deployed services. It is the
+// local stand-in for the run.app HTTPS endpoint: audience-bound ID-token
+// verification and the run.invoker grant are checked before any forwarding.
+func (p *Provider) Invocation() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, path, refused := splitInvocation(r.URL.Path)
+		if refused != nil {
+			writeInvocationError(w, refused)
+			return
+		}
+		serving, err := p.lookupServing(host)
+		if err != nil {
+			writeInvocationError(w, err)
+			return
+		}
+		if err := p.authorizeInvocation(r, serving); err != nil {
+			writeInvocationError(w, err)
+			return
+		}
+		p.forward(w, r, serving, path)
+	})
+}
+
+// splitInvocation separates the local service host from the request path.
+func splitInvocation(path string) (string, string, error) {
+	if !strings.HasPrefix(path, invocationPath) {
+		return "", "", status.Error(codes.NotFound, "No service is bound to this path")
+	}
+	rest := strings.TrimPrefix(path, invocationPath)
+	host, fragment, found := strings.Cut(rest, "/")
+	if !found {
+		return "", "", status.Error(codes.NotFound, "No service is bound to this path")
+	}
+	if fragment == "" {
+		fragment = "/"
+	}
+	return host, fragment, nil
+}
+
+// servingRef is one resolved, running service for invocation.
+type servingRef struct {
+	project  string
+	location string
+	id       string
+	address  string
+}
+
+// lookupServing resolves the host to a running service revision.
+func (p *Provider) lookupServing(host string) (servingRef, error) {
+	record, scope, err := p.lookupHost(host)
+	if err != nil {
+		return servingRef{}, err
+	}
+	latest := latestRevision(record)
+	if latest == nil || latest.Address == "" {
+		return servingRef{}, status.Error(codes.Unavailable, "No ready revision is serving traffic")
+	}
+	return servingRef{project: scope.Project, location: scope.Location, id: record.Name, address: latest.Address}, nil
+}
+
+// forward proxies the request to the revision container. Only the method,
+// path, and headers the application needs are forwarded; the local
+// authorization header never reaches the container.
+func (p *Provider) forward(w http.ResponseWriter, r *http.Request, serving servingRef, path string) {
+	if !loopback(serving.address) {
+		writeInvocationError(w, status.Error(codes.Internal, "The revision address is not a loopback endpoint"))
+		return
+	}
+	target, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+serving.address+path, r.Body) //nolint:gosec // the address is the provider-owned loopback container port and the path is a single local URL path
+
+	if err != nil {
+		writeInvocationError(w, status.Error(codes.Internal, "Build the container request"))
+		return
+	}
+	for _, key := range []string{"Content-Type", "Accept", "X-Forwarded-For"} {
+		if value := r.Header.Get(key); value != "" {
+			target.Header.Set(key, value)
+		}
+	}
+	response, err := http.DefaultClient.Do(target) //nolint:gosec // the target URL is validated above as a loopback revision port
+	if err != nil {
+		writeInvocationError(w, status.Error(codes.Unavailable, "The revision container is unreachable"))
+		return
+	}
+	defer func() { _ = response.Body.Close() }()
+	headers := w.Header()
+	for key, values := range response.Header {
+		for _, value := range values {
+			headers.Add(key, value)
+		}
+	}
+	w.WriteHeader(response.StatusCode)
+	// The container's bytes are proxied verbatim, mirroring the HTTPS
+	// terminator semantics of the real service endpoint.
+	_, _ = io.Copy(w, response.Body)
+}
+
+// authorizeInvocation enforces the Cloud Run invocation contract: a local ID
+// token bound to the service URI, or an unauthenticated caller only when the
+// service policy grants run.invoker to allUsers.
+func (p *Provider) authorizeInvocation(r *http.Request, serving servingRef) error {
+	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if bearer != "" && bearer != r.Header.Get("Authorization") {
+		return p.authorizeToken(r, bearer, serving)
+	}
+	return p.requirePublic(serving)
+}
+
+// invocationStatus maps the gRPC codes the invocation surface can return to
+// their HTTP status.
+var invocationStatus = map[codes.Code]int{
+	codes.NotFound:         404,
+	codes.Unavailable:      503,
+	codes.Unauthenticated:  401,
+	codes.PermissionDenied: 403,
+	codes.InvalidArgument:  400,
+}
+
+// writeInvocationError renders a Cloud Run-style invocation error.
+func writeInvocationError(w http.ResponseWriter, err error) {
+	code := 500
+	if mapped, ok := invocationStatus[status.Code(err)]; ok {
+		code = mapped
+	}
+	body := wireError(code, status.Code(err).String(), status.Convert(err).Message())
+	body.Headers = http.Header{}
+	for _, header := range body.Headers.Values("Content-Type") {
+		w.Header().Set("Content-Type", header)
+	}
+	w.WriteHeader(code)
+	// The client observes the status first; a body write race cannot happen.
+	// strconv.Quote escapes every control character before the JSON template.
+	fmt.Fprintf(w, `{"error":{"code":%d,"message":%s}}`, code, strconv.Quote(status.Convert(err).Message())) //nolint:gosec // the quoted message is fixed-shape before interpolation
+}
+
+// authorizeToken verifies a locally minted ID token and the invoker grant.
+func (p *Provider) authorizeToken(r *http.Request, bearer string, serving servingRef) error {
+	if p.tokens == nil {
+		return status.Error(codes.Unauthenticated, "Local ID-token verification is not configured")
+	}
+	claims, verifyErr := p.tokens.Verify(bearer, p.audienceOf(serving))
+	if verifyErr != nil {
+		return status.Error(codes.Unauthenticated, "Invalid local ID token")
+	}
+	email := strings.TrimSuffix(claims.Email, "@"+serving.project+".iam.gserviceaccount.com")
+	if email == "" {
+		return status.Error(codes.Unauthenticated, "The ID token names no service account")
+	}
+	call := gateway.Call{
+		Context:   r.Context(),
+		Method:    methodServicesInvoke,
+		Project:   serving.project,
+		Principal: gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + claims.Email},
+	}
+	target := iam.Target{Name: resource(serving.project, serving.location, kindService, serving.id)}
+	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	if authorizeErr != nil {
+		if status.Code(authorizeErr) == codes.PermissionDenied || status.Code(authorizeErr) == codes.Unauthenticated {
+			return status.Error(codes.PermissionDenied, "The caller does not have the run.invoker permission")
+		}
+		return fmt.Errorf("authorize the invocation: %w", authorizeErr)
+	}
+	_ = decision
+	return nil
+}
+
+// requirePublic refuses anonymous traffic unless the service policy grants
+// run.invoker to allUsers.
+func (p *Provider) requirePublic(serving servingRef) error {
+	target := resource(serving.project, serving.location, kindService, serving.id)
+	policy, err := p.engine.GetPolicy(target)
+	if err != nil {
+		return status.Error(codes.Unauthenticated, "Anonymous callers must be granted the run.invoker role")
+	}
+	for _, binding := range policy.Bindings {
+		if binding.Role != "roles/run.invoker" {
+			continue
+		}
+		for _, member := range binding.Members {
+			if member == "allUsers" || member == "allAuthenticatedUsers" {
+				return nil
+			}
+		}
+	}
+	return status.Error(codes.Unauthenticated, "Anonymous callers must be granted the run.invoker role")
+}
+
+// hostEntry maps one local service host to its scope and identifier.
+type hostEntry struct {
+	project  string
+	location string
+	id       string
+}
+
+// hostOf builds the local service host from the Cloud Run hostname shape.
+func hostOf(scope state.Scope, id string) string {
+	return id + "-" + scope.Project + "." + scope.Location + ".run.app"
+}
+
+// lookupHost resolves one local service host to its record and scope.
+func (p *Provider) lookupHost(host string) (*serviceRecord, state.Scope, error) {
+	p.hostMu.RLock()
+	entry, ok := p.hosts[host]
+	p.hostMu.RUnlock()
+	if !ok {
+		return nil, state.Scope{}, status.Errorf(codes.NotFound, "No service is bound to host %q", host)
+	}
+	scope := state.Scope{Project: entry.project, Location: entry.location}
+	record, refused, err := p.serviceRecordLookUp(scope, entry.id)
+	if err != nil || refused != nil {
+		return nil, state.Scope{}, status.Errorf(codes.NotFound, "No service is bound to host %q", host)
+	}
+	return record, scope, nil
+}
+
+// indexHost publishes the local host mapping after a service launch.
+func (p *Provider) indexHost(scope state.Scope, id string) {
+	p.hostMu.Lock()
+	p.hosts[hostOf(scope, id)] = hostEntry{project: scope.Project, location: scope.Location, id: id}
+	p.hostMu.Unlock()
+}
+
+// forgetHost removes the local host mapping when a service goes away.
+func (p *Provider) forgetHost(scope state.Scope, id string) {
+	p.hostMu.Lock()
+	delete(p.hosts, hostOf(scope, id))
+	p.hostMu.Unlock()
+}
+
+// audienceOf returns the verified invocation audience of one service.
+func (p *Provider) audienceOf(serving servingRef) string {
+	return "https://" + hostOf(state.Scope{Project: serving.project, Location: serving.location}, serving.id)
+}
+
+// loopback reports whether the address dials a loopback host.
+func loopback(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	return net.ParseIP(host).IsLoopback()
+}

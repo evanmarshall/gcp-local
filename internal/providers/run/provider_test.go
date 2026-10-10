@@ -100,7 +100,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("grant the project: %v", err)
 	}
 	runtime := newFakeRuntime()
-	provider, err := New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine, runtime)
+	provider, err := New(context.Background(), Config{}, registry, backend.NewManager(time.Second, time.Second), index, engine, runtime)
 	if err != nil {
 		t.Fatalf("build the run provider: %v", err)
 	}
@@ -342,4 +342,27 @@ func TestWorkloadEnvInjectsServiceIdentity(t *testing.T) {
 // containsEntry reports whether the KEY=VALUE entry list holds one value.
 func containsEntry(entries []string, want string) bool {
 	return slices.Contains(entries, want)
+}
+
+func TestInvocationRequiresInvokerGrant(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	handler := h.provider.Invocation()
+	recorder := httptest.NewRecorder()
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/_run/svc-demo-project.us-central1.run.app/", nil)
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != 401 {
+		t.Fatalf("anonymous invocation status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestInvocationUnknownHostIsNotFound(t *testing.T) {
+	h := newHarness(t)
+	handler := h.provider.Invocation()
+	recorder := httptest.NewRecorder()
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/_run/other-demo-project.us-central1.run.app/", nil)
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != 404 {
+		t.Fatalf("unknown host status = %d body %s", recorder.Code, recorder.Body.String())
+	}
 }

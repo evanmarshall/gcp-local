@@ -228,9 +228,12 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 		if options.runSocket != "" {
 			runtime = runprovider.NewDockerRuntime(options.runSocket)
 		}
-		if _, err := runprovider.New(ctx, registry, server.Backends, index, engine, runtime); err != nil {
+		config := runprovider.Config{BaseURL: "http://" + options.listen}
+		provider, err := runprovider.New(ctx, config, registry, server.Backends, index, engine, runtime)
+		if err != nil {
 			return fmt.Errorf("register the Cloud Run provider: %w", err)
 		}
+		server.Run = provider.Invocation()
 	}
 	return nil
 }

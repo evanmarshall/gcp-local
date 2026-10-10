@@ -24,6 +24,7 @@ type Server struct {
 	Backends        *backend.Manager
 	Identity        http.Handler
 	IAM             http.Handler
+	Run             http.Handler
 	Metadata        *http.Server
 	ShutdownTimeout time.Duration
 	ready           atomic.Bool
@@ -55,14 +56,34 @@ func (s *Server) adminRoute(w http.ResponseWriter, r *http.Request, g *gateway.G
 		writeJSON(w, s.healthCode(), map[string]any{"service": "gcp-local", "version": version, "ready": s.ready.Load(), "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
 	case r.Method == http.MethodGet && r.URL.Path == "/_local/diagnostics":
 		writeJSON(w, 200, map[string]any{"runtime": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "providers": g.Registry.Providers(), "backends": s.Backends.Status()})
+	default:
+		return s.adminSubroutes(w, r)
+	}
+	return true
+}
+
+// adminSubroutes serves the diagnostics, IAM, run, and identity mounts.
+func (s *Server) adminSubroutes(w http.ResponseWriter, r *http.Request) bool {
+	switch {
 	case strings.HasPrefix(r.URL.Path, "/_local/iam/decisions/"):
 		s.serveIAM(w, r)
+	case strings.HasPrefix(r.URL.Path, "/_run/"):
+		s.serveRun(w, r)
 	case r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs":
 		s.serveIdentity(w, r)
 	default:
 		return false
 	}
 	return true
+}
+
+// serveRun answers the local Cloud Run invocation surface when mounted.
+func (s *Server) serveRun(w http.ResponseWriter, r *http.Request) {
+	if s.Run == nil {
+		writeJSON(w, 501, map[string]any{"error": map[string]any{"code": 501, "message": "The Cloud Run provider is not selected"}})
+		return
+	}
+	s.Run.ServeHTTP(w, r)
 }
 
 // serveIAM answers the decision-diagnostics route when the engine is mounted.
