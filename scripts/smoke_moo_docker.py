@@ -21,8 +21,7 @@ opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 base='http://127.0.0.1:4566'
 form=urllib.parse.urlencode({'grant_type':'urn:ietf:params:oauth:grant-type:token-exchange','audience':'//gcp-local/identity','subject_token_type':'urn:ietf:params:oauth:token-type:access_token','requested_token_type':'urn:ietf:params:oauth:token-type:access_token','subject_token':'gls.synthetic-moo-container-probe-subject','scope':'https://www.googleapis.com/auth/cloud-platform'})
 token=json.load(opener.open(urllib.request.Request(base+'/v1/token',data=form.encode(),headers={'Content-Type':'application/x-www-form-urlencoded'}),timeout=5))['access_token']
-def call(method: str, path: str, body: object = None, media: bool = False) -> object:
-    """Issue one signed request against the in-container core."""
+def call(method,path,body=None,media=False):
  data=body if media else json.dumps(body).encode() if body is not None else None
  headers={'Authorization':'Bearer '+token,
                   'Content-Type':'application/octet-stream' if media else 'application/json'}
