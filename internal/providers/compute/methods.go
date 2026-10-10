@@ -21,9 +21,82 @@ func (p *Provider) executeNetwork(call gateway.Call, request *gateway.RESTReques
 		return p.getNetwork(request, scope)
 	case methodNetworksList:
 		return p.listNetworks(scope)
+	case methodNetworksAddPeering:
+		return p.addPeering(request, scope)
+	case methodNetworksRemovePeering:
+		return p.removePeering(request, scope)
 	default:
 		return p.deleteNetwork(call, request, scope)
 	}
+}
+
+// addPeering stores one peering of a network toward a peer network.
+func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	body, err := parseInsert(request)
+	if err != nil {
+		return nil, err
+	}
+	name := textOf(body["name"])
+	peer := networkName(textOf(body["peerNetwork"]))
+	if name == "" || peer == "" {
+		return nil, statusInvalid("A peering requires a name and a peerNetwork")
+	}
+	if !p.networkExists(scope, peer) {
+		return nil, missingReference()
+	}
+	if err := p.scopes.With(scope, func(s *scopeState) error {
+		record := s.networks[request.Path["network"]]
+		if record == nil {
+			return errMissing
+		}
+		for _, existing := range record.Peerings {
+			if existing.Name == name {
+				return errAlreadyExists
+			}
+		}
+		record.Peerings = append(record.Peerings, peeringRecord{
+			Name: name, PeerNetwork: peer,
+			ImportCustomRoutes: boolOf(body["importCustomRoutes"], false),
+			ExportCustomRoutes: boolOf(body["exportCustomRoutes"], false),
+		})
+		return nil
+	}); err != nil {
+		if errors.Is(err, errAlreadyExists) {
+			return nil, conflict("peering", name)
+		}
+		return nil, notFound(kindNetwork, request.Path["network"])
+	}
+	return p.newOperation(scope, "global", "", "addPeering", request.Path["network"])
+}
+
+// removePeering deletes one named peering of a network.
+func (p *Provider) removePeering(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	body, err := parseInsert(request)
+	if err != nil {
+		return nil, err
+	}
+	name := textOf(body["peering"])
+	removed := false
+	if err := p.scopes.With(scope, func(s *scopeState) error {
+		record := s.networks[request.Path["network"]]
+		if record == nil {
+			return errMissing
+		}
+		for i, existing := range record.Peerings {
+			if existing.Name == name {
+				record.Peerings = append(record.Peerings[:i], record.Peerings[i+1:]...)
+				removed = true
+				return nil
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, notFound(kindNetwork, request.Path["network"])
+	}
+	if !removed {
+		return nil, notFound("peerings", name)
+	}
+	return p.newOperation(scope, "global", "", "removePeering", request.Path["network"])
 }
 
 // createNetwork validates and stores one network, then reports its operation.

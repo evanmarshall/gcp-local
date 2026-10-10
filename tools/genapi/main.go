@@ -328,7 +328,9 @@ func computeRoutes(_ bool) []byte {
 		{"compute.routes.list", verbGET, base + "/global/routes", false, false},
 		{"compute.routes.get", verbGET, base + "/global/routes/{route}", false, false},
 		{"compute.routes.delete", verbDELETE, base + "/global/routes/{route}", false, false},
-		{"compute.globalOperations.get", verbGET, base + "/global/operations/{operation}", false, false},
+		{"compute.networks.addPeering", verbPOST, globalNet + "/{network}/addPeering", true, false},
+		{"compute.networks.removePeering", verbPOST, globalNet + "/{network}/removePeering", true, false},
+			{"compute.globalOperations.get", verbGET, base + "/global/operations/{operation}", false, false},
 		{"compute.globalOperations.list", verbGET, base + "/global/operations", false, false},
 		{"compute.regionOperations.get", verbGET, base + "/regions/{region}/operations/{operation}", false, false},
 	}

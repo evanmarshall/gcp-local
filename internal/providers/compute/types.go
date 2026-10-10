@@ -35,6 +35,7 @@ const (
 	keyKind        = "kind"
 	keyNetwork     = "network"
 	keyIPProto     = "IPProtocol"
+	keyPeerNetwork = "peerNetwork"
 	keyDestRange   = "destRange"
 	keyError       = "error"
 	keyMessage     = "message"
@@ -86,6 +87,11 @@ func wireError(code int, reason, message string) *gateway.RESTResponse {
 			"errors": []any{map[string]any{keyCode: code, "reason": reason, keyMessage: message}},
 		},
 	}}
+}
+
+// statusInvalid reports a 400 for one malformed request field.
+func statusInvalid(message string) error {
+	return status.Error(codes.InvalidArgument, message)
 }
 
 // notFound reports the compute not-found status for one resource type.

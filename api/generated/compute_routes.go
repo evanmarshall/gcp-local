@@ -20,6 +20,8 @@ var ComputeRoutes = []Route{
 	{"compute.routes.list", "GET", "/compute/v1/projects/{project}/global/routes", false, false},
 	{"compute.routes.get", "GET", "/compute/v1/projects/{project}/global/routes/{route}", false, false},
 	{"compute.routes.delete", "DELETE", "/compute/v1/projects/{project}/global/routes/{route}", false, false},
+	{"compute.networks.addPeering", "POST", "/compute/v1/projects/{project}/global/networks/{network}/addPeering", true, false},
+	{"compute.networks.removePeering", "POST", "/compute/v1/projects/{project}/global/networks/{network}/removePeering", true, false},
 	{"compute.globalOperations.get", "GET", "/compute/v1/projects/{project}/global/operations/{operation}", false, false},
 	{"compute.globalOperations.list", "GET", "/compute/v1/projects/{project}/global/operations", false, false},
 	{"compute.regionOperations.get", "GET", "/compute/v1/projects/{project}/regions/{region}/operations/{operation}", false, false},

@@ -16,8 +16,17 @@ type networkRecord struct {
 	Name                  string
 	AutoCreateSubnetworks bool
 	MTU                   int
+	Peerings              []peeringRecord
 	Generation            int64
 	CreatedAt             time.Time
+}
+
+// peeringRecord is one network peering of a network.
+type peeringRecord struct {
+	Name               string
+	PeerNetwork        string
+	ImportCustomRoutes bool
+	ExportCustomRoutes bool
 }
 
 // subnetworkRecord is one stored subnetwork.

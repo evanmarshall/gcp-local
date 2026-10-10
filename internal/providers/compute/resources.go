@@ -13,7 +13,8 @@ import (
 // execute dispatches one authorized method.
 func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
-	case methodNetworksCreate, methodNetworksGet, methodNetworksList, methodNetworksDelete:
+	case methodNetworksCreate, methodNetworksGet, methodNetworksList, methodNetworksDelete,
+		methodNetworksAddPeering, methodNetworksRemovePeering:
 		return p.executeNetwork(call, request, scope)
 	case methodSubnetworksCreate, methodSubnetworksGet, methodSubnetworksList, methodSubnetworksDelete:
 		return p.executeSubnetwork(call, request, scope)

@@ -17,13 +17,16 @@ import (
 
 // Names and keys repeated across the lifecycle tests.
 const (
-	testNetwork   = "vpc-1"
-	testFirewall  = "fw-1"
-	testAllowed   = "allowed"
-	testProject   = "demo-net"
-	testKindProj  = "project"
-	testSubnetOne = "subnet-1"
-	testTCP       = "tcp"
+	testNetwork     = "vpc-1"
+	testFirewall    = "fw-1"
+	testAllowed     = "allowed"
+	testProject     = "demo-net"
+	testKindProj    = "project"
+	testSubnetOne   = "subnet-1"
+	testPeerNetwork = "peer-net"
+	testPeerSubnet  = "peer-subnet"
+	testPeering     = "peering-1"
+	testTCP         = "tcp"
 	// verdictUnknown is the analyzer's unresolved result.
 	verdictUnknown = "unknown"
 )
@@ -241,6 +244,24 @@ func TestReachabilityDistinguishesVerdicts(t *testing.T) {
 // analyzer exposes the mounted reachability surface.
 func (h *harness) analyzer() http.Handler { return h.analyzerHandler }
 
+// analyzeFlow posts one flow specification and decodes the verdict.
+func (h *harness) analyzeFlow(source, dest, protocol string, port int) Reachability {
+	h.t.Helper()
+	spec := map[string]any{
+		"project": testProject, "sourceIp": source, "destIp": dest,
+		"protocol": protocol, "port": port,
+	}
+	encoded, _ := json.Marshal(spec) //nolint:errchkjson // plain map bodies
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/_local/networking/reachability", bytes.NewReader(encoded))
+	recorder := httptest.NewRecorder()
+	h.analyzer().ServeHTTP(recorder, request)
+	var verdict Reachability
+	if err := json.Unmarshal(recorder.Body.Bytes(), &verdict); err != nil {
+		h.t.Fatalf("decode verdict: %v", err)
+	}
+	return verdict
+}
+
 func TestUnimplementedTopologyReportsUnsupported(t *testing.T) {
 	h := newHarness(t)
 	spec := map[string]any{
@@ -257,5 +278,62 @@ func TestUnimplementedTopologyReportsUnsupported(t *testing.T) {
 	}
 	if verdict.Result != verdictUnknown {
 		t.Fatalf("empty topology verdict = %+v", verdict)
+	}
+}
+
+func TestCrossNetworkFlowsViaPeering(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testNetwork, "autoCreateSubnetworks": false,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{
+		keyName: testPeerNetwork, "autoCreateSubnetworks": false,
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+		keyName: testSubnetOne, keyNetwork: testNetwork, "ipCidrRange": "10.0.0.0/20",
+	})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+		keyName: testPeerSubnet, keyNetwork: testPeerNetwork, "ipCidrRange": "10.1.0.0/20",
+	})
+	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks/"+testNetwork+"/addPeering", map[string]any{
+		keyName: testPeering, keyPeerNetwork: testPeerNetwork,
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("addPeering status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	verdict := h.analyzeFlow("10.0.0.5", "10.1.0.9", testTCP, 443)
+	if verdict.Result != "dropped" {
+		t.Fatalf("peered flow verdict = %+v", verdict)
+	}
+	if len(verdict.Trace) != 1 || verdict.Trace[0] != "peering/peering-1 to peer-net" {
+		t.Fatalf("peered flow trace = %v", verdict.Trace)
+	}
+	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks/"+testNetwork+"/removePeering", map[string]any{
+		"peering": testPeering,
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("removePeering status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	verdict = h.analyzeFlow("10.0.0.5", "10.1.0.9", testTCP, 443)
+	if verdict.Result != "unsupported" {
+		t.Fatalf("unpeered flow verdict = %+v", verdict)
+	}
+}
+
+func TestDuplicatePeeringIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{keyName: testNetwork})
+	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{keyName: testPeerNetwork})
+	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks/"+testNetwork+"/addPeering", map[string]any{
+		keyName: testPeering, keyPeerNetwork: testPeerNetwork,
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("addPeering status = %d", recorder.Code)
+	}
+	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks/"+testNetwork+"/addPeering", map[string]any{
+		keyName: testPeering, keyPeerNetwork: testPeerNetwork,
+	})
+	if recorder.Code != 409 {
+		t.Fatalf("duplicate peering status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }

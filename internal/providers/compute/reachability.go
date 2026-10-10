@@ -71,11 +71,15 @@ func (p *Provider) analyze(request reachabilityRequest) Reachability {
 	if source.network == "" || destination.network == "" {
 		return Reachability{Result: "unknown", Reason: "Both endpoints must resolve into a modeled network"}
 	}
+	trace := []string{}
 	if source.network != destination.network {
-		return unsupported("Cross-network flows require peering or NAT, which have no modeled resources")
+		peering, found := p.peeringBetween(scope, source.network, destination.network)
+		if !found {
+			return unsupported("Cross-network flows require a modeled peering; NAT is not modeled")
+		}
+		trace = append(trace, "peering/"+peering.Name+" to "+peering.PeerNetwork)
 	}
-	result := p.evaluateFirewalls(scope, request, source, destination)
-	return result
+	return p.evaluateFirewalls(scope, request, source, destination, trace)
 }
 
 // endpoint is one resolved flow endpoint.
@@ -130,14 +134,32 @@ func cidrContains(cidr string, ip net.IP) bool {
 }
 
 // evaluateFirewalls applies the modeled firewall precedence to one flow.
-func (p *Provider) evaluateFirewalls(scope state.Scope, request reachabilityRequest, source, destination endpoint) Reachability {
-	trace := []string{}
+func (p *Provider) evaluateFirewalls(scope state.Scope, request reachabilityRequest, source, destination endpoint, trace []string) Reachability {
 	verdict, reason := p.applyFirewalls(scope, request, source, destination, &trace)
 	if verdict == "" {
 		// Compute's implied rules: default deny for ingress, allow for egress.
 		verdict, reason = "dropped", "No ingress rule permits the flow; the implied deny applies"
 	}
 	return Reachability{Result: verdict, Reason: reason, Trace: trace}
+}
+
+// peeringBetween finds one directed peering from source to destination.
+func (p *Provider) peeringBetween(scope state.Scope, source, destination string) (peeringRecord, bool) {
+	var found peeringRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		network := s.networks[source]
+		if network == nil {
+			return nil
+		}
+		for _, candidate := range network.Peerings {
+			if candidate.PeerNetwork == destination {
+				found = candidate
+				return nil
+			}
+		}
+		return nil
+	})
+	return found, found.Name != ""
 }
 
 // applyFirewalls returns the modeled verdict and whether one was decided.
