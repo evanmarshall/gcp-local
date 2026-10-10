@@ -12,7 +12,8 @@ SHA256 = "e8105a3e687ea7e0b0f81abe4bf9269c8a2801fb72c2b498b5ff2472bc54145f"
 URL = f"https://github.com/docker/compose/releases/download/v{VERSION}/docker-compose-linux-aarch64"
 
 
-def main():
+def main() -> int:
+    """Install the pinned Compose diagnostic plugin in an arm64 guest."""
     if platform.system() != "Linux" or platform.machine() != "aarch64":
         raise SystemExit("Install this diagnostic plugin only in the arm64 Moo task guest")
     path = Path("/usr/local/lib/docker/cli-plugins/docker-compose")

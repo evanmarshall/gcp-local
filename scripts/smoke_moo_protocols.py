@@ -15,7 +15,8 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(command, timeout=60):
+def run(command: str, timeout: int = 60) -> str:
+    """Run a multipass command in the guest machine."""
     result = subprocess.run(
         command, cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False
     )
@@ -24,7 +25,8 @@ def run(command, timeout=60):
     return result.stdout
 
 
-def main():
+def main() -> int:
+    """Check gRPC forwarding and TCP send-half-close behavior."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--machine",
@@ -59,7 +61,7 @@ def main():
         timeout=180,
     )
 
-    def guest(action, identifier):
+    def guest(action: str, identifier: str) -> None:
         command = shlex.join(
             ["python3", "/srv/app/scripts/moo_protocol_guest.py", action, "--run", identifier]
         )

@@ -12,7 +12,8 @@ from urllib.parse import urlencode
 from urllib.request import ProxyHandler, Request, build_opener
 
 
-def main():
+def main() -> int:
+    """Exercise private ADC setup and the local identity listeners."""
     root = Path(__file__).resolve().parents[1]
     principal = "serviceAccount:app@synthetic.iam.gserviceaccount.com"
     with tempfile.TemporaryDirectory(prefix="gcp-local-identity-") as temporary:
@@ -52,7 +53,7 @@ def main():
         )
         lines, events = [], queue.Queue()
 
-        def read_logs():
+        def read_logs() -> str:
             for line in process.stdout:
                 lines.append(line)
                 events.put(json.loads(line))

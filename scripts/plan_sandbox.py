@@ -64,7 +64,9 @@ def plan(
     )
     steps = []
 
-    def add(label: str, command: str, check: str | None = None, expected: str | None = None) -> None:
+    def add(
+        label: str, command: str, check: str | None = None, expected: str | None = None
+    ) -> None:
         """Record one command and the output it must produce."""
         steps.append(
             {

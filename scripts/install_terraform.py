@@ -11,7 +11,8 @@ from pathlib import Path
 from urllib.request import urlopen
 
 
-def main():
+def main() -> int:
+    """Install pinned Terraform and a local Google provider mirror."""
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / "toolchains/terraform.json").read_text())
     arch = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "amd64"}.get(platform.machine())

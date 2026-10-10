@@ -10,7 +10,8 @@ from urllib.error import HTTPError
 from urllib.request import ProxyHandler, build_opener
 
 
-def main():
+def main() -> int:
+    """Verify the built process's listener and SIGTERM shutdown."""
     root = Path(__file__).resolve().parents[1]
     with subprocess.Popen(
         [str(root / "bin/gcp-local"), "-listen", "127.0.0.1:0", "-grpc-listen", "127.0.0.1:0"],

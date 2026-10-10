@@ -12,7 +12,8 @@ from gcp_validation.pubsub_scope import LIMITS, private_json
 from gcp_validation.sandbox import Sandbox
 
 
-def plan(profile, setup_account):
+def plan(profile: str, setup_account: str) -> list[str]:
+    """Return the offline Pub/Sub setup and recording command plan."""
     if not re.fullmatch(r"[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", setup_account):
         raise ValueError("Select an explicit setup account")
     flags = ["--project=" + profile.project, "--account=" + setup_account, "--quiet"]
@@ -79,7 +80,8 @@ def plan(profile, setup_account):
     }
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
+    """Print the plan; never run gcloud or approve it."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)
     parser.add_argument("--setup-account", required=True)

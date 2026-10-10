@@ -11,7 +11,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-def main():
+def main() -> int:
+    """Create a private synthetic ADC bundle for the local identity server."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", required=True, type=Path)
     parser.add_argument("--endpoint", default="http://127.0.0.1:4566")

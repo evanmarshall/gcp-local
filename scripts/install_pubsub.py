@@ -10,7 +10,8 @@ from pathlib import Path
 from urllib.request import urlopen
 
 
-def main():
+def main() -> int:
+    """Install the checksum-pinned official Pub/Sub emulator JAR."""
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / "toolchains/pubsub.json").read_text())
     directory = root / ".tools/pubsub"

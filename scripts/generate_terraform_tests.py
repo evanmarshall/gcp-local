@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 
 
-def main():
+def main() -> int:
+    """Reproduce the pinned acceptance slice and its local adaptations."""
     root = Path(__file__).resolve().parents[1]
     source = root / "third_party/terraform-provider-google"
     manifest = json.loads((source / "manifest.json").read_text())

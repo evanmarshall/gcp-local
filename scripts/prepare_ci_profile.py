@@ -11,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gcp_validation.sandbox import Sandbox, inspect_credentials
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
+    """Write the selected CI profile privately, outside the checkout."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)

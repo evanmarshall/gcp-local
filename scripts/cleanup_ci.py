@@ -11,7 +11,8 @@ from gcp_validation.sandbox import Sandbox
 from gcp_validation.storage import main as cleanup
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
+    """Retry pending owned manifests against the selected sandbox."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)
     parser.add_argument("--allow-live", action="store_true", required=True)

@@ -9,7 +9,8 @@ import subprocess
 from pathlib import Path
 
 
-def main():
+def main() -> int:
+    """Run the Pub/Sub integration suite and report local-only coverage."""
     if os.environ.get("GCP_LOCAL_ISOLATED") != "1" or {
         name for _, name in socket.if_nameindex()
     } != {"lo"}:
