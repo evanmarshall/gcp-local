@@ -36,7 +36,7 @@ class SyntheticClient:
     def verify_project(self):
         pass
 
-    def call(self, actor, kind, method, request, timeout=10):  # noqa: ARG002 -- parity with the real client
+    def call(self, actor, kind, method, request, timeout=10):
         self.calls.append((actor, kind, method, request))
         if actor == "denied":
             return self.denied(method, request)
