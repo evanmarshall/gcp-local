@@ -134,6 +134,7 @@ func firewallDocument(project string, record *firewallRecord) map[string]any {
 		"targetTags":   targetTags,
 		"priority":     record.Priority,
 		"disabled":     record.Disabled,
+		"logConfig":    map[string]any{"enable": false},
 		keyDescription: "",
 	}
 }
