@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -141,14 +142,17 @@ type secretRecord struct {
 	Versions    map[string]*versionRecord
 	Labels      map[string]string
 	CreatedAt   time.Time
+	Revision    int
 }
 
 // versionRecord is one stored secret version.
 type versionRecord struct {
-	Number    string
-	Payload   []byte
-	State     string // ENABLED, DISABLED, DESTROYED
-	CreatedAt time.Time
+	Number      string
+	Payload     []byte
+	State       string // ENABLED, DISABLED, DESTROYED
+	CreatedAt   time.Time
+	DestroyedAt time.Time
+	Revision    int
 }
 
 // scopeState is one project slice of provider state.
@@ -182,9 +186,26 @@ func projectResource(project string) string {
 	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }
 
+// numericProject matches a project number in a resource path.
+var numericProject = regexp.MustCompile(`^[0-9]+$`)
+
+// wireProject is the project number GCP puts in returned resource names,
+// falling back to the ID when the index has no number.
+func (p *Provider) wireProject(project string) string {
+	if resource, ok := p.index.Get(projectResource(project)); ok && resource.Number != "" {
+		return resource.Number
+	}
+	return project
+}
+
 // resolve derives the scope and IAM target for one request and its record.
 func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, *secretRecord, error) {
 	project := request.Path["project"]
+	// Names GCP returns carry the project number; callers send them back.
+	if resource, ok := p.index.ProjectByNumber(project); ok && numericProject.MatchString(project) {
+		project = resource.Scope.Project
+		request.Path["project"] = project
+	}
 	scope := scopeOf(project)
 	target := iam.Target{Name: projectResource(project)}
 	switch call.Method {

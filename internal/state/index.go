@@ -72,6 +72,19 @@ func (i *Index) Get(name string) (Resource, bool) {
 	value, ok := i.resources[name]
 	return value, ok
 }
+// ProjectByNumber finds the indexed project with a numeric project ID, the
+// form GCP returns in many resource names.
+func (i *Index) ProjectByNumber(number string) (Resource, bool) {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	for _, resource := range i.resources {
+		if resource.Service == "resourcemanager" && resource.Kind == "project" && resource.Number == number {
+			return resource, true
+		}
+	}
+	return Resource{}, false
+}
+
 func (i *Index) Remove(owner string, scope Scope, name string) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()

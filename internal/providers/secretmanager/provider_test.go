@@ -283,3 +283,52 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, "/v1/projects/"+testProject+"/secrets/"+testSecret+"/versions")
 	probe(http.MethodGet, "/v1/projects/"+testProject+"/locations")
 }
+
+// TestRecordedWireContract pins the shapes the secretmanager-access-lifecycle
+// recording observed: number-form names, labels, etags, CRC32C, the latest
+// alias, the 64 KiB limit, and FAILED_PRECONDITION for destroyed access.
+func TestRecordedWireContract(t *testing.T) {
+	h := newHarness(t)
+	secret := "/v1/projects/" + testProject + "/secrets/" + testSecret
+	recorder := h.invoke(http.MethodPost, "/v1/projects/"+testProject+"/secrets?secretId="+testSecret, map[string]any{
+		"replication": replicationAuto(), testKeyLabels: map[string]any{"managed-by": "gcp-local"},
+	}, "actor")
+	var created map[string]any
+	_ = json.Unmarshal(recorder.Body.Bytes(), &created)
+	if recorder.Code != 200 || created["name"] != "projects/123456/secrets/"+testSecret || created["etag"] == nil {
+		t.Fatalf("create = %d %v", recorder.Code, created)
+	}
+	if labels, _ := created[testKeyLabels].(map[string]any); labels["managed-by"] != "gcp-local" {
+		t.Fatalf("labels were not stored: %v", created)
+	}
+	h.addVersion(t, "hello")
+	checkRecordedAccess(t, h, secret)
+}
+
+// checkRecordedAccess covers the access, limit, and destroy observations.
+func checkRecordedAccess(t *testing.T, h *harness, secret string) {
+	t.Helper()
+	recorder := h.invoke(http.MethodGet, "/v1/projects/123456/secrets/"+testSecret+"/versions/latest:access", nil, "actor")
+	var accessed struct {
+		Name    string            `json:"name"`
+		Payload map[string]string `json:"payload"`
+	}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &accessed)
+	// CRC32C (Castagnoli) of "hello".
+	if recorder.Code != 200 || accessed.Name != "projects/123456/secrets/"+testSecret+"/versions/1" || accessed.Payload["dataCrc32c"] != "2591144780" {
+		t.Fatalf("number-path latest access = %d %s", recorder.Code, recorder.Body.String())
+	}
+	oversize := h.invoke(http.MethodPost, secret+":addVersion", map[string]any{
+		testKeyPayload: map[string]any{testKeyData: base64Of(strings.Repeat("x", 64<<10+1))},
+	}, "actor")
+	if oversize.Code != 400 {
+		t.Fatalf("oversize payload = %d", oversize.Code)
+	}
+	if code := h.invoke(http.MethodPost, secret+"/versions/1:destroy", nil, "actor").Code; code != 200 {
+		t.Fatalf("destroy = %d", code)
+	}
+	destroyed := h.invoke(http.MethodGet, secret+"/versions/1:access", nil, "actor")
+	if destroyed.Code != 400 || !strings.Contains(destroyed.Body.String(), "FAILED_PRECONDITION") {
+		t.Fatalf("destroyed access = %d %s", destroyed.Code, destroyed.Body.String())
+	}
+}

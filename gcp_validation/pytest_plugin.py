@@ -55,6 +55,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption(
         "--gcp-pubsub-identities", help="Explicit synthetic ADC bundle for isolated local Pub/Sub"
     )
+    group.addoption(
+        "--gcp-secretmanager-scope",
+        help="Separately approved bounded Secret Manager scope JSON; live modes only",
+    )
 
 
 def network_policy(config: pytest.Config, *, loopback: bool = False) -> None:
@@ -102,6 +106,11 @@ def select_target(config: pytest.Config) -> None:
         "revalidate",
     }:
         raise ValueError("Pub/Sub cloud scope is only valid in explicit live modes")
+    if config.getoption("gcp_secretmanager_scope") and config.gcp_target.mode not in {
+        "record",
+        "revalidate",
+    }:
+        raise ValueError("Secret Manager cloud scope is only valid in explicit live modes")
     if config.getoption("gcp_pubsub_identities") and config.gcp_target.mode != "local":
         raise ValueError("Synthetic Pub/Sub identities are only valid in local mode")
     if any(versions) and (

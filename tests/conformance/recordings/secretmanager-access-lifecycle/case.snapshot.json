@@ -1,0 +1,152 @@
+{
+  "secretmanager-access-lifecycle": {
+    "recorded-date": "11-10-2026, 17:58:22",
+    "recorded-content": {
+      "created": {
+        "fields": [
+          "createTime",
+          "etag",
+          "labels",
+          "name",
+          "replication"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "name": "<secret-by-number>",
+        "replication": {
+          "automatic": {}
+        }
+      },
+      "version-added": {
+        "fields": [
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "name": "<secret-by-number>/versions/1",
+        "state": "ENABLED"
+      },
+      "denied-access": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "accessor-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/secretmanager.secretAccessor"
+          }
+        ],
+        "http_status": 200
+      },
+      "accessed": {
+        "crc32c_matches": true,
+        "fields": [
+          "name",
+          "payload"
+        ],
+        "http_status": 200,
+        "name": "<secret-by-number>/versions/1",
+        "payload_fields": [
+          "data",
+          "dataCrc32c"
+        ],
+        "payload_matches": true
+      },
+      "latest-alias": {
+        "http_status": 200,
+        "name": "<secret-by-number>/versions/1"
+      },
+      "accessor-cannot-read-metadata": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "accessor-cannot-add-version": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "oversize-payload": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "disabled": {
+        "fields": [
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DISABLED"
+      },
+      "access-disabled": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "enabled": {
+        "fields": [
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "ENABLED"
+      },
+      "destroyed": {
+        "fields": [
+          "createTime",
+          "destroyTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DESTROYED"
+      },
+      "access-destroyed": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "destroy-again": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "versions-listed": {
+        "http_status": 200,
+        "states": [
+          "DESTROYED"
+        ]
+      },
+      "deleted": {
+        "http_status": 200
+      },
+      "absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "secret_absent": true
+      }
+    }
+  }
+}

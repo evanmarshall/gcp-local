@@ -1,9 +1,52 @@
 # Secret Manager (local emulation)
 
 Status: the v1 control plane is implemented locally - secrets, versions,
-payload access, per-secret IAM policy, and location listing. No cloud
-recording covers these methods yet, so nothing here is a cloud-fidelity
-claim; issue #37 tracks the recording and the Terraform workflow pin.
+payload access, per-secret IAM policy, and location listing. One scenario,
+`secretmanager-access-lifecycle`, was recorded and revalidated against real
+GCP on 2026-10-11, and the local provider matches it in comparison mode
+(`sh scripts/check_secretmanager.sh` in Moo/Linux; CI runs it in the
+`pubsub-backend` job). Methods outside that scenario remain local-modeled.
+
+## Recorded scenario
+
+One labeled secret with automatic replication. The fixture identity creates it
+and adds a version; the allowed identity receives `roles/secretmanager.secretAccessor`
+on the secret only; the denied identity has no grant. Observed and compared:
+
+- create and addVersion response fields; names use the project **number**
+  (`projects/NUMBER/secrets/...`), and callers may send that form back
+- denied access is 403 `PERMISSION_DENIED`; after the grant propagates, the
+  accessor reads the payload with a matching `dataCrc32c`, and `latest`
+  resolves to the newest enabled version
+- the accessor cannot read version metadata or add a version (403)
+- a 65,537-byte payload is 400 `INVALID_ARGUMENT` (the limit is 64 KiB)
+- access to a disabled or destroyed version, and a second destroy, are 400
+  `FAILED_PRECONDITION`; destroyed versions report `destroyTime`
+- secret delete, then 404 `NOT_FOUND`
+
+The recording fixed seven local divergences: dropped create labels, project-ID
+names, missing `etag`/`createTime` on versions, missing `dataCrc32c`, no
+`latest` alias, a 512 KiB limit, and `INVALID_ARGUMENT` for destroyed access.
+No claim covers user-managed replication, CMEK, rotation, expiration, topics,
+version aliases, or IAM minimization. Error messages are not compared.
+
+To re-record (needs an approved `.gcp-local/secretmanager-scope.json` matching
+`LiveScope` in `gcp_validation/secretmanager.py`, the Secret Manager API, and a
+temporary project-level `roles/secretmanager.admin` grant on the fixture
+identity):
+
+```sh
+.venv-tools/bin/python -m pytest tests/conformance/secretmanager -q \
+  --gcp-mode record --gcp-profile /absolute/path/to/.env \
+  --gcp-secretmanager-scope /absolute/path/to/.gcp-local/secretmanager-scope.json \
+  --gcp-allow-live --gcp-artifacts .artifacts/secretmanager-record
+```
+
+Each run writes an owner-only ownership manifest under
+`~/.local/state/gcp-local/PROJECT/secretmanager/` before creating anything.
+After an interruption, run
+`.venv-tools/bin/python -m gcp_validation.secretmanager cleanup --profile ... --scope ... --manifest ... --allow-live`;
+it deletes only the labeled secret named in the manifest.
 
 ## Surface
 
@@ -11,7 +54,7 @@ claim; issue #37 tracks the recording and the Terraform workflow pin.
   secrets create/get/list/update/delete, getIamPolicy/setIamPolicy,
   addVersion, versions list/get/access/destroy, locations list.
 - Payloads stay in provider state, reset with the scope, and are never
-  returned by version metadata reads.
+  returned by version metadata reads. Payloads are limited to 64 KiB.
 - Version states: ENABLED, DISABLED (access fails until re-enabled via
   :enable; :disable moves an enabled version), DESTROYED (payload is
   unrecoverable; access is a 400 and a second destroy is refused).

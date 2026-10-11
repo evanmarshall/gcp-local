@@ -4,10 +4,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"maps"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -16,8 +18,22 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// maxPayloadBounds the stored payload size (512 KiB, the cloud limit).
-const maxPayload = 512 << 10
+// maxPayload is the recorded cloud payload limit (64 KiB).
+const maxPayload = 64 << 10
+
+// castagnoli is the CRC32C table for payload checksums.
+var castagnoli = crc32.MakeTable(crc32.Castagnoli)
+
+// labelsOf copies a wire label map.
+func labelsOf(value any) map[string]string {
+	labels := map[string]string{}
+	if values, ok := value.(map[string]any); ok {
+		for key, label := range values {
+			labels[key] = textOf(label)
+		}
+	}
+	return labels
+}
 
 // version states.
 const (
@@ -122,16 +138,41 @@ func secretDocument(project string, record *secretRecord) map[string]any {
 		"replication": record.Replication,
 		"labels":      labels,
 		"createTime":  stamp(record.CreatedAt),
+		"etag":        etag(record.CreatedAt, record.Revision),
 	}
 }
 
 // versionDocument renders one version wire shape without its payload.
 func versionDocument(project string, record *secretRecord, version *versionRecord) map[string]any {
-	return map[string]any{
+	document := map[string]any{
 		"name":              versionWireName(project, record.Name, version.Number),
 		"state":             version.State,
-		"replicationStatus": map[string]any{},
+		"replicationStatus": map[string]any{"automatic": map[string]any{}},
+		"createTime":        stamp(version.CreatedAt),
+		"etag":              etag(version.CreatedAt, version.Revision),
 	}
+	if version.State == stateDestroyed {
+		document["destroyTime"] = stamp(version.DestroyedAt)
+	}
+	return document
+}
+
+// etag renders a quoted revision tag that changes with each mutation.
+func etag(created time.Time, revision int) string {
+	return strconv.Quote(strconv.FormatInt(created.UnixNano()+int64(revision), 16))
+}
+
+// versionOf resolves a version number or the "latest" alias (newest enabled).
+func versionOf(record *secretRecord, id string) *versionRecord {
+	if id != "latest" {
+		return record.Versions[id]
+	}
+	for _, version := range sortedVersions(record) {
+		if version.State == stateEnabled {
+			return version
+		}
+	}
+	return nil
 }
 
 // sortedVersions returns the secret's versions newest-first.
@@ -170,7 +211,7 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gat
 			return nil
 		}
 		s.secrets[id] = &secretRecord{
-			Name: id, Replication: replication,
+			Name: id, Replication: replication, Labels: labelsOf(body["labels"]),
 			Versions: map[string]*versionRecord{}, CreatedAt: now,
 		}
 		return nil
@@ -187,7 +228,7 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gat
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the secret: %w", indexErr)
 	}
-	return &gateway.RESTResponse{JSON: secretDocument(scope.Project, p.mustSecret(scope, id))}, nil
+	return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), p.mustSecret(scope, id))}, nil
 }
 
 // mustSecret reads one secret record under the scope lock.
@@ -199,7 +240,7 @@ func (p *Provider) mustSecret(scope state.Scope, id string) *secretRecord {
 
 // get returns one secret document.
 func (p *Provider) get(scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	return &gateway.RESTResponse{JSON: secretDocument(scope.Project, record)}, nil
+	return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}, nil
 }
 
 // list returns the project's secrets.
@@ -214,7 +255,7 @@ func (p *Provider) list(scope state.Scope) (*gateway.RESTResponse, error) {
 	sort.Strings(names)
 	items := make([]any, 0, len(names))
 	for _, name := range names {
-		items = append(items, secretDocument(scope.Project, p.mustSecret(scope, name)))
+		items = append(items, secretDocument(p.wireProject(scope.Project), p.mustSecret(scope, name)))
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{"secrets": items}}, nil
 }
@@ -226,12 +267,10 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 		return nil, err
 	}
 	if labels, ok := body["labels"].(map[string]any); ok {
-		record.Labels = map[string]string{}
-		for key, value := range labels {
-			record.Labels[key] = textOf(value)
-		}
+		record.Labels = labelsOf(labels)
+		record.Revision++
 	}
-	return &gateway.RESTResponse{JSON: secretDocument(scope.Project, record)}, nil
+	return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}, nil
 }
 
 // delete removes one secret and all its versions.
@@ -292,7 +331,7 @@ func (p *Provider) addVersion(request *gateway.RESTRequest, scope state.Scope, r
 	}
 	version := &versionRecord{Number: nextVersion(record), Payload: payload, State: stateEnabled, CreatedAt: p.clock()}
 	record.Versions[version.Number] = version
-	return &gateway.RESTResponse{JSON: versionDocument(scope.Project, record, version)}, nil
+	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
 }
 
 // versionsList returns the secret's versions newest-first.
@@ -300,43 +339,44 @@ func (p *Provider) versionsList(scope state.Scope, record *secretRecord) (*gatew
 	versions := sortedVersions(record)
 	items := make([]any, 0, len(versions))
 	for _, version := range versions {
-		items = append(items, versionDocument(scope.Project, record, version))
+		items = append(items, versionDocument(p.wireProject(scope.Project), record, version))
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{"versions": items}}, nil
 }
 
 // versionGet returns one version document.
 func (p *Provider) versionGet(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	version := record.Versions[request.Path["version"]]
+	version := versionOf(record, request.Path["version"])
 	if version == nil {
 		return nil, notFound("versions", request.Path["version"])
 	}
-	return &gateway.RESTResponse{JSON: versionDocument(scope.Project, record, version)}, nil
+	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
 }
 
 // versionAccess returns one version's payload to a granted accessor.
 func (p *Provider) versionAccess(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	version := record.Versions[request.Path["version"]]
+	version := versionOf(record, request.Path["version"])
 	if version == nil {
 		return nil, notFound("versions", request.Path["version"])
 	}
 	if version.State == stateDestroyed {
-		return nil, status.Errorf(codes.InvalidArgument, "Version %s of the secret is destroyed", version.Number)
+		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is destroyed", version.Number)
 	}
 	if version.State == stateDisabled {
 		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is disabled", version.Number)
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{
-		"name": versionWireName(scope.Project, record.Name, version.Number),
+		"name": versionWireName(p.wireProject(scope.Project), record.Name, version.Number),
 		"payload": map[string]any{
-			"data": base64Encode(version.Payload),
+			"data":       base64Encode(version.Payload),
+			"dataCrc32c": strconv.FormatUint(uint64(crc32.Checksum(version.Payload, castagnoli)), 10),
 		},
 	}}, nil
 }
 
 // versionDestroy permanently destroys one version's payload.
 func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	version := record.Versions[request.Path["version"]]
+	version := versionOf(record, request.Path["version"])
 	if version == nil {
 		return nil, notFound("versions", request.Path["version"])
 	}
@@ -345,7 +385,9 @@ func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scop
 	}
 	version.State = stateDestroyed
 	version.Payload = nil
-	return &gateway.RESTResponse{JSON: versionDocument(scope.Project, record, version)}, nil
+	version.DestroyedAt = p.clock()
+	version.Revision++
+	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
 }
 
 // nextVersion allocates the next version number of a secret.
@@ -376,7 +418,7 @@ func base64Encode(payload []byte) string { return base64.StdEncoding.EncodeToStr
 
 // versionSetState disables or re-enables one version.
 func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Scope, record *secretRecord, state string) (*gateway.RESTResponse, error) {
-	version := record.Versions[request.Path["version"]]
+	version := versionOf(record, request.Path["version"])
 	if version == nil {
 		return nil, notFound("versions", request.Path["version"])
 	}
@@ -384,7 +426,8 @@ func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Sco
 		return nil, status.Errorf(codes.InvalidArgument, "Version %s of the secret is destroyed", version.Number)
 	}
 	version.State = state
-	return &gateway.RESTResponse{JSON: versionDocument(scope.Project, record, version)}, nil
+	version.Revision++
+	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
 }
 
 // secretID resolves the secret id from the path, the body name, or the query.
