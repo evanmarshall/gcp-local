@@ -74,6 +74,10 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		if !strings.HasPrefix(method, "/") || method == subscriber+"StreamingPull" {
 			continue
 		}
+		if strings.HasPrefix(method, policyRPC) {
+			// The IAM policy surface registers below with its own handler.
+			continue
+		}
 		if err := registry.Register(method, p.handle); err != nil {
 			return nil, fmt.Errorf("register %s: %w", method, err)
 		}

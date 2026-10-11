@@ -11,4 +11,8 @@ var PubSubRestRoutes = []Route{
 	{"pubsub.http.subscriptions.get", "GET", "/v1/projects/{project}/subscriptions/{subscription}", false, false},
 	{"pubsub.http.subscriptions.delete", "DELETE", "/v1/projects/{project}/subscriptions/{subscription}", false, false},
 	{"pubsub.http.subscriptions.list", "GET", "/v1/projects/{project}/subscriptions", false, false},
+	{"pubsub.http.topics.getIamPolicy", "GET", "/v1/projects/{project}/topics/{topic}:getIamPolicy", false, false},
+	{"pubsub.http.topics.setIamPolicy", "POST", "/v1/projects/{project}/topics/{topic}:setIamPolicy", true, false},
+	{"pubsub.http.subscriptions.getIamPolicy", "GET", "/v1/projects/{project}/subscriptions/{subscription}:getIamPolicy", false, false},
+	{"pubsub.http.subscriptions.setIamPolicy", "POST", "/v1/projects/{project}/subscriptions/{subscription}:setIamPolicy", true, false},
 }

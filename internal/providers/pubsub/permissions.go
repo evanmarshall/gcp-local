@@ -33,6 +33,8 @@ var permissions = map[string]string{
 	"pubsub.subscriptions.getIamPolicy": "pubsub.subscriptions.getIamPolicy",
 	"pubsub.subscriptions.setIamPolicy": "pubsub.subscriptions.setIamPolicy",
 	"pubsub.push.actAs":                 "iam.serviceAccounts.actAs",
+	policyRPC + "GetIamPolicy":          "pubsub.topics.getIamPolicy",
+	policyRPC + "SetIamPolicy":          "pubsub.topics.setIamPolicy",
 }
 
 // permissionSubscriptionsConsume is the single permission that governs every

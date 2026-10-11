@@ -2,7 +2,9 @@ package pubsub
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"errors"
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -44,12 +46,32 @@ var restTwins = map[string]string{
 	restSubscriptionsGet:    subscriber + "GetSubscription",
 	restSubscriptionsDelete: subscriber + "DeleteSubscription",
 	restSubscriptionsList:   subscriber + "ListSubscriptions",
+	restTopicsGetIam:        policyRPC + "GetIamPolicy",
+	restTopicsSetIam:        policyRPC + "SetIamPolicy",
+	restSubsGetIam:          policyRPC + "GetIamPolicy",
+	restSubsSetIam:          policyRPC + "SetIamPolicy",
 }
 
 // registerRestPermissions binds every REST method to its twin's permission.
+const (
+	restTopicsGetIam = "pubsub.http.topics.getIamPolicy"
+	restTopicsSetIam = "pubsub.http.topics.setIamPolicy"
+	restSubsGetIam   = "pubsub.http.subscriptions.getIamPolicy"
+	restSubsSetIam   = "pubsub.http.subscriptions.setIamPolicy"
+)
+
 func (p *Provider) registerRestPermissions() error {
+	restPermissions := map[string]string{
+		restTopicsGetIam: "pubsub.topics.getIamPolicy",
+		restTopicsSetIam: "pubsub.topics.setIamPolicy",
+		restSubsGetIam:   "pubsub.subscriptions.getIamPolicy",
+		restSubsSetIam:   "pubsub.subscriptions.setIamPolicy",
+	}
 	for method, twin := range restTwins {
-		permission, ok := permissions[twin]
+		permission, ok := restPermissions[method]
+		if !ok {
+			permission, ok = permissions[twin]
+		}
 		if !ok {
 			return fmt.Errorf("%w: %s", errRestUnknownTwin, twin)
 		}
@@ -65,10 +87,12 @@ func restResourceFor(method, project string, request *gateway.RESTRequest) strin
 	switch method {
 	case restTopicsList:
 		return projectResourceOf(project)
-	case restTopicsCreate, restTopicsGet, restTopicsDelete:
+	case restTopicsCreate, restTopicsGet, restTopicsDelete, restTopicsGetIam, restTopicsSetIam:
 		return restTopicName(project, request.Path["topic"])
 	case restSubscriptionsList:
 		return projectResourceOf(project)
+	case restSubsGetIam, restSubsSetIam:
+		return restSubscriptionName(project, request.Path["subscription"])
 	default:
 		return restSubscriptionName(project, request.Path["subscription"])
 	}
@@ -103,6 +127,12 @@ func (p *Provider) handleRest(call gateway.Call, raw any) (any, error) {
 	}
 	project := request.Path["project"]
 	call.Resource = restResourceFor(call.Method, project, request)
+	isPolicy := strings.Contains(twin, "IAMPolicy")
+	if isPolicy {
+		// The policy surface is provider-owned: the resource name is the
+		// canonical topic/subscription, not a backend resource.
+		return p.handleRestPolicy(call, request, project, call.Method)
+	}
 	call.Method = twin // the twin drives authorization and the emulator call
 
 	protoRequest, buildErr := p.buildRestProto(twin, project, request)
@@ -117,6 +147,33 @@ func (p *Provider) handleRest(call gateway.Call, raw any) (any, error) {
 		return nil, err
 	}
 	return &gateway.RESTResponse{JSON: restWire(call.Method, response)}, nil
+}
+
+// handleRestPolicy serves the REST topic/subscription IAM surface straight
+// from the shared IAM engine, mirroring the gRPC policy handler's shape.
+func (p *Provider) handleRestPolicy(call gateway.Call, request *gateway.RESTRequest, project, restMethod string) (*gateway.RESTResponse, error) {
+	call.Method = restTwins[restMethod]
+	if !strings.Contains(call.Resource, "/topics/") && !strings.Contains(call.Resource, "/subscriptions/") {
+		return nil, status.Error(codes.InvalidArgument, "Invalid policy resource")
+	}
+	if call.Method == policyRPC+"GetIamPolicy" {
+		policy, err := p.iam.GetPolicy(canonical(call.Resource))
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "read the policy: %v", err)
+		}
+		return &gateway.RESTResponse{JSON: policy}, nil
+	}
+	var envelope struct {
+		Policy iam.Policy `json:"policy"`
+	}
+	if json.Unmarshal(request.JSON, &envelope) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+	}
+	policy, err := p.iam.SetPolicy(canonical(call.Resource), envelope.Policy)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "write the policy: %v", err)
+	}
+	return &gateway.RESTResponse{JSON: policy}, nil
 }
 
 // restSession opens the backend session and runs the same authorize, invoke,
