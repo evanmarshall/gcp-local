@@ -47,7 +47,7 @@ func compileCondition(raw json.RawMessage) (*evaluated, error) {
 	}
 	env, err := cel.NewEnv(
 		cel.Variable("resource", cel.MapType(cel.StringType, cel.StringType)),
-		cel.Variable("request", cel.MapType(cel.StringType, cel.StringType)),
+		cel.Variable("request", cel.MapType(cel.StringType, cel.DynType)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build the condition environment: %w", err)
@@ -75,9 +75,8 @@ func (e *evaluated) evaluate(ctx conditionContext) conditionResult {
 			"name":    ctx.ResourceName,
 			"service": ctx.Service,
 		},
-		"request": map[string]string{
-			"time": ctx.Now.Format(time.RFC3339),
-		},
+		// request.time is a timestamp, so comparisons with timestamp() work.
+		"request": map[string]any{"time": ctx.Now},
 	}
 	out, _, err := e.program.Eval(values)
 	if err != nil {
@@ -96,12 +95,12 @@ type conditionGuard struct {
 }
 
 // evaluateBinding evaluates the condition of one stored binding index.
-func (s storedPolicy) evaluateBinding(index int) conditionResult {
+func (s storedPolicy) evaluateBinding(index int, attributes conditionContext) conditionResult {
 	for _, guard := range s.conditions {
 		if guard.bindingIndex != index {
 			continue
 		}
-		return guard.condition.evaluate(conditionContext{Now: time.Now()})
+		return guard.condition.evaluate(attributes)
 	}
 	return conditionResult{Allowed: false, Reason: "the binding condition was not compiled"}
 }

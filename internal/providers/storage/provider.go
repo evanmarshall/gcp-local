@@ -238,9 +238,14 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 	}
 	scope = resource.Scope
 	call.Project = scope.Project
+	// IAM condition attributes use Storage's documented resource names.
+	target.Attributes = iam.ResourceAttributes{Name: "projects/_/buckets/" + bucket,
+		Type: "storage.googleapis.com/Bucket", Service: "storage.googleapis.com"}
 	if object != "" {
 		target.Parent = target.Name
 		target.Name += "/objects/" + object
+		target.Attributes.Name += "/objects/" + object
+		target.Attributes.Type = "storage.googleapis.com/Object"
 	}
 	return target, scope, projectMethod, nil, nil
 }
@@ -458,6 +463,10 @@ func (p *Provider) writeBucketPolicy(bucket string, r *gateway.RESTRequest) (*ga
 		return public, nil
 	}
 	result, err := p.iam.SetPolicy(BucketResource(bucket), request.Policy)
+	if status.Code(err) == codes.InvalidArgument {
+		// Recorded: version and condition errors are 400 "invalid" in Storage's format.
+		return wireError(400, "invalid", status.Convert(err).Message()), nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("write bucket policy: %w", err)
 	}

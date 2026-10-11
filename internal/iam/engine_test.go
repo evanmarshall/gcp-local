@@ -212,14 +212,19 @@ func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 		t.Fatal("known grant bypassed unknown ancestor policy:", err)
 	}
 	_ = engine.MarkUnsupported(org, nil)
-	for _, policy := range []iam.Policy{
-		{Version: 2},
-		{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{allowed}, Condition: json.RawMessage(testBadCondition)}}},
-		{Version: 3, Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{allowed}, Condition: json.RawMessage(testBadCondition)}}},
-		{Bindings: []iam.Binding{{Role: "roles/unknown", Members: []string{allowed}}}},
-		{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{"group:unknown@local"}}}},
+	// Recorded (storage-iam-conditions): a conditional binding below version 3
+	// and an uncompilable expression are 400 INVALID_ARGUMENT in GCP.
+	for _, refused := range []struct {
+		policy iam.Policy
+		code   codes.Code
+	}{
+		{iam.Policy{Version: 2}, codes.Unimplemented},
+		{iam.Policy{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{allowed}, Condition: json.RawMessage(testBadCondition)}}}, codes.InvalidArgument},
+		{iam.Policy{Version: 3, Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{allowed}, Condition: json.RawMessage(testBadCondition)}}}, codes.InvalidArgument},
+		{iam.Policy{Bindings: []iam.Binding{{Role: "roles/unknown", Members: []string{allowed}}}}, codes.Unimplemented},
+		{iam.Policy{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{"group:unknown@local"}}}}, codes.Unimplemented},
 	} {
-		if _, err := engine.SetPolicy(object().Parent, policy); status.Code(err) != codes.Unimplemented {
+		if _, err := engine.SetPolicy(object().Parent, refused.policy); status.Code(err) != refused.code {
 			t.Fatal(err)
 		}
 	}
@@ -403,6 +408,44 @@ func TestConditionalBindingsFailClosedAndGrant(t *testing.T) {
 	}
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("unmatched condition did not deny: %v", err)
+	}
+}
+
+// TestConditionAttributesAndTimeMatchRecording mirrors storage-iam-conditions:
+// a resource.name prefix scopes a grant, the conditional binding need not be
+// first in the policy, and request.time compares as a timestamp.
+func TestConditionAttributesAndTimeMatchRecording(t *testing.T) {
+	engine, _ := setup(t)
+	read := call(testObjectGet, fixture, testProject)
+	if _, err := engine.SetPolicy(projectA, iam.Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	grant := func(expression string) {
+		t.Helper()
+		condition, _ := json.Marshal(map[string]string{"title": "t", "expression": expression}) //nolint:errchkjson // plain string map
+		if _, err := engine.SetPolicy(object().Parent, iam.Policy{Version: 3, Bindings: []iam.Binding{
+			{Role: testViewerRole, Members: []string{allowed}},
+			{Role: testViewerRole, Members: []string{fixture}, Condition: condition},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	named := func(name string) iam.Target {
+		target := object()
+		target.Attributes = iam.ResourceAttributes{Name: "projects/_/buckets/bucket-a/objects/" + name,
+			Type: "storage.googleapis.com/Object", Service: "storage.googleapis.com"}
+		return target
+	}
+	grant(`resource.name.startsWith("projects/_/buckets/bucket-a/objects/public-")`)
+	if _, err := engine.Authorize(read, named("public-a.txt"), nil); err != nil {
+		t.Fatalf("prefix grant denied: %v", err)
+	}
+	if _, err := engine.Authorize(read, named("private-b.txt"), nil); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("outside the prefix was allowed: %v", err)
+	}
+	grant(`request.time < timestamp("2000-01-01T00:00:00Z")`)
+	if _, err := engine.Authorize(read, named("public-a.txt"), nil); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("expired condition was allowed: %v", err)
 	}
 }
 

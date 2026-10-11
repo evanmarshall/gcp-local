@@ -1,0 +1,115 @@
+{
+  "storage-iam-conditions": {
+    "recorded-date": "11-10-2026, 23:21:08",
+    "recorded-content": {
+      "condition-needs-version-3": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Specified policy version (1) must be at least 3 based on the policy's contents. For more information, please refer to https://cloud.google.com/iam/help/allow-policies/versions.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "invalid-expression": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "conditional-grant": {
+        "conditional_bindings": [
+          {
+            "condition_fields": [
+              "expression",
+              "title"
+            ],
+            "expression": "resource.name.startsWith(\"projects/_/buckets/<bucket>/objects/public-\")",
+            "role": "roles/storage.objectViewer"
+          }
+        ],
+        "status": 200,
+        "version": 3
+      },
+      "read-v1-with-conditions": {
+        "status": 200,
+        "v1_status": 200
+      },
+      "read-v3": {
+        "conditional_bindings": [
+          {
+            "condition_fields": [
+              "expression",
+              "title"
+            ],
+            "expression": "resource.name.startsWith(\"projects/_/buckets/<bucket>/objects/public-\")",
+            "role": "roles/storage.objectViewer"
+          }
+        ],
+        "version": 3
+      },
+      "prefix-allowed": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "8qzS//INxH/qebZ3IwQV9Q==",
+        "metageneration": "<metageneration-1>",
+        "name": "public-a.txt",
+        "size": "30"
+      },
+      "outside-prefix-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/private-b.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "denied-caller": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/public-a.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "expired-grant": {
+        "conditional_bindings": [
+          {
+            "condition_fields": [
+              "expression",
+              "title"
+            ],
+            "expression": "request.time < timestamp(\"2000-01-01T00:00:00Z\")",
+            "role": "roles/storage.objectViewer"
+          }
+        ],
+        "status": 200,
+        "version": 3
+      },
+      "expired-condition-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/public-a.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

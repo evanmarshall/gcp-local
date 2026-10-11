@@ -1,6 +1,7 @@
 package iam
 
 import (
+	"time"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -22,7 +23,15 @@ type Rule struct {
 	Baseline []string
 	When     map[string][]string
 }
-type Target struct{ Name, Parent string }
+// Target names the resource a call acts on. Attributes are the CEL
+// resource.* values GCP exposes to IAM conditions for that resource.
+type Target struct {
+	Name, Parent string
+	Attributes   ResourceAttributes
+}
+
+// ResourceAttributes are the documented IAM condition resource attributes.
+type ResourceAttributes struct{ Name, Type, Service string }
 type Check struct {
 	Permission  string   `json:"permission"`
 	Target      string   `json:"target"`
@@ -46,6 +55,8 @@ type Decision struct {
 	// They are dry-run observations, never enforcement, and stay distinct from
 	// IAM denial so no precedence order is implied between families.
 	Signals []Signal `json:"signals,omitempty"`
+	// conditions holds the request's CEL attributes; never serialized.
+	conditions conditionContext
 }
 
 // Signal records one non-IAM policy family's observation on a decision.
@@ -135,6 +146,8 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 	if err != nil {
 		return Decision{}, err
 	}
+	decision.conditions = conditionContext{ResourceName: target.Attributes.Name, ResourceType: target.Attributes.Type,
+		Service: target.Attributes.Service, Now: time.Now()}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	finish := func(outcome, reason string, code codes.Code) (Decision, error) {
@@ -397,7 +410,7 @@ func (e *Engine) evaluatePermission(decision *Decision, ancestors []state.Resour
 	}
 	if denyMatch == "" || excepted {
 		for _, ancestor := range ancestors {
-			e.matchBindings(&check, ancestor.Name, permission, principal)
+			e.matchBindings(&check, ancestor.Name, permission, principal, decision.conditions)
 		}
 	}
 	return check
@@ -405,7 +418,7 @@ func (e *Engine) evaluatePermission(decision *Decision, ancestors []state.Resour
 
 // matchBindings records the first binding that grants one permission at one
 // policy. A binding whose condition fails closed never grants.
-func (e *Engine) matchBindings(check *Check, policyName, permission string, principal gateway.Principal) {
+func (e *Engine) matchBindings(check *Check, policyName, permission string, principal gateway.Principal, attributes conditionContext) {
 	stored := e.policies[policyName]
 	for index, binding := range stored.policy.Bindings {
 		member := firstMember(binding, principal)
@@ -413,7 +426,7 @@ func (e *Engine) matchBindings(check *Check, policyName, permission string, prin
 			continue
 		}
 		if len(binding.Condition) > 0 {
-			verdict := stored.evaluateBinding(index)
+			verdict := stored.evaluateBinding(index, attributes)
 			check.Conditions = append(check.Conditions, verdict.Reason)
 			if !verdict.Allowed {
 				continue

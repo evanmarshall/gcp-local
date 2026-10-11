@@ -105,7 +105,8 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	if policy.Version != 3 {
 		for _, binding := range policy.Bindings {
 			if len(binding.Condition) > 0 {
-				return Policy{}, status.Error(codes.Unimplemented, "Bindings with conditions require policy version 3")
+				return Policy{}, status.Errorf(codes.InvalidArgument, "Specified policy version (%d) must be at least 3 based on the policy's contents. "+
+					"For more information, please refer to https://cloud.google.com/iam/help/allow-policies/versions.", max(policy.Version, 1))
 			}
 		}
 		if len(policy.DenyRules) > 0 {
@@ -134,14 +135,15 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 		_ = index
 		compiledDenies = append(compiledDenies, compiled)
 	}
-	for _, binding := range policy.Bindings {
+	for index, binding := range policy.Bindings {
 		if len(binding.Condition) > 0 {
 			compiled, compileErr := compileCondition(binding.Condition)
 			if compileErr != nil {
-				return Policy{}, status.Error(codes.Unimplemented, compileErr.Error())
+				return Policy{}, status.Error(codes.InvalidArgument, "Condition expression compilation failed: "+compileErr.Error())
 			}
+			// Guards are keyed by the binding's own position in the policy.
 			compiledConditions = append(compiledConditions, conditionGuard{
-				bindingIndex: len(compiledConditions), condition: compiled,
+				bindingIndex: index, condition: compiled,
 			})
 		}
 		if _, ok := e.roles[binding.Role]; !ok {
