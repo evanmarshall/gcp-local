@@ -7,7 +7,9 @@
   "datastore.entities.get",
   "datastore.entities.list",
   "datastore.entities.update",
-  "datastore.indexes.list"
+  "datastore.indexes.get",
+  "datastore.indexes.list",
+  "datastore.indexes.update"
  ],
  "name": "roles/datastore.user",
  "stage": "GA"

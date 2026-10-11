@@ -18,6 +18,8 @@ const serviceName = "firestore"
 const (
 	methodDocumentsGet    = "firestore.documents.get"
 	methodDocumentsList   = "firestore.documents.list"
+	methodFieldsGet       = "firestore.fields.get"
+	methodFieldsUpdate    = "firestore.fields.update"
 	methodDocumentsCreate = "firestore.documents.create"
 	methodDocumentsUpdate = "firestore.documents.update"
 	methodDocumentsDelete = "firestore.documents.delete"
@@ -31,6 +33,8 @@ var permissions = map[string]string{
 	methodDocumentsCreate: "datastore.entities.create",
 	methodDocumentsUpdate: "datastore.entities.update",
 	methodDocumentsDelete: "datastore.entities.delete",
+	methodFieldsGet:       "datastore.indexes.get",
+	methodFieldsUpdate:    "datastore.indexes.update",
 }
 
 // Resource-name helpers follow the real Firestore namespace.
@@ -51,14 +55,29 @@ type documentRecord struct {
 	UpdateTime string
 }
 
+// fieldRecord is one configured collection-group field.
+type fieldRecord struct {
+	Name        string
+	TTLConfig   map[string]any
+	IndexConfig map[string]any
+	Configured  bool
+	CreatedAt   time.Time
+}
+
 // scopeState is one project slice of provider state.
 type scopeState struct {
 	documents map[string]*documentRecord
+	fields    map[string]*fieldRecord
 }
 
-func newScopeState() scopeState { return scopeState{documents: map[string]*documentRecord{}} }
+func newScopeState() scopeState {
+	return scopeState{documents: map[string]*documentRecord{}, fields: map[string]*fieldRecord{}}
+}
 
-func (s *scopeState) reset() { s.documents = map[string]*documentRecord{} }
+func (s *scopeState) reset() {
+	s.documents = map[string]*documentRecord{}
+	s.fields = map[string]*fieldRecord{}
+}
 
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("firestore requires registry, manager, index, and iam")

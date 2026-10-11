@@ -47,6 +47,7 @@
 1	unparam	internal/providers/resourcemanager/provider_test.go
 1	wrapcheck	internal/providers/artifactregistry/methods.go
 1	wrapcheck	internal/providers/bigquery/methods.go
+1	wrapcheck	internal/providers/firestore/methods.go
 1	wrapcheck	internal/providers/iam/methods.go
 2	cyclop	internal/backend/manager_test.go
 2	cyclop	internal/gateway/gateway_test.go

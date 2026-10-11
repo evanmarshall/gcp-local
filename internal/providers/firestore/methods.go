@@ -26,6 +26,10 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.get(request, scope)
 	case methodDocumentsList:
 		return p.list(request, scope)
+	case methodFieldsGet:
+		return p.fieldGet(request, scope)
+	case methodFieldsUpdate:
+		return p.fieldUpdate(request, scope)
 	default:
 		return p.remove(request, scope)
 	}
@@ -192,4 +196,106 @@ func (p *Provider) createFromCollection(_ gateway.Call, request *gateway.RESTReq
 		return nil, fmt.Errorf("index the document: %w", indexErr)
 	}
 	return &gateway.RESTResponse{JSON: documentWire(scope.Project, collection, id, body.Fields, now, now)}, nil
+}
+
+// fieldGet returns one collection-group field record.
+func (p *Provider) fieldGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	p.ensureDatabase(scope)
+	collection, field := request.Path["collectionId"], request.Path["fieldId"]
+	if !uid.MatchString(collection) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid collection id %q", collection)
+	}
+	if !uid.MatchString(field) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid field id %q", field)
+	}
+	record := p.fieldLocked(scope, collection, field)
+	if record == nil {
+		// Real Firestore reports an unconfigured field with fully automatic
+		// index settings rather than a 404.
+		return &gateway.RESTResponse{JSON: fieldWire(projectField(scope.Project, collection, field), nil, nil, false)}, nil
+	}
+	return &gateway.RESTResponse{JSON: fieldWire(record.Name, record.TTLConfig, record.IndexConfig, record.Configured)}, nil
+}
+
+// fieldUpdate patches one field's TTL or index configuration.
+func (p *Provider) fieldUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	p.ensureDatabase(scope)
+	collection, field := request.Path["collectionId"], request.Path["fieldId"]
+	if !uid.MatchString(collection) || !uid.MatchString(field) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid field path")
+	}
+	var body struct {
+		TTLConfig *struct {
+			ExpirationPolicy *struct {
+				Expiration string `json:"expiration"`
+			} `json:"expirationPolicy"`
+		} `json:"ttlConfig"`
+		IndexConfig *struct {
+			AncestorField string `json:"ancestorField"`
+		} `json:"indexConfig"`
+	}
+	if json.Unmarshal(request.JSON, &body) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid field body")
+	}
+	now := p.clock()
+	var ttl map[string]any
+	if body.TTLConfig != nil && body.TTLConfig.ExpirationPolicy != nil {
+		ttl = map[string]any{"expirationPolicy": map[string]any{"expiration": body.TTLConfig.ExpirationPolicy.Expiration}}
+	}
+	var index map[string]any
+	if body.IndexConfig != nil {
+		index = map[string]any{"ancestorField": body.IndexConfig.AncestorField}
+	}
+	var record *fieldRecord
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		record = s.fields[collection+"/"+field]
+		if record == nil {
+			record = &fieldRecord{Name: projectField(scope.Project, collection, field), CreatedAt: now}
+			s.fields[collection+"/"+field] = record
+		}
+		record.TTLConfig, record.IndexConfig = ttl, index
+		record.Configured = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{
+		"done":     true,
+		"response": fieldWire(record.Name, record.TTLConfig, record.IndexConfig, record.Configured),
+	}}, nil
+}
+
+// fieldLocked reads one field under the scope lock.
+func (p *Provider) fieldLocked(scope state.Scope, collection, field string) *fieldRecord {
+	var record *fieldRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.fields[collection+"/"+field]; return nil })
+	return record
+}
+
+// projectField renders the canonical field name.
+func projectField(project, collection, field string) string {
+	return "projects/" + project + "/databases/(default)/collectionGroups/" + collection + "/fields/" + field
+}
+
+// fieldWire renders one field document.
+func fieldWire(name string, ttl, index map[string]any, configured bool) map[string]any {
+	document := map[string]any{
+		"name":        name,
+		"indexConfig": map[string]any{"ancestorField": "REQUEST_TIME", "reverting": false, "usesAncestorConfig": true},
+	}
+	document["ttlConfig"] = map[string]any{}
+	if configured {
+		if ttl != nil {
+			document["ttlConfig"] = ttl
+		} else {
+			// An empty HCL ttl_config{} sets the default expiration policy;
+			// the wire always carries one once configured.
+			document["ttlConfig"] = map[string]any{"expirationPolicy": map[string]any{"expiration": "864000s"}}
+		}
+	}
+	if index != nil {
+		document["indexConfig"] = index
+	}
+	return document
 }

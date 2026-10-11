@@ -136,12 +136,12 @@
   {
    "file": "datastore.user.json",
    "name": "roles/datastore.user",
-   "sha256": "6c90a8d7b2b04f5785b4cbb26084df075ad94f7c9bc879b9785615663ffcd379"
+   "sha256": "239b0fb4fddee45aae422cc73882ebb176a5d9a4bfb068195f11e5e00eecfca9"
   },
   {
    "file": "datastore.viewer.json",
    "name": "roles/datastore.viewer",
-   "sha256": "c262ee7529751d4c877ebe5e4c5f5e0249fea94cc3c21bcc9ef6462d2e5e729a"
+   "sha256": "4e5eca5b03410fbc3a66f7c665c9da6bfdb88451196da8fa5dd4d404998a0560"
   },
   {
    "file": "bigquery.dataEditor.json",

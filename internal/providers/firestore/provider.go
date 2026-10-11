@@ -146,6 +146,11 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	scope := scopeOf(project)
 	target := iam.Target{Name: projectResource(project)}
 	collection, id := request.Path["collectionId"], request.Path["documentId"]
+	if call.Method == methodFieldsGet || call.Method == methodFieldsUpdate {
+		// Field methods are database-scoped like the documents.
+		target.Name = databaseResource(project)
+		return scope, target, nil
+	}
 	if !uid.MatchString(collection) {
 		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid collection id %q", collection)
 	}

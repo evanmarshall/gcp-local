@@ -8,4 +8,6 @@ var FirestoreRoutes = []Route{
 	{"firestore.documents.get", "GET", "/v1/projects/{project}/databases/(default)/documents/{collectionId}/{documentId}", false, false},
 	{"firestore.documents.list", "GET", "/v1/projects/{project}/databases/(default)/documents/{collectionId}", false, false},
 	{"firestore.documents.delete", "DELETE", "/v1/projects/{project}/databases/(default)/documents/{collectionId}/{documentId}", false, false},
+	{"firestore.fields.get", "GET", "/v1/projects/{project}/databases/(default)/collectionGroups/{collectionId}/fields/{fieldId}", false, false},
+	{"firestore.fields.update", "PATCH", "/v1/projects/{project}/databases/(default)/collectionGroups/{collectionId}/fields/{fieldId}", true, false},
 }

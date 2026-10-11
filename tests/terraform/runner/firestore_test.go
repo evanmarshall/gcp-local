@@ -53,6 +53,7 @@ func TestAccFirestoreDocument(t *testing.T) {
 				Config: testFirestoreConfig(docID),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("google_firestore_document.document", "document_id", docID),
+					resource.TestCheckResourceAttr("google_firestore_field.field", "field", "title"),
 					resource.TestCheckResourceAttrSet("google_firestore_document.document", "create_time"),
 				),
 			},
@@ -69,7 +70,15 @@ resource "google_firestore_document" "document" {
  document_id = %q
  fields      = jsonencode({title = {stringValue = "fire-and-fog"}})
 }
-`, projectID, docID)
+
+resource "google_firestore_field" "field" {
+ project  = %q
+ database = "(default)"
+ collection = "gcp-local-collection"
+ field    = "title"
+ ttl_config {}
+}
+`, projectID, docID, projectID)
 }
 
 // firestoreAPI reads one local Firestore path as the fixture principal.
