@@ -70,7 +70,7 @@ resource "google_pubsub_topic" "topic" {
  }
 }
 
-resource "google_pubsub_topic_iam_member" "member" {
+resource "google_pubsub_topic_iam_member" "topic_member" {
  topic  = google_pubsub_topic.topic.name
  role   = "roles/pubsub.viewer"
  member = "serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"
@@ -83,6 +83,12 @@ resource "google_pubsub_subscription" "subscription" {
  labels = {
    "gcp-local-run" = "terraform"
  }
+}
+
+resource "google_pubsub_subscription_iam_member" "member" {
+ subscription = google_pubsub_subscription.subscription.name
+ role         = "roles/pubsub.viewer"
+ member       = "serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"
 }
 `, name)
 }
