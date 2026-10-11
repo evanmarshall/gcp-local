@@ -15,24 +15,31 @@ const (
 // networkRecord is one stored VPC network.
 type networkRecord struct {
 	Name                  string
+	Description           string
 	AutoCreateSubnetworks bool
-	MTU                   int
+	RoutingMode           string
+	MTU                   int // zero when the caller left it unset
 	Peerings              []peeringRecord
 	Generation            int64
 	CreatedAt             time.Time
 }
 
-// peeringRecord is one network peering of a network.
+// peeringRecord is one network peering of a network toward a same-project peer.
 type peeringRecord struct {
-	Name               string
-	PeerNetwork        string
-	ImportCustomRoutes bool
-	ExportCustomRoutes bool
+	Name                 string
+	PeerNetwork          string
+	ExchangeSubnetRoutes bool
+	ImportCustomRoutes   bool
+	ExportCustomRoutes   bool
+	ExportPublicIP       bool
+	ImportPublicIP       bool
+	CreatedAt            time.Time
 }
 
 // subnetworkRecord is one stored subnetwork.
 type subnetworkRecord struct {
 	Name          string
+	Description   string
 	Network       string
 	Region        string
 	IPCIDRRange   string
@@ -44,17 +51,19 @@ type subnetworkRecord struct {
 
 // firewallRecord is one stored firewall rule.
 type firewallRecord struct {
-	Name         string
-	Network      string
-	Direction    string
-	Allowed      []map[string]any
-	Denied       []map[string]any
-	SourceRanges []string
-	TargetTags   []string
-	Priority     int
-	Disabled     bool
-	Generation   int64
-	CreatedAt    time.Time
+	Name              string
+	Description       string
+	Network           string
+	Direction         string
+	Allowed           []map[string]any
+	Denied            []map[string]any
+	SourceRanges      []string
+	DestinationRanges []string
+	TargetTags        []string
+	Priority          int
+	Disabled          bool
+	Generation        int64
+	CreatedAt         time.Time
 }
 
 // routeRecord is one stored route.
@@ -131,7 +140,15 @@ type operationRecord struct {
 	Region  string
 	Type    string
 	Target  string
-	Error   string
+	Error   *operationError
 	Done    bool
 	Created time.Time
+}
+
+// operationError is the error a finished compute operation reports. Compute
+// validates some requests asynchronously: the insert or delete call succeeds
+// and the operation finishes DONE with this error instead.
+type operationError struct {
+	Code    string
+	Message string
 }

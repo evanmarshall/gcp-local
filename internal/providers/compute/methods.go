@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -32,75 +33,6 @@ func (p *Provider) executeNetwork(call gateway.Call, request *gateway.RESTReques
 	}
 }
 
-// addPeering stores one peering of a network toward a peer network.
-func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := parseInsert(request)
-	if err != nil {
-		return nil, err
-	}
-	name := textOf(body["name"])
-	peer := networkName(textOf(body["peerNetwork"]))
-	if name == "" || peer == "" {
-		return nil, statusInvalid("A peering requires a name and a peerNetwork")
-	}
-	if !p.networkExists(scope, peer) {
-		return nil, missingReference()
-	}
-	if err := p.scopes.With(scope, func(s *scopeState) error {
-		record := s.networks[request.Path["network"]]
-		if record == nil {
-			return errMissing
-		}
-		for _, existing := range record.Peerings {
-			if existing.Name == name {
-				return errAlreadyExists
-			}
-		}
-		record.Peerings = append(record.Peerings, peeringRecord{
-			Name: name, PeerNetwork: peer,
-			ImportCustomRoutes: boolOf(body["importCustomRoutes"], false),
-			ExportCustomRoutes: boolOf(body["exportCustomRoutes"], false),
-		})
-		return nil
-	}); err != nil {
-		if errors.Is(err, errAlreadyExists) {
-			return nil, conflict("peering", name)
-		}
-		return nil, notFound(kindNetwork, request.Path["network"])
-	}
-	return p.newOperation(scope, "global", "", "addPeering", selfLink(scope.Project, "networks", request.Path["network"]))
-}
-
-// removePeering deletes one named peering of a network.
-func (p *Provider) removePeering(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := parseInsert(request)
-	if err != nil {
-		return nil, err
-	}
-	name := textOf(body["peering"])
-	removed := false
-	if err := p.scopes.With(scope, func(s *scopeState) error {
-		record := s.networks[request.Path["network"]]
-		if record == nil {
-			return errMissing
-		}
-		for i, existing := range record.Peerings {
-			if existing.Name == name {
-				record.Peerings = append(record.Peerings[:i], record.Peerings[i+1:]...)
-				removed = true
-				return nil
-			}
-		}
-		return nil
-	}); err != nil {
-		return nil, notFound(kindNetwork, request.Path["network"])
-	}
-	if !removed {
-		return nil, notFound("peerings", name)
-	}
-	return p.newOperation(scope, "global", "", "removePeering", selfLink(scope.Project, "networks", request.Path["network"]))
-}
-
 // createNetwork validates and stores one network, then reports its operation.
 func (p *Provider) createNetwork(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	project := scope.Project
@@ -114,9 +46,12 @@ func (p *Provider) createNetwork(request *gateway.RESTRequest, scope state.Scope
 		if s.networks[name] != nil {
 			return errAlreadyExists
 		}
+		routing, _ := body["routingConfig"].(map[string]any)
 		created = &networkRecord{
-			Name: name, AutoCreateSubnetworks: boolOf(body["autoCreateSubnetworks"], true),
-			MTU: intOf(body["mtu"], 1460), Generation: s.nextGeneration(), CreatedAt: p.clock(),
+			Name: name, Description: textOf(body[keyDescription]),
+			AutoCreateSubnetworks: boolOf(body[keyAutoSubnets], true),
+			RoutingMode:           textOr(routing["routingMode"], "REGIONAL"),
+			MTU:                   intOf(body["mtu"], 0), Generation: s.nextGeneration(), CreatedAt: p.clock(),
 		}
 		s.networks[name] = created
 		return nil
@@ -141,7 +76,7 @@ func (p *Provider) getNetwork(request *gateway.RESTRequest, scope state.Scope) (
 	if record == nil {
 		return nil, notFound(kindNetwork, name)
 	}
-	return &gateway.RESTResponse{JSON: p.networkDocument(scope.Project, record, p.subnetworksOf(scope.Project, name))}, nil
+	return &gateway.RESTResponse{JSON: p.renderNetwork(scope, record)}, nil
 }
 
 // listNetworks returns the scope's networks.
@@ -155,38 +90,75 @@ func (p *Provider) listNetworks(scope state.Scope) (*gateway.RESTResponse, error
 	})
 	items := make([]any, 0, len(networks))
 	for _, record := range networks {
-		items = append(items, p.networkDocument(scope.Project, record, p.subnetworksOf(scope.Project, record.Name)))
+		items = append(items, p.renderNetwork(scope, record))
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
 }
 
-// deleteNetwork removes one network, refusing while subnetworks reference it.
+// deleteNetwork removes one network. Compute accepts the delete of a network
+// that other resources still use and reports RESOURCE_IN_USE_BY_ANOTHER_RESOURCE
+// in the finished operation, keeping the network.
 func (p *Provider) deleteNetwork(_ gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["network"]
-	var errDependency error
+	target := selfLink(scope.Project, "networks", name)
+	var missing bool
+	var user string
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		if s.networks[name] == nil {
-			return errMissing
+			missing = true
+			return nil
 		}
-		for _, subnet := range s.subnetworks {
-			if subnet.Network == name {
-				errDependency = dependencyError{
-					message: "The network is still referenced by subnetwork " + subnet.Name,
-				}
-				return nil
-			}
+		if user = s.networkUser(name); user == "" {
+			delete(s.networks, name)
 		}
-		delete(s.networks, name)
 		return nil
 	})
-	if errors.Is(errDependency, errMissing) {
+	if missing {
 		return nil, notFound(kindNetwork, name)
 	}
-	if errDependency != nil {
-		return nil, status.Error(codes.FailedPrecondition, errDependency.Error())
+	if user != "" {
+		return p.failedOperation(scope, "global", "", "delete", target, &operationError{
+			Code:    "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE",
+			Message: "The network resource '" + target + "' is already being used by '" + user + "'",
+		})
 	}
 	_ = p.index.Remove(serviceName, scope, globalName(scope.Project, kindNetwork, name))
-	return p.newOperation(scope, "global", "", "delete", selfLink(scope.Project, "networks", name))
+	return p.newOperation(scope, "global", "", "delete", target)
+}
+
+// networkUser names one resource that still references the network, if any.
+func (s *scopeState) networkUser(network string) string {
+	for _, name := range sortedKeys(s.subnetworks) {
+		if s.subnetworks[name].Network == network {
+			return "subnetworks/" + name
+		}
+	}
+	for _, name := range sortedKeys(s.firewalls) {
+		if s.firewalls[name].Network == network {
+			return "firewalls/" + name
+		}
+	}
+	for _, name := range sortedKeys(s.routes) {
+		if s.routes[name].Network == network {
+			return "routes/" + name
+		}
+	}
+	for _, name := range sortedKeys(s.routers) {
+		if s.routers[name].Network == network {
+			return "routers/" + name
+		}
+	}
+	return ""
+}
+
+// sortedKeys returns the map's keys in order, for deterministic choices.
+func sortedKeys[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Sentinel record states for the shared handlers.
@@ -194,11 +166,6 @@ var (
 	errMissing       = errors.New("missing")
 	errAlreadyExists = errors.New("already exists")
 )
-
-// dependencyError reports a resource still referenced by another resource.
-type dependencyError struct{ message string }
-
-func (e dependencyError) Error() string { return e.message }
 
 // executeSubnetwork handles the subnetwork methods.
 func (p *Provider) executeSubnetwork(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
@@ -216,9 +183,11 @@ func (p *Provider) executeSubnetwork(call gateway.Call, request *gateway.RESTReq
 	}
 }
 
-// createSubnetwork validates and stores one subnetwork.
+// createSubnetwork validates and stores one subnetwork. A range that overlaps
+// another subnetwork of the network is refused asynchronously, as compute does:
+// the operation finishes DONE with INVALID_USAGE and nothing is created.
 func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	project := scope.Project
+	project, region := scope.Project, request.Path["region"]
 	body, err := parseInsert(request)
 	if err != nil {
 		return nil, err
@@ -231,14 +200,19 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 	if !p.networkExists(scope, network) {
 		return nil, missingReference()
 	}
+	name := textOf(body["name"])
+	target := regionalSelfLink(project, region, "subnetworks", name)
 	var created *subnetworkRecord
+	var overlap string
 	err = p.scopes.With(scope, func(s *scopeState) error {
-		name := textOf(body["name"])
 		if s.subnetworks[name] != nil {
 			return errAlreadyExists
 		}
+		if overlap = s.overlappingSubnet(network, cidr); overlap != "" {
+			return nil
+		}
 		created = &subnetworkRecord{
-			Name: name, Network: network, Region: request.Path["region"],
+			Name: name, Description: textOf(body[keyDescription]), Network: network, Region: region,
 			IPCIDRRange: cidr, Gateway: defaultGateway(cidr),
 			PrivateAccess: boolOf(body["privateIpGoogleAccess"], false),
 			Generation:    1, CreatedAt: p.clock(),
@@ -247,9 +221,15 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 		return nil
 	})
 	if err != nil {
-		return nil, conflict("subnetwork", textOf(body["name"]))
+		return nil, conflict("subnetwork", name)
 	}
-
+	if overlap != "" {
+		return p.failedOperation(scope, "region", region, "insert", target, &operationError{
+			Code: "INVALID_USAGE",
+			Message: "Invalid IPCidrRange: " + cidr + " conflicts with existing subnetwork '" +
+				overlap + "' in region '" + region + "'.",
+		})
+	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: regionalName(project, created.Region, kindSubnetwork, created.Name), Service: serviceName,
 		Kind: kindSubnetwork, Parent: regionalName(project, created.Region, kindLocation, created.Region),
@@ -257,7 +237,26 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 	}); indexErr != nil {
 		return nil, gap("index the subnetwork")
 	}
-	return p.newOperation(scope, "region", created.Region, "insert", regionalSelfLink(scope.Project, created.Region, "subnetworks", created.Name))
+	return p.newOperation(scope, "region", region, "insert", target)
+}
+
+// overlappingSubnet names a subnetwork of the network whose range overlaps cidr.
+func (s *scopeState) overlappingSubnet(network, cidr string) string {
+	_, candidate, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return ""
+	}
+	for _, name := range sortedKeys(s.subnetworks) {
+		subnet := s.subnetworks[name]
+		_, existing, parseErr := net.ParseCIDR(subnet.IPCIDRRange)
+		if subnet.Network != network || parseErr != nil {
+			continue
+		}
+		if existing.Contains(candidate.IP) || candidate.Contains(existing.IP) {
+			return name
+		}
+	}
+	return ""
 }
 
 // getSubnetwork returns one subnetwork document.
@@ -299,12 +298,16 @@ func (p *Provider) removeRegionResource(request *gateway.RESTRequest, scope stat
 	exists func(*scopeState, string) bool,
 ) (*gateway.RESTResponse, error) {
 	project, name, region := scope.Project, request.Path[requestPath(plural)], request.Path["region"]
+	found := false
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if exists(s, name) {
+		if found = exists(s, name); found {
 			remove(s, name)
 		}
 		return nil
 	})
+	if !found {
+		return nil, notFound(kind, name)
+	}
 	_ = p.index.Remove(serviceName, scope, regionalName(project, region, kind, name))
 	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, plural, name))
 }
@@ -386,7 +389,11 @@ func (p *Provider) writeFirewall(call gateway.Call, request *gateway.RESTRequest
 		Name: globalName(project, kindFirewall, name), Service: serviceName,
 		Kind: kindFirewall, Parent: projectResource(project), Scope: scope,
 	})
-	return p.newOperation(scope, "global", "", "insert", firewallTarget(scope, kindFirewall, name))
+	operationType := "insert"
+	if call.Method == methodFirewallsUpdate {
+		operationType = "update"
+	}
+	return p.newOperation(scope, "global", "", operationType, selfLink(scope.Project, "firewalls", name))
 }
 
 // storeFirewall validates and stores one firewall record under the scope lock.
@@ -407,12 +414,14 @@ func (p *Provider) storeFirewall(scope state.Scope, body map[string]any, network
 			created.Generation++
 		}
 		created.Network = network
-		created.Direction = textOr(body["direction"], "INGRESS")
+		created.Direction = textOr(body[keyDirection], directionIngress)
 		created.Allowed = listOfMaps(body["allowed"])
 		created.Denied = listOfMaps(body["denied"])
+		created.Description = textOf(body[keyDescription])
 		created.SourceRanges = stringListOf(body["sourceRanges"])
+		created.DestinationRanges = stringListOf(body["destinationRanges"])
 		created.TargetTags = stringListOf(body["targetTags"])
-		created.Priority = intOf(body["priority"], 1000)
+		created.Priority = intOf(body[keyPriority], 1000)
 		created.Disabled = boolOf(body["disabled"], false)
 		return nil
 	})
@@ -448,20 +457,29 @@ func (p *Provider) listFirewalls(scope state.Scope) (*gateway.RESTResponse, erro
 // deleteFirewall removes one firewall rule.
 func (p *Provider) deleteFirewall(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["firewall"]
-	remove := func(s *scopeState) { delete(s.firewalls, name) }
+	remove := func(s *scopeState) bool {
+		found := s.firewalls[name] != nil
+		delete(s.firewalls, name)
+		return found
+	}
 	return p.deleteGlobal(scope, kindFirewall, name, remove)
 }
 
 // deleteGlobal removes one global resource, unindexes it, and reports its
-// operation; the remove closure runs under the scope lock.
-func (p *Provider) deleteGlobal(scope state.Scope, kind, name string, remove func(*scopeState)) (*gateway.RESTResponse, error) {
+// operation; the remove closure runs under the scope lock and reports whether
+// the resource existed.
+func (p *Provider) deleteGlobal(scope state.Scope, kind, name string, remove func(*scopeState) bool) (*gateway.RESTResponse, error) {
 	project := scope.Project
+	found := false
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		remove(s)
+		found = remove(s)
 		return nil
 	})
+	if !found {
+		return nil, notFound(kind, name)
+	}
 	_ = p.index.Remove(serviceName, scope, globalName(project, kind, name))
-	return p.newOperation(scope, "global", "", "delete", selfLink(scope.Project, "networks", name))
+	return p.newOperation(scope, "global", "", "delete", selfLink(scope.Project, kind+"s", name))
 }
 
 // textOr returns the first non-empty text of the field and the fallback.
@@ -511,7 +529,7 @@ func (p *Provider) createRoute(request *gateway.RESTRequest, scope state.Scope) 
 			Name: name, Network: network, DestRange: cidr,
 			NextHopGateway: textOf(body["nextHopGateway"]),
 			NextHopIP:      textOf(body["nextHopIp"]),
-			Priority:       intOf(body["priority"], 1000), Tags: stringListOf(body["tags"]),
+			Priority:       intOf(body[keyPriority], 1000), Tags: stringListOf(body["tags"]),
 			Generation: 1, CreatedAt: p.clock(),
 		}
 		s.routes[name] = created
@@ -524,7 +542,7 @@ func (p *Provider) createRoute(request *gateway.RESTRequest, scope state.Scope) 
 		Name: globalName(project, kindRoute, name), Service: serviceName,
 		Kind: kindRoute, Parent: projectResource(project), Scope: scope,
 	})
-	return p.newOperation(scope, "global", "", "insert", firewallTarget(scope, kindFirewall, name))
+	return p.newOperation(scope, "global", "", "insert", selfLink(scope.Project, "routes", name))
 }
 
 // getRoute returns one route document.
@@ -553,16 +571,12 @@ func (p *Provider) listRoutes(scope state.Scope) (*gateway.RESTResponse, error) 
 // deleteRoute removes one route.
 func (p *Provider) deleteRoute(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["route"]
-	remove := func(s *scopeState) { delete(s.routes, name) }
-	return p.deleteGlobal(scope, kindRoute, name, remove)
-}
-
-// firewallTarget selects the collection for a global insert/delete target.
-func firewallTarget(scope state.Scope, kind, name string) string {
-	if kind == kindFirewall {
-		return selfLink(scope.Project, "firewalls", name)
+	remove := func(s *scopeState) bool {
+		found := s.routes[name] != nil
+		delete(s.routes, name)
+		return found
 	}
-	return selfLink(scope.Project, "routes", name)
+	return p.deleteGlobal(scope, kindRoute, name, remove)
 }
 
 // executeRouters handles the router methods.

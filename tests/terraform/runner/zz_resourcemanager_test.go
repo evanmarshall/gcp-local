@@ -39,7 +39,7 @@ func testProjectPolicy() string {
 		"roles/cloudkms.admin", "roles/secretmanager.admin", "roles/cloudtasks.admin",
 		"roles/datastore.user", "roles/datastore.indexAdmin", "roles/bigquery.dataOwner", "roles/bigquery.jobUser",
 		"roles/spanner.admin", "roles/pubsub.admin", "roles/run.admin", "roles/compute.admin",
-		"roles/artifactregistry.admin", "roles/bigtable.admin",
+		"roles/artifactregistry.admin", "roles/bigtable.admin", "roles/networkmanagement.admin",
 	}
 	bindings := ""
 	for _, role := range roles {

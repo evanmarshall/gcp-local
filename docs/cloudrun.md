@@ -46,10 +46,9 @@ here is a cloud-fidelity claim yet (#13 tracks that work).
 ## Cross-checks
 
 The reachability analyzer ([networking.md](networking.md)) evaluates flows
-against this surface's modeled topology; a named Connectivity Tests surface
-(`networkmanagement.connectivityTests`) exposes the same verdicts over the
-networkmanagement-style route names, marked local-modeled like everything
-without a recording.
+against the modeled VPC topology and also backs the Network Management
+Connectivity Tests API. It models no Cloud Run or VM endpoints, so it never
+reports a Cloud Run service as reachable.
 
 ## Ingress scope
 

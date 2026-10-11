@@ -51,10 +51,22 @@ const (
 	keySource      = "source"
 	keyDestination = "destination"
 	keyProtocol    = "protocol"
+	keyState       = "state"
+	keyCause       = "cause"
+	keyCausesDrop  = "causesDrop"
+	keyRegion      = "region"
+	keyDirection   = "direction"
+	keyPriority    = "priority"
+	keyNetworkURI  = "networkUri"
+	stackIPv4Only  = "IPV4_ONLY"
+	keyStackType   = "stackType"
+	keyDisplayName = "displayName"
+	keyProjectID   = "projectId"
 )
 
-// wireHost is the canonical self-link host of the recorded compute contract.
-const wireHost = "https://compute.googleapis.com/compute/v1"
+// wireHost is the self-link host the recorded compute documents carry. Compute
+// answers on compute.googleapis.com but links resources under www.googleapis.com.
+const wireHost = "https://www.googleapis.com/compute/v1"
 
 // scopeOf builds the location scope of one compute resource path.
 func scopeOf(project, location string) state.Scope {
@@ -83,6 +95,11 @@ func regionalSelfLink(project, location, collection, id string) string {
 		url.PathEscape(location) + "/" + collection + "/" + url.PathEscape(id)
 }
 
+// regionLink builds the self-link URL of one region.
+func regionLink(project, region string) string {
+	return wireHost + "/projects/" + url.PathEscape(project) + "/regions/" + url.PathEscape(region)
+}
+
 // gap reports an unimplemented slice boundary.
 func gap(message string) error {
 	return status.Error(codes.Unimplemented, "Compute coverage gap: "+message)
@@ -91,7 +108,7 @@ func gap(message string) error {
 // wireError builds the compute error body.
 func wireError(code int, reason, message string) *gateway.RESTResponse {
 	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{
+		keyError: map[string]any{
 			keyCode: code, keyMessage: message,
 			"errors": []any{map[string]any{keyCode: code, "reason": reason, keyMessage: message}},
 		},

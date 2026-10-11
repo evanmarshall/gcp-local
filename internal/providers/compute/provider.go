@@ -116,7 +116,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
 			return nil, authorizeErr
 		}
-		return p.denied(call, decision, target), nil
+		return p.denied(call, decision, target)
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -145,8 +145,9 @@ func projectResource(project string) string {
 	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }
 
-// denied renders the compute denial shape.
-func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.Target) *gateway.RESTResponse {
+// denied renders the compute denial shape; Network Management methods use the
+// standard Google API error shape instead.
+func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.Target) (*gateway.RESTResponse, error) {
 	permission := "unspecified"
 	for _, check := range decision.Checks {
 		if !check.Allowed {
@@ -154,10 +155,14 @@ func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.T
 			break
 		}
 	}
-	actor := call.Principal.Subject
-	code := 403
 	if call.Principal.State != gateway.Authenticated {
-		actor, code = "Anonymous caller", 401
+		if strings.HasPrefix(call.Method, "networkmanagement.") {
+			return nil, status.Error(codes.Unauthenticated, "The request does not have valid authentication credentials")
+		}
+		return wireError(401, "forbidden", "Anonymous caller does not have "+permission+" access to "+target.Name+"."), nil
 	}
-	return wireError(code, "forbidden", fmt.Sprintf("%s does not have %s access to %s.", actor, permission, target.Name))
+	if strings.HasPrefix(call.Method, "networkmanagement.") {
+		return nil, status.Errorf(codes.PermissionDenied, "Permission '%s' denied on '%s'", permission, target.Name)
+	}
+	return wireError(403, "forbidden", fmt.Sprintf("%s does not have %s access to %s.", call.Principal.Subject, permission, target.Name)), nil
 }
