@@ -23,6 +23,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	artifactregistryprovider "github.com/evanmarshall/gcp-local/internal/providers/artifactregistry"
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
+	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
 	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
@@ -68,6 +69,7 @@ func main() {
 			{Role: "roles/run.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/compute.networkAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/artifactregistry.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/bigtable.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}
@@ -112,6 +114,8 @@ func main() {
 	_, err = computeprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = artifactregistryprovider.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
+	_, err = bigtableprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
 	must(err)
