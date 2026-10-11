@@ -1,0 +1,121 @@
+{
+  "serviceaccount-lifecycle-authorization": {
+    "recorded-date": "11-10-2026, 18:20:45",
+    "recorded-content": {
+      "created": {
+        "client_id_equals_unique_id": true,
+        "description": "gcp-local conformance run <run>",
+        "displayName": "gcp-local conformance",
+        "email": "<account>",
+        "fields": [
+          "description",
+          "displayName",
+          "email",
+          "etag",
+          "name",
+          "oauth2ClientId",
+          "projectId",
+          "uniqueId"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/serviceAccounts/<account>",
+        "projectId": "<project>",
+        "unique_id_numeric": true
+      },
+      "fixture-read": {
+        "displayName": "gcp-local conformance",
+        "email": "<account>",
+        "fields": [
+          "description",
+          "displayName",
+          "email",
+          "etag",
+          "name",
+          "oauth2ClientId",
+          "projectId",
+          "uniqueId"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/serviceAccounts/<account>"
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "policy-read": {
+        "bindings": null,
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200
+      },
+      "user-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/iam.serviceAccountUser"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "allowed-read": {
+        "email": "<account>",
+        "fields": [
+          "description",
+          "displayName",
+          "email",
+          "etag",
+          "name",
+          "oauth2ClientId",
+          "projectId",
+          "uniqueId"
+        ],
+        "http_status": 200
+      },
+      "allowed-cannot-update": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "patched": {
+        "description": null,
+        "displayName": "gcp-local renamed",
+        "fields": [
+          "displayName",
+          "name"
+        ],
+        "http_status": 200
+      },
+      "duplicate-create": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "invalid-id": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "account_absent": true
+      }
+    }
+  }
+}

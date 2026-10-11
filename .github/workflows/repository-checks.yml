@@ -31,10 +31,10 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_pubsub.sh
-      - name: Compare local Secret Manager against its recorded contract
+      - name: Compare local REST providers against their recorded contracts
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_secretmanager.sh
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_rest_recordings.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -45,7 +45,7 @@ jobs:
             .artifacts/pubsub-provider/results.json
             .artifacts/pubsub-conformance/coverage.json
             .artifacts/pubsub-conformance/junit.xml
-            .artifacts/secretmanager-provider/coverage.json
+            .artifacts/rest-provider/coverage.json
 
   packaged-environment:
     runs-on: ubuntu-latest

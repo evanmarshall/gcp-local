@@ -4,7 +4,7 @@ Status: the v1 control plane is implemented locally - secrets, versions,
 payload access, per-secret IAM policy, and location listing. One scenario,
 `secretmanager-access-lifecycle`, was recorded and revalidated against real
 GCP on 2026-10-11, and the local provider matches it in comparison mode
-(`sh scripts/check_secretmanager.sh` in Moo/Linux; CI runs it in the
+(`sh scripts/check_rest_recordings.sh` in Moo/Linux; CI runs it in the
 `pubsub-backend` job). Methods outside that scenario remain local-modeled.
 
 ## Recorded scenario

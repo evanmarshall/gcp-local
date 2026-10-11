@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -112,13 +111,24 @@ func accountWire(record *accountRecord) map[string]any {
 	return map[string]any{
 		keyName:          accountName(record.Project, record.ID),
 		"projectId":      record.Project,
-		"uniqueId":       strconv.FormatInt(record.CreatedAt.UnixNano(), 10),
+		"uniqueId":       accountUniqueID(record),
 		"email":          accountEmail(record.Project, record.ID),
 		"displayName":    record.DisplayName,
 		"description":    record.Description,
-		"oauth2ClientId": strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
-		"disabled":       false,
+		"oauth2ClientId": accountUniqueID(record),
+		"etag":           accountETag(record),
 	}
+}
+
+// accountUniqueID renders the 21-digit numeric id GCP assigns; the OAuth2
+// client id carries the same value.
+func accountUniqueID(record *accountRecord) string {
+	return fmt.Sprintf("1%020d", record.CreatedAt.UnixNano())
+}
+
+// accountETag renders a revision tag that changes with each update.
+func accountETag(record *accountRecord) string {
+	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatInt(record.CreatedAt.UnixNano()+int64(record.Revision), 36)))
 }
 
 // accountLocked reads one account under the scope lock.
@@ -156,15 +166,35 @@ func (p *Provider) accountsUpdate(request *gateway.RESTRequest, scope state.Scop
 		return nil, notFound(kindAccount, request.Path["serviceAccount"])
 	}
 	var body struct {
-		DisplayName string `json:"displayName"`
-		Description string `json:"description"`
+		ServiceAccount struct {
+			DisplayName string `json:"displayName"`
+			Description string `json:"description"`
+		} `json:"serviceAccount"`
+		UpdateMask string `json:"updateMask"`
 	}
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid service account update")
 	}
-	record.DisplayName = body.DisplayName
-	record.Description = body.Description
-	return &gateway.RESTResponse{JSON: accountWire(record)}, nil
+	// The patch applies and echoes only the masked fields, as GCP does.
+	response := map[string]any{keyName: accountName(record.Project, record.ID)}
+	for field := range strings.SplitSeq(body.UpdateMask, ",") {
+		switch strings.TrimSpace(field) {
+		case "displayName", "display_name":
+			record.DisplayName = body.ServiceAccount.DisplayName
+			response["displayName"] = record.DisplayName
+		case "description":
+			record.Description = body.ServiceAccount.Description
+			response["description"] = record.Description
+		case "":
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, "Unsupported update mask field %q", field)
+		}
+	}
+	if len(response) == 1 {
+		return nil, status.Error(codes.InvalidArgument, "An update mask is required")
+	}
+	record.Revision++
+	return &gateway.RESTResponse{JSON: response}, nil
 }
 
 // accountsDelete removes one account and its keys.
@@ -182,7 +212,7 @@ func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scop
 	if indexErr != nil {
 		return nil, fmt.Errorf("unregister the service account: %w", indexErr)
 	}
-	return &gateway.RESTResponse{Status: http.StatusNoContent}, nil
+	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
 // keysList returns the account's synthesized keys.
@@ -261,7 +291,7 @@ func (p *Provider) keysDelete(request *gateway.RESTRequest, scope state.Scope) (
 		delete(record.Keys, keyID)
 		return nil
 	})
-	return &gateway.RESTResponse{Status: http.StatusNoContent}, nil
+	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
 // getIam returns the stored policy of the account.
@@ -269,6 +299,10 @@ func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
 	policy, err := p.engine.GetPolicy(target.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the IAM policy: %v", err)
+	}
+	// An account without bindings reads back as only its etag.
+	if len(policy.Bindings) == 0 {
+		return &gateway.RESTResponse{JSON: map[string]any{"etag": policy.ETag}}, nil
 	}
 	return &gateway.RESTResponse{JSON: policy}, nil
 }

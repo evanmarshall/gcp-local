@@ -577,7 +577,7 @@ func iamRoutes(_ bool) []byte {
 		{"iam.serviceAccounts.get", verbGET, base + "/{serviceAccount}", false, false},
 		{"iam.serviceAccounts.update", verbPATCH, base + "/{serviceAccount}", true, false},
 		{"iam.serviceAccounts.delete", verbDELETE, base + "/{serviceAccount}", false, false},
-		{"iam.serviceAccounts.getIamPolicy", verbGET, base + "/{serviceAccount}:getIamPolicy", false, false},
+		{"iam.serviceAccounts.getIamPolicy", verbPOST, base + "/{serviceAccount}:getIamPolicy", true, false},
 		{"iam.serviceAccounts.setIamPolicy", verbPOST, base + "/{serviceAccount}:setIamPolicy", true, false},
 		{"iam.serviceAccountKeys.create", verbPOST, base + "/{serviceAccount}/keys", true, false},
 		{"iam.serviceAccountKeys.list", verbGET, base + "/{serviceAccount}/keys", false, false},

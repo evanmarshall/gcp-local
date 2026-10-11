@@ -98,7 +98,8 @@ func TestAccountAndKeyLifecycle(t *testing.T) {
 		t.Fatalf("account list status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodPatch, testBase+"/"+testAccount, map[string]any{
-		"displayName": "renamed", "description": "worker account",
+		"serviceAccount": map[string]any{"displayName": "renamed", "description": "worker account"},
+		"updateMask":     "displayName,description",
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("account update status = %d", recorder.Code)
@@ -119,11 +120,11 @@ func TestAccountAndKeyLifecycle(t *testing.T) {
 		t.Fatalf("key list status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodDelete, testBase+"/"+testAccount+"/keys/"+created.Name[strings.LastIndex(created.Name, "/")+1:], nil)
-	if recorder.Code != 204 {
+	if recorder.Code != 200 {
 		t.Fatalf("key delete status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodDelete, testBase+"/"+testAccount, nil)
-	if recorder.Code != 204 {
+	if recorder.Code != 200 {
 		t.Fatalf("account delete status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodGet, testBase+"/"+testAccount, nil)

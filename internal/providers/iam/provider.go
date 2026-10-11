@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -145,7 +146,9 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	project := request.Path["project"]
 	scope := scopeOf(project)
 	target := iam.Target{Name: projectResource(project)}
-	account := request.Path["serviceAccount"]
+	// GCP addresses accounts by email; the provider keys them by account id.
+	account := strings.TrimSuffix(request.Path["serviceAccount"], "@"+project+".iam.gserviceaccount.com")
+	request.Path["serviceAccount"] = account
 	switch call.Method {
 	case methodAccountsCreate, methodAccountsList:
 		return scope, target, nil

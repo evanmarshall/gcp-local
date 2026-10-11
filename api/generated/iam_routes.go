@@ -8,7 +8,7 @@ var IAMRoutes = []Route{
 	{"iam.serviceAccounts.get", "GET", "/v1/projects/{project}/serviceAccounts/{serviceAccount}", false, false},
 	{"iam.serviceAccounts.update", "PATCH", "/v1/projects/{project}/serviceAccounts/{serviceAccount}", true, false},
 	{"iam.serviceAccounts.delete", "DELETE", "/v1/projects/{project}/serviceAccounts/{serviceAccount}", false, false},
-	{"iam.serviceAccounts.getIamPolicy", "GET", "/v1/projects/{project}/serviceAccounts/{serviceAccount}:getIamPolicy", false, false},
+	{"iam.serviceAccounts.getIamPolicy", "POST", "/v1/projects/{project}/serviceAccounts/{serviceAccount}:getIamPolicy", true, false},
 	{"iam.serviceAccounts.setIamPolicy", "POST", "/v1/projects/{project}/serviceAccounts/{serviceAccount}:setIamPolicy", true, false},
 	{"iam.serviceAccountKeys.create", "POST", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys", true, false},
 	{"iam.serviceAccountKeys.list", "GET", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys", false, false},

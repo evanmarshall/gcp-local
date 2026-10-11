@@ -71,6 +71,7 @@ type accountRecord struct {
 	Description string
 	Keys        map[string]*keyRecord
 	CreatedAt   time.Time
+	Revision    int
 }
 
 // scopeState is one project slice of provider state.
@@ -116,9 +117,9 @@ func projectResource(project string) string {
 	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }
 
-// accountName renders the canonical service-account name.
+// accountName renders the canonical service-account name, keyed by email.
 func accountName(project, account string) string {
-	return "projects/" + project + "/serviceAccounts/" + account
+	return "projects/" + project + "/serviceAccounts/" + accountEmail(project, account)
 }
 
 // accountEmail renders the account email.
