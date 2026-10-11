@@ -51,6 +51,8 @@ def source_version() -> str:
             "toolchains/pubsub.json",
             "scripts/install_firestore.py",
             "toolchains/firestore.json",
+            "scripts/install_spanner.py",
+            "toolchains/spanner.json",
         )
     ]
     for directory in ("api", "cmd", "internal"):

@@ -107,6 +107,7 @@ type serveOptions struct {
 	runProcess                         map[string]string
 	services, pubsubJava, pubsubJAR    string
 	firestoreJava, firestoreJAR        string
+	spannerEmulator, spannerLibraries  string
 	metadataPrincipal                  string
 	showVersion                        bool
 }
@@ -125,6 +126,8 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.firestoreJava, "firestore-java", "", "absolute Java executable for the official Firestore emulator")
 	flags.StringVar(&options.firestoreJAR, "firestore-jar", "", "absolute checksum-pinned Firestore emulator JAR")
+	flags.StringVar(&options.spannerEmulator, "spanner-emulator", "", "absolute checksum-pinned Spanner emulator_main binary (Linux only)")
+	flags.StringVar(&options.spannerLibraries, "spanner-libraries", "", "absolute directory holding the emulator's pinned libstdc++.so.6")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
 	flags.StringVar(&options.runSocket, "run-docker-socket", "", "Docker engine socket for Cloud Run containers; empty refuses launch")
 	flags.Var(processMap{&options.runProcess}, "run-process", "dockerless revision launch: image=command; repeatable; commands run as local processes")
@@ -272,6 +275,9 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleFirestore(ctx, options, selected, registry, server, index, engine); err != nil {
 		return err
 	}
+	if err := assembleSpanner(ctx, options, selected, registry, server, index, engine); err != nil {
+		return err
+	}
 	for _, assemble := range []struct {
 		service  string
 		register func(context.Context, map[string]bool, *gateway.Registry, *core.Server, *state.Index, *iam.Engine) error
@@ -280,7 +286,6 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 		{"secretmanager", assembleSecretManager},
 		{"cloudtasks", assembleCloudTasks},
 		{"cloudkms", assembleCloudKMS},
-		{"spanner", assembleSpanner},
 		{"bigquery", assembleBigQuery},
 		{"bigtable", assembleBigtable},
 		{"artifactregistry", assembleArtifactRegistry},
@@ -361,12 +366,13 @@ func assembleCloudKMS(ctx context.Context, selected map[string]bool, registry *g
 	return nil
 }
 
-// assembleSpanner registers the Spanner provider.
-func assembleSpanner(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+// assembleSpanner registers the Spanner provider in front of the official emulator.
+func assembleSpanner(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
 	if !selected["spanner"] {
 		return nil
 	}
-	if _, err := spannerprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+	config := spannerprovider.Config{Emulator: options.spannerEmulator, Libraries: options.spannerLibraries}
+	if _, err := spannerprovider.New(ctx, registry, server.Backends, index, engine, config); err != nil {
 		return fmt.Errorf("register the Spanner provider: %w", err)
 	}
 	return nil

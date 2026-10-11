@@ -19,7 +19,8 @@
     "state": "in-memory; reset recreates this Compose project",
     "pubsub_backend": "toolchains/pubsub.json",
     "firestore_backend": "toolchains/firestore.json",
-    "bigtable_backend": "third_party/bigtable-bttest/manifest.json"
+    "bigtable_backend": "third_party/bigtable-bttest/manifest.json",
+    "spanner_backend": "toolchains/spanner.json"
   },
   "pubsub": {
     "image": "eclipse-temurin:17-jre-jammy@sha256:8993f1aed8b25fcea7a7047a7949c1866fa558fc6830d938c22c4f13b26be9d7",
@@ -35,6 +36,16 @@
     "emulator": "toolchains/firestore.json",
     "path": "/opt/firestore/emulator.jar",
     "purpose": "Checksum-pinned official Firestore emulator 1.19.9 (the newest release that runs on Java 17) the provider starts lazily per project; the packaged -services list does not select firestore by default"
+  },
+  "spanner": {
+    "image": "gcr.io/cloud-spanner-emulator/emulator:1.5.58@sha256:c6f3402f2599684f295a0fdefb6fbbbfb18a0e43e309ff5456ccb452a4570a79",
+    "version": "Cloud Spanner emulator 1.5.58",
+    "source": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator",
+    "license": "https://github.com/GoogleCloudPlatform/cloud-spanner-emulator/blob/master/LICENSE",
+    "emulator": "toolchains/spanner.json",
+    "files": "/opt/spanner/emulator_main and /opt/spanner/lib/libstdc++.so.6, extracted by digest from the image layer for the build architecture",
+    "runtime_libraries": "glibc 2.35+, libm, and libgcc_s from the runtime base image",
+    "purpose": "Official emulator the Spanner provider starts lazily per project when -services includes spanner"
   },
   "quality": {
     "tools": "toolchains/quality.json",

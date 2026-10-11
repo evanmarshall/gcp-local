@@ -16,6 +16,8 @@ services:
       - -pubsub-jar=/opt/pubsub/emulator.jar
       - -firestore-java=/usr/bin/java
       - -firestore-jar=/opt/firestore/emulator.jar
+      - -spanner-emulator=/opt/spanner/emulator_main
+      - -spanner-libraries=/opt/spanner/lib
     networks: [backend]
     volumes:
       - type: bind

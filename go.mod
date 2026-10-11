@@ -7,7 +7,9 @@ toolchain go1.26.8
 require (
 	cloud.google.com/go/bigtable v1.58.0
 	cloud.google.com/go/iam v1.11.0
+	cloud.google.com/go/longrunning v1.2.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
+	cloud.google.com/go/spanner v1.95.1
 	github.com/fsouza/fake-gcs-server v1.56.1
 	github.com/google/cel-go v0.26.1
 	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800

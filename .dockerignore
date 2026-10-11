@@ -10,6 +10,8 @@
 !toolchains/go.json
 !toolchains/pubsub.json
 !toolchains/firestore.json
+!scripts/install_spanner.py
+!toolchains/spanner.json
 !api
 !api/**
 !cmd

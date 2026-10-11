@@ -1,0 +1,66 @@
+{
+  "name": "Cloud Spanner emulator",
+  "version": "1.5.58",
+  "retrieved_at": "2026-10-11",
+  "registry": "https://gcr.io",
+  "repository": "cloud-spanner-emulator/emulator",
+  "tag": "1.5.58",
+  "index_digest": "sha256:c6f3402f2599684f295a0fdefb6fbbbfb18a0e43e309ff5456ccb452a4570a79",
+  "gcloud_component": {
+    "name": "cloud-spanner-emulator",
+    "platform": "linux/amd64",
+    "url": "https://dl.google.com/dl/cloudsdk/channels/rapid/components/google-cloud-sdk-cloud-spanner-emulator-linux-x86_64-20260925073854.tar.gz",
+    "size": 52389839
+  },
+  "platforms": {
+    "linux/arm64": {
+      "manifest": "sha256:5f42f55ad4129ea0d86cf60f0d385e8a6be60a7e8e0cc791adcdedc8982bcb55",
+      "files": [
+        {
+          "install": "emulator_main",
+          "layer": "sha256:43dd056638857113f58c107f1b260bae7e6fc3c52cfebb445edf7b98edec0f17",
+          "layer_size": 41196828,
+          "member": "emulator_main",
+          "size": 118947840,
+          "sha256": "7a2457726dae20c0ef08efc50db4b8fc0974cd7e758e2c532f0de51fd1866551",
+          "mode": "0755"
+        },
+        {
+          "install": "lib/libstdc++.so.6",
+          "layer": "sha256:91d77af4133ea2e6094c182aa4686f7685c3f5396471e1ee85f810de9f624477",
+          "layer_size": 903714,
+          "member": "usr/lib/aarch64-linux-gnu/libstdc++.so.6",
+          "size": 2616936,
+          "sha256": "11bba08278c07d15ac13a0e469cd84667c707bb480445bf370564c70a09e5357",
+          "mode": "0644"
+        }
+      ]
+    },
+    "linux/amd64": {
+      "manifest": "sha256:e5bb3535cb3c1e821802531efd9a1d29bbf9804db57a4ae36731764926e3bcb8",
+      "files": [
+        {
+          "install": "emulator_main",
+          "layer": "sha256:73310e9a90f37966386c3e914b577c08c65d627ebb77afa819932c3a3cc004f4",
+          "layer_size": 48421357,
+          "member": "emulator_main",
+          "size": 125632336,
+          "sha256": "eb82a863bf80b43637ce04066b934c7b23ad3d0a3b9a73201fc6ac1895219604",
+          "mode": "0755"
+        },
+        {
+          "install": "lib/libstdc++.so.6",
+          "layer": "sha256:73248c3cd085bcc43dbe3c30fe7046ef6ff38e2f9641cbbb3060fee6d362d19b",
+          "layer_size": 1124316,
+          "member": "usr/lib/x86_64-linux-gnu/libstdc++.so.6",
+          "size": 2739728,
+          "sha256": "7d03c9686574bad9ee3590450fc441481b2ee01c97ee13647a72cad0637143c8",
+          "mode": "0644"
+        }
+      ]
+    }
+  },
+  "runtime_libraries": "emulator_main needs GLIBCXX_3.4.32 and GLIBC_2.35: glibc 2.35+, libm, and libgcc_s from the host, plus the image's newer libstdc++.so.6 installed under lib/",
+  "documentation": "https://docs.cloud.google.com/spanner/docs/emulator",
+  "distribution": "Downloaded development/runtime component; binaries are not vendored"
+}

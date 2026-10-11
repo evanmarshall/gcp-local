@@ -19,6 +19,8 @@ var SpannerRoutes = []Route{
 	{"spanner.databases.applyDdl", "PATCH", "/v1/projects/{project}/instances/{instance}/databases/{database}/ddl", true, false},
 	{"spanner.databases.getDdl", "GET", "/v1/projects/{project}/instances/{instance}/databases/{database}/ddl", false, false},
 	{"spanner.databases.delete", "DELETE", "/v1/projects/{project}/instances/{instance}/databases/{database}", false, false},
+	{"spanner.instances.operations.get", "GET", "/v1/projects/{project}/instances/{instance}/operations/{operation}", false, false},
+	{"spanner.databases.operations.get", "GET", "/v1/projects/{project}/instances/{instance}/databases/{database}/operations/{operation}", false, false},
 	{"spanner.backups.list", "GET", "/v1/projects/{project}/instances/{instance}/backups", false, false},
 	{"spanner.databases.getIamPolicy", "POST", "/v1/projects/{project}/instances/{instance}/databases/{database}:getIamPolicy", true, false},
 	{"spanner.databases.setIamPolicy", "POST", "/v1/projects/{project}/instances/{instance}/databases/{database}:setIamPolicy", true, false},

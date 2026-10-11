@@ -114,7 +114,12 @@ func main() {
 	must(err)
 	_, err = bigqueryprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
-	_, err = spannerprovider.New(context.Background(), registry, server.Backends, index, engine)
+	spannerEmulator, spannerLibraries := os.Getenv("GCP_LOCAL_SPANNER_EMULATOR"), os.Getenv("GCP_LOCAL_SPANNER_LIBRARIES")
+	if spannerEmulator == "" || spannerLibraries == "" {
+		log.Fatal("The conformance fixture needs GCP_LOCAL_SPANNER_EMULATOR and GCP_LOCAL_SPANNER_LIBRARIES for the Spanner provider")
+	}
+	_, err = spannerprovider.New(context.Background(), registry, server.Backends, index, engine,
+		spannerprovider.Config{Emulator: spannerEmulator, Libraries: spannerLibraries})
 	must(err)
 	java := os.Getenv("GCP_LOCAL_JAVA")
 	jar := os.Getenv("GCP_LOCAL_PUBSUB_JAR")
