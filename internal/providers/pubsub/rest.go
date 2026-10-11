@@ -162,5 +162,5 @@ func (p *Provider) restForward(session context.Context, active backend.Backend,
 		}
 		return err
 	}
-	return p.settleMutation(session, b, call, *response, push, creating, err)
+	return p.settleMutation(session, b, call, *response, forwarded, push, creating, err)
 }

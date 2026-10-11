@@ -36,6 +36,7 @@ type Provider struct {
 	poisoned sync.Map // unresolved control-plane mutations, cleared only on reset
 	tokens   *identity.IDTokens
 	pushes   sync.Map // canonical subscription -> provider-owned immutable config and worker
+	labels   sync.Map // canonical subscription -> provider-owned labels map
 }
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, config Config) (*Provider, error) {
@@ -214,7 +215,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 			}
 			return err
 		}
-		return p.settleMutation(session, b, call, response, push, creating, err)
+		return p.settleMutation(session, b, call, response, forwarded, push, creating, err)
 	})
 	return response, err
 }
@@ -269,9 +270,9 @@ func (p *Provider) splitPushConfig(call gateway.Call, request proto.Message) (pr
 // settleMutation reconciles the provider index and push worker after a create or
 // delete. An ambiguous backend outcome is resolved by reading the resource back
 // rather than assuming success.
-func (p *Provider) settleMutation(session context.Context, b driver, call gateway.Call, response proto.Message, push *pb.PushConfig, creating bool, invokeErr error) error {
+func (p *Provider) settleMutation(session context.Context, b driver, call gateway.Call, response proto.Message, forwarded proto.Message, push *pb.PushConfig, creating bool, invokeErr error) error {
 	if invokeErr == nil {
-		return p.commitMutation(session, call, response, push, creating)
+		return p.commitMutation(session, call, response, forwarded, push, creating)
 	}
 	if !ambiguous(invokeErr) {
 		return invokeErr
@@ -281,7 +282,7 @@ func (p *Provider) settleMutation(session context.Context, b driver, call gatewa
 
 // commitMutation mirrors a successful create or delete into the provider index
 // and starts the push worker for a created subscription.
-func (p *Provider) commitMutation(session context.Context, call gateway.Call, response proto.Message, push *pb.PushConfig, creating bool) error {
+func (p *Provider) commitMutation(session context.Context, call gateway.Call, response proto.Message, forwarded proto.Message, push *pb.PushConfig, creating bool) error {
 	if !creating {
 		return p.forget(call)
 	}
@@ -291,6 +292,11 @@ func (p *Provider) commitMutation(session context.Context, call gateway.Call, re
 	if push != nil {
 		if err := p.startPush(session, call, push); err != nil {
 			return err
+		}
+	}
+	if subscription, ok := forwarded.(*pb.Subscription); ok {
+		if labels := subscription.GetLabels(); len(labels) > 0 {
+			p.labels.Store(canonical(call.Resource), labels)
 		}
 	}
 	p.restorePush(response)
@@ -345,6 +351,7 @@ func (p *Provider) publish(call gateway.Call) error {
 	return nil
 }
 func (p *Provider) forget(call gateway.Call) error {
+	p.labels.Delete(canonical(call.Resource))
 	if err := p.stopPush(canonical(call.Resource)); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return err

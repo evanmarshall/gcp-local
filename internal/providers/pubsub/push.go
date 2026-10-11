@@ -166,6 +166,11 @@ func (p *Provider) restorePush(response proto.Message) {
 				subscription.PushConfig, _ = cloneMessage(worker.config)
 			}
 		}
+		if labels, ok := p.labels.Load(canonical(subscription.GetName())); ok {
+			if stored, ok := labels.(map[string]string); ok {
+				subscription.Labels = stored
+			}
+		}
 	}
 	switch response := response.(type) {
 	case *pb.Subscription:
