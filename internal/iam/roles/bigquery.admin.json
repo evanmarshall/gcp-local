@@ -1,0 +1,24 @@
+{
+ "description": "Full control of BigQuery datasets, tables, and jobs.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "bigquery.datasets.create",
+  "bigquery.datasets.delete",
+  "bigquery.datasets.get",
+  "bigquery.datasets.getIamPolicy",
+  "bigquery.datasets.list",
+  "bigquery.datasets.setIamPolicy",
+  "bigquery.datasets.update",
+  "bigquery.jobs.create",
+  "bigquery.jobs.get",
+  "bigquery.tables.create",
+  "bigquery.tables.delete",
+  "bigquery.tables.get",
+  "bigquery.tables.getData",
+  "bigquery.tables.list",
+  "bigquery.tables.update",
+  "bigquery.tables.updateData"
+ ],
+ "name": "roles/bigquery.admin",
+ "stage": "GA"
+}

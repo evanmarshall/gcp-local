@@ -79,6 +79,7 @@ resource "google_bigquery_table" "table" {
 ]
 EOS
 }
+
 `, name)
 }
 

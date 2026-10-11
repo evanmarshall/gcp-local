@@ -34,6 +34,8 @@ const (
 	methodRowsList       = "bigquery.tabledata.list"
 	methodJobsQuery      = "bigquery.jobs.query"
 	methodJobsResults    = "bigquery.jobs.getQueryResults"
+	methodDatasetsGetIam = "bigquery.datasets.getIamPolicy"
+	methodDatasetsSetIam = "bigquery.datasets.setIamPolicy"
 )
 
 // permissions follows the documented BigQuery access-control rows.
@@ -52,6 +54,8 @@ var permissions = map[string]string{
 	methodRowsList:       "bigquery.tables.getData",
 	methodJobsQuery:      "bigquery.jobs.create",
 	methodJobsResults:    "bigquery.jobs.get",
+	methodDatasetsGetIam: "bigquery.datasets.getIamPolicy",
+	methodDatasetsSetIam: "bigquery.datasets.setIamPolicy",
 }
 
 // Resource-name helpers follow the real BigQuery namespace.

@@ -5,6 +5,9 @@ package generated
 var BigQueryRoutes = []Route{
 	{"bigquery.datasets.create", "POST", "/bigquery/v2/projects/{project}/datasets", true, false},
 	{"bigquery.datasets.delete", "DELETE", "/bigquery/v2/projects/{project}/datasets/{datasetId}", false, false},
+	{"bigquery.datasets.getIamPolicy", "GET", "/bigquery/v2/projects/{project}/datasets/{datasetId}:getIamPolicy", false, false},
+	{"bigquery.datasets.getIamPolicy", "POST", "/bigquery/v2/projects/{project}/datasets/{datasetId}:getIamPolicy", false, false},
+	{"bigquery.datasets.setIamPolicy", "POST", "/bigquery/v2/projects/{project}/datasets/{datasetId}:setIamPolicy", true, false},
 	{"bigquery.datasets.get", "GET", "/bigquery/v2/projects/{project}/datasets/{datasetId}", false, false},
 	{"bigquery.datasets.list", "GET", "/bigquery/v2/projects/{project}/datasets", false, false},
 	{"bigquery.datasets.update", "PATCH", "/bigquery/v2/projects/{project}/datasets/{datasetId}", true, false},

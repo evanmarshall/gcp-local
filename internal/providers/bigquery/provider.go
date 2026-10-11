@@ -122,7 +122,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
-	response, err := p.execute(call, request, scope)
+	response, err := p.execute(call, request, scope, target)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid dataset id %q", dataset)
 	}
 	switch call.Method {
-	case methodDatasetsGet, methodDatasetsDelete, methodDatasetsUpdate:
+	case methodDatasetsGet, methodDatasetsDelete, methodDatasetsUpdate, methodDatasetsGetIam, methodDatasetsSetIam:
 		target.Name = datasetResource(project, dataset)
 		return scope, target, nil
 	case methodTablesCreate, methodTablesList:

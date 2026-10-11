@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 // execute dispatches one authorized BigQuery request.
-func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodDatasetsCreate:
 		return p.datasetsCreate(request, scope)
@@ -24,15 +25,17 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.datasetsList(scope)
 	case methodDatasetsUpdate:
 		return p.datasetsUpdate(request, scope)
+	case methodDatasetsGetIam, methodDatasetsSetIam:
+		return p.datasetIam(call, request, target)
 	case methodDatasetsDelete:
 		return p.datasetsDelete(request, scope)
 	default:
-		return p.executeTables(call, request, scope)
+		return p.executeTables(call, request, scope, target)
 	}
 }
 
 // executeTables dispatches the table and row methods.
-func (p *Provider) executeTables(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+func (p *Provider) executeTables(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, _ iam.Target) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodTablesCreate:
 		return p.tablesCreate(request, scope)
@@ -396,6 +399,28 @@ func (p *Provider) rowsList(request *gateway.RESTRequest, scope state.Scope) (*g
 		"totalRows": strconv.Itoa(len(rows)),
 		"rows":      rows,
 	}}, nil
+}
+
+// datasetIam reads or writes the dataset's stored IAM policy.
+func (p *Provider) datasetIam(call gateway.Call, request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
+	if call.Method == methodDatasetsGetIam {
+		policy, err := p.engine.GetPolicy(target.Name)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "read the dataset policy: %v", err)
+		}
+		return &gateway.RESTResponse{JSON: policy}, nil
+	}
+	var envelope struct {
+		Policy iam.Policy `json:"policy"`
+	}
+	if json.Unmarshal(request.JSON, &envelope) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+	}
+	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "write the dataset policy: %v", err)
+	}
+	return &gateway.RESTResponse{JSON: policy}, nil
 }
 
 // jobsQuery runs a bounded local SELECT against one stored table.

@@ -3,6 +3,7 @@
  "etag": "AA==",
  "includedPermissions": [
   "bigquery.datasets.get",
+  "bigquery.datasets.getIamPolicy",
   "bigquery.datasets.list",
   "bigquery.jobs.get",
   "bigquery.tables.get",

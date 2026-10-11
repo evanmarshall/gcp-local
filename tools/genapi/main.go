@@ -385,6 +385,9 @@ func bigqueryRoutes(_ bool) []byte {
 	rowsList := []row{
 		{"bigquery.datasets.create", verbPOST, base, true, false},
 		{"bigquery.datasets.delete", verbDELETE, base + "/{datasetId}", false, false},
+		{"bigquery.datasets.getIamPolicy", verbGET, base + "/{datasetId}:getIamPolicy", false, false},
+		{"bigquery.datasets.getIamPolicy", verbPOST, base + "/{datasetId}:getIamPolicy", false, false},
+		{"bigquery.datasets.setIamPolicy", verbPOST, base + "/{datasetId}:setIamPolicy", true, false},
 		{"bigquery.datasets.get", verbGET, base + "/{datasetId}", false, false},
 		{"bigquery.datasets.list", verbGET, base, false, false},
 		{"bigquery.datasets.update", verbPATCH, base + "/{datasetId}", true, false},

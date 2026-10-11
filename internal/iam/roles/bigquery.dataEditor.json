@@ -5,6 +5,7 @@
   "bigquery.datasets.create",
   "bigquery.datasets.delete",
   "bigquery.datasets.get",
+  "bigquery.datasets.getIamPolicy",
   "bigquery.datasets.list",
   "bigquery.datasets.update",
   "bigquery.jobs.create",

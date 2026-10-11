@@ -146,12 +146,12 @@
   {
    "file": "bigquery.dataEditor.json",
    "name": "roles/bigquery.dataEditor",
-   "sha256": "508d07aaf5243b8f197065e59a2ef8da22c7cd18e0124cfe402784b1764114ed"
+   "sha256": "d69893e2c5ebe50cd47e41ac43116363e4b5595150c529dc6a99246355850bf4"
   },
   {
    "file": "bigquery.dataViewer.json",
    "name": "roles/bigquery.dataViewer",
-   "sha256": "2d2c3deb87b578773e5a89a3d120bdbbefa16b5904303e61bf607669beae3570"
+   "sha256": "de9b40151b98aa07cb8d3b31b1b99643556becbc51e53022c6a787d62b3ff327"
   },
   {
    "file": "spanner.admin.json",
@@ -212,6 +212,11 @@
    "file": "iam.serviceAccountViewer.json",
    "name": "roles/iam.serviceAccountViewer",
    "sha256": "0da339b45e5c1f85631a976fab39f31fb1723f49bb7781fa235742bd2de5f935"
+  },
+  {
+   "file": "bigquery.admin.json",
+   "name": "roles/bigquery.admin",
+   "sha256": "f399ed35a759fd4d0c79e226441de3829792c2f8c763391f0a73eb5e1ac91198"
   }
  ]
 }
