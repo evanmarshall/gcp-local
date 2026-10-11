@@ -50,16 +50,17 @@ func (p *Provider) executeAnalysis(call gateway.Call, request *gateway.RESTReque
 // networkDocument renders the network wire shape.
 func (p *Provider) networkDocument(project string, record *networkRecord, cachedSubnets []any) map[string]any {
 	return map[string]any{
-		"id":                    idOf(record.Name, record.Generation),
-		keyName:                 record.Name,
-		keySelfLink:             selfLink(project, "networks", record.Name),
-		keyTimestamp:            stamp(record.CreatedAt),
-		keyKind:                 "compute#network",
-		"autoCreateSubnetworks": record.AutoCreateSubnetworks,
-		"mtu":                   record.MTU,
-		"routingConfig":         map[string]any{"routingMode": "REGIONAL"},
-		"subnetworks":           cachedSubnets,
-		keyDescription:          "",
+		"id":                                    idOf(record.Name, record.Generation),
+		keyName:                                 record.Name,
+		keySelfLink:                             selfLink(project, "networks", record.Name),
+		keyTimestamp:                            stamp(record.CreatedAt),
+		keyKind:                                 "compute#network",
+		"autoCreateSubnetworks":                 record.AutoCreateSubnetworks,
+		"mtu":                                   record.MTU,
+		"routingConfig":                         map[string]any{"routingMode": "REGIONAL"},
+		"networkFirewallPolicyEnforcementOrder": "AFTER_CLASSIC_FIREWALL",
+		"subnetworks":                           cachedSubnets,
+		keyDescription:                          "",
 	}
 }
 
