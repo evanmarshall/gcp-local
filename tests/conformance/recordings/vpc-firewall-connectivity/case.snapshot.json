@@ -1,0 +1,247 @@
+{
+  "vpc-firewall-connectivity": {
+    "recorded-date": "11-10-2026, 23:08:38",
+    "recorded-content": {
+      "network-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "network": {
+        "autoCreateSubnetworks": false,
+        "fields": [
+          "autoCreateSubnetworks",
+          "creationTimestamp",
+          "description",
+          "id",
+          "kind",
+          "name",
+          "networkFirewallPolicyEnforcementOrder",
+          "routingConfig",
+          "selfLink",
+          "selfLinkWithId"
+        ],
+        "http_status": 200,
+        "name": "<prefix>-a",
+        "networkFirewallPolicyEnforcementOrder": "AFTER_CLASSIC_FIREWALL",
+        "routingConfig": {
+          "bgpBestPathSelectionMode": "LEGACY",
+          "routingMode": "REGIONAL"
+        }
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": null
+      },
+      "subnetwork-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "subnetwork": {
+        "fields": [
+          "allowSubnetCidrRoutesOverlap",
+          "creationTimestamp",
+          "fingerprint",
+          "gatewayAddress",
+          "id",
+          "ipCidrRange",
+          "kind",
+          "name",
+          "network",
+          "privateIpGoogleAccess",
+          "privateIpv6GoogleAccess",
+          "purpose",
+          "region",
+          "selfLink",
+          "stackType"
+        ],
+        "gatewayAddress": "10.10.0.1",
+        "http_status": 200,
+        "ipCidrRange": "10.10.0.0/24",
+        "name": "<prefix>-a1",
+        "network": "https://www.googleapis.com/compute/v1/projects/<project>/global/networks/<prefix>-a",
+        "privateIpGoogleAccess": false,
+        "region": "https://www.googleapis.com/compute/v1/projects/<project>/regions/us-central1",
+        "stackType": "IPV4_ONLY"
+      },
+      "overlapping-subnetwork": {
+        "http_status": 200,
+        "operation_error_codes": [
+          "INVALID_USAGE"
+        ],
+        "operation_status": "DONE"
+      },
+      "firewall-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "firewall": {
+        "allowed": [
+          {
+            "IPProtocol": "tcp",
+            "ports": [
+              "8080"
+            ]
+          }
+        ],
+        "direction": "INGRESS",
+        "disabled": false,
+        "fields": [
+          "allowed",
+          "creationTimestamp",
+          "description",
+          "direction",
+          "disabled",
+          "id",
+          "kind",
+          "logConfig",
+          "name",
+          "network",
+          "priority",
+          "selfLink",
+          "sourceRanges"
+        ],
+        "http_status": 200,
+        "logConfig": {
+          "enable": false
+        },
+        "name": "<prefix>-allow",
+        "priority": 1000,
+        "sourceRanges": [
+          "10.10.0.0/24"
+        ]
+      },
+      "network-in-use": {
+        "http_status": 200,
+        "operation_error_codes": [
+          "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE"
+        ],
+        "operation_status": "DONE"
+      },
+      "peer-network-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "test-allowed-port": {
+        "abort_cause": "UNKNOWN_IP",
+        "drop_cause": null,
+        "final_state": "ABORT",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "UNDETERMINED",
+        "step_states": [
+          "START_FROM_PRIVATE_NETWORK",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ABORT"
+        ],
+        "trace_count": 1
+      },
+      "test-blocked-port": {
+        "abort_cause": "UNKNOWN_IP",
+        "drop_cause": null,
+        "final_state": "ABORT",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "UNDETERMINED",
+        "step_states": [
+          "START_FROM_PRIVATE_NETWORK",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ABORT"
+        ],
+        "trace_count": 1
+      },
+      "test-unpeered-network": {
+        "abort_cause": null,
+        "drop_cause": "PRIVATE_TRAFFIC_TO_INTERNET",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_PRIVATE_NETWORK",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "peering-added": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "addPeering",
+        "status": "DONE"
+      },
+      "peering": [
+        {
+          "name": "<prefix>-a-to-b",
+          "state": "ACTIVE",
+          "exchangeSubnetRoutes": true,
+          "fields": [
+            "autoCreateRoutes",
+            "connectionStatus",
+            "exchangeSubnetRoutes",
+            "exportCustomRoutes",
+            "exportSubnetRoutesWithPublicIp",
+            "importCustomRoutes",
+            "importSubnetRoutesWithPublicIp",
+            "name",
+            "network",
+            "stackType",
+            "state",
+            "stateDetails",
+            "updateStrategy"
+          ]
+        }
+      ],
+      "test-peered-network": {
+        "abort_cause": null,
+        "drop_cause": "PRIVATE_TRAFFIC_TO_INTERNET",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_PRIVATE_NETWORK",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "test-fields": {
+        "details_fields": [
+          "result",
+          "traces",
+          "verifyTime"
+        ],
+        "fields": [
+          "createTime",
+          "destination",
+          "name",
+          "protocol",
+          "reachabilityDetails",
+          "source",
+          "updateTime"
+        ]
+      },
+      "cleanup": {
+        "owned_resources_absent": true
+      }
+    }
+  }
+}
