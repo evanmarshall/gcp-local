@@ -1,12 +1,14 @@
 package compute
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -207,6 +209,8 @@ func (p *Provider) executeSubnetwork(call gateway.Call, request *gateway.RESTReq
 		return p.getSubnetwork(request, scope)
 	case methodSubnetworksList:
 		return p.listSubnetworks(scope)
+	case methodSubnetworksGetIam, methodSubnetworksSetIam:
+		return p.subnetworkIam(call, request, scope)
 	default:
 		return p.deleteSubnetwork(request, scope)
 	}
@@ -712,4 +716,32 @@ func (p *Provider) deleteRouter(request *gateway.RESTRequest, scope state.Scope)
 		func(s *scopeState, name string) { delete(s.routers, name) },
 		func(s *scopeState, name string) bool { return s.routers[name] != nil },
 	)
+}
+
+// subnetworkIam reads or writes the subnetwork's stored IAM policy.
+func (p *Provider) subnetworkIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	target := subnetworkIamResource(scope.Project, request.Path["region"], request.Path["subnetwork"])
+	if call.Method == methodSubnetworksGetIam {
+		policy, err := p.engine.GetPolicy(target)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "read the subnetwork policy: %v", err)
+		}
+		return &gateway.RESTResponse{JSON: policy}, nil
+	}
+	var envelope struct {
+		Policy iam.Policy `json:"policy"`
+	}
+	if json.Unmarshal(request.JSON, &envelope) != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid IAM policy")
+	}
+	policy, err := p.engine.SetPolicy(target, envelope.Policy)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "write the subnetwork policy: %v", err)
+	}
+	return &gateway.RESTResponse{JSON: policy}, nil
+}
+
+// subnetworkIamResource renders the canonical subnetwork resource name.
+func subnetworkIamResource(project, region, subnetwork string) string {
+	return "//compute.googleapis.com/projects/" + project + "/regions/" + region + "/subnetworks/" + subnetwork
 }

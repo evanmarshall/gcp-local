@@ -331,6 +331,8 @@ func computeRoutes(_ bool) []byte {
 		{"compute.subnetworks.create", verbPOST, base + "/regions/{region}/subnetworks", true, false},
 		{"compute.subnetworks.list", verbGET, base + "/regions/{region}/subnetworks", false, false},
 		{"compute.subnetworks.get", verbGET, base + "/regions/{region}/subnetworks/{subnetwork}", false, false},
+		{"compute.subnetworks.getIamPolicy", verbGET, base + "/regions/{region}/subnetworks/{subnetwork}:getIamPolicy", false, false},
+		{"compute.subnetworks.setIamPolicy", verbPOST, base + "/regions/{region}/subnetworks/{subnetwork}:setIamPolicy", true, false},
 		{"compute.subnetworks.delete", verbDELETE, base + "/regions/{region}/subnetworks/{subnetwork}", false, false},
 		{"compute.firewalls.create", verbPOST, globalFW, true, false},
 		{"compute.firewalls.list", verbGET, globalFW, false, false},

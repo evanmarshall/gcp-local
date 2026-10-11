@@ -76,12 +76,12 @@
   {
    "file": "compute.admin.json",
    "name": "roles/compute.admin",
-   "sha256": "8574f22a1ef7ddea05cff7cacd0b011ac87d524047a030dd0e26ebf7670cd761"
+   "sha256": "c6d395202f8bb4b0c5925f0ea093da3ec67cac627ce723bc73084ea328f78d3c"
   },
   {
    "file": "compute.networkAdmin.json",
    "name": "roles/compute.networkAdmin",
-   "sha256": "8cd85460868e5b78fe706debd73b81ac0b69a81656aacd2a3568fdddb44c05a6"
+   "sha256": "b351887f26cdf4b2c16028e7a4888ef184a8f2c495353a659101a24683e15e5e"
   },
   {
    "file": "compute.viewer.json",

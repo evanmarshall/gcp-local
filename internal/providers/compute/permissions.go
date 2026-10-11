@@ -15,6 +15,8 @@ var permissions = map[string]string{
 	methodNetworksDelete:        "compute.networks.delete",
 	methodSubnetworksCreate:     "compute.subnetworks.create",
 	methodSubnetworksGet:        "compute.subnetworks.get",
+	methodSubnetworksGetIam:     "compute.subnetworks.getIamPolicy",
+	methodSubnetworksSetIam:     "compute.subnetworks.setIamPolicy",
 	methodSubnetworksList:       "compute.subnetworks.list",
 	methodSubnetworksDelete:     "compute.subnetworks.delete",
 	methodFirewallsCreate:       "compute.firewalls.create",
@@ -50,6 +52,8 @@ const (
 	methodNetworksDelete        = "compute.networks.delete"
 	methodSubnetworksCreate     = "compute.subnetworks.create"
 	methodSubnetworksGet        = "compute.subnetworks.get"
+	methodSubnetworksGetIam     = "compute.subnetworks.getIamPolicy"
+	methodSubnetworksSetIam     = "compute.subnetworks.setIamPolicy"
 	methodSubnetworksList       = "compute.subnetworks.list"
 	methodSubnetworksDelete     = "compute.subnetworks.delete"
 	methodFirewallsCreate       = "compute.firewalls.create"

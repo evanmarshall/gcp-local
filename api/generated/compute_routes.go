@@ -10,6 +10,8 @@ var ComputeRoutes = []Route{
 	{"compute.subnetworks.create", "POST", "/compute/v1/projects/{project}/regions/{region}/subnetworks", true, false},
 	{"compute.subnetworks.list", "GET", "/compute/v1/projects/{project}/regions/{region}/subnetworks", false, false},
 	{"compute.subnetworks.get", "GET", "/compute/v1/projects/{project}/regions/{region}/subnetworks/{subnetwork}", false, false},
+	{"compute.subnetworks.getIamPolicy", "GET", "/compute/v1/projects/{project}/regions/{region}/subnetworks/{subnetwork}:getIamPolicy", false, false},
+	{"compute.subnetworks.setIamPolicy", "POST", "/compute/v1/projects/{project}/regions/{region}/subnetworks/{subnetwork}:setIamPolicy", true, false},
 	{"compute.subnetworks.delete", "DELETE", "/compute/v1/projects/{project}/regions/{region}/subnetworks/{subnetwork}", false, false},
 	{"compute.firewalls.create", "POST", "/compute/v1/projects/{project}/global/firewalls", true, false},
 	{"compute.firewalls.list", "GET", "/compute/v1/projects/{project}/global/firewalls", false, false},

@@ -33,7 +33,9 @@
   "compute.subnetworks.create",
   "compute.subnetworks.delete",
   "compute.subnetworks.get",
+  "compute.subnetworks.getIamPolicy",
   "compute.subnetworks.list",
+  "compute.subnetworks.setIamPolicy",
   "compute.subnetworks.update"
  ],
  "name": "roles/compute.admin",
