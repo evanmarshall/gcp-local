@@ -51,6 +51,7 @@ func TestAccPubSubTopicAndSubscription(t *testing.T) {
 				Config: testPubSubConfig(name),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("google_pubsub_topic.topic", "name", name),
+					resource.TestCheckResourceAttr("google_pubsub_topic.topic", "labels.gcp-local-run", "terraform"),
 					resource.TestCheckResourceAttr("google_pubsub_subscription.subscription", "name", "fanout"),
 					resource.TestCheckResourceAttr("google_pubsub_subscription.subscription", "labels.gcp-local-run", "terraform"),
 				),
@@ -64,6 +65,9 @@ func testPubSubConfig(name string) string {
 	return fmt.Sprintf(`
 resource "google_pubsub_topic" "topic" {
  name = "%s"
+ labels = {
+   "gcp-local-run" = "terraform"
+ }
 }
 
 resource "google_pubsub_subscription" "subscription" {
