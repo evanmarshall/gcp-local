@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,7 +105,8 @@ func TestRepositoryLifecycle(t *testing.T) {
 		t.Fatalf("duplicate create status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodDelete, testBase+"/"+testRepo, nil)
-	if recorder.Code != 204 {
+	// Deletion answers with a completed operation, as recorded.
+	if recorder.Code != 200 || !strings.Contains(recorder.Body.String(), `"done":true`) {
 		t.Fatalf("repository delete status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodGet, testBase+"/"+testRepo, nil)

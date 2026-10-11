@@ -1,9 +1,11 @@
 package artifactregistry
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -87,7 +89,7 @@ func (p *Provider) repositoriesCreate(request *gateway.RESTRequest, scope state.
 		created = &repositoryRecord{
 			Name: name, Location: location, Format: format, Mode: mode,
 			Description: body.Description, CleanupPolicyDryRun: body.CleanupPolicyDryRun,
-			Labels: body.Labels, CreatedAt: now,
+			Labels: body.Labels, CreatedAt: now, UpdatedAt: now,
 		}
 		s.repositories[name] = created
 		return nil
@@ -101,26 +103,70 @@ func (p *Provider) repositoriesCreate(request *gateway.RESTRequest, scope state.
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the repository: %w", indexErr)
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{
-		"done": true, "response": repositoryWire(scope.Project, created),
-	}}, nil
+	response := repositoryWire(scope.Project, created, viewCreate)
+	response["@type"] = repositoryType
+	return &gateway.RESTResponse{JSON: operationWire(scope.Project, location, response)}, nil
 }
 
-// repositoryWire renders one repository document.
-func repositoryWire(project string, record *repositoryRecord) map[string]any {
+// Repository views: GCP returns different field sets per method.
+const (
+	viewCreate = iota // create operation response: no times or registry URI
+	viewPatch         // patch response: times but no registry URI
+	viewGet           // get/list: every field
+)
+
+// Operation and response type URLs of the Artifact Registry LRO envelope.
+const (
+	repositoryType = "type.googleapis.com/google.devtools.artifactregistry.v1.Repository"
+	emptyType      = "type.googleapis.com/google.protobuf.Empty"
+	metadataType   = "type.googleapis.com/google.devtools.artifactregistry.v1.OperationMetadata"
+)
+
+// operationWire wraps a completed result in the long-running operation envelope.
+func operationWire(project, location string, response map[string]any) map[string]any {
+	id := make([]byte, 16)
+	_, _ = rand.Read(id)
+	return map[string]any{
+		keyName:    "projects/" + project + "/locations/" + location + "/operations/" + hex.EncodeToString(id),
+		"metadata": map[string]any{"@type": metadataType},
+		"done":     true,
+		"response": response,
+	}
+}
+
+// repositoryWire renders one repository document for the given view. The
+// satisfiesPzi and scanning values are local stand-ins; the recording pins
+// only that the fields are present.
+func repositoryWire(project string, record *repositoryRecord, view int) map[string]any {
 	labels := record.Labels
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	return map[string]any{
-		keyName:               repositoryName(project, record.Location, record.Name),
-		"format":              record.Format,
-		"mode":                record.Mode,
-		"cleanupPolicyDryRun": record.CleanupPolicyDryRun,
-		"description":         record.Description,
-		"labels":              labels,
-		"createTime":          stamp(record.CreatedAt),
+	document := map[string]any{
+		keyName:                       repositoryName(project, record.Location, record.Name),
+		"format":                      record.Format,
+		"mode":                        record.Mode,
+		"description":                 record.Description,
+		"labels":                      labels,
+		"satisfiesPzi":                false,
+		"vulnerabilityScanningConfig": map[string]any{"enablementState": "SCANNING_DISABLED"},
 	}
+	if record.CleanupPolicyDryRun {
+		document["cleanupPolicyDryRun"] = true
+	}
+	if view != viewCreate {
+		document["createTime"] = stamp(record.CreatedAt)
+		document["updateTime"] = stamp(record.UpdatedAt)
+	}
+	if view == viewGet {
+		document["registryUri"] = registryURI(project, record)
+	}
+	return document
+}
+
+// registryURI renders the repository's package host path.
+func registryURI(project string, record *repositoryRecord) string {
+	return record.Location + "-" + strings.ToLower(record.Format) + ".pkg.dev/" + project + "/" + record.Name
 }
 
 // repositoryLocked reads one repository under the scope lock.
@@ -136,7 +182,7 @@ func (p *Provider) repositoriesGet(request *gateway.RESTRequest, scope state.Sco
 	if record == nil {
 		return nil, notFound(kindRepository, request.Path["repository"])
 	}
-	return &gateway.RESTResponse{JSON: repositoryWire(scope.Project, record)}, nil
+	return &gateway.RESTResponse{JSON: repositoryWire(scope.Project, record, viewGet)}, nil
 }
 
 // repositoriesList returns the location's repositories.
@@ -146,7 +192,7 @@ func (p *Provider) repositoriesList(request *gateway.RESTRequest, scope state.Sc
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		for _, record := range s.repositories {
 			if record.Location == location {
-				items = append(items, repositoryWire(scope.Project, record))
+				items = append(items, repositoryWire(scope.Project, record, viewGet))
 			}
 		}
 		return nil
@@ -167,9 +213,23 @@ func (p *Provider) repositoriesUpdate(request *gateway.RESTRequest, scope state.
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid repository update")
 	}
-	record.Description = body.Description
-	record.Labels = body.Labels
-	return &gateway.RESTResponse{JSON: repositoryWire(scope.Project, record)}, nil
+	// Only masked fields change; without a mask GCP updates every field sent.
+	mask := request.Query.Get("updateMask")
+	if mask == "" {
+		mask = "description,labels"
+	}
+	for field := range strings.SplitSeq(mask, ",") {
+		switch strings.TrimSpace(field) {
+		case "description":
+			record.Description = body.Description
+		case "labels":
+			record.Labels = body.Labels
+		default:
+			return nil, status.Errorf(codes.InvalidArgument, "Unsupported update mask field %q", field)
+		}
+	}
+	record.UpdatedAt = p.clock()
+	return &gateway.RESTResponse{JSON: repositoryWire(scope.Project, record, viewPatch)}, nil
 }
 
 // repositoriesDelete removes one repository.
@@ -187,7 +247,7 @@ func (p *Provider) repositoriesDelete(request *gateway.RESTRequest, scope state.
 	if indexErr != nil {
 		return nil, fmt.Errorf("unregister the repository: %w", indexErr)
 	}
-	return &gateway.RESTResponse{Status: http.StatusNoContent}, nil
+	return &gateway.RESTResponse{JSON: operationWire(scope.Project, request.Path["location"], map[string]any{"@type": emptyType})}, nil
 }
 
 // getIam returns the stored policy.
@@ -196,7 +256,7 @@ func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the Artifact Registry policy: %v", err)
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }
 
 // setIam stores the policy.
@@ -209,6 +269,9 @@ func (p *Provider) setIam(request *gateway.RESTRequest, target iam.Target) (*gat
 	}
 	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
 	if err != nil {
+		if _, ok := status.FromError(err); ok {
+			return nil, err //nolint:wrapcheck // already a wire status
+		}
 		return nil, status.Errorf(codes.Internal, "write the Artifact Registry policy: %v", err)
 	}
 	return &gateway.RESTResponse{JSON: policy}, nil

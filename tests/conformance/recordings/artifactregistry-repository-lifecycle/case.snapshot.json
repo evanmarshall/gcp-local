@@ -1,0 +1,153 @@
+{
+  "artifactregistry-repository-lifecycle": {
+    "recorded-date": "11-10-2026, 21:30:47",
+    "recorded-content": {
+      "create-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "response_fields": [
+          "@type",
+          "description",
+          "format",
+          "labels",
+          "mode",
+          "name",
+          "satisfiesPzi",
+          "vulnerabilityScanningConfig"
+        ],
+        "response_type": "type.googleapis.com/google.devtools.artifactregistry.v1.Repository"
+      },
+      "fixture-read": {
+        "description": "gcp-local conformance",
+        "fields": [
+          "createTime",
+          "description",
+          "format",
+          "labels",
+          "mode",
+          "name",
+          "registryUri",
+          "satisfiesPzi",
+          "updateTime",
+          "vulnerabilityScanningConfig"
+        ],
+        "format": "DOCKER",
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "mode": "STANDARD_REPOSITORY",
+        "name": "projects/<project>/locations/us-central1/repositories/<repository>"
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "policy-read": {
+        "bindings": null,
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200
+      },
+      "reader-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/artifactregistry.reader"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "allowed-read": {
+        "fields": [
+          "createTime",
+          "description",
+          "format",
+          "labels",
+          "mode",
+          "name",
+          "registryUri",
+          "satisfiesPzi",
+          "updateTime",
+          "vulnerabilityScanningConfig"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/locations/us-central1/repositories/<repository>"
+      },
+      "allowed-cannot-update": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "patched": {
+        "description": "gcp-local renamed",
+        "fields": [
+          "createTime",
+          "description",
+          "format",
+          "labels",
+          "mode",
+          "name",
+          "satisfiesPzi",
+          "updateTime",
+          "vulnerabilityScanningConfig"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        }
+      },
+      "duplicate-create": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "invalid-format": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "delete-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "response_fields": [
+          "@type"
+        ],
+        "response_type": "type.googleapis.com/google.protobuf.Empty"
+      },
+      "absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "repository_absent": true
+      }
+    }
+  }
+}

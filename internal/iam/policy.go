@@ -214,3 +214,12 @@ func (e *Engine) ClearScope(owner string, scope state.Scope) {
 		}
 	}
 }
+
+// Wire renders a policy as GCP returns it: a policy without bindings, deny
+// rules, or a boundary reads back as only its etag.
+func (p Policy) Wire() any {
+	if len(p.Bindings) == 0 && len(p.DenyRules) == 0 && p.PAB == nil {
+		return map[string]any{"etag": p.ETag}
+	}
+	return p
+}

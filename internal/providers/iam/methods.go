@@ -300,11 +300,7 @@ func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the IAM policy: %v", err)
 	}
-	// An account without bindings reads back as only its etag.
-	if len(policy.Bindings) == 0 {
-		return &gateway.RESTResponse{JSON: map[string]any{"etag": policy.ETag}}, nil
-	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }
 
 // setIam stores the policy of the account.

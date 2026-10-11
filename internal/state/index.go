@@ -72,6 +72,7 @@ func (i *Index) Get(name string) (Resource, bool) {
 	value, ok := i.resources[name]
 	return value, ok
 }
+
 // ProjectByNumber finds the indexed project with a numeric project ID, the
 // form GCP returns in many resource names.
 func (i *Index) ProjectByNumber(number string) (Resource, bool) {

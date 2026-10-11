@@ -16,12 +16,32 @@ is selected with `--services=...,artifactregistry`.
 - Predefined roles pinned: `roles/artifactregistry.admin`,
   `roles/artifactregistry.repoAdmin`, `roles/artifactregistry.reader`.
 
+## Recorded scenario
+
+`artifactregistry-repository-lifecycle` was recorded and revalidated against
+real GCP on 2026-10-11, and the local provider matches it in comparison mode
+(`sh scripts/check_rest_recordings.sh`). One empty labeled DOCKER repository in
+us-central1; the allowed identity receives `roles/artifactregistry.reader` on
+the repository only. Observed and compared:
+
+- create and delete return completed operations (`name`, `metadata`, `done`,
+  typed `response`); delete's response is `google.protobuf.Empty`
+- field sets differ by method: the create response has no times or
+  `registryUri`, PATCH adds the times but not `registryUri`, GET has all of
+  them; `cleanupPolicyDryRun` is omitted while false
+- an empty repository policy reads back as only `etag`
+- denied read 403; the reader can read but not update; PATCH with
+  `updateMask=description` leaves labels untouched
+- duplicate create 409; an unknown format 400; 404 after delete
+
+The recording fixed five local divergences: bare create results, 204 deletes,
+missing fields, an empty policy rendered with bindings, and PATCH replacing
+unmasked labels. `satisfiesPzi` and `vulnerabilityScanningConfig` values are
+local stand-ins; only their presence is recorded.
+
 ## Explicit gaps
 
-- No cloud recording covers these methods yet; nothing claims recorded
-  conformance (tracked under the recording backlog issues).
 - Image push/pull (the container data plane, GCR/token flow) is out of scope;
   repositories store metadata only.
 - Cleanup policies, remote/upstream/virtual modes beyond STANDARD, KMS
   encryption settings, and vulnerability scanning are not modeled.
-

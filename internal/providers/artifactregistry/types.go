@@ -62,6 +62,7 @@ type repositoryRecord struct {
 	CleanupPolicyDryRun bool
 	Labels              map[string]string
 	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // scopeState is one project slice of provider state.
