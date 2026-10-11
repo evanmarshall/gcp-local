@@ -54,6 +54,7 @@ func TestAccComputeNetworkAndSubnetwork(t *testing.T) {
 					resource.TestCheckResourceAttr("google_compute_network.network", "name", name),
 					resource.TestCheckResourceAttr("google_compute_subnetwork.subnetwork", "name", name+"-subnet"),
 					resource.TestCheckResourceAttr("google_compute_subnetwork.subnetwork", "region", "us-central1"),
+					resource.TestCheckResourceAttr("google_compute_firewall.firewall", "name", name+"-fw"),
 				),
 			},
 		},
@@ -66,6 +67,16 @@ func testComputeConfig(name string) string {
 resource "google_compute_network" "network" {
  name                    = "%s"
  auto_create_subnetworks = false
+}
+
+resource "google_compute_firewall" "firewall" {
+ name          = "%[1]s-fw"
+ network       = google_compute_network.network.id
+ allow {
+   protocol = "tcp"
+   ports    = ["8080"]
+ }
+ source_ranges = ["10.2.0.0/16"]
 }
 
 resource "google_compute_subnetwork" "subnetwork" {

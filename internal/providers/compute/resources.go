@@ -113,13 +113,7 @@ func firewallDocument(project string, record *firewallRecord) map[string]any {
 		denied = []map[string]any{}
 	}
 	sourceRanges := record.SourceRanges
-	if sourceRanges == nil {
-		sourceRanges = []string{}
-	}
 	targetTags := record.TargetTags
-	if targetTags == nil {
-		targetTags = []string{}
-	}
 	return map[string]any{
 		"id":           idOf(record.Name, record.Generation),
 		keyName:        record.Name,
@@ -132,6 +126,7 @@ func firewallDocument(project string, record *firewallRecord) map[string]any {
 		"denied":       denied,
 		"sourceRanges": sourceRanges,
 		"targetTags":   targetTags,
+
 		"priority":     record.Priority,
 		"disabled":     record.Disabled,
 		"logConfig":    map[string]any{"enable": false},
