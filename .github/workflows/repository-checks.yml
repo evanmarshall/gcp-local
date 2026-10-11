@@ -17,6 +17,7 @@ jobs:
           persist-credentials: false
       - run: python3 scripts/install_go.py
       - run: python3 scripts/install_pubsub.py
+      - run: python3 scripts/install_firestore.py
       - run: python3 -m venv .venv-tools
       - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt
       - run: .venv-tools/bin/python -m pip check
@@ -31,6 +32,11 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_pubsub.sh
+      - run: sh scripts/go.sh test -c -tags=firestoreintegration -race -o bin/firestore-integration ./internal/providers/firestore
+      - name: Verify Firestore authorization, isolation, and reset against the official emulator
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_firestore.sh
       - name: Compare local REST providers against their recorded contracts
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
@@ -103,6 +109,8 @@ jobs:
           python-version: '3.12'
       - run: python scripts/install_go.py
       - run: python scripts/install_terraform.py
+      - run: python scripts/install_firestore.py
+      - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - name: Warm pinned module and build dependencies before isolation
         run: |
           sh scripts/go.sh -C tests/terraform/runner test -c -o "$PWD/bin/terraform-tests" .
@@ -110,7 +118,7 @@ jobs:
       - name: Run upstream acceptance cases and the metadata negative control without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_terraform.sh
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_terraform.sh
       - name: Hand private reports back to the artifact uploader
         if: always()
         run: |

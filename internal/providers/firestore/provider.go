@@ -14,28 +14,37 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Provider owns the Firestore documents control plane and data state.
+// Provider is the Firestore authentication and authorization gate. The
+// official emulator owns documents; the provider owns collection-group field
+// configuration, which the emulator does not implement.
 type Provider struct {
-	index  *state.Index
-	engine *iam.Engine
-	scopes *state.Store[scopeState]
-	clock  func() time.Time
+	index   *state.Index
+	engine  *iam.Engine
+	manager *backend.Manager
+	scopes  *state.Store[scopeState]
+	clock   func() time.Time
 }
 
-// New registers the Firestore provider.
-func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
-	if registry == nil || manager == nil || index == nil || engine == nil {
+// New registers the Firestore provider backed by the official emulator.
+func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, config Config) (*Provider, error) {
+	return newProvider(registry, manager, index, engine, func(scope state.Scope) (backend.Backend, error) {
+		return &emulator{config: config, scope: scope}, nil
+	})
+}
+
+func newProvider(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, factory func(state.Scope) (backend.Backend, error)) (*Provider, error) {
+	if registry == nil || manager == nil || index == nil || engine == nil || factory == nil {
 		return nil, errProviderShape
 	}
 	if err := registerPermissions(engine); err != nil {
 		return nil, err
 	}
 	p := &Provider{
-		index: index, engine: engine,
+		index: index, engine: engine, manager: manager,
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
-	if err := p.registerBackend(manager, engine, index); err != nil {
+	if err := p.registerBackend(factory); err != nil {
 		return nil, err
 	}
 	for method := range permissions {
@@ -46,17 +55,17 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	return p, nil
 }
 
-// registerBackend attaches the in-memory Firestore backend and its reset hook.
-func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine, index *state.Index) error {
-	if err := manager.Register(serviceName, backend.Definition{
+// registerBackend attaches the per-project emulator and its reset hook.
+func (p *Provider) registerBackend(factory func(state.Scope) (backend.Backend, error)) error {
+	if err := p.manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New:      factory,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
 			}
-			engine.ClearScope(serviceName, scope)
-			index.RemoveScope(serviceName, scope)
+			p.engine.ClearScope(serviceName, scope)
+			p.index.RemoveScope(serviceName, scope)
 			return nil
 		},
 	}); err != nil {
@@ -65,17 +74,8 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 	return nil
 }
 
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error    { return nil }
-func (emptyBackend) Ready(context.Context) error    { return nil }
-func (emptyBackend) Stop(context.Context) error     { return nil }
-func (emptyBackend) Reset(context.Context) error    { return nil }
-func (emptyBackend) Snapshot(context.Context) error { return backend.ErrPersistenceUnsupported }
-func (emptyBackend) Restore(context.Context) error  { return backend.ErrPersistenceUnsupported }
-
-// Reset clears the scope's documents.
+// Reset clears the scope's provider-owned field configuration. The backend
+// manager has already stopped the emulator, which discards its documents.
 func (p *Provider) Reset(scope state.Scope) error {
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		s.reset()
@@ -117,9 +117,18 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
-	response, err := p.execute(call, request, scope)
+	var response *gateway.RESTResponse
+	err = p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(ctx context.Context, active backend.Backend) error {
+		b, ok := active.(driver)
+		if !ok {
+			return status.Error(codes.Internal, "Invalid Firestore backend")
+		}
+		var executeErr error
+		response, executeErr = p.execute(ctx, b, call, request, scope)
+		return executeErr
+	})
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // keep the emulator or manager status unchanged on the wire
 	}
 	if response.Headers == nil {
 		response.Headers = http.Header{}

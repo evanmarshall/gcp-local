@@ -112,8 +112,6 @@ func main() {
 	must(err)
 	_, err = secretmanager.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
-	_, err = firestoreprovider.New(context.Background(), registry, server.Backends, index, engine)
-	must(err)
 	_, err = bigqueryprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = spannerprovider.New(context.Background(), registry, server.Backends, index, engine)
@@ -123,6 +121,12 @@ func main() {
 	if java == "" || jar == "" {
 		log.Fatal("The conformance fixture needs GCP_LOCAL_JAVA and GCP_LOCAL_PUBSUB_JAR for the Pub/Sub provider")
 	}
+	firestoreJAR := os.Getenv("GCP_LOCAL_FIRESTORE_JAR")
+	if firestoreJAR == "" {
+		log.Fatal("The conformance fixture needs GCP_LOCAL_JAVA and GCP_LOCAL_FIRESTORE_JAR for the Firestore provider")
+	}
+	_, err = firestoreprovider.New(context.Background(), registry, server.Backends, index, engine, firestoreprovider.Config{Java: java, JAR: firestoreJAR})
+	must(err)
 	tokens, tokenErr := identity.NewIDTokens(engine, index)
 	must(tokenErr)
 	_, err = pubsubprovider.New(registry, server.Backends, index, engine, pubsubprovider.Config{Java: java, JAR: jar, IDTokens: tokens})

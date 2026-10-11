@@ -1,12 +1,12 @@
 package firestore
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
-	"fmt"
-	"maps"
-	"strings"
-	"sync"
-	"time"
+	"io"
+	"net/http"
+	"net/url"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -14,228 +14,104 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// mu guards the clock-free field decode across requests.
-var mu sync.Mutex
-
-// execute dispatches one authorized Firestore request.
-func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+// execute dispatches one authorized Firestore request inside the scope's
+// backend operation. Documents belong to the emulator; collection-group field
+// configuration is the Admin API, which the emulator does not serve, so the
+// provider keeps it.
+func (p *Provider) execute(ctx context.Context, b driver, call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
-	case methodDocumentsCreate:
-		return p.createFromCollection(call, request, scope)
-	case methodDocumentsUpdate:
-		return p.upsert(call, request, scope)
-	case methodDocumentsGet:
-		return p.get(request, scope)
-	case methodDocumentsList:
-		return p.list(request, scope)
 	case methodFieldsGet:
 		return p.fieldGet(request, scope)
 	case methodFieldsUpdate:
 		return p.fieldUpdate(request, scope)
 	default:
-		return p.remove(request, scope)
+		return forward(ctx, b, call.Method, request)
 	}
 }
 
-// documentKey is the state key of one document.
-func documentKey(collection, id string) string { return collection + "/" + id }
+// forwardedQuery lists the documented documents-API parameters the emulator
+// receives; system parameters and credentials such as access_token never do.
+var forwardedQuery = map[string]bool{
+	"documentId": true, "mask.fieldPaths": true, "updateMask.fieldPaths": true,
+	"currentDocument.exists": true, "currentDocument.updateTime": true,
+	"pageSize": true, "pageToken": true, "orderBy": true, "showMissing": true, "readTime": true,
+}
 
-// upsert creates or replaces one document with the posted fields.
-func (p *Provider) upsert(_ gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	collection, id := request.Path["collectionId"], request.Path["documentId"]
-	var body struct {
-		Fields map[string]any `json:"fields"`
+// maxBackendResponse bounds one emulator response body.
+const maxBackendResponse = 32 << 20
+
+// forward replays one authorized documents request against the private
+// emulator and returns its status and JSON body unchanged. The fixed "owner"
+// bearer is the emulator's documented administrative bypass of security rules:
+// the provider has already made the IAM decision, and no caller credential is
+// sent.
+func forward(ctx context.Context, b driver, method string, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+	var body io.Reader
+	if method == methodDocumentsCreate || method == methodDocumentsUpdate {
+		body = bytes.NewReader(request.JSON)
 	}
-	if err := json.Unmarshal(request.JSON, &body); err != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid document body")
-	}
-	if body.Fields == nil {
-		return nil, status.Error(codes.InvalidArgument, "A document requires a fields object")
-	}
-	// A field mask limits the write to the named top-level fields; without one
-	// the document is replaced, as GCP does.
-	mask := request.Query["updateMask.fieldPaths"]
-	if err := checkMask(mask); err != nil {
-		return nil, err
-	}
-	now := p.clock()
-	var created bool
-	var stored *documentRecord
-	err := p.scopes.With(scope, func(s *scopeState) error {
-		key := documentKey(collection, id)
-		existing := s.documents[key]
-		created = existing == nil
-		stored = &documentRecord{Collection: collection, ID: id, Fields: maskedFields(existing, body.Fields, mask), CreateTime: stamp(now), UpdateTime: stamp(now)}
-		if existing != nil {
-			stored.CreateTime = existing.CreateTime
-		}
-		s.documents[key] = stored
-		return nil
-	})
+	outbound, err := http.NewRequestWithContext(ctx, httpVerb(method), b.baseURL()+backendPath(request), body)
 	if err != nil {
-		return nil, fmt.Errorf("store the document: %w", err)
+		return nil, status.Error(codes.Internal, "Unable to build the emulator request")
 	}
-	if created {
-		if indexErr := p.index.Put(serviceName, state.Resource{
-			Name: documentResource(scope.Project, collection, id), Service: serviceName,
-			Kind: kindDocument, Parent: projectResource(scope.Project), Scope: scope,
-		}); indexErr != nil {
-			return nil, fmt.Errorf("index the document: %w", indexErr)
-		}
+	outbound.Header.Set("Authorization", "Bearer owner")
+	if body != nil {
+		outbound.Header.Set("Content-Type", "application/json")
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	return &gateway.RESTResponse{JSON: documentWire(scope.Project, collection, id, stored.Fields, parseStamp(stored.CreateTime), now)}, nil
-}
-
-// checkMask refuses nested update mask paths, an explicit coverage gap.
-func checkMask(mask []string) error {
-	for _, path := range mask {
-		if strings.ContainsAny(path, ".`") {
-			return status.Error(codes.Unimplemented, "Firestore coverage gap: nested update mask paths are not implemented")
-		}
-	}
-	return nil
-}
-
-// maskedFields applies a top-level field mask to the stored document; with no
-// mask the written fields replace the document.
-func maskedFields(existing *documentRecord, written map[string]any, mask []string) map[string]any {
-	if len(mask) == 0 {
-		return written
-	}
-	fields := map[string]any{}
-	if existing != nil {
-		maps.Copy(fields, existing.Fields)
-	}
-	for _, path := range mask {
-		if value, ok := written[path]; ok {
-			fields[path] = value
-		} else {
-			delete(fields, path)
-		}
-	}
-	return fields
-}
-
-// get returns one document.
-func (p *Provider) get(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	collection, id := request.Path["collectionId"], request.Path["documentId"]
-	var record *documentRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		record = s.documents[documentKey(collection, id)]
-		return nil
-	})
-	if record == nil {
-		return nil, notFound(kindDocument, id)
-	}
-	return &gateway.RESTResponse{JSON: documentWire(scope.Project, collection, id, record.Fields, parseStamp(record.CreateTime), parseStamp(record.UpdateTime))}, nil
-}
-
-// list returns the collection's documents.
-func (p *Provider) list(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	collection := request.Path["collectionId"]
-	items := []any{}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for key, record := range s.documents {
-			coll, _ := splitKey(key)
-			if coll != collection {
-				continue
-			}
-			items = append(items, documentWire(scope.Project, record.Collection, record.ID, record.Fields, parseStamp(record.CreateTime), parseStamp(record.UpdateTime)))
-		}
-		return nil
-	})
-	return &gateway.RESTResponse{JSON: map[string]any{"documents": items}}, nil
-}
-
-// remove deletes one document.
-func (p *Provider) remove(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	collection, id := request.Path["collectionId"], request.Path["documentId"]
-	var existed bool
-	err := p.scopes.With(scope, func(s *scopeState) error {
-		key := documentKey(collection, id)
-		if s.documents[key] != nil {
-			existed = true
-			delete(s.documents, key)
-		}
-		return nil
-	})
+	response, err := backendClient.Do(outbound)
 	if err != nil {
-		return nil, fmt.Errorf("remove the document: %w", err)
+		if ctx.Err() != nil {
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
+		return nil, status.Error(codes.Unavailable, "Firestore emulator request failed")
 	}
-	// Deleting an absent document succeeds in GCP.
-	if !existed {
-		return &gateway.RESTResponse{JSON: map[string]any{}}, nil
-	}
-	if err := p.index.Remove(serviceName, scope, documentResource(scope.Project, collection, id)); err != nil {
-		return nil, fmt.Errorf("unregister the document: %w", err)
-	}
-	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
+	defer response.Body.Close()
+	return relay(response)
 }
 
-// documentWire renders one document wire shape.
-func documentWire(project, collection, id string, fields map[string]any, created, updated time.Time) map[string]any {
-	return map[string]any{
-		"name":       documentName(project, collection, id),
-		"fields":     fields,
-		"createTime": stamp(created),
-		"updateTime": stamp(updated),
+// backendPath rebuilds the documents path and its allowed query parameters.
+func backendPath(request *gateway.RESTRequest) string {
+	path := "/v1/projects/" + url.PathEscape(request.Path["project"]) + "/databases/(default)/documents/" + url.PathEscape(request.Path["collectionId"])
+	if id, ok := request.Path["documentId"]; ok {
+		path += "/" + url.PathEscape(id)
 	}
-}
-
-// splitKey splits a state key into collection and id.
-func splitKey(key string) (string, string) {
-	for i := range len(key) {
-		if key[i] == '/' {
-			return key[:i], key[i+1:]
+	query := url.Values{}
+	for key, values := range request.Query {
+		if forwardedQuery[key] {
+			query[key] = values
 		}
 	}
-	return key, ""
+	if len(query) != 0 {
+		path += "?" + query.Encode()
+	}
+	return path
 }
 
-// parseStamp reads one stored timestamp, defaulting to the zero time.
-func parseStamp(value string) time.Time {
-	parsed, err := time.Parse("2006-01-02T15:04:05.000000Z", value)
-	if err != nil {
-		return time.Time{}
+// relay returns the emulator's status and JSON body unchanged; a non-JSON
+// reply means the emulator does not serve that surface.
+func relay(response *http.Response) (*gateway.RESTResponse, error) {
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxBackendResponse+1))
+	if err != nil || len(raw) > maxBackendResponse {
+		return nil, status.Error(codes.Unavailable, "Firestore emulator response was unreadable or too large")
 	}
-	return parsed
+	if !json.Valid(raw) {
+		return nil, status.Errorf(codes.Unimplemented, "Firestore coverage gap: the emulator returned HTTP %d without a JSON body", response.StatusCode)
+	}
+	return &gateway.RESTResponse{Status: response.StatusCode, JSON: json.RawMessage(raw)}, nil
 }
 
-// createFromCollection creates one document from a collection POST with the
-// documentId query, matching the real surface's collection-level create.
-func (p *Provider) createFromCollection(_ gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	collection := request.Path["collectionId"]
-	id := request.Query.Get("documentId")
-	if !uid.MatchString(id) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid document id %q", id)
+// httpVerb maps a documents method to its REST verb.
+func httpVerb(method string) string {
+	switch method {
+	case methodDocumentsCreate:
+		return http.MethodPost
+	case methodDocumentsUpdate:
+		return http.MethodPatch
+	case methodDocumentsDelete:
+		return http.MethodDelete
+	default:
+		return http.MethodGet
 	}
-	var body struct {
-		Fields map[string]any `json:"fields"`
-	}
-	if err := json.Unmarshal(request.JSON, &body); err != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid document body")
-	}
-	now := p.clock()
-	err := p.scopes.With(scope, func(s *scopeState) error {
-		key := documentKey(collection, id)
-		if s.documents[key] != nil {
-			return status.Errorf(codes.AlreadyExists, "Document %s already exists", id)
-		}
-		s.documents[key] = &documentRecord{Collection: collection, ID: id, Fields: body.Fields, CreateTime: stamp(now), UpdateTime: stamp(now)}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store the document: %w", err)
-	}
-	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: documentResource(scope.Project, collection, id), Service: serviceName,
-		Kind: kindDocument, Parent: projectResource(scope.Project), Scope: scope,
-	}); indexErr != nil {
-		return nil, fmt.Errorf("index the document: %w", indexErr)
-	}
-	return &gateway.RESTResponse{JSON: documentWire(scope.Project, collection, id, body.Fields, now, now)}, nil
 }
 
 // fieldGet returns one collection-group field record.

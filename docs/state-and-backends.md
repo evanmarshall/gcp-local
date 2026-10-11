@@ -12,6 +12,8 @@ This layer follows LocalStack's scoped stores, lazy service loading, and reset/s
 | Canonical resource name, service, kind, project/location, parent reference | Shared resource index | Provider publication/deletion/reset only; no backend databases or duplicate policy payloads |
 | Process status, readiness, lifecycle failure category | Backend manager | Startup/probe/reset/shutdown transitions |
 
+The same split applies to emulator-backed providers. Pub/Sub and Firestore each run one official emulator JVM per project scope. That emulator owns topics/subscriptions or documents. The provider owns what the emulator cannot: Pub/Sub push configuration, and Firestore collection-group field/TTL configuration. Reset stops the JVM, which discards backend data, before clearing provider state. See [pubsub.md](pubsub.md) and [firestore.md](firestore.md).
+
 `state.Store` requires an explicit project and location and serializes mutations per scope. Providers supply the service-specific location validator. Storage is global: a bucket's physical region is a placement attribute, not another namespace for the same name. The shared index enforces global bucket-name ownership across projects. Regional/zonal providers can use distinct location keys; store tests verify that project and location resets do not cross those boundaries. Store callbacks perform short in-memory work and must not retain mutable references or re-enter their store. Catalog getters return value copies.
 
 ## Lifecycle and reset

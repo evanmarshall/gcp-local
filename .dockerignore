@@ -5,9 +5,11 @@
 !scripts
 !scripts/install_go.py
 !scripts/install_pubsub.py
+!scripts/install_firestore.py
 !toolchains
 !toolchains/go.json
 !toolchains/pubsub.json
+!toolchains/firestore.json
 !api
 !api/**
 !cmd

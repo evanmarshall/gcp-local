@@ -1,0 +1,17 @@
+{
+  "name": "Google Cloud Firestore emulator",
+  "version": "1.19.9",
+  "sdk_version": "529.0.0",
+  "source_manifest": "https://dl.google.com/dl/cloudsdk/channels/rapid/components-v529.0.0.json",
+  "retrieved_at": "2026-10-11",
+  "url": "https://dl.google.com/dl/cloudsdk/channels/rapid/components/google-cloud-sdk-cloud-firestore-emulator-20240913204132.tar.gz",
+  "size": 49222535,
+  "sha256": "8b4dbc1cb4a0d1217f8283a3057d4ba704fcbe11ba7f2b12dc1c13edb87e2e22",
+  "jar": "platform/cloud-firestore-emulator/cloud-firestore-emulator.jar",
+  "jar_sha256": "c8c8a63a5ab87cc1b677642c16b794dd9be241fe2d50dc52242b353d27e189fe",
+  "main_class": "com.google.cloud.datastore.emulator.firestore.CloudFirestore",
+  "java_minimum": 11,
+  "newer_versions": "1.20.0 (SDK 530.0.0) through 1.22.0 (SDK 588.0.0) ship Java 21 class files (major version 65) and do not run on the pinned Java 17 runtime",
+  "documentation": "https://docs.cloud.google.com/firestore/native/docs/emulator",
+  "distribution": "Downloaded development/runtime component; binaries are not vendored"
+}

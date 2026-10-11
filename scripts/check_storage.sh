@@ -4,7 +4,8 @@ set -eu
 cd "$(dirname "$0")/.."
 GCP_LOCAL_JAVA=${GCP_LOCAL_JAVA:-$(command -v java)}
 GCP_LOCAL_PUBSUB_JAR=${GCP_LOCAL_PUBSUB_JAR:-"$PWD/.tools/pubsub/emulator.jar"}
-export GCP_LOCAL_JAVA GCP_LOCAL_PUBSUB_JAR
+GCP_LOCAL_FIRESTORE_JAR=${GCP_LOCAL_FIRESTORE_JAR:-"$PWD/.tools/firestore/emulator.jar"}
+export GCP_LOCAL_JAVA GCP_LOCAL_PUBSUB_JAR GCP_LOCAL_FIRESTORE_JAR
 storage_python=${GCP_LOCAL_TEST_PYTHON:-.venv-tools/bin/python}
 sh scripts/go.sh build -trimpath -o bin/gcp-local ./cmd/gcp-local
 sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance

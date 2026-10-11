@@ -106,6 +106,7 @@ type serveOptions struct {
 	runSocket                          string
 	runProcess                         map[string]string
 	services, pubsubJava, pubsubJAR    string
+	firestoreJava, firestoreJAR        string
 	metadataPrincipal                  string
 	showVersion                        bool
 }
@@ -122,6 +123,8 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager,iam")
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
+	flags.StringVar(&options.firestoreJava, "firestore-java", "", "absolute Java executable for the official Firestore emulator")
+	flags.StringVar(&options.firestoreJAR, "firestore-jar", "", "absolute checksum-pinned Firestore emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
 	flags.StringVar(&options.runSocket, "run-docker-socket", "", "Docker engine socket for Cloud Run containers; empty refuses launch")
 	flags.Var(processMap{&options.runProcess}, "run-process", "dockerless revision launch: image=command; repeatable; commands run as local processes")
@@ -266,6 +269,9 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assemblePubSub(options, selected, registry, server, index, engine, identities); err != nil {
 		return err
 	}
+	if err := assembleFirestore(ctx, options, selected, registry, server, index, engine); err != nil {
+		return err
+	}
 	for _, assemble := range []struct {
 		service  string
 		register func(context.Context, map[string]bool, *gateway.Registry, *core.Server, *state.Index, *iam.Engine) error
@@ -274,7 +280,6 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 		{"secretmanager", assembleSecretManager},
 		{"cloudtasks", assembleCloudTasks},
 		{"cloudkms", assembleCloudKMS},
-		{"firestore", assembleFirestore},
 		{"spanner", assembleSpanner},
 		{"bigquery", assembleBigQuery},
 		{"bigtable", assembleBigtable},
@@ -411,12 +416,13 @@ func assembleIAMAdmin(ctx context.Context, selected map[string]bool, registry *g
 	return nil
 }
 
-// assembleFirestore registers the Firestore documents provider.
-func assembleFirestore(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+// assembleFirestore registers the Firestore provider and its emulator paths.
+func assembleFirestore(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
 	if !selected["firestore"] {
 		return nil
 	}
-	if _, err := firestoreprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+	config := firestoreprovider.Config{Java: options.firestoreJava, JAR: options.firestoreJAR}
+	if _, err := firestoreprovider.New(ctx, registry, server.Backends, index, engine, config); err != nil {
 		return fmt.Errorf("register the Firestore provider: %w", err)
 	}
 	return nil

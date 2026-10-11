@@ -49,6 +49,8 @@ def source_version() -> str:
             "toolchains/go.json",
             "scripts/install_pubsub.py",
             "toolchains/pubsub.json",
+            "scripts/install_firestore.py",
+            "toolchains/firestore.json",
         )
     ]
     for directory in ("api", "cmd", "internal"):

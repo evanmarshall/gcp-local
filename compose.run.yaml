@@ -11,6 +11,8 @@ services:
       - -iam-config=/config/iam.json
       - -pubsub-java=/usr/bin/java
       - -pubsub-jar=/opt/pubsub/emulator.jar
+      - -firestore-java=/usr/bin/java
+      - -firestore-jar=/opt/firestore/emulator.jar
       - -run-docker-socket=/var/run/docker.sock
     volumes:
       - type: bind

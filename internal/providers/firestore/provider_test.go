@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,25 +17,90 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
-// Names and keys repeated across the lifecycle tests.
+// Names repeated across the provider tests.
 const (
-	testProject     = "demo-fs"
-	testCollection  = "books"
-	testDoc         = "doc-1"
-	testToken       = "actor"
-	testDocsPath    = "/v1/projects/" + testProject + "/databases/(default)/documents"
-	testActor       = "serviceAccount:actor@" + testProject + ".iam.gserviceaccount.com"
-	testFieldsKey   = "fields"
-	testTitleKey    = "title"
-	testTitleString = "fire-and-fog"
+	testProject    = "demo-fs"
+	otherProject   = "demo-other"
+	testCollection = "books"
+	testDoc        = "doc-1"
+	testDocsPath   = "/v1/projects/" + testProject + "/databases/(default)/documents"
+	testFieldPath  = "/v1/projects/" + testProject + "/databases/(default)/collectionGroups/" + testCollection + "/fields/title"
 )
 
-// harness drives the provider through the gateway.
+// seen is one request the fake emulator received.
+type seen struct {
+	Method, Path, Query, Authorization, Body string
+}
+
+// fakeEmulator stands in for one scoped JVM: it records what reaches it and
+// replies with a fixed status and body.
+type fakeEmulator struct {
+	mu       sync.Mutex
+	scope    state.Scope
+	server   *httptest.Server
+	starts   int
+	stops    int
+	requests []seen
+	status   int
+	reply    string
+}
+
+func (f *fakeEmulator) Start(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.starts++
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.requests = append(f.requests, seen{r.Method, r.URL.EscapedPath(), r.URL.RawQuery, r.Header.Get("Authorization"), string(body)})
+		code, reply := f.status, f.reply
+		f.mu.Unlock()
+		w.WriteHeader(code)
+		_, _ = w.Write([]byte(reply))
+	}))
+	return nil
+}
+func (f *fakeEmulator) Ready(context.Context) error { return nil }
+
+// counts returns the lifecycle counters and received requests under the lock.
+func (f *fakeEmulator) counts() (int, int, []seen) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.starts, f.stops, append([]seen(nil), f.requests...)
+}
+
+// respond sets the next replies.
+func (f *fakeEmulator) respond(code int, reply string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status, f.reply = code, reply
+}
+func (f *fakeEmulator) Stop(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.server != nil {
+		f.server.Close()
+		f.server = nil
+		f.stops++
+	}
+	return nil
+}
+func (f *fakeEmulator) Reset(ctx context.Context) error { return f.Stop(ctx) }
+func (f *fakeEmulator) baseURL() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.server.URL
+}
+
+// harness drives the provider through the gateway with a fake per-scope backend.
 type harness struct {
-	t      *testing.T
-	gate   *gateway.Gateway
-	index  *state.Index
-	engine *iam.Engine
+	t         *testing.T
+	gate      *gateway.Gateway
+	engine    *iam.Engine
+	manager   *backend.Manager
+	provider  *Provider
+	mu        sync.Mutex
+	instances []*fakeEmulator
 }
 
 func newHarness(t *testing.T) *harness {
@@ -45,31 +111,46 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("build the iam engine: %v", err)
 	}
-	if err := index.Put("resourcemanager", state.Resource{
-		Name: "//cloudresourcemanager.googleapis.com/projects/" + testProject, Service: "resourcemanager",
-		Kind: "project", Number: "123456", Scope: state.Scope{Project: testProject, Location: state.Global},
-	}); err != nil {
-		t.Fatalf("register the project: %v", err)
+	for _, project := range []string{testProject, otherProject} {
+		if err := index.Put("resourcemanager", state.Resource{
+			Name: projectResource(project), Service: "resourcemanager",
+			Kind: "project", Number: "123456", Scope: scopeOf(project),
+		}); err != nil {
+			t.Fatalf("register the project: %v", err)
+		}
+		if _, err := engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{
+			{Role: "roles/datastore.user", Members: []string{principal("actor", project)}},
+			{Role: "roles/datastore.viewer", Members: []string{principal("viewer", project)}},
+			{Role: "roles/datastore.indexAdmin", Members: []string{principal("admin", project)}},
+		}}); err != nil {
+			t.Fatalf("grant the project: %v", err)
+		}
 	}
-	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, iam.Policy{
-		Bindings: []iam.Binding{
-			{Role: "roles/datastore.user", Members: []string{testActor}},
-		},
-	}); err != nil {
-		t.Fatalf("grant the project: %v", err)
-	}
-	_, err = New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine)
+	h := &harness{t: t, engine: engine, manager: backend.NewManager(time.Second, time.Second)}
+	h.provider, err = newProvider(registry, h.manager, index, engine, func(scope state.Scope) (backend.Backend, error) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		instance := &fakeEmulator{scope: scope, status: 200, reply: `{"name":"from-emulator"}`}
+		h.instances = append(h.instances, instance)
+		return instance, nil
+	})
 	if err != nil {
 		t.Fatalf("build the firestore provider: %v", err)
 	}
-	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
-		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
+	t.Cleanup(func() { _ = h.manager.Shutdown(context.Background()) })
+	h.gate = gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
+		actor, project, _ := bytes.Cut([]byte(token), []byte(":"))
+		return gateway.Principal{State: gateway.Authenticated, Subject: principal(string(actor), string(project)), Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, index: index, engine: engine}
+	return h
 }
 
-// invoke issues one REST request as the fixture principal.
-func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
+func principal(actor, project string) string {
+	return "serviceAccount:" + actor + "@" + project + ".iam.gserviceaccount.com"
+}
+
+// invoke issues one REST request with a token naming the actor and its project.
+func (h *harness) invoke(token, verb, path string, body any) *httptest.ResponseRecorder {
 	h.t.Helper()
 	var encoded []byte
 	if body != nil {
@@ -79,152 +160,148 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Authorization", "Bearer "+testToken)
+	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
 	h.gate.ServeHTTP(recorder, request)
 	return recorder
 }
 
-// docPath is one document path in the fixture collection.
-func docPath(id string) string { return testDocsPath + "/" + testCollection + "/" + id }
-
-// fieldsBody renders one document body with the fixture title.
-func fieldsBody(title string) map[string]any {
-	return map[string]any{testFieldsKey: map[string]any{testTitleKey: map[string]any{"stringValue": title}}}
+// started returns the backend instances created so far.
+func (h *harness) started() []*fakeEmulator {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]*fakeEmulator(nil), h.instances...)
 }
 
-func TestDocumentLifecycle(t *testing.T) {
-	h := newHarness(t)
-	recorder := h.invoke(http.MethodPatch, docPath(testDoc), fieldsBody(testTitleString))
-	if recorder.Code != 200 {
-		t.Fatalf("create status = %d body %s", recorder.Code, recorder.Body.String())
-	}
-	recorder = h.invoke(http.MethodGet, docPath(testDoc), nil)
-	if recorder.Code != 200 {
-		t.Fatalf("get status = %d", recorder.Code)
-	}
-	var document struct {
-		Fields map[string]map[string]any `json:"fields"`
-		Name   string                    `json:"name"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &document); err != nil {
-		t.Fatalf("decode document: %v", err)
-	}
-	if document.Fields[testTitleKey]["stringValue"] != testTitleString {
-		t.Fatalf("fields = %+v", document.Fields)
-	}
-	if document.Name == "" {
-		t.Fatal("name is empty")
-	}
+const actor = "actor:" + testProject
+
+func docPath() string { return testDocsPath + "/" + testCollection + "/" + testDoc }
+
+func titleBody(title string) map[string]any {
+	return map[string]any{"fields": map[string]any{"title": map[string]any{"stringValue": title}}}
 }
 
-// TestDocumentUpsertAndListing covers the upsert and the collection listing.
-func TestDocumentUpsertAndListing(t *testing.T) {
+func TestDeniedRequestsNeverStartOrReachTheEmulator(t *testing.T) {
 	h := newHarness(t)
-	h.invoke(http.MethodPatch, docPath(testDoc), fieldsBody(testTitleString))
-	// The real surface upserts: a PATCH over an existing path replaces it.
-	recorder := h.invoke(http.MethodPatch, docPath(testDoc), fieldsBody("second"))
-	if recorder.Code != 200 {
-		t.Fatalf("upsert status = %d", recorder.Code)
-	}
-	// A second document joins the collection listing.
-	recorder = h.invoke(http.MethodPatch, docPath("doc-2"), fieldsBody("second-book"))
-	if recorder.Code != 200 {
-		t.Fatalf("second create status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodGet, testDocsPath+"/"+testCollection, nil)
-	if recorder.Code != 200 {
-		t.Fatalf("list status = %d", recorder.Code)
-	}
-	var listed struct {
-		Documents []struct {
-			Name string `json:"name"`
-		} `json:"documents"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if len(listed.Documents) != 2 {
-		t.Fatalf("documents = %+v", listed.Documents)
-	}
-	recorder = h.invoke(http.MethodDelete, docPath(testDoc), nil)
-	if recorder.Code != 200 {
-		t.Fatalf("delete status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodGet, docPath(testDoc), nil)
-	if recorder.Code != 404 {
-		t.Fatalf("get after delete status = %d", recorder.Code)
-	}
-}
-
-func TestDocumentUpdateKeepsCreateTime(t *testing.T) {
-	h := newHarness(t)
-	h.invoke(http.MethodPatch, docPath(testDoc), fieldsBody(testTitleString))
-	recorder := h.invoke(http.MethodPatch, docPath(testDoc)+"?currentDocument.exists=true", fieldsBody("second"))
-	if recorder.Code != 200 {
-		t.Fatalf("update status = %d", recorder.Code)
-	}
-	var document struct {
-		Fields     map[string]map[string]any `json:"fields"`
-		CreateTime string                    `json:"createTime"`
-		UpdateTime string                    `json:"updateTime"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &document); err != nil {
-		t.Fatalf("decode document: %v", err)
-	}
-	if document.Fields[testTitleKey]["stringValue"] != "second" {
-		t.Fatalf("fields = %+v", document.Fields)
-	}
-	if document.CreateTime == "" || document.UpdateTime == "" {
-		t.Fatalf("timestamps = %+v", document)
-	}
-}
-
-func TestDocumentRequiresFields(t *testing.T) {
-	h := newHarness(t)
-	recorder := h.invoke(http.MethodPatch, docPath(testDoc), map[string]any{})
-	if recorder.Code != 400 {
-		t.Fatalf("missing fields status = %d", recorder.Code)
-	}
-}
-
-func TestViewerCannotWrite(t *testing.T) {
-	h := newHarness(t)
-	if _, err := h.engineSet(iam.Policy{Version: 3, Bindings: []iam.Binding{
-		{Role: "roles/datastore.viewer", Members: []string{"serviceAccount:viewer@" + testProject + ".iam.gserviceaccount.com"}},
-	}}); err != nil {
-		t.Fatalf("set the viewer policy: %v", err)
-	}
-	request, _ := http.NewRequestWithContext(context.Background(), http.MethodPatch,
-		docPath(testDoc), bytes.NewReader([]byte(`{"fields":{}}`)))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer viewer")
-	recorder := httptest.NewRecorder()
-	h.gate.ServeHTTP(recorder, request)
-	if recorder.Code != 403 {
-		t.Fatalf("viewer write status = %d body %s", recorder.Code, recorder.Body.String())
-	}
-}
-
-func TestEveryRouteIsHandled(t *testing.T) {
-	h := newHarness(t)
-	h.invoke(http.MethodPatch, docPath(testDoc), fieldsBody(testTitleString))
-	gap := "this method is not implemented"
-	probe := func(verb, path string) {
-		recorder := h.invoke(verb, path, nil)
-		if recorder.Code == 501 && bytes.Contains(recorder.Body.Bytes(), []byte(gap)) {
-			t.Fatalf("%s %s hit the dispatch gap", verb, path)
+	viewer := "viewer:" + testProject
+	stranger := "actor:" + otherProject
+	for _, attempt := range []struct{ token, verb, path string }{
+		{viewer, http.MethodPatch, docPath()},
+		{viewer, http.MethodPost, testDocsPath + "/" + testCollection + "?documentId=x"},
+		{viewer, http.MethodDelete, docPath()},
+		{stranger, http.MethodGet, docPath()},
+		{stranger, http.MethodGet, testDocsPath + "/" + testCollection},
+	} {
+		recorder := h.invoke(attempt.token, attempt.verb, attempt.path, titleBody("no"))
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("%s %s as %s = %d %s", attempt.verb, attempt.path, attempt.token, recorder.Code, recorder.Body.String())
 		}
 	}
-	probe(http.MethodGet, docPath(testDoc))
-	probe(http.MethodGet, testDocsPath+"/"+testCollection)
+	if instances := h.started(); len(instances) != 0 {
+		t.Fatalf("denied requests created %d backend instances", len(instances))
+	}
 }
 
-// engineSet replaces the project policy in the test harness.
-func (h *harness) engineSet(policy iam.Policy) (iam.Policy, error) {
-	policy, err := h.engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, policy)
-	if err != nil {
-		return policy, fmt.Errorf("set the project policy: %w", err)
+func TestAllowedRequestIsForwardedWithoutCallerCredentials(t *testing.T) {
+	h := newHarness(t)
+	recorder := h.invoke(actor, http.MethodPatch, docPath()+"?updateMask.fieldPaths=title&access_token=secret&alt=json", titleBody("fog"))
+	if recorder.Code != http.StatusOK || recorder.Body.String() != `{"name":"from-emulator"}` {
+		t.Fatalf("forwarded response = %d %s", recorder.Code, recorder.Body.String())
 	}
-	return policy, nil
+	instances := h.started()
+	if len(instances) != 1 || instances[0].scope != scopeOf(testProject) {
+		t.Fatalf("instances = %d", len(instances))
+	}
+	starts, _, got := instances[0].counts()
+	if starts != 1 {
+		t.Fatalf("starts = %d", starts)
+	}
+	want := seen{http.MethodPatch, "/v1/projects/" + testProject + "/databases/%28default%29/documents/" + testCollection + "/" + testDoc,
+		"updateMask.fieldPaths=title", "Bearer owner", `{"fields":{"title":{"stringValue":"fog"}}}`}
+	if len(got) != 1 {
+		t.Fatalf("requests = %+v", got)
+	}
+	// Go may escape the database segment; both spellings name the same path.
+	if got[0].Path == "/v1/projects/"+testProject+"/databases/(default)/documents/"+testCollection+"/"+testDoc {
+		want.Path = got[0].Path
+	}
+	if got[0] != want {
+		t.Fatalf("forwarded request = %+v, want %+v", got[0], want)
+	}
+}
+
+func TestEmulatorErrorsPassThrough(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(actor, http.MethodGet, docPath(), nil)
+	instance := h.started()[0]
+	instance.respond(http.StatusConflict, `{"error":{"code":409,"message":"exists","status":"ALREADY_EXISTS"}}`)
+	recorder := h.invoke(actor, http.MethodPost, testDocsPath+"/"+testCollection+"?documentId="+testDoc, titleBody("x"))
+	var wire struct {
+		Error struct {
+			Status string `json:"status"`
+		} `json:"error"`
+	}
+	if recorder.Code != http.StatusConflict || json.Unmarshal(recorder.Body.Bytes(), &wire) != nil || wire.Error.Status != "ALREADY_EXISTS" {
+		t.Fatalf("duplicate = %d %s", recorder.Code, recorder.Body.String())
+	}
+	instance.respond(http.StatusNotFound, "Not Found")
+	if recorder := h.invoke(actor, http.MethodGet, docPath(), nil); recorder.Code != http.StatusNotImplemented {
+		t.Fatalf("non-JSON emulator reply = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestProjectsUseSeparateEmulators(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(actor, http.MethodGet, docPath(), nil)
+	other := "/v1/projects/" + otherProject + "/databases/(default)/documents/" + testCollection + "/" + testDoc
+	if recorder := h.invoke("actor:"+otherProject, http.MethodGet, other, nil); recorder.Code != http.StatusOK {
+		t.Fatalf("other project = %d %s", recorder.Code, recorder.Body.String())
+	}
+	instances := h.started()
+	if len(instances) != 2 || instances[0].scope == instances[1].scope || instances[0].baseURL() == instances[1].baseURL() {
+		t.Fatalf("instances = %d", len(instances))
+	}
+	for _, instance := range instances {
+		if _, _, requests := instance.counts(); len(requests) != 1 {
+			t.Fatalf("instance %v requests = %+v", instance.scope, requests)
+		}
+	}
+}
+
+func TestResetStopsTheEmulatorAndClearsFieldConfiguration(t *testing.T) {
+	h := newHarness(t)
+	admin := "admin:" + testProject
+	if recorder := h.invoke(admin, http.MethodPatch, testFieldPath, map[string]any{"ttlConfig": map[string]any{}}); recorder.Code != http.StatusOK {
+		t.Fatalf("field update = %d %s", recorder.Code, recorder.Body.String())
+	}
+	h.invoke(actor, http.MethodGet, docPath(), nil)
+	if err := h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if _, stops, _ := h.started()[0].counts(); stops != 1 {
+		t.Fatal("reset left the emulator running")
+	}
+	recorder := h.invoke(admin, http.MethodGet, testFieldPath, nil)
+	var field struct {
+		TTLConfig map[string]any `json:"ttlConfig"`
+	}
+	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &field) != nil || len(field.TTLConfig) != 0 {
+		t.Fatalf("field after reset = %d %s", recorder.Code, recorder.Body.String())
+	}
+	h.invoke(actor, http.MethodGet, docPath(), nil)
+	// The manager restarts the scope's driver; Start launches a fresh process.
+	starts, _, requests := h.started()[0].counts()
+	if len(h.started()) != 1 || starts != 2 || len(requests) != 2 {
+		t.Fatalf("documents after reset did not reach a restarted emulator: starts %d requests %+v", starts, requests)
+	}
+}
+
+func TestInvalidPathIsRejectedBeforeTheBackend(t *testing.T) {
+	h := newHarness(t)
+	if recorder := h.invoke(actor, http.MethodGet, testDocsPath+"/"+testCollection+"/a%2Fb", nil); recorder.Code < 400 {
+		t.Fatalf("invalid id status = %d", recorder.Code)
+	}
+	if len(h.started()) != 0 {
+		t.Fatal("an invalid request started the backend")
+	}
 }
