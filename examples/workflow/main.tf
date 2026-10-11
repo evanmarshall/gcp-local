@@ -1,7 +1,9 @@
-# The workflow example provisions the durable bucket through Terraform. The
-# Pub/Sub push subscription and the Cloud Run worker are created with the same
-# REST surfaces the SDKs use; their Terraform resources are not covered by a
-# recorded local contract yet (see docs/workflow.md).
+# The workflow example provisions the durable bucket plus the Pub/Sub topic
+# and push subscription through Terraform. The resource contracts are pinned
+# by the acceptance runner (TestAccPubSubTopicAndSubscription over the JSON
+# REST surface). The Cloud Run worker is still created with the same REST
+# surfaces the SDKs use; its Terraform resource is parked (see docs/workflow.md
+# and issue #13).
 terraform {
   required_providers {
     google = {
@@ -37,7 +39,44 @@ variable "bucket" {
   type = string
 }
 
+variable "topic" {
+  type = string
+}
+
+variable "subscription" {
+  type = string
+}
+
+variable "push_endpoint" {
+  type = string
+}
+
+variable "push_audience" {
+  type = string
+}
+
+variable "worker_service_account" {
+  type = string
+}
+
 resource "google_storage_bucket" "workflow" {
   name     = var.bucket
   location = var.region
+}
+
+resource "google_pubsub_topic" "workflow" {
+  name = var.topic
+}
+
+resource "google_pubsub_subscription" "workflow" {
+  name  = var.subscription
+  topic = google_pubsub_topic.workflow.id
+
+  push_config {
+    push_endpoint = var.push_endpoint
+    oidc_token {
+      service_account_email = var.worker_service_account
+      audience              = var.push_audience
+    }
+  }
 }

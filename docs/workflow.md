@@ -5,10 +5,10 @@ ordinary Linux Docker). The example sources live in `examples/workflow/`.
 
 ## Chain
 
-1. A bucket is created through the recorded Storage surface (the example's
-   Terraform covers it; the smoke uses the same API).
+1. The example's Terraform creates the bucket; the smoke uses the same API.
 2. A topic and a push subscription are created with the real Pub/Sub SDK over
-   the local gRPC gateway. The push delivery mints an ID token for the
+   the local gateway (the example's Terraform covers the same resources over
+   the JSON REST surface). The push delivery mints an ID token for the
    subscription's configured OIDC account, audience-bound to the worker URI.
 3. A Cloud Run worker is deployed through the v2 control plane with the worker
    service account configured. Its revision gets a private metadata listener
@@ -29,5 +29,9 @@ ordinary Linux Docker). The example sources live in `examples/workflow/`.
 - The control-plane calls in the smoke use an allUsers fixture project grant;
   the boundaries under test (invocation, the worker's write) use real
   per-identity grants.
-- Terraform coverage for Pub/Sub and Cloud Run resources needs proxy recording
-  work; the example's Terraform only provisions the bucket today.
+- The example's Terraform now provisions the bucket, topic, and push
+  subscription; the resource contracts are pinned by the acceptance runner
+  (TestAccPubSubTopicAndSubscription, TestAccStorageBucket_basic). The Cloud
+  Run resource stays parked (#13): the provider's start-up sequence hangs in
+  the loopback-only runner before reaching the local endpoint, so recording
+  its call sequence from real GCP is the unblock path.
