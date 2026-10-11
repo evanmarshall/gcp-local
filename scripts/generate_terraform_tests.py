@@ -7,6 +7,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+BUCKET_IAM_MEMBER_HCL = (
+    "resource \"google_storage_bucket_iam_member\" \"member\" {\n"
+    " bucket  = google_storage_bucket.bucket.name\n"
+    " role    = \"roles/storage.objectViewer\"\n"
+    " member  = \"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com\"\n"
+    "}\n"
+)
+
 
 def main() -> int:
     """Reproduce the pinned acceptance slice and its local adaptations."""
@@ -56,6 +64,12 @@ const objectName = "tf-gce-test"
                 "resource.TestCheckNoResourceAttr(\n\t\t\t\t\t\t"
                 '"google_storage_bucket.bucket", "rpo")',
             )
+        if name == "testAccStorageBucket_basic":
+            # The adapter pins a bucket IAM member alongside the upstream
+            # case: the surface is local-modeled and the grant exercises it.
+            value = value.replace(
+                'resource "google_storage_bucket" "bucket" {',
+                BUCKET_IAM_MEMBER_HCL + 'resource "google_storage_bucket" "bucket" {', 1)
         header += "\n" + value + "\n"
     formatted = subprocess.check_output([str(root / ".tools/go/bin/gofmt")], input=header.encode())
     output = root / "tests/terraform/runner/upstream_test.go"
