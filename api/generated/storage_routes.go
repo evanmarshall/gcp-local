@@ -97,9 +97,5 @@ var StorageRoutes = []Route{
 	{"storage.projects.hmacKeys.list", "GET", "/storage/v1/projects/{projectId}/hmacKeys", false, false},
 	{"storage.projects.hmacKeys.create", "POST", "/storage/v1/projects/{projectId}/hmacKeys", false, false},
 	{"storage.projects.serviceAccount.get", "GET", "/storage/v1/projects/{projectId}/serviceAccount", false, false},
-	{"storage.folders.delete", "DELETE", "/storage/v2/b/{bucket}/folders/{folder}", false, false},
-	{"storage.folders.get", "GET", "/storage/v2/b/{bucket}/folders/{folder}", false, false},
-	{"storage.folders.list", "GET", "/storage/v2/b/{bucket}/folders", false, false},
-	{"storage.folders.create", "POST", "/storage/v2/b/{bucket}/folders", true, false},
 	{"storage.objects.insert", "POST", "/upload/storage/v1/b/{bucket}/o", false, true},
 }

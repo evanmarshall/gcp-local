@@ -159,6 +159,10 @@ resource "google_storage_bucket_iam_member" "member" {
  role    = "roles/storage.objectViewer"
  member  = "serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"
 }
+resource "google_storage_folder" "folder" {
+ name   = "gcp-local-run/"
+ bucket = google_storage_bucket.bucket.name
+}
 resource "google_storage_bucket" "bucket" {
   name     = "%s"
   location = "US"

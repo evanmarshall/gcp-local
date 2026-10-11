@@ -54,7 +54,7 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 	}); err != nil {
 		return nil, fmt.Errorf("register the storage backend: %w", err)
 	}
-	for _, method := range methods {
+	for _, method := range append(methods, "storage.folders.insert", "storage.folders.get", "storage.folders.list", "storage.folders.delete") {
 		if err := registry.Register(method, p.handle); err != nil {
 			return nil, fmt.Errorf("register %s: %w", method, err)
 		}
@@ -225,7 +225,7 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 		}
 		return target, scope, projectMethod, nil, nil
 	}
-	if strings.HasPrefix(call.Method, "storage.folders.") {
+	if strings.HasPrefix(call.Method, "storage.folders.") || call.Method == "storage.folders.insert" {
 		resource, found := p.index.Get(target.Name)
 		if !found {
 			return iam.Target{}, state.Scope{}, projectMethod, notFound(bucket, ""), nil
@@ -563,7 +563,7 @@ func (p *Provider) executeFolder(call gateway.Call, r *gateway.RESTRequest, scop
 		return &gateway.RESTResponse{Status: 404, JSON: map[string]any{"error": map[string]any{"code": 404, "message": "No such object: folders/" + folderID}}}
 	}
 	switch call.Method {
-	case MethodFoldersCreate:
+	case MethodFoldersCreate, "storage.folders.insert":
 		var body struct {
 			Name string `json:"name"`
 		}

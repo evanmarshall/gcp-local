@@ -7,6 +7,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+FOLDER_HCL = (
+    "resource \"google_storage_folder\" \"folder\" {\n"
+    " name   = \"gcp-local-run/\"\n"
+    " bucket = google_storage_bucket.bucket.name\n"
+    "}\n"
+)
+
 BUCKET_IAM_MEMBER_HCL = (
     "resource \"google_storage_bucket_iam_member\" \"member\" {\n"
     " bucket  = google_storage_bucket.bucket.name\n"
@@ -69,7 +76,8 @@ const objectName = "tf-gce-test"
             # case: the surface is local-modeled and the grant exercises it.
             value = value.replace(
                 'resource "google_storage_bucket" "bucket" {',
-                BUCKET_IAM_MEMBER_HCL + 'resource "google_storage_bucket" "bucket" {', 1)
+                BUCKET_IAM_MEMBER_HCL + FOLDER_HCL +
+                'resource "google_storage_bucket" "bucket" {', 1)
         header += "\n" + value + "\n"
     formatted = subprocess.check_output([str(root / ".tools/go/bin/gofmt")], input=header.encode())
     output = root / "tests/terraform/runner/upstream_test.go"
