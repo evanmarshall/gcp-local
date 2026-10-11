@@ -87,6 +87,7 @@ func (r *Registry) registerRoutes() {
 		{generated.FirestoreRoutes, "firestore"},
 		{generated.BigQueryRoutes, "bigquery"},
 		{generated.SpannerRoutes, "spanner"},
+		{generated.BigtableRoutes, "bigtable"},
 		{generated.CloudTasksRoutes, "cloudtasks"},
 		{generated.PubSubRestRoutes, servicePubsub},
 	}

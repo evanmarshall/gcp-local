@@ -20,6 +20,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
+	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
 	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
@@ -115,7 +116,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcListen, "grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable")
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
@@ -262,26 +263,22 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assemblePubSub(options, selected, registry, server, index, engine, identities); err != nil {
 		return err
 	}
-	if err := assembleCompute(ctx, selected, registry, server, index, engine); err != nil {
-		return err
-	}
-	if err := assembleSecretManager(ctx, selected, registry, server, index, engine); err != nil {
-		return err
-	}
-	if err := assembleCloudTasks(ctx, selected, registry, server, index, engine); err != nil {
-		return err
-	}
-	if err := assembleCloudKMS(ctx, selected, registry, server, index, engine); err != nil {
-		return err
-	}
-	if err := assembleFirestore(ctx, selected, registry, server, index, engine); err != nil {
-		return err
-	}
-	if err := assembleSpanner(ctx, selected, registry, server, index, engine); err != nil {
-		return err
-	}
-	if err := assembleBigQuery(ctx, selected, registry, server, index, engine); err != nil {
-		return err
+	for _, assemble := range []struct {
+		service  string
+		register func(context.Context, map[string]bool, *gateway.Registry, *core.Server, *state.Index, *iam.Engine) error
+	}{
+		{"compute", assembleCompute},
+		{"secretmanager", assembleSecretManager},
+		{"cloudtasks", assembleCloudTasks},
+		{"cloudkms", assembleCloudKMS},
+		{"firestore", assembleFirestore},
+		{"spanner", assembleSpanner},
+		{"bigquery", assembleBigQuery},
+		{"bigtable", assembleBigtable},
+	} {
+		if err := assemble.register(ctx, selected, registry, server, index, engine); err != nil {
+			return err
+		}
 	}
 	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
 }
@@ -360,6 +357,17 @@ func assembleSpanner(ctx context.Context, selected map[string]bool, registry *ga
 	}
 	if _, err := spannerprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Spanner provider: %w", err)
+	}
+	return nil
+}
+
+// assembleBigtable registers the Bigtable admin provider.
+func assembleBigtable(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["bigtable"] {
+		return nil
+	}
+	if _, err := bigtableprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Bigtable provider: %w", err)
 	}
 	return nil
 }

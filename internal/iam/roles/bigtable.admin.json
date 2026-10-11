@@ -1,0 +1,33 @@
+{
+ "description": "Full control of Bigtable instances, tables, and app profiles.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "bigtable.appProfiles.create",
+  "bigtable.appProfiles.delete",
+  "bigtable.appProfiles.get",
+  "bigtable.appProfiles.list",
+  "bigtable.appProfiles.update",
+  "bigtable.clusters.create",
+  "bigtable.clusters.delete",
+  "bigtable.clusters.get",
+  "bigtable.clusters.list",
+  "bigtable.clusters.update",
+  "bigtable.instances.create",
+  "bigtable.instances.delete",
+  "bigtable.instances.get",
+  "bigtable.instances.getIamPolicy",
+  "bigtable.instances.list",
+  "bigtable.instances.setIamPolicy",
+  "bigtable.instances.update",
+  "bigtable.tables.create",
+  "bigtable.tables.delete",
+  "bigtable.tables.get",
+  "bigtable.tables.getIamPolicy",
+  "bigtable.tables.list",
+  "bigtable.tables.modifyColumnFamilies",
+  "bigtable.tables.setIamPolicy",
+  "bigtable.tables.update"
+ ],
+ "name": "roles/bigtable.admin",
+ "stage": "GA"
+}

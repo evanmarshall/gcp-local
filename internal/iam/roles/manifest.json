@@ -167,6 +167,21 @@
    "file": "spanner.viewer.json",
    "name": "roles/spanner.viewer",
    "sha256": "d2632f82c816c5590e9631fe47fa9462dd30644da6c31da3473e1507f663cf1b"
+  },
+  {
+   "file": "bigtable.admin.json",
+   "name": "roles/bigtable.admin",
+   "sha256": "7e580d8bc7c8f3de475d6d5bd36457aa94f9e97c77a2e576ee2f075896a86f3c"
+  },
+  {
+   "file": "bigtable.user.json",
+   "name": "roles/bigtable.user",
+   "sha256": "0ee0c1cf9f6eb77cb725f0af6cdb7b59b2df218b8708c331c6504310233425be"
+  },
+  {
+   "file": "bigtable.viewer.json",
+   "name": "roles/bigtable.viewer",
+   "sha256": "085870c76e6e080f79a799d7310d2c758d95617cee848628b79c279be8f35fd8"
   }
  ]
 }

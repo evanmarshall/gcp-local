@@ -1,0 +1,25 @@
+{
+ "description": "Manage Bigtable tables and app profiles inside existing instances.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "bigtable.appProfiles.create",
+  "bigtable.appProfiles.delete",
+  "bigtable.appProfiles.get",
+  "bigtable.appProfiles.list",
+  "bigtable.appProfiles.update",
+  "bigtable.clusters.get",
+  "bigtable.clusters.list",
+  "bigtable.instances.get",
+  "bigtable.instances.getIamPolicy",
+  "bigtable.tables.create",
+  "bigtable.tables.delete",
+  "bigtable.tables.get",
+  "bigtable.tables.getIamPolicy",
+  "bigtable.tables.list",
+  "bigtable.tables.modifyColumnFamilies",
+  "bigtable.tables.setIamPolicy",
+  "bigtable.tables.update"
+ ],
+ "name": "roles/bigtable.user",
+ "stage": "GA"
+}

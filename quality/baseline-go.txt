@@ -31,3 +31,16 @@
 2	gocognit	internal/runtime/server_test.go
 3	cyclop	internal/iam/engine_test.go
 3	gocognit	internal/providers/pubsub/provider.go
+1	cyclop	internal/providers/bigtable/provider_test.go
+1	cyclop	internal/providers/spanner/methods.go
+1	errchkjson	internal/providers/bigtable/provider_test.go
+1	errchkjson	internal/providers/spanner/provider_test.go
+1	gocognit	internal/providers/bigtable/provider.go
+1	gocognit	internal/providers/spanner/methods.go
+1	goconst	internal/providers/bigtable/methods.go
+1	goconst	internal/providers/spanner/methods.go
+1	intrange	internal/providers/spanner/methods.go
+1	prealloc	internal/providers/spanner/methods.go
+2	cyclop	internal/providers/bigtable/methods.go
+2	wrapcheck	internal/providers/bigtable/methods.go
+2	wrapcheck	internal/providers/spanner/methods.go

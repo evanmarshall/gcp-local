@@ -1,0 +1,15 @@
+{
+ "description": "Read Bigtable instances, clusters, and tables.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "bigtable.clusters.get",
+  "bigtable.clusters.list",
+  "bigtable.instances.get",
+  "bigtable.instances.getIamPolicy",
+  "bigtable.instances.list",
+  "bigtable.tables.get",
+  "bigtable.tables.list"
+ ],
+ "name": "roles/bigtable.viewer",
+ "stage": "GA"
+}
