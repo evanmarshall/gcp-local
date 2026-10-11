@@ -29,6 +29,7 @@ type harness struct {
 	t      *testing.T
 	gate   *gateway.Gateway
 	engine *iam.Engine
+	index  *state.Index
 }
 
 func newHarness(t *testing.T) *harness {
@@ -61,7 +62,7 @@ func newHarness(t *testing.T) *harness {
 	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, engine: engine}
+	return &harness{t: t, gate: g, engine: engine, index: index}
 }
 
 // invoke issues one REST request as the fixture principal.
@@ -130,6 +131,23 @@ func TestAccountAndKeyLifecycle(t *testing.T) {
 	recorder = h.invoke(http.MethodGet, testBase+"/"+testAccount, nil)
 	if recorder.Code != 404 {
 		t.Fatalf("post-destroy get status = %d", recorder.Code)
+	}
+}
+
+// TestCreatedAccountIndexesItsUniqueID proves a created account is published
+// with its numeric identity, which ID-token minting requires as the subject.
+func TestCreatedAccountIndexesItsUniqueID(t *testing.T) {
+	h := newHarness(t)
+	recorder := h.invoke(http.MethodPost, testBase, map[string]any{"accountId": testAccount})
+	var created struct {
+		UniqueID string `json:"uniqueId"`
+	}
+	if recorder.Code != 200 || json.Unmarshal(recorder.Body.Bytes(), &created) != nil {
+		t.Fatalf("account create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	resource, ok := h.index.Get(accountResource(testProject, accountEmail(testProject, testAccount)))
+	if !ok || resource.Number == "" || resource.Number != created.UniqueID {
+		t.Fatalf("indexed account = %+v, unique id %q", resource, created.UniqueID)
 	}
 }
 

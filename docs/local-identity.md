@@ -56,7 +56,7 @@ Metadata ID tokens, general service-account impersonation/signing APIs, service-
 | Python 3.11/3.12, google-auth 2.56.2, metadata ADC | Both metadata host/IP overrides; one configured account | Discovery, account binding, controlled expiry, automatic refresh |
 | google-cloud-storage 3.10.1 with either credential flow | Explicit API endpoint and credentials; no anonymous emulator switch | Authenticated list calls to a controlled provider fixture before and after refresh |
 
-These are credential/transport checks, not Storage service conformance or real-GCP token-issuer parity. No Go/Java/Node SDK, Terraform ADC, or Pub/Sub emulator-mode identity certification is claimed yet. API unknown/expired/anonymous decisions pass to the shared IAM layer in #7; none is promoted to an administrator.
+These are credential/transport checks, not Storage service conformance or real-GCP token-issuer parity. No Go/Java/Node SDK or Pub/Sub emulator-mode identity certification is claimed yet. The google 8.5.0 Terraform provider accepts this ADC shape only with an added `"universe_domain": "gcp-local.invalid"` and `scopes = [cloud-platform]`; the [workflow acceptance](workflow.md#terraform-authentication) is the only evidence. API unknown/expired/anonymous decisions pass to the shared IAM layer in #7; none is promoted to an administrator.
 
 Ordinary Go tests and the built-process smoke check require no Python SDK packages. The integration test additionally needs `requirements-sdk.txt` and runs only in the Linux isolation launcher, which gives the core and SDK subprocess loopback connectivity and blocks cloud egress. Its clock-control route exists only inside the test, never in the built core:
 

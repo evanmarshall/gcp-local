@@ -1,6 +1,13 @@
 # Pub/Sub push to Cloud Run worker to Storage workflow
 
-Terraform creates the bucket, the topic, and the push subscription; the local
-APIs create the Cloud Run worker. Publishing a message makes the worker
-store an object under its own service account. See docs/workflow.md for the
-runbook and the recorded-coverage notes.
+`main.tf` provisions the whole chain against a local gcp-local endpoint: the
+worker and push service accounts, the bucket and the worker's object grant,
+the topic, the Cloud Run v2 worker, its invoker grant, the Pub/Sub service
+agent's token-creator grant, and the push subscription. Publishing a message
+makes the worker (`worker.py`) store an object under its own service account.
+
+The configuration only accepts a numeric loopback endpoint and a local
+external-account ADC file marked with `universe_domain = "gcp-local.invalid"`;
+it cannot be pointed at real GCP. `scripts/smoke_workflow.py` runs it end to
+end. See docs/workflow.md for the runbook, the authentication details, and
+the recorded-coverage notes.

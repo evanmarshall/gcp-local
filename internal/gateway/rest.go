@@ -181,6 +181,11 @@ func restBody(r *http.Request, route *compiledRoute, request *RESTRequest) error
 	if len(body) > maxJSON {
 		return status.Error(codes.ResourceExhausted, "JSON request exceeds two MiB")
 	}
+	if len(body) == 0 {
+		// Google's front end reads an absent body as the empty request
+		// message; clients send none for methods like getIamPolicy.
+		body = []byte("{}")
+	}
 	var object map[string]json.RawMessage
 	if json.Unmarshal(body, &object) != nil || object == nil {
 		return status.Error(codes.InvalidArgument, "Expected a JSON object body")

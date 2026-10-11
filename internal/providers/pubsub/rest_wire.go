@@ -164,11 +164,8 @@ func restWire(_ string, response proto.Message) map[string]any {
 		if retention := protoMessage.GetMessageRetentionDuration(); retention != nil {
 			wire["messageRetentionDuration"] = secondsString(retention)
 		}
-		if push := protoMessage.GetPushConfig(); push != nil && (push.GetPushEndpoint() != "" || push.GetOidcToken().GetServiceAccountEmail() != "") {
-			wire["pushConfig"] = map[string]any{"oidcToken": map[string]any{
-				"serviceAccountEmail": protoMessage.GetPushConfig().GetOidcToken().GetServiceAccountEmail(),
-				"audience":            protoMessage.GetPushConfig().GetOidcToken().GetAudience(),
-			}}
+		if push := pushWire(protoMessage.GetPushConfig()); push != nil {
+			wire["pushConfig"] = push
 		}
 		return wire
 	case *pb.ListTopicsResponse:
@@ -186,6 +183,22 @@ func restWire(_ string, response proto.Message) map[string]any {
 	default:
 		return map[string]any{}
 	}
+}
+
+// pushWire renders a subscription's push configuration in the JSON field
+// names declarative clients read back, or nil for a pull subscription.
+func pushWire(push *pb.PushConfig) map[string]any {
+	if push.GetPushEndpoint() == "" && push.GetOidcToken().GetServiceAccountEmail() == "" {
+		return nil
+	}
+	wire := map[string]any{"pushEndpoint": push.GetPushEndpoint()}
+	if attributes := push.GetAttributes(); len(attributes) > 0 {
+		wire["attributes"] = attributes
+	}
+	if token := push.GetOidcToken(); token != nil {
+		wire["oidcToken"] = map[string]any{"serviceAccountEmail": token.GetServiceAccountEmail(), "audience": token.GetAudience()}
+	}
+	return wire
 }
 
 // wireRestName converts a canonical //host name into the wire-relative name.

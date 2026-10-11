@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -203,9 +204,10 @@ func (p *Provider) serviceDocument(scope state.Scope, record *serviceRecord) map
 
 // templateDocument renders a revision template wire shape.
 func templateDocument(record *serviceRecord) map[string]any {
+	// Stable order: a map-ordered echo makes declarative clients see drift.
 	env := make([]any, 0, len(record.Template.Container.Env))
-	for key, value := range record.Template.Container.Env {
-		env = append(env, map[string]any{"name": key, "value": value})
+	for _, key := range slices.Sorted(maps.Keys(record.Template.Container.Env)) {
+		env = append(env, map[string]any{"name": key, "value": record.Template.Container.Env[key]})
 	}
 	document := map[string]any{
 		"serviceAccount": record.Template.ServiceAccount,
@@ -265,7 +267,7 @@ func (p *Provider) startRevision(record *serviceRecord, revision *revisionRecord
 		Env:   workloadEnv(record, revision),
 	}
 	if revision.Template.ServiceAccount != "" && p.metadata != nil {
-		subject := revision.Template.ServiceAccount
+		subject := "serviceAccount:" + revision.Template.ServiceAccount
 		handler, metadataErr := p.metadata(subject)
 		if metadataErr != nil {
 			return fmt.Errorf("enroll the workload identity %s: %w", subject, metadataErr)

@@ -2,7 +2,7 @@
 
 Authentication uses the workload metadata endpoint for the service's
 configured service account; the write goes to the local Storage endpoint
-selected by the GCP_LOCAL_ENDPOINT environment variable.
+selected by the GCP_LOCAL_STORAGE_ENDPOINT environment variable.
 """
 
 import base64
@@ -40,8 +40,6 @@ def store(bucket: str, name: str, payload: bytes) -> None:
     except urllib.error.HTTPError as error:
         raise RuntimeError(
             "store failed: " + str(error.code) + " " + error.read().decode()[:200]) from None
-    """Upload one object with the workload's service account credentials."""
-
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -53,12 +51,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             envelope = json.loads(body)
             payload = base64.urlsafe_b64decode(envelope["message"]["data"])
-            bucket = envelope["message"]["attributes"]["bucket"]
-                        # Real Pub/Sub push envelopes carry camelCase JSON fields. The
+            # Real Pub/Sub push envelopes carry camelCase JSON fields. The
             # object name is the publisher's messageId attribute, not the
             # server-assigned message id.
             attributes = envelope["message"]["attributes"]
-            store(bucket, attributes["messageId"] + ".txt", payload)
+            store(attributes["bucket"], attributes["messageId"] + ".txt", payload)
             code, reply = 200, b"stored"
         except Exception as error:  # noqa: BLE001 -- the push agent reads the status only
             code, reply = 500, str(error).encode()

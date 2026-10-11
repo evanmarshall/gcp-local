@@ -17,9 +17,11 @@ import (
 
 // Test subject identity for the revision metadata listener.
 const (
-	testProjectName   = "demo-project"
-	testWorkerSubject = "serviceAccount:worker@demo-project.iam.gserviceaccount.com"
-	testWorkerToken   = "gls.revision-metadata-subject-token-for-refresh-tests" //nolint:gosec // synthetic enrollment secret
+	testProjectName = "demo-project"
+	// testServiceAccountKey is the template field naming the revision identity.
+	testServiceAccountKey = "serviceAccount"
+	testWorkerSubject     = "serviceAccount:worker@demo-project.iam.gserviceaccount.com"
+	testWorkerToken       = "gls.revision-metadata-subject-token-for-refresh-tests" //nolint:gosec // synthetic enrollment secret
 )
 
 // TestRevisionMetadataServesConfiguredIdentity proves the per-revision metadata
@@ -49,8 +51,8 @@ func TestRevisionMetadataServesConfiguredIdentity(t *testing.T) {
 	body := map[string]any{
 		keyName: serviceReference,
 		testTemplate: map[string]any{
-			testContainers:   []any{map[string]any{testImageKey: imageReference}},
-			"serviceAccount": subject,
+			testContainers:        []any{map[string]any{testImageKey: imageReference}},
+			testServiceAccountKey: strings.TrimPrefix(subject, "serviceAccount:"),
 		},
 	}
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", body)

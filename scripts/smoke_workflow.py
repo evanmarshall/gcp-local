@@ -1,10 +1,15 @@
-"""CI-only acceptance for the packaged workflow on real Docker.
+"""Workflow acceptance: Terraform-provisioned Pub/Sub push -> Cloud Run -> Storage.
 
-A Pub/Sub push delivers to the Cloud Run worker, which stores an object under
-its own service account; revoking the worker's Storage grant fails the write
-and restoring it recovers. The control plane calls use an allUsers fixture
-grant on the synthetic project; the boundaries under test (invocation and the
-worker's Storage write) use real per-identity grants.
+The example Terraform (examples/workflow/main.tf) provisions every resource
+through the released google provider against a private local core. A
+published message must reach the worker, which stores an object under its own
+service account. Toggling the worker's Storage grant and the push identity's
+invoker grant through Terraform must fail at those boundaries and recover. A
+second plan must be empty, and destroy must leave no listed resources.
+
+Revisions run through the process runtime, so the acceptance needs no
+container engine. Terraform only ever sees loopback
+endpoints, a reserved universe domain, and local external-account ADC.
 """
 
 import json
@@ -22,312 +27,318 @@ from pathlib import Path
 from typing import Any
 
 import google.auth
-import google.pubsub_v1 as gpv1
 import grpc
 from google.auth.transport.grpc import secure_authorized_channel
 from google.auth.transport.requests import Request
 from google.cloud import pubsub_v1
 from google.pubsub_v1.services.publisher.transports.grpc import PublisherGrpcTransport
-from google.pubsub_v1.services.subscriber.transports.grpc import SubscriberGrpcTransport
-from smoke_cloudrun import build_image, start_core, write_configs  # helpers
+from smoke_cloudrun import start_core  # helpers
 
 REPO = Path(__file__).resolve().parents[1]
-# Own the ports locally: the imported SERVE_SOCKET above belongs to the
-# Cloud Run smoke and must not leak into this file's port arithmetic.
 SERVE_SOCKET = 9298
 PUBSUB_GRPC_PORT = SERVE_SOCKET + 1
 BASE = "http://127.0.0.1:" + str(SERVE_SOCKET)
 PROJECT = "demo-run"
-SCOPE = "/v2/projects/" + PROJECT + "/locations/us-central1"
+# A real-shaped project number: the push contract names the Pub/Sub service
+# agent by it and requires no leading zeros.
+PROJECT_NUMBER = "123456789012"
+REGION = "us-central1"
+BUCKET = "workflow-" + PROJECT
+TOPIC = "projects/" + PROJECT + "/topics/workflow"
 WORKER_IMAGE = "gcp-local/workflow:latest"
 WORKER_EMAIL = "worker@" + PROJECT + ".iam.gserviceaccount.com"
-WORKER_HOST = "worker-" + PROJECT + ".us-central1.run.app"
-ENDPOINT = BASE + "/_run/" + WORKER_HOST
+DEVELOPER = "serviceAccount:developer@" + PROJECT + ".iam.gserviceaccount.com"
+WORKER_SOURCE = str(REPO / "examples/workflow/worker.py")
+# Matches a revision process, not the core whose flags name the same file.
+WORKER_PROCESS = "^python3 " + WORKER_SOURCE
+PGREP = shutil.which("pgrep") or "/usr/bin/pgrep"
+PKILL = shutil.which("pkill") or "/usr/bin/pkill"
+TERRAFORM = REPO / ".tools/terraform/bin/terraform"
+# How long a refused delivery must stay refused before the grant is restored.
+REFUSAL_WINDOW = 8.0
 
 
-class LocalChannelClients:
-    """Pub/Sub clients pinned to the local gRPC gateway only."""
-
-    def __init__(self, credentials: google.auth.credentials.Credentials, port: int) -> None:
-        """Pin both clients to the local gRPC gateway channel."""
-        # The core's gRPC listener is plaintext loopback; the validation
-        # runner uses the same local credentials shape against it.
-        # The auth request object is required: without it the credential
-        # cannot refresh and every call retries unauthenticated forever.
-        channel = secure_authorized_channel(
-            credentials, Request(), "127.0.0.1:" + str(port),
-            ssl_credentials=grpc.local_channel_credentials())
-        self.publisher = pubsub_v1.PublisherClient(
-            transport=PublisherGrpcTransport(channel=channel))
-        self.subscriber = pubsub_v1.SubscriberClient(
-            transport=SubscriberGrpcTransport(channel=channel))
-
-
-def sdk_credentials(adc: Path) -> google.auth.credentials.Credentials:
-    """Load the fixture ADC bundle pinned to the local endpoint."""
-    credentials, _ = google.auth.load_credentials_from_file(
-        str(adc), scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    return credentials
-
-
-def rest(method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, Any]:
-    """Issue one control-plane REST request against the local core."""
-    data = json.dumps(body).encode() if body is not None else None
-    head = urllib.request.Request(BASE + path, data=data, method=method)  # noqa: S310 -- fixed loopback base
-    if data:
-        head.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(head, timeout=30) as response:  # noqa: S310 -- fixed loopback base
-            payload = response.read()
-            return response.status, json.loads(payload) if payload else {}
-    except urllib.error.HTTPError as error:
-        payload = error.read()
-        return error.code, json.loads(payload) if payload else {}
-    data = json.dumps(body).encode() if body is not None else None
-    head = urllib.request.Request(BASE + path, data=data, method=method)  # noqa: S310 -- fixed loopback base
-    if data:
-        head.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(head, timeout=30) as response:  # noqa: S310 -- fixed loopback base
-            payload = response.read()
-            return response.status, json.loads(payload) if payload else {}
-    except urllib.error.HTTPError as error:
-        payload = error.read()
-        return error.code, json.loads(payload) if payload else {}
-
-
-def write_adc(_project: str, subject_token: str) -> Path:
-    """Write the developer fixture ADC bundle for the local token exchange."""
-    directory = Path(tempfile.mkdtemp())
+def private_file(directory: Path, name: str, content: str) -> Path:
+    """Write one owner-only file in an owner-only directory."""
     directory.chmod(stat.S_IRWXU)
-    (directory / "subject.txt").write_text(subject_token)
-    adc = {
-        "type": "external_account",
-        "audience": "//gcp-local/identity",
-        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
-        "token_url": "http://127.0.0.1:" + str(SERVE_SOCKET) + "/v1/token",
-        "credential_source": {"file": str(directory / "subject.txt")},
-    }
-    path = directory / "adc.json"
-    path.write_text(json.dumps(adc))
+    path = directory / name
+    path.write_text(content)
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     return path
 
 
-def install_java() -> str:
-    """Install the pinned Pub/Sub emulator jar and return an absolute Java path."""
-    install = subprocess.run(
-        [sys.executable, "scripts/install_pubsub.py"], check=True, capture_output=True, text=True)
-    assert install.returncode == 0, install.stdout + install.stderr
-    java = os.environ.get("GCP_LOCAL_JAVA") or shutil.which("java") or ""
-    assert java.startswith("/"), "An absolute Java path is required"
-    jar = REPO / ".tools/pubsub/emulator.jar"
-    assert jar.exists(), "The pinned Pub/Sub emulator jar is missing"
-    return java
+def write_iam(directory: Path) -> Path:
+    """Grant the developer the project roles the Terraform apply needs."""
+    resource = "//cloudresourcemanager.googleapis.com/projects/" + PROJECT
+    roles = ["roles/storage.admin", "roles/pubsub.admin", "roles/run.admin",
+             "roles/iam.serviceAccountAdmin", "roles/iam.serviceAccountUser"]
+    iam = {
+        "resources": [{"name": resource, "service": "resourcemanager", "kind": "project",
+                       "number": PROJECT_NUMBER,
+                       "scope": {"project": PROJECT, "location": "global"}}],
+        "policies": {resource: {"bindings": [
+            {"role": role, "members": [DEVELOPER]} for role in roles]}},
+    }
+    return private_file(directory, "iam.json", json.dumps(iam))
 
 
-def write_identity(project: str) -> tuple[Path, str]:
-    """Write the owner-only identity config with the workflow principals."""
-    directory = Path(tempfile.mkdtemp())
-    directory.chmod(stat.S_IRWXU)
+def write_identity(directory: Path) -> tuple[Path, Path, Path]:
+    """Enroll the developer and the worker; return server, SDK ADC, and Terraform ADC."""
+    developer_token = "gls." + secrets.token_urlsafe(32)
     principals = [
-        {"subject": "serviceAccount:" + email, "project": project,
-         "subject_token": "gls." + secrets.token_urlsafe(32)}
-        for email in ("developer@" + project, WORKER_EMAIL)
+        {"subject": DEVELOPER, "project": PROJECT, "subject_token": developer_token},
+        # The worker's metadata enrollment: the run provider serves its tokens
+        # to the revision; Terraform creates the matching account record.
+        {"subject": "serviceAccount:" + WORKER_EMAIL, "project": PROJECT,
+         "subject_token": "gls." + secrets.token_urlsafe(32)},
     ]
-    path = directory / "server.json"
-    path.write_text(json.dumps({"token_lifetime_seconds": 3600, "principals": principals}))
-    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    return path, principals[0]["subject_token"]
+    server = private_file(directory, "server.json", json.dumps(
+        {"token_lifetime_seconds": 3600, "principals": principals}))
+    subject = private_file(directory, "subject.txt", developer_token)
+    adc = {
+        "type": "external_account",
+        "audience": "//gcp-local/identity",
+        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        "token_url": BASE + "/v1/token",
+        "credential_source": {"file": str(subject)},
+    }
+    sdk_adc = private_file(directory, "adc.json", json.dumps(adc))
+    # The google provider refuses a universe_domain override unless the
+    # credential names the same universe; the Python SDKs compare it against
+    # their own default instead, so they keep the unmarked file.
+    adc["universe_domain"] = "gcp-local.invalid"
+    return server, sdk_adc, private_file(directory, "terraform-adc.json", json.dumps(adc))
 
 
-def await_operation(name: str, deadline: float = 90.0) -> dict[str, Any]:
-    """Poll one long-running operation until it reports done."""
-    last: dict[str, Any] = {}
-    end = time.time() + deadline
-    while time.time() < end:
-        _, body = rest("GET", "/v2/" + name)
-        if body.get("done"):
-            return body
-        last = body
-        time.sleep(0.5)
-    raise AssertionError("Operation did not finish: " + name + " last=" + json.dumps(last))
+def api(token: str, method: str, path: str) -> tuple[int, Any]:
+    """Issue one authenticated request against the local core."""
+    head = urllib.request.Request(BASE + path, method=method)  # noqa: S310 -- fixed loopback base
+    head.add_header("Authorization", "Bearer " + token)
+    try:
+        with urllib.request.urlopen(head, timeout=30) as response:  # noqa: S310 -- fixed loopback base
+            payload = response.read()
+            return response.status, payload
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
 
 
-def deploy_worker(clients: LocalChannelClients, storage_endpoint: str) -> str:
-    """Create the bucket, topic, push subscription, and the worker service."""
-    bucket = "workflow-" + PROJECT
-    status, body = rest("POST", "/storage/v1/b?project=" + PROJECT, {
-        "name": bucket, "location": "US-CENTRAL1", "storageClass": "STANDARD",
-        "iamConfiguration": {"uniformBucketLevelAccess": {"enabled": True},
-                             "publicAccessPrevention": "enforced"},
-        "softDeletePolicy": {"retentionDurationSeconds": "0"},
-    })
-    assert status == 200, "bucket create failed: " + json.dumps(body)[:200]
-    status, _ = rest("GET", "/storage/v1/b/" + bucket + "/iam")
-    assert status == 200
-    # Grant the worker storage.objects.create on the bucket.
-    policy = {"bindings": [{"role": "roles/storage.objectUser",
-                            "members": ["serviceAccount:" + WORKER_EMAIL]}],
-              "resourceId": "/b/" + bucket, "kind": "storage#policy"}
-    status, body = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
-    assert status == 200, "bucket grant failed: " + json.dumps(body)[:200]
+class Terraform:
+    """Run the pinned Terraform against a private copy of the example."""
 
-    clients.publisher.create_topic(
-        request={"name": "projects/" + PROJECT + "/topics/workflow"}, timeout=30, retry=None)
-    status, service = rest("POST", SCOPE + "/services", {
-        "name": SCOPE + "/services/worker",
-        "template": {"containers": [{
-            "image": WORKER_IMAGE, "containerPort": 8080,
-            "env": [{"name": "GCP_LOCAL_STORAGE_ENDPOINT", "value": storage_endpoint}],
-        }],
-                     "serviceAccount": "serviceAccount:" + WORKER_EMAIL},
-    })
-    assert status == 200, service
-    result = await_operation(service["name"])
-    assert "error" not in result, result
+    def __init__(self, workdir: Path, variables: dict[str, str]) -> None:
+        """Stage the example and a filesystem-only provider mirror."""
+        shutil.copy(REPO / "examples/workflow/main.tf", workdir / "main.tf")
+        config = workdir / "terraform.rc"
+        config.write_text(
+            "disable_checkpoint = true\nprovider_installation {\n filesystem_mirror {\n path = "
+            + json.dumps(str(REPO / ".tools/terraform/mirror"))
+            + '\n include = ["registry.terraform.io/hashicorp/google"]\n }\n}\n')
+        self.workdir = workdir
+        # Only what Terraform needs: no ambient credentials, gcloud config, or
+        # proxies; variables travel in the environment, never in argv. The
+        # dead proxy is an independent guard: any non-loopback HTTP(S) request
+        # fails instead of leaving the machine (loopback is never proxied).
+        self.env = {key: os.environ[key] for key in ("PATH", "HOME") if key in os.environ}
+        self.env.update({
+            "TF_CLI_CONFIG_FILE": str(config), "TF_IN_AUTOMATION": "1",
+            "CHECKPOINT_DISABLE": "1", "HTTPS_PROXY": "http://127.0.0.1:9",
+            "HTTP_PROXY": "http://127.0.0.1:9", "CLOUDSDK_CONFIG": str(workdir / "gcloud"),
+        })
+        self.env.update({"TF_VAR_" + key: value for key, value in variables.items()})
 
-    # The push delivery mints its ID token for the configured OIDC account;
-    # the invocation contract requires that account to hold run.invoker.
-    status, policy = rest("GET", SCOPE + "/services/worker:getIamPolicy")
-    assert status == 200, policy
-    policy.setdefault("bindings", []).append(
-        {"role": "roles/run.invoker", "members": ["serviceAccount:" + WORKER_EMAIL]})
-    status, _ = rest("POST", SCOPE + "/services/worker:setIamPolicy", {"policy": policy})
-    assert status == 200
-    clients.subscriber.create_subscription(request={
-        "name": "projects/" + PROJECT + "/subscriptions/workflow-push",
-        "topic": "projects/" + PROJECT + "/topics/workflow",
-        "push_config": gpv1.PushConfig(
-            push_endpoint=ENDPOINT,
-            # The invocation contract verifies the ID token against the
-            # canonical run.app host, so the OIDC audience is that host even
-            # though the delivery dials the local endpoint.
-            oidc_token=gpv1.PushConfig.OidcToken(
-                service_account_email=WORKER_EMAIL,
-                audience="https://" + WORKER_HOST),
-        ),
-        "ack_deadline_seconds": 10,
-    }, timeout=30, retry=None)
-    return bucket
+    def run(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        """Run one Terraform command in the staged directory."""
+        result = subprocess.run(
+            [str(TERRAFORM), *arguments, "-no-color", "-input=false"],
+            cwd=self.workdir, env=self.env, capture_output=True, text=True, check=False)
+        if check and result.returncode != 0:
+            raise AssertionError("terraform " + arguments[0] + " failed:\n"
+                                 + result.stdout[-4000:] + result.stderr[-4000:])
+        return result
+
+    def apply(self, **toggles: bool) -> None:
+        """Apply the example with the given grant toggles."""
+        flags = ["-var=" + key + "=" + str(value).lower() for key, value in toggles.items()]
+        self.run("apply", "-auto-approve", *flags)
+
+    def assert_local_only(self, sdk_adc: Path) -> None:
+        """Require the variable guards to refuse a non-loopback endpoint and real-shaped ADC."""
+        for override, refusal in (
+            ("endpoint=https://storage.googleapis.com", "never targets real GCP"),
+            ("credentials_file=" + str(sdk_adc), "Use a local gcp-local ADC file"),
+        ):
+            result = self.run("plan", "-var=" + override, check=False)
+            output = " ".join((result.stdout + result.stderr).split())
+            assert result.returncode != 0, "terraform accepted " + override
+            assert refusal in output, override + " failed for another reason:\n" + output[-2000:]
+
+    def assert_no_changes(self) -> None:
+        """Require an empty plan (exit code 0 with -detailed-exitcode)."""
+        result = self.run("plan", "-detailed-exitcode", check=False)
+        assert result.returncode == 0, "second plan is not clean:\n" + result.stdout[-4000:]
 
 
-def publish(clients: LocalChannelClients, bucket: str, payload: str, message_id: str) -> None:
+def publish(publisher: pubsub_v1.PublisherClient, payload: str, message_id: str) -> None:
     """Publish one message through the SDK client."""
-    future = clients.publisher.publish(
-        "projects/" + PROJECT + "/topics/workflow", payload.encode(),
-        bucket=bucket, messageId=message_id)
+    future = publisher.publish(TOPIC, payload.encode(), bucket=BUCKET, messageId=message_id)
     assert future.result(timeout=15), "publish failed"
 
 
-def stored_object(bucket: str, name: str,
-                  credentials: google.auth.credentials.Credentials) -> tuple[int, str]:
-    """Read the stored object bytes as the developer principal."""
-    head = urllib.request.Request(  # noqa: S310 -- fixed loopback base
-        BASE + "/storage/v1/b/" + bucket + "/o/" + name + "?alt=media")
-    # Public access prevention blocks anonymous reads on this bucket.
-    head.add_header("Authorization", "Bearer " + credentials.token)
-    try:
-        with urllib.request.urlopen(head, timeout=30) as response:  # noqa: S310 -- fixed loopback base
-            return response.status, response.read().decode()
-    except urllib.error.HTTPError as error:
-        return error.code, error.read().decode()
+def object_status(token: str, message_id: str) -> tuple[int, bytes]:
+    """Read one stored object as the developer."""
+    return api(token, "GET", "/storage/v1/b/" + BUCKET + "/o/" + message_id + ".txt?alt=media")
 
 
-def expect_object(bucket: str, message_id: str, payload: str,
-                  credentials: google.auth.credentials.Credentials) -> None:
+def expect_object(token: str, message_id: str, payload: str, deadline: float = 60) -> None:
     """Wait for the worker to store the message payload."""
-    end = time.time() + 60
+    end = time.time() + deadline
     while time.time() < end:
-        status, body = stored_object(bucket, message_id + ".txt", credentials)
-        if status == 200:
-            assert body == payload, body
+        code, body = object_status(token, message_id)
+        if code == 200:
+            assert body.decode() == payload, body
             return
         time.sleep(1)
     raise AssertionError("The worker did not store the object: " + message_id)
 
 
-def denial_cycle(clients: LocalChannelClients, bucket: str,
-                 credentials: google.auth.credentials.Credentials) -> None:
-    """Revoke the worker's Storage grant, expect the write to fail, then restore."""
-    status, _ = rest("PUT", "/storage/v1/b/" + bucket + "/iam",
-                     {"bindings": [], "resourceId": "/b/" + bucket, "kind": "storage#policy"})
-    assert status == 200, "revoke failed"
-    publish(clients, bucket, "denied-payload", "denied-msg")
-    end = time.time() + 30
+def expect_absent(token: str, message_id: str) -> None:
+    """Require the object to stay absent for the whole refusal window."""
+    end = time.time() + REFUSAL_WINDOW
     while time.time() < end:
-        status, _ = stored_object(bucket, "denied-msg.txt", credentials)
-        if status == 404:
-            break
+        code, _ = object_status(token, message_id)
+        assert code == 404, "a refused delivery still stored " + message_id
         time.sleep(1)
-    else:
-        raise AssertionError("The denied worker still stored the object")
-    policy = {"bindings": [{"role": "roles/storage.objectUser",
-                            "members": ["serviceAccount:" + WORKER_EMAIL]}],
-              "resourceId": "/b/" + bucket, "kind": "storage#policy"}
-    status, _ = rest("PUT", "/storage/v1/b/" + bucket + "/iam", policy)
-    assert status == 200, "restore failed"
-    publish(clients, bucket, "restored-payload", "restored-msg")
-    expect_object(bucket, "restored-msg", "restored-payload", credentials)
 
 
-def main() -> int:
-    """Run the end-to-end workflow acceptance and clean everything up."""
-    build = subprocess.run(
-        [sys.executable, "scripts/install_go.py"], check=True, capture_output=True, text=True)
-    assert build.returncode == 0, build.stdout + build.stderr
+def storage_denial(terraform: Terraform, publisher: pubsub_v1.PublisherClient,
+                   token: str) -> None:
+    """Revoke the worker's object grant, expect no write, restore, expect recovery."""
+    terraform.apply(grant_worker_storage=False)
+    publish(publisher, "denied-payload", "denied-msg")
+    expect_absent(token, "denied-msg")
+    terraform.apply(grant_worker_storage=True)
+    # The refused message is redelivered and now succeeds.
+    expect_object(token, "denied-msg", "denied-payload")
+    publish(publisher, "restored-payload", "restored-msg")
+    expect_object(token, "restored-msg", "restored-payload")
+
+
+def invoker_denial(terraform: Terraform, publisher: pubsub_v1.PublisherClient,
+                   token: str) -> None:
+    """Revoke run.invoker from the push identity; the push stops at invocation."""
+    terraform.apply(grant_push_invoker=False)
+    # The worker's Storage grant is intact, so a delivery that reached the
+    # worker would store the object: its absence places the refusal at the
+    # invocation check, the only boundary this toggle changes.
+    publish(publisher, "uninvoked-payload", "uninvoked-msg")
+    expect_absent(token, "uninvoked-msg")
+    terraform.apply(grant_push_invoker=True)
+    expect_object(token, "uninvoked-msg", "uninvoked-payload")
+
+
+def assert_empty(token: str) -> None:
+    """List every workflow resource kind through the local API; all must be gone."""
+    listings = {
+        "buckets": "/storage/v1/b?project=" + PROJECT,
+        "topics": "/v1/projects/" + PROJECT + "/topics",
+        "subscriptions": "/v1/projects/" + PROJECT + "/subscriptions",
+        "services": "/v2/projects/" + PROJECT + "/locations/" + REGION + "/services",
+        "accounts": "/v1/projects/" + PROJECT + "/serviceAccounts",
+    }
+    for kind, path in listings.items():
+        code, body = api(token, "GET", path)
+        assert code == 200, kind + " listing failed: " + str(code) + " " + body.decode()[:200]
+        document = json.loads(body or b"{}")
+        leftovers = [value for key, value in document.items()
+                     if isinstance(value, list) and key != "unreachable" and value]
+        assert not leftovers, kind + " survived destroy: " + json.dumps(leftovers)[:400]
+        print("after destroy:", kind, "listing is empty")
+
+
+def assert_no_revisions() -> None:
+    """Require destroy to stop every revision process."""
+    running = subprocess.run([PGREP, "-af", WORKER_PROCESS], capture_output=True, check=False,
+                             text=True)
+    assert running.returncode == 1, "The workflow left a worker process: " + running.stdout
+    print("after destroy: no revision process remains")
+
+
+def install_tools() -> tuple[Path, str]:
+    """Build the core and install the pinned Pub/Sub jar and Terraform."""
+    for installer in ("install_go.py", "install_pubsub.py", "install_terraform.py"):
+        subprocess.run([sys.executable, str(REPO / "scripts" / installer)],
+                       check=True, capture_output=True, text=True)
     binary = REPO / "bin" / "gcp-local"
     subprocess.run(
         ["/bin/sh", str(REPO / "scripts/go.sh"), "build", "-o", str(binary), "./cmd/gcp-local"],
-        check=True, capture_output=True)
-    dockerless = shutil.which(os.environ.get("DOCKER", "docker")) is None
-    if dockerless:
-        # Restricted guest: the worker runs as a local process through the
-        # dockerless revision runtime. The container packaging acceptance
-        # still runs on host Docker in CI.
-        worker = str(REPO / "examples" / "workflow" / "worker.py")
-        extra = ("--run-process", WORKER_IMAGE + "=python3 " + worker)
-    else:
-        build_image(WORKER_IMAGE)
-        extra = ()
-    java = install_java()
-    jar = str(REPO / ".tools/pubsub/emulator.jar")
-    docker = os.environ.get("DOCKER", "docker")
-    before = "" if dockerless else subprocess.check_output([docker, "ps", "-aq"], text=True)
-    # serviceAccountUser carries the actAs permission the push identity mint
-    # requires for the worker's account.
-    iam_path = write_configs(
-        PROJECT,
-        ["roles/pubsub.admin", "roles/storage.admin", "roles/iam.serviceAccountUser",
-         "roles/iam.serviceAccountTokenCreator"],
-        accounts=[WORKER_EMAIL])
-    identity_path, developer_token = write_identity(PROJECT)
-    adc = write_adc(PROJECT, developer_token)
-    core = start_core(binary, iam_path, identity_path, port=SERVE_SOCKET,
-                      services="storage,pubsub,run", pubsub_java=java, pubsub_jar=jar,
-                      extra_flags=extra)
+        check=True, capture_output=True, cwd=REPO)
+    java = os.environ.get("GCP_LOCAL_JAVA") or shutil.which("java") or ""
+    assert java.startswith("/"), "An absolute Java path is required"
+    assert TERRAFORM.is_file(), "The pinned Terraform is missing"
+    return binary, java
+
+
+def run_workflow(terraform: Terraform, credentials: google.auth.credentials.Credentials,
+                 sdk_adc: Path) -> None:
+    """Apply, exercise both denial boundaries, re-plan, destroy, and list."""
+    terraform.run("init")
+    # The SDK ADC file lacks the local universe marker, so it doubles as a
+    # credential the configuration must refuse.
+    terraform.assert_local_only(sdk_adc)
+    print("guards: variable validation refused a non-loopback endpoint and unmarked ADC")
+    terraform.apply()
+    token = credentials.token
     # Refresh before the channel exists: the on-demand refresh inside the
     # gRPC auth interceptor fails and the SDK retries it forever.
-    credentials = sdk_credentials(adc)
-    credentials.refresh(Request())
-    clients = LocalChannelClients(credentials, PUBSUB_GRPC_PORT)
+    channel = secure_authorized_channel(
+        credentials, Request(), "127.0.0.1:" + str(PUBSUB_GRPC_PORT),
+        ssl_credentials=grpc.local_channel_credentials())
+    publisher = pubsub_v1.PublisherClient(transport=PublisherGrpcTransport(channel=channel))
+    publish(publisher, "workflow-payload", "wf-msg-1")
+    expect_object(token, "wf-msg-1", "workflow-payload")
+    print("published message stored by the worker")
+    storage_denial(terraform, publisher, token)
+    print("storage grant removed: write refused; restored: redelivery stored")
+    invoker_denial(terraform, publisher, token)
+    print("invoker grant removed: push refused at invocation; restored: delivered")
+    terraform.assert_no_changes()
+    print("second plan: no changes")
+    terraform.run("destroy", "-auto-approve")
+    assert_empty(token)
+
+
+def main() -> int:
+    """Run the Terraform-driven workflow acceptance and clean everything up."""
+    binary, java = install_tools()
+    secrets_dir = Path(tempfile.mkdtemp(prefix="gcp-local-workflow-"))
+    identity_path, adc, terraform_adc = write_identity(secrets_dir)
+    # The process revision runtime runs the worker source directly and reaches
+    # the core over loopback. Container execution is covered separately by
+    # scripts/smoke_cloudrun.py; this acceptance targets the resource chain.
+    core = start_core(binary, write_iam(secrets_dir), identity_path, port=SERVE_SOCKET,
+                      services="storage,pubsub,run,iam", pubsub_java=java,
+                      pubsub_jar=str(REPO / ".tools/pubsub/emulator.jar"),
+                      extra_flags=("--run-process", WORKER_IMAGE + "=python3 " + WORKER_SOURCE))
     try:
-        # Container revisions dial the Docker bridge; process revisions dial
-        # the host loopback directly.
-        host = "127.0.0.1" if dockerless else "172.17.0.1"
-        bucket = deploy_worker(clients, "http://" + host + ":" + str(SERVE_SOCKET) + "/storage/v1")
-        publish(clients, bucket, "workflow-payload", "wf-msg-1")
-        expect_object(bucket, "wf-msg-1", "workflow-payload", credentials)
-        denial_cycle(clients, bucket, credentials)
-        status, _ = rest("DELETE", SCOPE + "/services/worker")
-        assert status == 200
-        if not dockerless:
-            docker = os.environ.get("DOCKER", "docker")
-            after = subprocess.check_output([docker, "ps", "-aq"], text=True)
-            assert after == before, "The workflow left a container behind"
+        credentials, _ = google.auth.load_credentials_from_file(
+            str(adc), scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        credentials.refresh(Request())
+        with tempfile.TemporaryDirectory(prefix="gcp-local-workflow-tf-") as workdir:
+            terraform = Terraform(Path(workdir), {
+                "endpoint": BASE, "credentials_file": str(terraform_adc), "project": PROJECT,
+                "project_number": PROJECT_NUMBER, "region": REGION, "bucket": BUCKET,
+                "worker_image": WORKER_IMAGE, "worker_storage_endpoint": BASE + "/storage/v1",
+            })
+            run_workflow(terraform, credentials, adc)
+        assert_no_revisions()
     finally:
         core.terminate()
         core.wait(timeout=10)
+        shutil.rmtree(secrets_dir, ignore_errors=True)
+        # The process runtime does not stop revisions when the core exits;
+        # after a failed run, do not leave the worker running.
+        subprocess.run([PKILL, "-f", WORKER_PROCESS], check=False)
+    print("workflow acceptance passed")
     return 0
 
 

@@ -14,6 +14,9 @@ here is a cloud-fidelity claim yet (#13 tracks that work).
   its location ancestry into the shared resource index; IAM authorization uses
   the documented `run.services.*`, `run.revisions.*`, `run.operations.*`, and
   `run.routes.invoke` permissions, backed by pinned `roles/run.*` snapshots.
+- Templates take one container; its serving port is `ports[0].containerPort`
+  (default 8080) and `template.serviceAccount` is the bare service-account
+  email, as in the v2 API. Plain-text `env` entries echo back sorted by name.
 - Create and update return a `google.longrunning.Operation`. The operation
   completes from actual container readiness: a container that exits before
   readiness fails the operation with its exit status.
@@ -71,3 +74,6 @@ reads the `serviceId` query parameter, and `template.revision` is echoed only
 when the caller named the revision (generated names appear in
 `latestCreatedRevision`). The acceptance fixture serves each revision from a
 loopback HTTP server so readiness is real without a container engine.
+The [workflow example](workflow.md) also provisions a service with a service
+account, port, and environment variable plus a `google_cloud_run_v2_service_iam_member`
+invoker grant, with an empty second plan.

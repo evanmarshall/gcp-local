@@ -206,7 +206,7 @@ def create_and_grant() -> None:
         SCOPE + "/services",
         {
             "name": SCOPE + "/services/acceptance",
-            "template": {"containers": [{"image": IMAGE, "containerPort": 8080}]},
+            "template": {"containers": [{"image": IMAGE, "ports": [{"containerPort": 8080}]}]},
             "ingress": "INGRESS_TRAFFIC_ALL",
         },
     )
@@ -231,7 +231,7 @@ def update_and_delete(before: str, *, dockerless: bool) -> None:
     status, operation = request(
         "PATCH",
         SCOPE + "/services/acceptance",
-        {"template": {"containers": [{"image": IMAGE, "containerPort": 8080}]}},
+        {"template": {"containers": [{"image": IMAGE, "ports": [{"containerPort": 8080}]}]}},
     )
     assert status == 200, operation
     if "name" in operation and "template" not in operation:

@@ -142,6 +142,22 @@ func TestRESTValidationBeforeDispatchAndExplicitGaps(t *testing.T) {
 		t.Fatalf("malformed/unsupported request reached provider: %d", called.Load())
 	}
 }
+func TestRESTEmptyBodyIsTheEmptyMessage(t *testing.T) {
+	r := NewRegistry()
+	register(t, r, "storage.buckets.insert", func(_ Call, input any) (any, error) {
+		req, ok := input.(*RESTRequest)
+		if !ok || string(req.JSON) != "{}" {
+			return nil, errBadDecodedRequest
+		}
+		return &RESTResponse{JSON: map[string]any{}}, nil
+	})
+	server := httptest.NewServer(New(r, nil))
+	defer server.Close()
+	code, body, _ := request(t, server.Client(), "POST", server.URL+bucketCollectionPath+"?project=synthetic-project", "", nil)
+	if code != 200 {
+		t.Fatalf("empty body: %d %v", code, body)
+	}
+}
 func TestDefaultIdentityNeverAuthenticatesPresentedToken(t *testing.T) {
 	r := NewRegistry()
 	register(t, r, "storage.buckets.list", func(call Call, _ any) (any, error) {

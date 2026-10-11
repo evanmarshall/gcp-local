@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/url"
 	"regexp"
-	"strings"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -90,8 +89,9 @@ func resolveTemplate(template map[string]any) (templateShape, error) {
 		Revision:       text(template["revision"]),
 		ServiceAccount: text(template["serviceAccount"]),
 	}
-	if account := shape.ServiceAccount; account != "" && !strings.HasPrefix(account, "serviceAccount:") {
-		return templateShape{}, status.Errorf(codes.InvalidArgument, "serviceAccount must be a serviceAccount: URI, got %q", account)
+	// The v2 API names the revision identity by its email, without a member prefix.
+	if account := shape.ServiceAccount; account != "" && !serviceAccountEmail.MatchString(account) {
+		return templateShape{}, status.Errorf(codes.InvalidArgument, "serviceAccount must be a service account email, got %q", account)
 	}
 	if volumes, _ := template["volumes"].([]any); len(volumes) != 0 {
 		return templateShape{}, status.Error(codes.Unimplemented, "Revision volumes are not implemented")
@@ -119,8 +119,9 @@ func resolveContainer(value any) (containerSpec, error) {
 		return containerSpec{}, status.Errorf(codes.InvalidArgument, "A revision requires a container image of at most %d characters", maxImageLength)
 	}
 	port := 8080
-	if value := number(first["containerPort"]); value > 0 {
-		port = int(value)
+	// The v2 API carries the serving port as ports[0].containerPort.
+	if ports := mapList(first["ports"]); len(ports) > 0 && number(ports[0]["containerPort"]) > 0 {
+		port = int(number(ports[0]["containerPort"]))
 	}
 	env, refused := resolveEnv(first["env"])
 	if refused != nil {
@@ -141,6 +142,9 @@ func resolveEnv(value any) (map[string]string, error) {
 	}
 	return env, nil
 }
+
+// serviceAccountEmail matches the bare service-account email a template names.
+var serviceAccountEmail = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z0-9.-]+\.iam\.gserviceaccount\.com$`)
 
 // maxImageLength bounds the accepted container image reference length.
 const maxImageLength = 2048

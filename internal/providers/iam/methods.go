@@ -92,6 +92,8 @@ func (p *Provider) accountsCreate(request *gateway.RESTRequest, scope state.Scop
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: accountResource(scope.Project, accountEmail(scope.Project, id)), Service: serviceName,
 		Kind: kindAccount, Parent: projectResource(scope.Project), Scope: scope,
+		// The unique id is the account's numeric identity (an ID token's sub).
+		Number: accountUniqueID(created),
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the service account: %w", indexErr)
 	}

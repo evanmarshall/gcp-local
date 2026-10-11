@@ -169,7 +169,7 @@ func (h *harness) create(t *testing.T) {
 	t.Helper()
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
 		testName:     serviceReference,
-		testTemplate: map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference, "containerPort": 8080}}},
+		testTemplate: map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference, "ports": []any{map[string]any{"containerPort": 8080}}}}},
 		"ingress":    "INGRESS_TRAFFIC_ALL",
 	})
 	if recorder.Code != 200 {
@@ -410,8 +410,8 @@ func TestWorkloadMetadataBindsPerRevisionListener(t *testing.T) {
 	body := map[string]any{
 		testName: serviceReference,
 		testTemplate: map[string]any{
-			testContainers:   []any{map[string]any{testImageKey: imageReference}},
-			"serviceAccount": "serviceAccount:worker@demo-project.iam.gserviceaccount.com",
+			testContainers:        []any{map[string]any{testImageKey: imageReference, "ports": []any{map[string]any{"containerPort": 9090}}}},
+			testServiceAccountKey: "worker@demo-project.iam.gserviceaccount.com",
 		},
 	}
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", body)
@@ -421,8 +421,23 @@ func TestWorkloadMetadataBindsPerRevisionListener(t *testing.T) {
 	if !containsEntry(h.runtime.started[0].Env, "GCE_METADATA_HOST="+harnessBind) {
 		t.Fatalf("env = %v", h.runtime.started[0].Env)
 	}
-	if h.runtime.started[0].Port != 8080 {
+	if h.runtime.started[0].Port != 9090 {
 		t.Fatalf("spec = %+v", h.runtime.started[0])
+	}
+}
+
+func TestTemplateServiceAccountIsAnEmail(t *testing.T) {
+	h := newHarness(t)
+	body := map[string]any{
+		testName: serviceReference,
+		testTemplate: map[string]any{
+			testContainers:        []any{map[string]any{testImageKey: imageReference}},
+			testServiceAccountKey: "serviceAccount:worker@demo-project.iam.gserviceaccount.com",
+		},
+	}
+	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", body)
+	if recorder.Code != 400 || len(h.runtime.started) != 0 {
+		t.Fatalf("member-prefixed account status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
 

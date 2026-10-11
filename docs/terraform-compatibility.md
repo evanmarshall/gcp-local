@@ -37,7 +37,7 @@ The check also starts a fresh fixture with deliberately incorrect bucket RPO. It
 
 ## Endpoint and identity configuration
 
-The acceptance runner needs **no ADC or GCP account**. It uses an explicit synthetic project and a build-tagged credential fixture; the production gateway, IAM evaluator, Storage provider, and backend execute every API request. The fixed test token is rejected by the production binary. Production opaque local ADC is separately exercised by `scripts/check_storage.sh`; native Terraform ADC and refresh are not certified by these acceptance cases.
+The acceptance runner needs **no ADC or GCP account**. It uses an explicit synthetic project and a build-tagged credential fixture; the production gateway, IAM evaluator, Storage provider, and backend execute every API request. The fixed test token is rejected by the production binary. Production opaque local ADC is separately exercised by `scripts/check_storage.sh`; native Terraform ADC and refresh are not certified by these acceptance cases. The [workflow acceptance](workflow.md#terraform-authentication) drives the released provider with local external-account ADC, which needs a local `universe_domain` marker in the credential file and an explicit cloud-platform scope.
 
 The adapter supplies this provider configuration automatically:
 

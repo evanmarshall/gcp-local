@@ -224,3 +224,23 @@ func TestPushActAsDeniedBeforeAnyBackendAccess(t *testing.T) {
 		t.Fatal("missing actAs reached backend", err)
 	}
 }
+
+// TestRestWireEchoesPushConfig proves a push subscription reads back with its
+// endpoint and OIDC identity, so declarative clients see no drift.
+func TestRestWireEchoesPushConfig(t *testing.T) {
+	wire := restWire("", &pb.Subscription{
+		Name: "projects/p/subscriptions/s", Topic: "projects/p/topics/t",
+		PushConfig: &pb.PushConfig{
+			PushEndpoint:         "http://127.0.0.1:1/push",
+			AuthenticationMethod: &pb.PushConfig_OidcToken_{OidcToken: &pb.PushConfig_OidcToken{ServiceAccountEmail: "push@p.iam.gserviceaccount.com", Audience: "https://aud"}},
+		},
+	})
+	push, _ := wire["pushConfig"].(map[string]any)
+	oidc, _ := push["oidcToken"].(map[string]any)
+	if push["pushEndpoint"] != "http://127.0.0.1:1/push" || oidc["serviceAccountEmail"] != "push@p.iam.gserviceaccount.com" || oidc["audience"] != "https://aud" {
+		t.Fatalf("push wire = %v", wire)
+	}
+	if _, found := restWire("", &pb.Subscription{Name: "projects/p/subscriptions/s"})["pushConfig"]; found {
+		t.Fatal("a pull subscription rendered a push config")
+	}
+}

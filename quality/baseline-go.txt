@@ -8,6 +8,7 @@
 1	cyclop	internal/providers/bigquery/provider_test.go
 1	cyclop	internal/providers/iam/methods.go
 1	cyclop	internal/providers/iam/provider_test.go
+1	cyclop	internal/providers/pubsub/rest_wire.go
 1	cyclop	internal/providers/resourcemanager/provider.go
 1	cyclop	internal/providers/storage/provider_test.go
 1	cyclop	internal/providers/storage/state_test.go
@@ -44,7 +45,6 @@
 1	wrapcheck	internal/providers/iam/methods.go
 2	cyclop	internal/backend/manager_test.go
 2	cyclop	internal/gateway/gateway_test.go
-2	cyclop	internal/providers/pubsub/rest_wire.go
 2	cyclop	internal/providers/storage/provider.go
 2	cyclop	internal/providers/storage/validation.go
 2	gocognit	internal/backend/manager.go

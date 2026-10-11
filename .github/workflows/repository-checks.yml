@@ -86,7 +86,10 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-pubsub.txt
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
-      - name: Run the Pub/Sub push to Cloud Run worker to Storage workflow
+      - run: python scripts/install_go.py
+      - run: python scripts/install_pubsub.py
+      - run: python scripts/install_terraform.py
+      - name: Provision and run the Pub/Sub push to Cloud Run worker to Storage workflow with Terraform
         run: |
           GCP_LOCAL_JAVA=$(readlink -f "$(command -v java)") python scripts/smoke_workflow.py
 
