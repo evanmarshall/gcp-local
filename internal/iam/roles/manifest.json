@@ -217,6 +217,11 @@
    "file": "bigquery.admin.json",
    "name": "roles/bigquery.admin",
    "sha256": "f399ed35a759fd4d0c79e226441de3829792c2f8c763391f0a73eb5e1ac91198"
+  },
+  {
+   "file": "cloudkms.cryptoKeyEncrypter.json",
+   "name": "roles/cloudkms.cryptoKeyEncrypter",
+   "sha256": "88b4fdb8f24d19567c4c98fd3cfb99025bce36049a9ed40246cbd08705363e87"
   }
  ]
 }

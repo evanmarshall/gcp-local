@@ -83,6 +83,12 @@ resource "google_kms_key_ring_iam_member" "member" {
  role        = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
  member      = "serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"
 }
+
+resource "google_kms_crypto_key_iam_member" "key_member" {
+ crypto_key_id = google_kms_crypto_key.key.id
+ role          = "roles/cloudkms.cryptoKeyEncrypter"
+ member        = "serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"
+}
 `, ringName, keyName)
 }
 
