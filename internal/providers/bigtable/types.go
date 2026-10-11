@@ -1,8 +1,9 @@
-// Package bigtable implements the Bigtable admin v2 control plane: instances
-// with one modeled cluster, tables with column families, app-profile-level
-// IAM via instances, and per-resource IAM. Data-plane row reads/writes are
-// out of scope. The bigtable-instance-table-admin recording covers the
-// instance, cluster, table, column-family, and instance IAM shapes.
+// Package bigtable implements the Bigtable admin v2 control plane. The provider
+// owns instances, their one modeled cluster, and per-resource IAM; tables and
+// column families are served by Google's Bigtable emulator (bttest) running
+// in-process per project. Data-plane row reads/writes are not exposed. The
+// bigtable-instance-table-admin recording covers the instance, cluster, table,
+// column-family, and instance IAM shapes.
 package bigtable
 
 import (
@@ -103,37 +104,18 @@ type instanceRecord struct {
 	CreatedAt   time.Time
 }
 
-// familyRecord is one column family of a table.
-type familyRecord struct {
-	Name   string
-	GCRule map[string]any
-}
-
-// tableRecord is one stored Bigtable table.
-type tableRecord struct {
-	Instance    string
-	Name        string
-	Families    map[string]*familyRecord
-	Granularity string
-	CreatedAt   time.Time
-}
-
-// scopeState is one project slice of provider state.
+// scopeState is one project slice of provider-owned state: instances and their
+// clusters. Tables and column families live in the scope's emulator backend.
 type scopeState struct {
 	instances map[string]*instanceRecord
-	tables    map[string]*tableRecord
 }
 
 func newScopeState() scopeState {
-	return scopeState{
-		instances: map[string]*instanceRecord{},
-		tables:    map[string]*tableRecord{},
-	}
+	return scopeState{instances: map[string]*instanceRecord{}}
 }
 
 func (s *scopeState) reset() {
 	s.instances = map[string]*instanceRecord{}
-	s.tables = map[string]*tableRecord{}
 }
 
 // errProviderShape rejects an incomplete provider construction.

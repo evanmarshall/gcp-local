@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/googleapis/google-cloud-go/tree/bigtable/v1.58.0/bigtable/bttest",
+  "module": "cloud.google.com/go/bigtable",
+  "version": "v1.58.0",
+  "revision": "967a532a6d1f3ffe5210c7f972b82b20ef663c2d",
+  "license": "Apache-2.0",
+  "upstream_emulator": "cloud.google.com/go/bigtable/cmd/emulator (cbtemulator) serves the same bttest package",
+  "version_choice": "Latest release on 2026-10-11; the cbt CLI (github.com/googleapis/cloud-bigtable-cbt-cli@d553ae611d4e) also requires v1.58.0. The gcloud cbt 1.25.5 component version does not map to a module version that could be verified offline.",
+  "integration": "bttest.NewServerWithListener over an in-memory bufconn listener, one server per project scope; table admin only, no data-plane exposure",
+  "integrity": {
+    "go.sum": "cloud.google.com/go/bigtable v1.58.0 h1:fkf7bI0DBkKN85uRrfEEpkbufSc48b4PVIZCRud3xRk=",
+    "go.mod": "cloud.google.com/go/bigtable v1.58.0/go.mod h1:fZ/QM3mBog9JYJ5KV1z2xqv2+vfHGvoazGJllGQClds="
+  },
+  "new_transitive_modules": [
+    "github.com/google/btree v1.1.3",
+    "rsc.io/binaryregexp v0.2.0",
+    "cloud.google.com/go/longrunning v1.2.0"
+  ]
+}

@@ -18,7 +18,8 @@
     "storage_contract": "api/discovery/manifest.json",
     "state": "in-memory; reset recreates this Compose project",
     "pubsub_backend": "toolchains/pubsub.json",
-    "firestore_backend": "toolchains/firestore.json"
+    "firestore_backend": "toolchains/firestore.json",
+    "bigtable_backend": "third_party/bigtable-bttest/manifest.json"
   },
   "pubsub": {
     "image": "eclipse-temurin:17-jre-jammy@sha256:8993f1aed8b25fcea7a7047a7949c1866fa558fc6830d938c22c4f13b26be9d7",

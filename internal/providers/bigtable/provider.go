@@ -11,18 +11,23 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// Provider owns the Bigtable admin control plane and instance/table state.
+// Provider owns the Bigtable admin control plane and instance state; tables
+// live in one in-process emulator per project.
 type Provider struct {
-	index  *state.Index
-	engine *iam.Engine
-	scopes *state.Store[scopeState]
-	clock  func() time.Time
-	// operations numbers create-instance operation names.
+	manager *backend.Manager
+	index   *state.Index
+	engine  *iam.Engine
+	scopes  *state.Store[scopeState]
+	clock   func() time.Time
+	// operations numbers instance and table operation names.
 	operations atomic.Uint64
+	// serverOptions are passed to each emulator; tests use them to observe calls.
+	serverOptions []grpc.ServerOption
 }
 
 // New registers the Bigtable provider.
@@ -34,7 +39,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 		return nil, err
 	}
 	p := &Provider{
-		index: index, engine: engine,
+		manager: manager, index: index, engine: engine,
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
@@ -49,11 +54,15 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	return p, nil
 }
 
-// registerBackend attaches the in-memory Bigtable backend and its reset hook.
+// registerBackend attaches one in-process Bigtable emulator per project scope.
+// Reset stops the emulator, discarding its tables, before clearing instances,
+// policies, and index entries for that project.
 func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine, index *state.Index) error {
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New: func(state.Scope) (backend.Backend, error) {
+			return &emulatorBackend{options: p.serverOptions}, nil
+		},
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
@@ -68,17 +77,7 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 	return nil
 }
 
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error    { return nil }
-func (emptyBackend) Ready(context.Context) error    { return nil }
-func (emptyBackend) Stop(context.Context) error     { return nil }
-func (emptyBackend) Reset(context.Context) error    { return nil }
-func (emptyBackend) Snapshot(context.Context) error { return backend.ErrPersistenceUnsupported }
-func (emptyBackend) Restore(context.Context) error  { return backend.ErrPersistenceUnsupported }
-
-// Reset clears the scope's instances and tables.
+// Reset clears the scope's provider-owned instances.
 func (p *Provider) Reset(scope state.Scope) error {
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		s.reset()
@@ -142,9 +141,12 @@ func (p *Provider) denied(_ gateway.Call, decision iam.Decision, target iam.Targ
 	return wireError(403, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", "The caller", permission, target.Name))
 }
 
-// resolve derives the scope and IAM target for one request. Instance methods
-// authorize against the instance; table methods inherit via the instance;
-// list and create methods authorize against the project.
+// resolve derives the scope and IAM target for one request from provider
+// state and the shared index only; it never calls the backend. Instance methods
+// authorize against the instance; list and create methods against the project.
+// Table methods authorize against a published table, or against its instance
+// when the table is not published, so absence is reported only to callers that
+// hold the permission.
 func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
 	project := request.Path["project"]
 	scope := scopeOf(project)
@@ -161,10 +163,16 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		target.Name = instanceResource(project, instance)
 		return scope, target, nil
 	default:
-		if err := p.existingTable(scope, instance, table); err != nil {
+		if !tableID.MatchString(table) {
+			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
+		}
+		if err := p.existingInstance(scope, instance); err != nil {
 			return scope, target, err
 		}
-		target.Name = tableResource(project, instance, table)
+		target.Name = instanceResource(project, instance)
+		if resource, found := p.index.Get(tableResource(project, instance, table)); found && resource.Scope == scope {
+			target.Name = resource.Name
+		}
 		return scope, target, nil
 	}
 }
@@ -176,20 +184,6 @@ func (p *Provider) existingInstance(scope state.Scope, instance string) error {
 	}
 	if p.instanceLocked(scope, instance) == nil {
 		return notFound(kindInstance, instance)
-	}
-	return nil
-}
-
-// existingTable validates a table id and requires its instance and table.
-func (p *Provider) existingTable(scope state.Scope, instance, table string) error {
-	if !tableID.MatchString(table) {
-		return status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
-	}
-	if err := p.existingInstance(scope, instance); err != nil {
-		return err
-	}
-	if p.tableLocked(scope, instance, table) == nil {
-		return notFound(kindTable, table)
 	}
 	return nil
 }

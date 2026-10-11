@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/grpc"
 )
 
 // Names and keys repeated across the lifecycle tests.
@@ -35,13 +38,19 @@ const (
 	testToken     = "actor"
 	testInstances = "/v2/projects/" + testProject + "/instances"
 	testActor     = "serviceAccount:actor@" + testProject + ".iam.gserviceaccount.com"
+	otherProject  = "other-bigtable"
 )
 
 // harness drives the provider through the gateway.
 type harness struct {
-	t      *testing.T
-	gate   *gateway.Gateway
-	engine *iam.Engine
+	t        *testing.T
+	gate     *gateway.Gateway
+	engine   *iam.Engine
+	index    *state.Index
+	manager  *backend.Manager
+	provider *Provider
+	// backendCalls counts every gRPC call the emulators receive.
+	backendCalls atomic.Int64
 }
 
 func newHarness(t *testing.T) *harness {
@@ -52,25 +61,35 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("build the iam engine: %v", err)
 	}
-	if err := index.Put("resourcemanager", state.Resource{
-		Name: "//cloudresourcemanager.googleapis.com/projects/" + testProject, Service: "resourcemanager",
-		Kind: "project", Number: "123456", Scope: state.Scope{Project: testProject, Location: state.Global},
-	}); err != nil {
-		t.Fatalf("register the project: %v", err)
+	for number, project := range []string{testProject, otherProject} {
+		if err := index.Put("resourcemanager", state.Resource{
+			Name: "//cloudresourcemanager.googleapis.com/projects/" + project, Service: "resourcemanager",
+			Kind: "project", Number: strconv.Itoa(123456 + number), Scope: state.Scope{Project: project, Location: state.Global},
+		}); err != nil {
+			t.Fatalf("register the project: %v", err)
+		}
+		if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+project, iam.Policy{
+			Bindings: []iam.Binding{{Role: "roles/bigtable.admin", Members: []string{testActor}}},
+		}); err != nil {
+			t.Fatalf("grant the project: %v", err)
+		}
 	}
-	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, iam.Policy{
-		Bindings: []iam.Binding{{Role: "roles/bigtable.admin", Members: []string{testActor}}},
-	}); err != nil {
-		t.Fatalf("grant the project: %v", err)
-	}
-	_, err = New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine)
+	manager := backend.NewManager(5*time.Second, 5*time.Second)
+	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
+	provider, err := New(context.Background(), registry, manager, index, engine)
 	if err != nil {
 		t.Fatalf("build the bigtable provider: %v", err)
 	}
-	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
+	h := &harness{t: t, engine: engine, index: index, manager: manager, provider: provider}
+	provider.serverOptions = []grpc.ServerOption{grpc.ChainUnaryInterceptor(
+		func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+			h.backendCalls.Add(1)
+			return handler(ctx, req)
+		})}
+	h.gate = gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, engine: engine}
+	return h
 }
 
 // invoke issues one REST request as the fixture principal.
@@ -185,13 +204,13 @@ func TestInstanceAndTableLifecycle(t *testing.T) {
 	expectOK(t, "table list", h.invoke(http.MethodGet, instance+"/tables", nil))
 	modify := instance + "/tables/" + testTable + ":modifyColumnFamilies"
 	expectOK(t, "family create", h.invoke(http.MethodPost, modify, map[string]any{
-		keyMods: []any{map[string]any{"id": familyTwo, "create": map[string]any{keyGCRule: map[string]any{"maxVersion": "3"}}}},
+		keyMods: []any{map[string]any{"id": familyTwo, "create": map[string]any{keyGCRule: map[string]any{"maxNumVersions": 3}}}},
 	}))
 	expectOK(t, "family drop", h.invoke(http.MethodPost, modify, map[string]any{
 		keyMods: []any{map[string]any{"id": familyOne, "drop": true}},
 	}))
 	families := decode(t, h.invoke(http.MethodGet, instance+"/tables/"+testTable, nil))[keyFamilies]
-	want := map[string]any{familyTwo: map[string]any{keyGCRule: map[string]any{"maxVersion": "3"}}}
+	want := map[string]any{familyTwo: map[string]any{keyGCRule: map[string]any{"maxNumVersions": float64(3)}}}
 	if !reflect.DeepEqual(families, want) {
 		t.Fatalf("families after create/drop = %v, want %v", families, want)
 	}
@@ -364,4 +383,142 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, testInstances+"/"+testInstance+"/tables")
 	probe(http.MethodPost, testInstances+"/"+testInstance+":getIamPolicy")
 	probe(http.MethodPost, testInstances+"/"+testInstance+"/tables/"+testTable+":getIamPolicy")
+}
+
+// tablePath addresses one table of the fixture instance in a project.
+func tablePath(project, table string) string {
+	return "/v2/projects/" + project + "/instances/" + testInstance + "/tables/" + table
+}
+
+// createTable creates one table with a single family in a project's fixture instance.
+func (h *harness) createTable(project, table string) {
+	h.t.Helper()
+	expectOK(h.t, "table create "+project, h.invoke(http.MethodPost, "/v2/projects/"+project+"/instances/"+testInstance+"/tables", map[string]any{
+		keyTableID: table, keyTable: map[string]any{keyFamilies: map[string]any{familyOne: map[string]any{}}},
+	}))
+}
+
+// TestDeniedRequestsNeverReachTheEmulator proves authorization precedes every
+// backend call: denied table and instance mutations neither start nor call
+// the emulator, and the table is unchanged afterwards.
+func TestDeniedRequestsNeverReachTheEmulator(t *testing.T) {
+	h := newHarness(t)
+	h.instance()
+	instance := testInstances + "/" + testInstance
+	denied := []struct{ verb, path string }{
+		{http.MethodPost, instance + "/tables"},
+		{http.MethodGet, instance + "/tables"},
+		{http.MethodGet, instance + "/tables/" + testTable},
+		{http.MethodPost, instance + "/tables/" + testTable + ":modifyColumnFamilies"},
+		{http.MethodPatch, instance + "/tables/" + testTable},
+		{http.MethodDelete, instance + "/tables/" + testTable},
+		{http.MethodDelete, instance},
+	}
+	probe := func() {
+		t.Helper()
+		before := h.backendCalls.Load()
+		for _, request := range denied {
+			recorder := h.invokeAs("denied", request.verb, request.path, map[string]any{keyTableID: testTable})
+			expectError(t, request.verb+" "+request.path, recorder, 403, "PERMISSION_DENIED")
+		}
+		if calls := h.backendCalls.Load() - before; calls != 0 {
+			t.Fatalf("denied requests reached the emulator %d times", calls)
+		}
+	}
+	// Instance creation starts the emulator lazily, but makes no emulator call.
+	if calls := h.backendCalls.Load(); calls != 0 {
+		t.Fatalf("instance creation made %d emulator calls", calls)
+	}
+	probe()
+
+	// The same holds for a published table.
+	h.createTable(testProject, testTable)
+	probe()
+	expectOK(t, "table survives denial", h.invoke(http.MethodGet, instance+"/tables/"+testTable, nil))
+}
+
+// TestDeniedRequestDoesNotStartTheEmulator checks the lazy start happens only
+// after authorization.
+func TestDeniedRequestDoesNotStartTheEmulator(t *testing.T) {
+	h := newHarness(t)
+	expectError(t, "denied create", h.invokeAs("denied", http.MethodPost, testInstances, createBody()), 403, "PERMISSION_DENIED")
+	for _, status := range h.manager.Status() {
+		if status.Phase != backend.Stopped {
+			t.Fatalf("emulator %v is %s after a denied request", status.Key, status.Phase)
+		}
+	}
+}
+
+// TestResetClearsTables checks a project reset stops its emulator, so the
+// tables, instances, policies, and index entries of that project are gone.
+func TestResetClearsTables(t *testing.T) {
+	h := newHarness(t)
+	h.instance()
+	h.createTable(testProject, testTable)
+	key := backend.Key{Service: serviceName, Scope: scopeOf(testProject)}
+	if err := h.manager.Reset(context.Background(), key); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if _, found := h.index.Get(tableResource(testProject, testInstance, testTable)); found {
+		t.Fatal("reset kept the table index entry")
+	}
+	expectError(t, "instance after reset", h.invoke(http.MethodGet, testInstances+"/"+testInstance, nil), 404, "NOT_FOUND")
+	// A recreated instance starts a fresh emulator without the old table.
+	h.instance()
+	expectError(t, "table after reset", h.invoke(http.MethodGet, tablePath(testProject, testTable), nil), 404, "NOT_FOUND")
+	listing := decode(t, h.invoke(http.MethodGet, testInstances+"/"+testInstance+"/tables", nil))
+	if len(listing) != 0 {
+		t.Fatalf("tables after reset = %v", listing)
+	}
+}
+
+// TestProjectIsolation checks each project has its own emulator: tables,
+// deletes, and resets in one project do not affect another.
+func TestProjectIsolation(t *testing.T) {
+	h := newHarness(t)
+	other := "/v2/projects/" + otherProject + "/instances"
+	h.instance()
+	body := createBody()
+	body["parent"] = "projects/" + otherProject
+	expectOK(t, "other instance", h.invoke(http.MethodPost, other, body))
+	h.createTable(testProject, testTable)
+	h.createTable(otherProject, testTable)
+
+	expectEmpty(t, "table delete", h.invoke(http.MethodDelete, tablePath(testProject, testTable), nil))
+	expectOK(t, "other table survives delete", h.invoke(http.MethodGet, tablePath(otherProject, testTable), nil))
+	h.createTable(testProject, "only-here")
+	expectError(t, "foreign table absent", h.invoke(http.MethodGet, tablePath(otherProject, "only-here"), nil), 404, "NOT_FOUND")
+
+	if err := h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	table := decode(t, h.invoke(http.MethodGet, tablePath(otherProject, testTable), nil))
+	if table["name"] != "projects/"+otherProject+"/instances/"+testInstance+"/tables/"+testTable {
+		t.Fatalf("other project table after reset = %v", table)
+	}
+}
+
+// TestTableUpdateAndProtectedInstanceDelete covers the emulator's
+// UpdateTable path: deletion protection blocks table and instance deletes.
+func TestTableUpdateAndProtectedInstanceDelete(t *testing.T) {
+	h := newHarness(t)
+	h.instance()
+	h.createTable(testProject, testTable)
+	path := tablePath(testProject, testTable)
+	update := func(protected bool) {
+		t.Helper()
+		operation := decode(t, h.invoke(http.MethodPatch, path+"?updateMask=deletionProtection", map[string]any{"deletionProtection": protected}))
+		if name, _ := operation["name"].(string); !strings.HasPrefix(name, "projects/"+testProject+"/instances/"+testInstance+"/tables/"+testTable+"/operations/") || operation["done"] != true {
+			t.Fatalf("update operation = %v", operation)
+		}
+	}
+	update(true)
+	expectError(t, "protected table delete", h.invoke(http.MethodDelete, path, nil), 400, "FAILED_PRECONDITION")
+	expectError(t, "protected instance delete", h.invoke(http.MethodDelete, testInstances+"/"+testInstance, nil), 400, "FAILED_PRECONDITION")
+	expectOK(t, "table kept", h.invoke(http.MethodGet, path, nil))
+	update(false)
+	expectEmpty(t, "instance delete", h.invoke(http.MethodDelete, testInstances+"/"+testInstance, nil))
+	if _, found := h.index.Get(tableResource(testProject, testInstance, testTable)); found {
+		t.Fatal("instance delete kept the table index entry")
+	}
 }
