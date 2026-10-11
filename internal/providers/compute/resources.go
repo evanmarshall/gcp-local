@@ -136,23 +136,27 @@ func firewallDocument(project string, record *firewallRecord) map[string]any {
 
 // routeDocument renders the route wire shape.
 func routeDocument(project string, record *routeRecord) map[string]any {
-	tags := record.Tags
-	if tags == nil {
-		tags = []string{}
+	document := map[string]any{
+		"id":           idOf(record.Name, record.Generation),
+		keyName:        record.Name,
+		keySelfLink:    selfLink(project, "routes", record.Name),
+		keyTimestamp:   stamp(record.CreatedAt),
+		keyKind:        "compute#route",
+		keyNetwork:     selfLink(project, "networks", record.Network),
+		keyDestRange:   record.DestRange,
+		"priority":     record.Priority,
+		keyDescription: "",
 	}
-	return map[string]any{
-		"id":             idOf(record.Name, record.Generation),
-		keyName:          record.Name,
-		keySelfLink:      selfLink(project, "routes", record.Name),
-		keyTimestamp:     stamp(record.CreatedAt),
-		keyKind:          "compute#route",
-		keyNetwork:       selfLink(project, "networks", record.Network),
-		keyDestRange:     record.DestRange,
-		"nextHopGateway": record.NextHopGateway,
-		"priority":       record.Priority,
-		"tags":           tags,
-		keyDescription:   "",
+	if record.NextHopGateway != "" {
+		document["nextHopGateway"] = record.NextHopGateway
 	}
+	if record.NextHopIP != "" {
+		document["nextHopIp"] = record.NextHopIP
+	}
+	if record.Tags != nil {
+		document["tags"] = record.Tags
+	}
+	return document
 }
 
 // operationDocument renders one operation in the compute shape.

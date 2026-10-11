@@ -63,6 +63,7 @@ type routeRecord struct {
 	Network        string
 	DestRange      string
 	NextHopGateway string
+	NextHopIP      string
 	Priority       int
 	Tags           []string
 	Generation     int64

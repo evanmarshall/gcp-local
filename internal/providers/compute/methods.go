@@ -505,7 +505,8 @@ func (p *Provider) createRoute(request *gateway.RESTRequest, scope state.Scope) 
 		}
 		created = &routeRecord{
 			Name: name, Network: network, DestRange: cidr,
-			NextHopGateway: textOr(body["nextHopGateway"], selfLink(project, "gateways", "default-internet-gateway")),
+			NextHopGateway: textOf(body["nextHopGateway"]),
+			NextHopIP:      textOf(body["nextHopIp"]),
 			Priority:       intOf(body["priority"], 1000), Tags: stringListOf(body["tags"]),
 			Generation: 1, CreatedAt: p.clock(),
 		}
