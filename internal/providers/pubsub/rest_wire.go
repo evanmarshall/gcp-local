@@ -1,6 +1,9 @@
 package pubsub
 
 import (
+	"strconv"
+	"time"
+
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // Wire document keys shared by the JSON response shapes.
@@ -46,9 +50,10 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	switch twin {
 	case subscriber + "CreateSubscription":
 		var body struct {
-			Topic              string         `json:"topic"`
-			AckDeadlineSeconds int32          `json:"ackDeadlineSeconds"`
-			PushConfig         *pb.PushConfig `json:"pushConfig"`
+			Topic                    string         `json:"topic"`
+			AckDeadlineSeconds       int32          `json:"ackDeadlineSeconds"`
+			MessageRetentionDuration string         `json:"messageRetentionDuration"`
+			PushConfig               *pb.PushConfig `json:"pushConfig"`
 		}
 		if json.Unmarshal(request.JSON, &body) != nil {
 			return nil, status.Error(codes.InvalidArgument, "Invalid subscription body")
@@ -62,10 +67,11 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 			deadline = 10
 		}
 		sub := &pb.Subscription{
-			Name:               restSubscriptionName(project, request.Path["subscription"]),
-			Topic:              topic,
-			AckDeadlineSeconds: deadline,
-			PushConfig:         body.PushConfig,
+			Name:                     restSubscriptionName(project, request.Path["subscription"]),
+			Topic:                    topic,
+			AckDeadlineSeconds:       deadline,
+			MessageRetentionDuration: durationFromSeconds(body.MessageRetentionDuration),
+			PushConfig:               body.PushConfig,
 		}
 		// The v2 CreateSubscription call takes the Subscription directly.
 		return sub, nil
@@ -76,6 +82,23 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	default:
 		return &pb.ListSubscriptionsRequest{Project: "projects/" + project}, nil
 	}
+}
+
+// durationFromSeconds parses one "3600s" duration string; empty stays nil.
+func durationFromSeconds(raw string) *durationpb.Duration {
+	if raw == "" {
+		return nil
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return nil
+	}
+	return durationpb.New(parsed)
+}
+
+// secondsString renders one protobuf duration in the wire "3600s" shape.
+func secondsString(value *durationpb.Duration) string {
+	return strconv.FormatInt(value.GetSeconds(), 10) + "s"
 }
 
 // restStringMap extracts one string map from a JSON body.
@@ -110,7 +133,10 @@ func restWire(_ string, response proto.Message) map[string]any {
 			keyWireTopic:         wireRestName(protoMessage.GetTopic()),
 			"ackDeadlineSeconds": protoMessage.GetAckDeadlineSeconds(),
 		}
-		if protoMessage.GetPushConfig() != nil {
+		if retention := protoMessage.GetMessageRetentionDuration(); retention != nil {
+			wire["messageRetentionDuration"] = secondsString(retention)
+		}
+		if push := protoMessage.GetPushConfig(); push != nil && (push.GetPushEndpoint() != "" || push.GetOidcToken().GetServiceAccountEmail() != "") {
 			wire["pushConfig"] = map[string]any{"oidcToken": map[string]any{
 				"serviceAccountEmail": protoMessage.GetPushConfig().GetOidcToken().GetServiceAccountEmail(),
 				"audience":            protoMessage.GetPushConfig().GetOidcToken().GetAudience(),

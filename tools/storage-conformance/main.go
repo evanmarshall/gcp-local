@@ -25,6 +25,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
+	pubsubprovider "github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -60,6 +61,7 @@ func main() {
 			{Role: "roles/datastore.user", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/bigquery.dataEditor", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/spanner.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/pubsub.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}
@@ -90,8 +92,15 @@ func main() {
 	must(err)
 	_, err = spannerprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
+	java := os.Getenv("GCP_LOCAL_JAVA")
+	jar := os.Getenv("GCP_LOCAL_PUBSUB_JAR")
+	if java == "" || jar == "" {
+		log.Fatal("The conformance fixture needs GCP_LOCAL_JAVA and GCP_LOCAL_PUBSUB_JAR for the Pub/Sub provider")
+	}
 	tokens, tokenErr := identity.NewIDTokens(engine, index)
 	must(tokenErr)
+	_, err = pubsubprovider.New(registry, server.Backends, index, engine, pubsubprovider.Config{Java: java, JAR: jar, IDTokens: tokens})
+	must(err)
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
 	must(err)
 	if *trace || *fault {

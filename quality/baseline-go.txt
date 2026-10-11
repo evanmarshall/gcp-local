@@ -45,3 +45,4 @@
 2	wrapcheck	internal/providers/spanner/methods.go
 3	cyclop	internal/iam/engine_test.go
 3	gocognit	internal/providers/pubsub/provider.go
+1	cyclop	internal/providers/pubsub/rest_wire.go

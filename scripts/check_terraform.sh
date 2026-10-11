@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+GCP_LOCAL_JAVA=${GCP_LOCAL_JAVA:-$(command -v java)}
+GCP_LOCAL_PUBSUB_JAR=${GCP_LOCAL_PUBSUB_JAR:-"$PWD/.tools/pubsub/emulator.jar"}
+export GCP_LOCAL_JAVA GCP_LOCAL_PUBSUB_JAR
 python3 scripts/generate_terraform_tests.py --check
 sh scripts/go.sh -C tests/terraform/runner test -c -o "$PWD/bin/terraform-tests" .
 sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance

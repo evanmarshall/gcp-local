@@ -1,6 +1,6 @@
 # Terraform compatibility
 
-Eight adapted upstream Google provider acceptance cases now pass across six services: authenticated Storage, Cloud KMS, Secret Manager, Cloud Tasks, Firestore documents, and Spanner instances/databases. They exercise the released **google 8.5.0** plugin with **Terraform 1.16.5** and **terraform-plugin-testing 1.15.0**. The [selection manifest](../tests/terraform/selection.json) pins exact IDs, source hashes, and limits; the [adapter audit](../tests/terraform/audit.md) accounts for fixture, credential, helper, endpoint, and assertion changes.
+Ten adapted upstream Google provider acceptance cases now pass across seven services: authenticated Storage, Cloud KMS, Secret Manager, Cloud Tasks, Firestore documents, Spanner instances/databases, and Pub/Sub topics/subscriptions. They exercise the released **google 8.5.0** plugin with **Terraform 1.16.5** and **terraform-plugin-testing 1.15.0**. The [selection manifest](../tests/terraform/selection.json) pins exact IDs, source hashes, and limits; the [adapter audit](../tests/terraform/audit.md) accounts for fixture, credential, helper, endpoint, and assertion changes.
 
 | Upstream test ID | Passing local coverage |
 | --- | --- |
@@ -12,8 +12,9 @@ Eight adapted upstream Google provider acceptance cases now pass across six serv
 | `TestAccCloudTasksQueueLifecycle` | Queue create with rate limits, PATCH update to new limits, delete, post-destroy 404 |
 | `TestAccFirestoreDocument` | Document create in a collection, refresh, unchanged plan, destroy with 404 confirmation |
 | `TestAccSpannerInstanceAndDatabase` | Instance create with processing units, database with DDL, refresh, unchanged plan, destroy with post-destroy 404 |
+| `TestAccPubSubTopicAndSubscription` | Topic and pull subscription over the JSON REST surface with retention duration, refresh, unchanged plan, destroy with 404 |
 
-The adapter retains the upstream checks except for the documented single-region RPO expectation and import handling for the injected ownership default label. These are serial, owned fixtures with bounded cleanup. No Terraform execution against real GCP is claimed. Seven separate recorded Storage scenarios cover the relevant API outcomes, including multipart request shapes, label updates, stale metageneration rejection, and nonmutation after denied updates. The KMS, Secret Manager, Cloud Tasks, Firestore, and Spanner slices are locally modeled without cloud recordings (their issues track the recording work); the Terraform cases verify each control-plane contract with the released provider, not recorded cloud behavior. Selected mutations are synchronous; asynchronous polling and the remaining services remain unsupported.
+The adapter retains the upstream checks except for the documented single-region RPO expectation and import handling for the injected ownership default label. These are serial, owned fixtures with bounded cleanup. No Terraform execution against real GCP is claimed. Seven separate recorded Storage scenarios cover the relevant API outcomes, including multipart request shapes, label updates, stale metageneration rejection, and nonmutation after denied updates. The KMS, Secret Manager, Cloud Tasks, Firestore, Spanner, and Pub/Sub slices are locally modeled without cloud recordings (their issues track the recording work); the Terraform cases verify each control-plane contract with the released provider, not recorded cloud behavior. Selected mutations are synchronous; asynchronous polling and the remaining services remain unsupported.
 
 ## Run the suite
 
