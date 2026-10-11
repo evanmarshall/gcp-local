@@ -51,6 +51,8 @@ Reviewed baselines live under `tests/conformance/recordings/SCENARIO_ID/` with `
 
 Raise `Unsupported`, `Unverified`, or `Inconclusive` from `gcp_validation.evidence` when those outcomes apply. They fail an explicitly selected suite and retain their classification in the report. Snapshot mismatches raise `Divergence`. Failed cleanup is an error and publishes no candidate. Synthetic fixture tests always label their provenance `source: synthetic` and cannot establish real-cloud verification.
 
+Permission minimization probes use a separate runner and report format; see [permission discovery](permission-discovery.md).
+
 ## Open-source components and next adapters
 
 | Component | Use and license | Status |

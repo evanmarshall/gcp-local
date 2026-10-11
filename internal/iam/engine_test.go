@@ -553,3 +553,28 @@ func TestOrgPolicyAndVPCSCSignalDistinctFromIAMDenial(t *testing.T) {
 		t.Fatalf("missing resource = %v", err)
 	}
 }
+
+// accessPermission is both the method and the permission in the plan export test.
+const accessPermission = "secretmanager.versions.access"
+
+// TestPlansExportsCopiesForOnePrefix keeps the drift export read-only.
+func TestPlansExportsCopiesForOnePrefix(t *testing.T) {
+	engine, err := iam.New(state.NewIndex())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Register(accessPermission, iam.Rule{Baseline: []string{accessPermission}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Register("storage.objects.get", iam.Rule{Baseline: []string{"storage.objects.get"}}); err != nil {
+		t.Fatal(err)
+	}
+	plans := engine.Plans("secretmanager.")
+	if len(plans) != 1 || plans[accessPermission].Baseline[0] != accessPermission {
+		t.Fatalf("unexpected plans: %v", plans)
+	}
+	plans[accessPermission].Baseline[0] = "changed"
+	if engine.Plans("secretmanager.")[accessPermission].Baseline[0] != accessPermission {
+		t.Fatal("Plans returned shared rule storage")
+	}
+}

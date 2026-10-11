@@ -133,6 +133,25 @@ func (e *Engine) Register(method string, plan Rule) error {
 	return nil
 }
 
+// Plans copies the registered permission plans whose method starts with
+// prefix. It is a read-only export for drift reports; it never changes rules.
+func (e *Engine) Plans(prefix string) map[string]Rule {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	plans := map[string]Rule{}
+	for method, rule := range e.rules {
+		if !strings.HasPrefix(method, prefix) {
+			continue
+		}
+		copied := Rule{Baseline: append([]string(nil), rule.Baseline...), When: map[string][]string{}}
+		for feature, permissions := range rule.When {
+			copied.When[feature] = append([]string(nil), permissions...)
+		}
+		plans[method] = copied
+	}
+	return plans
+}
+
 // Baseline is a preflight for state resolution only. It never authorizes a
 // mutation; providers must call Authorize with all required state features.
 func (e *Engine) Baseline(call gateway.Call, target Target) (Decision, error) {
