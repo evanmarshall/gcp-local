@@ -90,6 +90,7 @@ func (r *Registry) registerRoutes() {
 		{generated.BigtableRoutes, "bigtable"},
 		{generated.ArtifactRegistryRoutes, "artifactregistry"},
 		{generated.ResourceManagerRoutes, "resourcemanager"},
+		{generated.IAMRoutes, "iam"},
 		{generated.CloudTasksRoutes, "cloudtasks"},
 		{generated.PubSubRestRoutes, servicePubsub},
 	}

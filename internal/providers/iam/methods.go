@@ -1,0 +1,273 @@
+package iam
+
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// execute dispatches one authorized request.
+func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
+	switch call.Method {
+	case methodAccountsCreate:
+		return p.accountsCreate(request, scope)
+	case methodAccountsGet:
+		return p.accountsGet(request, scope)
+	case methodAccountsList:
+		return p.accountsList(scope)
+	case methodAccountsUpdate:
+		return p.accountsUpdate(request, scope)
+	case methodAccountsGetIam:
+		return p.getIam(target)
+	case methodAccountsSetIam:
+		return p.setIam(request, target)
+	case methodKeysList:
+		return p.keysList(request, scope)
+	case methodKeysCreate:
+		return p.keysCreate(request, scope)
+	case methodKeysDelete:
+		return p.keysDelete(request, scope)
+	default:
+		return p.accountsDelete(request, scope)
+	}
+}
+
+// accountsCreate validates and stores one service account.
+func (p *Provider) accountsCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	var body struct {
+		AccountID      string `json:"accountId"`
+		Name           string `json:"name"`
+		ServiceAccount struct {
+			DisplayName string `json:"displayName"`
+			Description string `json:"description"`
+		} `json:"serviceAccount"`
+		DisplayName string `json:"displayName"`
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(request.JSON, &body) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid service account body")
+	}
+	id := body.AccountID
+	if id == "" && body.Name != "" {
+		id = lastSegment(body.Name)
+	}
+	if !uid.MatchString(id) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", id)
+	}
+	now := p.clock()
+	var created *accountRecord
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		if s.accounts[id] != nil {
+			return status.Errorf(codes.AlreadyExists, "Service account %s already exists", id)
+		}
+		displayName := body.ServiceAccount.DisplayName
+		if displayName == "" {
+			displayName = body.DisplayName
+		}
+		description := body.ServiceAccount.Description
+		if description == "" {
+			description = body.Description
+		}
+		created = &accountRecord{
+			Project: scope.Project, ID: id, DisplayName: displayName,
+			Description: description, Keys: map[string]*keyRecord{}, CreatedAt: now,
+		}
+		s.accounts[id] = created
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if indexErr := p.index.Put(serviceName, state.Resource{
+		Name: accountResource(scope.Project, id), Service: serviceName,
+		Kind: kindAccount, Parent: projectResource(scope.Project), Scope: scope,
+	}); indexErr != nil {
+		return nil, fmt.Errorf("index the service account: %w", indexErr)
+	}
+	return &gateway.RESTResponse{JSON: accountWire(created)}, nil
+}
+
+// lastSegment returns the id after the final '/', or the value itself.
+func lastSegment(value string) string {
+	if index := strings.LastIndex(value, "/"); index >= 0 {
+		return value[index+1:]
+	}
+	return value
+}
+
+// accountWire renders one account document.
+func accountWire(record *accountRecord) map[string]any {
+	return map[string]any{
+		keyName:          accountName(record.Project, record.ID),
+		"projectId":      record.Project,
+		"uniqueId":       strconv.FormatInt(record.CreatedAt.UnixNano(), 10),
+		"email":          accountEmail(record.Project, record.ID),
+		"displayName":    record.DisplayName,
+		"description":    record.Description,
+		"oauth2ClientId": strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
+		"disabled":       false,
+	}
+}
+
+// accountLocked reads one account under the scope lock.
+func (p *Provider) accountLocked(scope state.Scope, account string) *accountRecord {
+	var record *accountRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.accounts[account]; return nil })
+	return record
+}
+
+// accountsGet returns one account.
+func (p *Provider) accountsGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	record := p.accountLocked(scope, request.Path["serviceAccount"])
+	if record == nil {
+		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+	}
+	return &gateway.RESTResponse{JSON: accountWire(record)}, nil
+}
+
+// accountsList returns the project's accounts.
+func (p *Provider) accountsList(scope state.Scope) (*gateway.RESTResponse, error) {
+	items := []any{}
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		for _, record := range s.accounts {
+			items = append(items, accountWire(record))
+		}
+		return nil
+	})
+	return &gateway.RESTResponse{JSON: map[string]any{"accounts": items}}, nil
+}
+
+// accountsUpdate replaces display name and description.
+func (p *Provider) accountsUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	record := p.accountLocked(scope, request.Path["serviceAccount"])
+	if record == nil {
+		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+	}
+	var body struct {
+		DisplayName string `json:"displayName"`
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(request.JSON, &body) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid service account update")
+	}
+	record.DisplayName = body.DisplayName
+	record.Description = body.Description
+	return &gateway.RESTResponse{JSON: accountWire(record)}, nil
+}
+
+// accountsDelete removes one account and its keys.
+func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	account := request.Path["serviceAccount"]
+	if p.accountLocked(scope, account) == nil {
+		return nil, notFound(kindAccount, account)
+	}
+	var indexErr error
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		delete(s.accounts, account)
+		indexErr = p.index.Remove(serviceName, scope, accountResource(scope.Project, account))
+		return nil
+	})
+	if indexErr != nil {
+		return nil, fmt.Errorf("unregister the service account: %w", indexErr)
+	}
+	return &gateway.RESTResponse{Status: http.StatusNoContent}, nil
+}
+
+// keysList returns the account's synthesized keys.
+func (p *Provider) keysList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	record := p.accountLocked(scope, request.Path["serviceAccount"])
+	if record == nil {
+		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+	}
+	items := []any{}
+	for _, key := range record.Keys {
+		items = append(items, keyWire(record, key))
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{"keys": items}}, nil
+}
+
+// keysCreate synthesizes one key record for the account.
+func (p *Provider) keysCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	record := p.accountLocked(scope, request.Path["serviceAccount"])
+	if record == nil {
+		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+	}
+	buffer := make([]byte, 24)
+	if _, err := rand.Read(buffer); err != nil {
+		return nil, status.Errorf(codes.Internal, "generate the key id: %v", err)
+	}
+	key := &keyRecord{
+		ID:        "projects/" + record.Project + "/serviceAccounts/" + record.ID + "/keys/" + base64.RawURLEncoding.EncodeToString(buffer[:12]),
+		CreatedAt: p.clock(),
+	}
+	_ = p.scopes.With(scope, func(_ *scopeState) error {
+		record.Keys[key.ID] = key
+		return nil
+	})
+	response := keyWire(record, key)
+	response["privateKeyData"] = base64.StdEncoding.EncodeToString(buffer)
+	return &gateway.RESTResponse{JSON: response}, nil
+}
+
+// keyWire renders one key document.
+func keyWire(_ *accountRecord, key *keyRecord) map[string]any {
+	return map[string]any{
+		keyName:           key.ID,
+		"keyAlgorithm":    "KEY_ALG_RSA_2048",
+		"keyOrigin":       "GOOGLE_PROVIDED",
+		"keyType":         "USER_MANAGED",
+		"validAfterTime":  stamp(key.CreatedAt),
+		"validBeforeTime": "3999-12-31T23:59:59.999999Z",
+	}
+}
+
+// keysDelete removes one synthesized key.
+func (p *Provider) keysDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	record := p.accountLocked(scope, request.Path["serviceAccount"])
+	if record == nil {
+		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+	}
+	keyID := "projects/" + record.Project + "/serviceAccounts/" + record.ID + "/keys/" + request.Path["keyId"]
+	if _, ok := record.Keys[keyID]; !ok {
+		return nil, notFound(kindKey, request.Path["keyId"])
+	}
+	_ = p.scopes.With(scope, func(_ *scopeState) error {
+		delete(record.Keys, keyID)
+		return nil
+	})
+	return &gateway.RESTResponse{Status: http.StatusNoContent}, nil
+}
+
+// getIam returns the stored policy of the account.
+func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
+	policy, err := p.engine.GetPolicy(target.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "read the IAM policy: %v", err)
+	}
+	return &gateway.RESTResponse{JSON: policy}, nil
+}
+
+// setIam stores the policy of the account.
+func (p *Provider) setIam(request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
+	var envelope struct {
+		Policy iam.Policy `json:"policy"`
+	}
+	if json.Unmarshal(request.JSON, &envelope) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+	}
+	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "write the IAM policy: %v", err)
+	}
+	return &gateway.RESTResponse{JSON: policy}, nil
+}

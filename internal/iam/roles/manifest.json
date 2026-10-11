@@ -202,6 +202,16 @@
    "file": "resourcemanager.projectIamAdmin.json",
    "name": "roles/resourcemanager.projectIamAdmin",
    "sha256": "9379c70e80e5005f6dfb29dee49e9a7207ddc0421e5f417410916d50614a6363"
+  },
+  {
+   "file": "iam.serviceAccountAdmin.json",
+   "name": "roles/iam.serviceAccountAdmin",
+   "sha256": "8f7a3b7b1eff91fa97abd8adc4168d2fbdeb1e6c08c232b78b66c753d11d8275"
+  },
+  {
+   "file": "iam.serviceAccountViewer.json",
+   "name": "roles/iam.serviceAccountViewer",
+   "sha256": "27a2ae78112bc58b1c99f6272330b6eaa8ba29005849fba8a648fbccfdf2881b"
   }
  ]
 }

@@ -20,6 +20,7 @@
     "TestAccPubSubTopicAndSubscription",
     "TestAccComputeNetworkAndSubnetwork",
     "TestAccArtifactRegistryRepository",
+    "TestAccServiceAccount",
     "TestAccProjectIamPolicy"
   ],
   "source_files": {
