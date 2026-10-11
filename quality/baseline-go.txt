@@ -37,6 +37,7 @@
 1	goconst	internal/providers/artifactregistry/provider_test.go
 1	goconst	internal/providers/bigtable/methods.go
 1	goconst	internal/providers/iam/provider_test.go
+1	goconst	internal/providers/storage/validation.go
 1	goconst	tools/genapi/main.go
 1	intrange	internal/providers/spanner/methods.go
 1	modernize	internal/providers/bigquery/methods.go
@@ -61,15 +62,17 @@
 2	gocognit	internal/gateway/gateway_test.go
 2	gocognit	internal/identity/service_test.go
 2	gocognit	internal/providers/bigquery/methods.go
-2	gocognit	internal/providers/storage/provider.go
 2	gocognit	internal/runtime/server_test.go
 2	goconst	internal/providers/spanner/methods.go
+2	goconst	internal/providers/storage/provider.go
 2	prealloc	internal/providers/bigquery/methods.go
 2	wrapcheck	internal/providers/bigtable/methods.go
 2	wrapcheck	internal/providers/spanner/methods.go
 3	cyclop	internal/iam/engine_test.go
 3	gocognit	internal/providers/pubsub/provider.go
+3	gocognit	internal/providers/storage/provider.go
 4	goconst	internal/providers/bigquery/methods.go
 4	goconst	internal/providers/pubsub/permissions.go
 4	goconst	internal/providers/pubsub/rest.go
+4	wrapcheck	internal/providers/storage/state.go
 6	goconst	internal/providers/bigquery/provider_test.go

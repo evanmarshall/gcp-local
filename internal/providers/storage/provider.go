@@ -225,6 +225,13 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 		}
 		return target, scope, projectMethod, nil, nil
 	}
+	if strings.HasPrefix(call.Method, "storage.folders.") {
+		resource, found := p.index.Get(target.Name)
+		if !found {
+			return iam.Target{}, state.Scope{}, projectMethod, notFound(bucket, ""), nil
+		}
+		return target, resource.Scope, projectMethod, nil, nil
+	}
 	resource, found := p.index.Get(target.Name)
 	if !found {
 		return iam.Target{}, state.Scope{}, projectMethod, notFound(bucket, ""), nil
@@ -367,6 +374,9 @@ func objectETag(generation, metageneration string) string {
 }
 
 func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.Call, r *gateway.RESTRequest, scope state.Scope, bucket, object string, upload *uploadRequest, current map[string]any) (*gateway.RESTResponse, error) {
+	if strings.HasPrefix(call.Method, "storage.folders.") {
+		return p.executeFolder(call, r, scope, bucket)
+	}
 	path := "/storage/v1/b/" + url.PathEscape(bucket)
 	switch call.Method {
 	case MethodBucketsInsert:
@@ -539,4 +549,62 @@ func (p *Provider) deleteBucket(ctx context.Context, b *memoryBackend, r *gatewa
 		p.iam.Forget(BucketResource(bucket))
 	}
 	return response, err
+}
+
+// executeFolder serves the Storage Control folders surface. Folders are
+// provider-owned because the storage backend does not model them; state lives
+// in the catalog and clears with the scope.
+func (p *Provider) executeFolder(call gateway.Call, r *gateway.RESTRequest, scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
+	folderID := r.Path["folder"]
+	folderWire := func(record Folder) map[string]any {
+		return map[string]any{"name": record.Name, "bucket": bucket}
+	}
+	folderMissing := func() *gateway.RESTResponse {
+		return &gateway.RESTResponse{Status: 404, JSON: map[string]any{"error": map[string]any{"code": 404, "message": "No such object: folders/" + folderID}}}
+	}
+	switch call.Method {
+	case MethodFoldersCreate:
+		var body struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(r.JSON, &body) != nil || body.Name == "" {
+			return nil, invalid("Expected a folder name")
+		}
+		folderID = body.Name
+		if _, ok, _ := p.catalog.Folder(scope, bucket, folderID); ok {
+			return &gateway.RESTResponse{Status: 409, JSON: map[string]any{"error": map[string]any{"code": 409, "message": "Folder already exists"}}}, nil
+		}
+		if err := p.catalog.PublishFolder(scope, Folder{Bucket: bucket, Name: folderID}); err != nil {
+			return nil, fmt.Errorf("publish folder: %w", err)
+		}
+		return &gateway.RESTResponse{JSON: folderWire(Folder{Bucket: bucket, Name: folderID})}, nil
+	case MethodFoldersGet:
+		record, ok, err := p.catalog.Folder(scope, bucket, folderID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return folderMissing(), nil
+		}
+		return &gateway.RESTResponse{JSON: folderWire(record)}, nil
+	case MethodFoldersList:
+		items, err := p.catalog.Folders(scope, bucket)
+		if err != nil {
+			return nil, err
+		}
+		wired := []any{}
+		for _, record := range items {
+			wired = append(wired, folderWire(record))
+		}
+		return &gateway.RESTResponse{JSON: map[string]any{"folders": wired}}, nil
+	default:
+		removed, err := p.catalog.DeleteFolder(scope, bucket, folderID)
+		if err != nil {
+			return nil, err
+		}
+		if !removed {
+			return folderMissing(), nil
+		}
+		return &gateway.RESTResponse{Status: 204}, nil
+	}
 }

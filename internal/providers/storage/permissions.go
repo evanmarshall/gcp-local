@@ -10,6 +10,10 @@ import (
 // these rules does not register API providers or claim service conformance.
 func RegisterPermissions(engine *iam.Engine) error {
 	rules := map[string]iam.Rule{
+		MethodFoldersCreate:       {Baseline: []string{"storage.folders.create"}},
+		MethodFoldersGet:          {Baseline: []string{"storage.folders.get"}},
+		MethodFoldersList:         {Baseline: []string{"storage.folders.list"}},
+		MethodFoldersDelete:       {Baseline: []string{"storage.folders.delete"}},
 		MethodBucketsList:         {Baseline: []string{MethodBucketsList}},
 		MethodBucketsInsert:       {Baseline: []string{permissionBucketsCreate}},
 		MethodBucketsGet:          {Baseline: []string{MethodBucketsGet}},

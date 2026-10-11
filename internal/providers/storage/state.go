@@ -13,7 +13,10 @@ import (
 // metadata belong to the backend. Bucket names are globally unique; placement is
 // an attribute, not a second store key for the same bucket.
 type Bucket struct{ Name, Location, Metadata string }
-type projectState struct{ Buckets map[string]Bucket }
+type projectState struct {
+	Buckets map[string]Bucket
+	Folders map[string]Folder
+}
 type Catalog struct {
 	// Serialize publication/reset across provider store and shared index. Backend
 	// calls happen before these short critical sections, never while locked.
@@ -23,7 +26,9 @@ type Catalog struct {
 }
 
 func NewCatalog(index *state.Index) *Catalog {
-	return &Catalog{store: state.NewStore(func() projectState { return projectState{Buckets: map[string]Bucket{}} }, state.GlobalScope), index: index}
+	return &Catalog{store: state.NewStore(func() projectState {
+		return projectState{Buckets: map[string]Bucket{}, Folders: map[string]Folder{}}
+	}, state.GlobalScope), index: index}
 }
 func BucketResource(name string) string { return "//storage.googleapis.com/projects/_/buckets/" + name }
 
@@ -112,4 +117,72 @@ func (c *Catalog) Reset(scope state.Scope) error {
 	}
 	c.index.RemoveScope(serviceName, scope)
 	return nil
+}
+
+// Folder is one hierarchical-namespace folder entry; provider-owned because
+// the storage backend does not model folders.
+type Folder struct{ Bucket, Name string }
+
+// PublishFolder records one folder whose parent bucket is already known.
+func (c *Catalog) PublishFolder(scope state.Scope, folder Folder) error {
+	if folder.Name == "" || folder.Bucket == "" {
+		return errBucketIdentity
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.store.With(scope, func(value *projectState) error {
+		if _, ok := value.Buckets[folder.Bucket]; !ok {
+			return errBucketAbsent
+		}
+		value.Folders[folder.Bucket+"/"+folder.Name] = folder
+		return nil
+	})
+}
+
+func (c *Catalog) Folder(scope state.Scope, bucket, name string) (Folder, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var found Folder
+	var ok bool
+	if err := c.store.With(scope, func(value *projectState) error {
+		found, ok = value.Folders[bucket+"/"+name]
+		return nil
+	}); err != nil {
+		return found, false, err
+	}
+	return found, ok, nil
+}
+
+func (c *Catalog) DeleteFolder(scope state.Scope, bucket, name string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var removed bool
+	if err := c.store.With(scope, func(value *projectState) error {
+		key := bucket + "/" + name
+		if _, ok := value.Folders[key]; ok {
+			delete(value.Folders, key)
+			removed = true
+		}
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return removed, nil
+}
+
+func (c *Catalog) Folders(scope state.Scope, bucket string) ([]Folder, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var items []Folder
+	if err := c.store.With(scope, func(value *projectState) error {
+		for _, folder := range value.Folders {
+			if folder.Bucket == bucket {
+				items = append(items, folder)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
