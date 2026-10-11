@@ -67,6 +67,9 @@ resource "google_artifact_registry_repository" "repository" {
  location      = "us-central1"
  format        = "DOCKER"
  description   = "acceptance"
+ labels = {
+   "gcp-local-run" = "terraform"
+ }
 }
 `, name)
 }
