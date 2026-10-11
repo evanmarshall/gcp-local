@@ -227,6 +227,8 @@ jobs:
             sh scripts/go.sh test -tags=sdkintegration -race -count=1 -timeout 60s ./internal/identity
       - run: python scripts/install_spanner.py
       - run: python scripts/install_firestore.py
+      - run: python scripts/install_pubsub.py
+      - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - name: Warm the Storage builds before blocking network egress
         run: |
           sh scripts/go.sh build -o bin/gcp-local ./cmd/gcp-local
@@ -235,7 +237,7 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             GITHUB_SHA="$GITHUB_SHA" GCP_LOCAL_TEST_PYTHON="$PWD/.venv-tools/bin/python" \
-            sh scripts/check_storage.sh
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_storage.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
