@@ -50,3 +50,25 @@ against this surface's modeled topology; a named Connectivity Tests surface
 (`networkmanagement.connectivityTests`) exposes the same verdicts over the
 networkmanagement-style route names, marked local-modeled like everything
 without a recording.
+
+## Ingress scope
+
+`ingress` is validated against the documented values and stored, but it does
+not gate local invocation: every caller reaches the shared local listener, and
+authorization (token audience plus `run.invoker`) is the only enforced
+boundary. Internal-only and load-balancer ingress, VPC egress settings, and
+Direct VPC are recorded configuration for the analyzer, not runtime network
+isolation.
+
+## Terraform
+
+`TestAccCloudRunV2Service` drives `google_cloud_run_v2_service` through the
+released google 8.5.0 provider (create, operation polling, read, an empty
+post-apply plan, destroy). The v2 resources read `cloud_run_v2_custom_endpoint`;
+the earlier parked attempt set `cloud_run_custom_endpoint`, which only
+redirects the v1 API, so the provider dialed run.googleapis.com and hung in the
+loopback-only runner. Two contract fixes came out of the case: services.create
+reads the `serviceId` query parameter, and `template.revision` is echoed only
+when the caller named the revision (generated names appear in
+`latestCreatedRevision`). The acceptance fixture serves each revision from a
+loopback HTTP server so readiness is real without a container engine.

@@ -207,8 +207,7 @@ func templateDocument(record *serviceRecord) map[string]any {
 	for key, value := range record.Template.Container.Env {
 		env = append(env, map[string]any{"name": key, "value": value})
 	}
-	return map[string]any{
-		"revision":       record.Template.Revision,
+	document := map[string]any{
 		"serviceAccount": record.Template.ServiceAccount,
 		"containers": []any{map[string]any{
 			"image":     record.Template.Container.Image,
@@ -217,6 +216,10 @@ func templateDocument(record *serviceRecord) map[string]any {
 			"resources": map[string]any{},
 		}},
 	}
+	if record.Template.RevisionNamed {
+		document["revision"] = record.Template.Revision
+	}
+	return document
 }
 
 // revisionDocument renders one revision wire shape.
@@ -443,6 +446,10 @@ func parseCreate(request *gateway.RESTRequest) (string, templateShape, error) {
 	if id == "" {
 		id = idOf(body.Name)
 	}
+	// The released google provider sends the id as the serviceId query parameter.
+	if id == "" {
+		id = request.Query.Get("serviceId")
+	}
 	if !uidPattern.MatchString(id) {
 		return "", templateShape{}, status.Errorf(codes.InvalidArgument, "Invalid service name %q", id)
 	}
@@ -453,6 +460,7 @@ func parseCreate(request *gateway.RESTRequest) (string, templateShape, error) {
 	if ingressErr := validateIngress(body.Ingress); ingressErr != nil {
 		return "", templateShape{}, ingressErr
 	}
+	template.RevisionNamed = template.Revision != ""
 	if template.Revision == "" {
 		template.Revision = id + "-00001"
 	}

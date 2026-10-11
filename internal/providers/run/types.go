@@ -68,7 +68,10 @@ func decodeRequest(body []byte) (requestEnvelope, error) {
 
 // templateShape is the validated revision template of a service request.
 type templateShape struct {
-	Revision       string
+	Revision string
+	// RevisionNamed records that the caller chose the revision name; GCP echoes
+	// template.revision only then and reports generated names elsewhere.
+	RevisionNamed  bool
 	ServiceAccount string
 	Container      containerSpec
 }

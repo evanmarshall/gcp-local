@@ -46,7 +46,7 @@ func pinnedProvider() map[string]resource.ExternalProvider {
 	return map[string]resource.ExternalProvider{"google": {Source: "hashicorp/google", VersionConstraint: "=8.5.0"}}
 }
 func api(method, path string) (int, map[string]any, error) {
-	if !strings.HasPrefix(path, "/storage/v1/") {
+	if !strings.HasPrefix(path, "/storage/v1/") && !strings.HasPrefix(path, "/v2/projects/"+projectID+"/") {
 		return 0, nil, fmt.Errorf("invalid local API path")
 	}
 	r, err := http.NewRequest(method, endpoint+path, nil)

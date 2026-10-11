@@ -6,6 +6,7 @@
 package main
 
 import (
+	"sync"
 	"fmt"
 	"context"
 	"encoding/json"
@@ -136,7 +137,7 @@ func main() {
 	must(tokenErr)
 	_, err = pubsubprovider.New(registry, server.Backends, index, engine, pubsubprovider.Config{Java: java, JAR: jar, IDTokens: tokens})
 	must(err)
-	_, err = runprovider.New(context.Background(), runprovider.Config{BaseURL: "http://127.0.0.1:4566"}, registry, server.Backends, index, engine, runprovider.NoopRuntime{})
+	_, err = runprovider.New(context.Background(), runprovider.Config{BaseURL: "http://127.0.0.1:4566"}, registry, server.Backends, index, engine, &servingRuntime{servers: map[string]*http.Server{}})
 	must(err)
 	_, err = computeprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
@@ -186,4 +187,44 @@ func must(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// servingRuntime is a test-only Cloud Run runtime: each revision is a loopback
+// HTTP server answering 200, so control-plane cases (Terraform) observe real
+// readiness without a container engine. Production uses the Docker or process runtime.
+type servingRuntime struct {
+	mu      sync.Mutex
+	servers map[string]*http.Server
+}
+
+func (r *servingRuntime) Start(_ context.Context, _ runprovider.StartSpec) (runprovider.Started, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return runprovider.Started{}, fmt.Errorf("listen for the revision: %w", err)
+	}
+	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = server.Serve(listener) }()
+	id := listener.Addr().String()
+	r.mu.Lock()
+	r.servers[id] = server
+	r.mu.Unlock()
+	return runprovider.Started{Address: id, Container: id}, nil
+}
+
+func (r *servingRuntime) Ready(context.Context, string) error { return nil }
+
+func (r *servingRuntime) Stop(ctx context.Context, container string) error {
+	r.mu.Lock()
+	server := r.servers[container]
+	delete(r.servers, container)
+	r.mu.Unlock()
+	if server == nil {
+		return nil
+	}
+	if err := server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("stop the revision server: %w", err)
+	}
+	return nil
 }

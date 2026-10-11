@@ -21,6 +21,7 @@
     "TestAccComputeNetworkAndSubnetwork",
     "TestAccArtifactRegistryRepository",
     "TestAccServiceAccount",
+    "TestAccCloudRunV2Service",
     "TestAccProjectIamPolicy"
   ],
   "source_files": {
