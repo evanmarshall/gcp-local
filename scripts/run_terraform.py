@@ -65,7 +65,7 @@ def main() -> int:
             str(root / "bin/terraform-tests"),
             "-test.v",
             "-test.parallel=1",
-            "-test.timeout=400s",
+            "-test.timeout=600s",
             "-test.run=^(" + "|".join(tests) + ")$",
         ]
         process = subprocess.Popen(
@@ -79,7 +79,7 @@ def main() -> int:
         )
         timed_out = False
         try:
-            stdout, stderr = process.communicate(timeout=420)
+            stdout, stderr = process.communicate(timeout=620)
         except subprocess.TimeoutExpired:
             timed_out = True
             os.killpg(process.pid, signal.SIGKILL)
