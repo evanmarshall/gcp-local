@@ -8,12 +8,14 @@
 1	cyclop	internal/providers/bigquery/provider_test.go
 1	cyclop	internal/providers/bigtable/provider_test.go
 1	cyclop	internal/providers/pubsub/rest_wire.go
+1	cyclop	internal/providers/resourcemanager/provider.go
 1	cyclop	internal/providers/spanner/methods.go
 1	cyclop	internal/providers/storage/provider.go
 1	cyclop	internal/providers/storage/provider_test.go
 1	cyclop	internal/providers/storage/state_test.go
 1	errchkjson	internal/providers/artifactregistry/provider_test.go
 1	errchkjson	internal/providers/bigtable/provider_test.go
+1	errchkjson	internal/providers/resourcemanager/provider_test.go
 1	errchkjson	internal/providers/spanner/provider_test.go
 1	gocognit	internal/gateway/grpc.go
 1	gocognit	internal/iam/policy.go
@@ -38,6 +40,7 @@
 1	nestif	internal/providers/storage/bucket_updates.go
 1	nestif	internal/providers/storage/provider.go
 1	prealloc	internal/providers/spanner/methods.go
+1	unparam	internal/providers/resourcemanager/provider_test.go
 1	wrapcheck	internal/providers/artifactregistry/methods.go
 1	wrapcheck	internal/providers/bigquery/methods.go
 2	cyclop	internal/backend/manager_test.go

@@ -1,0 +1,10 @@
+{
+ "description": "Manage IAM policies on existing projects.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "resourcemanager.projects.getIamPolicy",
+  "resourcemanager.projects.setIamPolicy"
+ ],
+ "name": "roles/resourcemanager.projectIamAdmin",
+ "stage": "GA"
+}

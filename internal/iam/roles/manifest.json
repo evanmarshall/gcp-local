@@ -197,6 +197,11 @@
    "file": "artifactregistry.reader.json",
    "name": "roles/artifactregistry.reader",
    "sha256": "87540b29be8be9dfb63292ca9217f7fa8cc9350b28a535b86fa253298a87ec2a"
+  },
+  {
+   "file": "resourcemanager.projectIamAdmin.json",
+   "name": "roles/resourcemanager.projectIamAdmin",
+   "sha256": "9379c70e80e5005f6dfb29dee49e9a7207ddc0421e5f417410916d50614a6363"
   }
  ]
 }

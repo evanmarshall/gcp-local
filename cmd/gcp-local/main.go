@@ -27,6 +27,7 @@ import (
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
+	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
@@ -117,7 +118,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcListen, "grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager")
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
@@ -277,6 +278,7 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 		{"bigquery", assembleBigQuery},
 		{"bigtable", assembleBigtable},
 		{"artifactregistry", assembleArtifactRegistry},
+		{"resourcemanager", assembleResourceManager},
 	} {
 		if err := assemble.register(ctx, selected, registry, server, index, engine); err != nil {
 			return err
@@ -381,6 +383,17 @@ func assembleArtifactRegistry(ctx context.Context, selected map[string]bool, reg
 	}
 	if _, err := artifactregistryprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Artifact Registry provider: %w", err)
+	}
+	return nil
+}
+
+// assembleResourceManager registers the project IAM provider.
+func assembleResourceManager(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["resourcemanager"] {
+		return nil
+	}
+	if _, err := resourcemanagerprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the resourcemanager provider: %w", err)
 	}
 	return nil
 }
