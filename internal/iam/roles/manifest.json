@@ -182,6 +182,21 @@
    "file": "bigtable.viewer.json",
    "name": "roles/bigtable.viewer",
    "sha256": "085870c76e6e080f79a799d7310d2c758d95617cee848628b79c279be8f35fd8"
+  },
+  {
+   "file": "artifactregistry.admin.json",
+   "name": "roles/artifactregistry.admin",
+   "sha256": "077b88a2813eefc32a836fc76727914748712a9583a0e55edaa0e3d7b49bf447"
+  },
+  {
+   "file": "artifactregistry.repositoryAdmin.json",
+   "name": "roles/artifactregistry.repositoryAdmin",
+   "sha256": "b05a47aabd33506691e883a9bee5c8bbdc4aead9680fd9112343976b5a853030"
+  },
+  {
+   "file": "artifactregistry.reader.json",
+   "name": "roles/artifactregistry.reader",
+   "sha256": "87540b29be8be9dfb63292ca9217f7fa8cc9350b28a535b86fa253298a87ec2a"
   }
  ]
 }

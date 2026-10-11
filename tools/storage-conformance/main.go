@@ -21,6 +21,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	artifactregistryprovider "github.com/evanmarshall/gcp-local/internal/providers/artifactregistry"
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
 	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
@@ -66,6 +67,7 @@ func main() {
 			{Role: "roles/pubsub.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/run.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/compute.networkAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/artifactregistry.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}
@@ -108,6 +110,8 @@ func main() {
 	_, err = runprovider.New(context.Background(), runprovider.Config{BaseURL: "http://127.0.0.1:4566"}, registry, server.Backends, index, engine, runprovider.NoopRuntime{})
 	must(err)
 	_, err = computeprovider.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
+	_, err = artifactregistryprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
 	must(err)

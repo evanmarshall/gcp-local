@@ -19,6 +19,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	artifactregistryprovider "github.com/evanmarshall/gcp-local/internal/providers/artifactregistry"
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
 	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
 	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
@@ -116,7 +117,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcListen, "grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry")
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
@@ -275,6 +276,7 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 		{"spanner", assembleSpanner},
 		{"bigquery", assembleBigQuery},
 		{"bigtable", assembleBigtable},
+		{"artifactregistry", assembleArtifactRegistry},
 	} {
 		if err := assemble.register(ctx, selected, registry, server, index, engine); err != nil {
 			return err
@@ -368,6 +370,17 @@ func assembleBigtable(ctx context.Context, selected map[string]bool, registry *g
 	}
 	if _, err := bigtableprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Bigtable provider: %w", err)
+	}
+	return nil
+}
+
+// assembleArtifactRegistry registers the Artifact Registry provider.
+func assembleArtifactRegistry(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["artifactregistry"] {
+		return nil
+	}
+	if _, err := artifactregistryprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Artifact Registry provider: %w", err)
 	}
 	return nil
 }

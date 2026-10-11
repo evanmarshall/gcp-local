@@ -1,0 +1,14 @@
+{
+ "description": "Read Artifact Registry repositories and artifacts.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "artifactregistry.files.get",
+  "artifactregistry.files.list",
+  "artifactregistry.repos.listArtifacts",
+  "artifactregistry.repositories.get",
+  "artifactregistry.repositories.getIamPolicy",
+  "artifactregistry.repositories.list"
+ ],
+ "name": "roles/artifactregistry.reader",
+ "stage": "GA"
+}

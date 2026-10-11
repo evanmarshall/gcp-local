@@ -20,7 +20,7 @@ The runner uses `terraform-plugin-testing v1.15.0` and the unmodified, checksum-
 The original bucket/object attribute checks remain except for the documented regional RPO assertion.
 The locally adapted `TestAccSpannerInstanceAndDatabase` is not an extracted upstream function. Its assertions (names, processing units, post-destroy 404) and destroy probe follow the same owned-name and isolation rules.
 
-The locally adapted `TestAccPubSubTopicAndSubscription` and `TestAccComputeNetworkAndSubnetwork` follow the same pattern: pinned provider through their custom endpoints, fixture credentials, owned names, post-destroy 404 probes, and unchanged-plan checks after refresh.
+The locally adapted `TestAccPubSubTopicAndSubscription`, `TestAccComputeNetworkAndSubnetwork`, and `TestAccArtifactRegistryRepository` follow the same pattern: pinned provider through their custom endpoints, fixture credentials, owned names, post-destroy 404 probes, and unchanged-plan checks after refresh.
 : it drives `google_spanner_instance` and `google_spanner_database` with the same pinned provider through `spanner_custom_endpoint`, fixture credentials, and the modeled regional configs. Its assertions (names, processing units, post-destroy 404) and destroy probe follow the same owned-name and isolation rules.
  Provider `terraform_labels` is excluded from import comparison because the adapter adds an ownership default label; effective labels remain checked. Import tests cover qualified IDs only. These are adapted upstream cases, not an unmodified provider-wide certification.
 

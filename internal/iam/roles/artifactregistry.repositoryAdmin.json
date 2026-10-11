@@ -1,0 +1,16 @@
+{
+ "description": "Manage repositories inside existing projects.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "artifactregistry.repos.updateArtifact",
+  "artifactregistry.repositories.create",
+  "artifactregistry.repositories.delete",
+  "artifactregistry.repositories.get",
+  "artifactregistry.repositories.getIamPolicy",
+  "artifactregistry.repositories.list",
+  "artifactregistry.repositories.setIamPolicy",
+  "artifactregistry.repositories.update"
+ ],
+ "name": "roles/artifactregistry.repositoryAdmin",
+ "stage": "GA"
+}
