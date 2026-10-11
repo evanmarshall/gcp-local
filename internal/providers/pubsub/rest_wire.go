@@ -50,9 +50,10 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	switch twin {
 	case subscriber + "CreateSubscription":
 		var body struct {
-			Topic                    string `json:"topic"`
-			AckDeadlineSeconds       int32  `json:"ackDeadlineSeconds"`
-			MessageRetentionDuration string `json:"messageRetentionDuration"`
+			Topic                    string            `json:"topic"`
+			AckDeadlineSeconds       int32             `json:"ackDeadlineSeconds"`
+			MessageRetentionDuration string            `json:"messageRetentionDuration"`
+			Labels                   map[string]string `json:"labels"`
 			PushConfig               struct {
 				PushEndpoint string            `json:"pushEndpoint"`
 				Attributes   map[string]string `json:"attributes"`
@@ -96,6 +97,7 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 			Topic:                    topic,
 			AckDeadlineSeconds:       deadline,
 			MessageRetentionDuration: durationFromSeconds(body.MessageRetentionDuration),
+			Labels:                   body.Labels,
 			PushConfig:               push,
 		}
 		// The v2 CreateSubscription call takes the Subscription directly.
@@ -157,6 +159,7 @@ func restWire(_ string, response proto.Message) map[string]any {
 			keyWireName:          wireRestName(protoMessage.GetName()),
 			keyWireTopic:         wireRestName(protoMessage.GetTopic()),
 			"ackDeadlineSeconds": protoMessage.GetAckDeadlineSeconds(),
+			"labels":             protoMessage.GetLabels(),
 		}
 		if retention := protoMessage.GetMessageRetentionDuration(); retention != nil {
 			wire["messageRetentionDuration"] = secondsString(retention)
