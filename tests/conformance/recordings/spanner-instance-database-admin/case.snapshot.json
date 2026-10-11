@@ -1,0 +1,197 @@
+{
+  "spanner-instance-database-admin": {
+    "recorded-date": "11-10-2026, 22:16:49",
+    "recorded-content": {
+      "instance-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.spanner.admin.instance.v1.CreateInstanceMetadata",
+        "response_fields": [
+          "@type",
+          "config",
+          "createTime",
+          "defaultBackupScheduleType",
+          "displayName",
+          "edition",
+          "instanceType",
+          "labels",
+          "name",
+          "processingUnits",
+          "replicaComputeCapacity",
+          "resourceLocation",
+          "state",
+          "updateTime"
+        ],
+        "response_type": "type.googleapis.com/google.spanner.admin.instance.v1.Instance"
+      },
+      "instance-read": {
+        "config": "projects/<project>/instanceConfigs/regional-us-central1",
+        "displayName": "gcp-local conformance",
+        "fields": [
+          "config",
+          "createTime",
+          "defaultBackupScheduleType",
+          "displayName",
+          "edition",
+          "instanceType",
+          "labels",
+          "name",
+          "processingUnits",
+          "replicaComputeCapacity",
+          "resourceLocation",
+          "state",
+          "updateTime"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "name": "projects/<project>/instances/<instance>",
+        "processingUnits": 100,
+        "state": "READY"
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "policy-read": {
+        "bindings": null,
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200
+      },
+      "viewer-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/spanner.viewer"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "viewer-read": {
+        "http_status": 200
+      },
+      "viewer-cannot-create-database": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "database-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.spanner.admin.database.v1.CreateDatabaseMetadata",
+        "response_fields": [
+          "@type",
+          "createTime",
+          "databaseDialect",
+          "earliestVersionTime",
+          "name",
+          "resourceLocationId",
+          "state",
+          "versionRetentionPeriod"
+        ],
+        "response_type": "type.googleapis.com/google.spanner.admin.database.v1.Database"
+      },
+      "database-read": {
+        "databaseDialect": "GOOGLE_STANDARD_SQL",
+        "fields": [
+          "createTime",
+          "databaseDialect",
+          "earliestVersionTime",
+          "encryptionInfo",
+          "name",
+          "state",
+          "versionRetentionPeriod"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/instances/<instance>/databases/gl_db",
+        "state": "READY"
+      },
+      "ddl": {
+        "fields": [
+          "statements"
+        ],
+        "http_status": 200,
+        "statements": [
+          "CREATE TABLE Items (\n  Id STRING(36) NOT NULL,\n  Name STRING(64),\n) PRIMARY KEY(Id)"
+        ]
+      },
+      "ddl-update-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.spanner.admin.database.v1.UpdateDatabaseDdlMetadata",
+        "response_fields": [
+          "@type"
+        ],
+        "response_type": "type.googleapis.com/google.protobuf.Empty"
+      },
+      "ddl-after-update": {
+        "fields": [
+          "statements"
+        ],
+        "http_status": 200,
+        "statements": [
+          "CREATE TABLE Items (\n  Id STRING(36) NOT NULL,\n  Name STRING(64),\n  Note STRING(64),\n) PRIMARY KEY(Id)"
+        ]
+      },
+      "duplicate-instance": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "database-dropped": {
+        "body": {},
+        "http_status": 200
+      },
+      "database-absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "instance-deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "instance-absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "instance_absent": true
+      }
+    }
+  }
+}

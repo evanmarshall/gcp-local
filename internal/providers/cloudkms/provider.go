@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
+	"regexp"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -27,8 +27,6 @@ type Provider struct {
 	engine *iam.Engine
 	scopes *state.Store[scopeState]
 	clock  func() time.Time
-	key    []byte
-	mu     sync.Mutex
 }
 
 // New registers the Cloud KMS provider.
@@ -39,14 +37,10 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	if err := registerPermissions(engine); err != nil {
 		return nil, err
 	}
-	key := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		return nil, fmt.Errorf("generate the local key-encryption key: %w", err)
-	}
 	p := &Provider{
 		index: index, engine: engine,
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
-		clock:  time.Now, key: key,
+		clock:  time.Now,
 	}
 	if err := p.registerBackend(manager, engine, index); err != nil {
 		return nil, err
@@ -115,7 +109,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Cloud KMS request")
 	}
-	scope, target, err := p.resolve(call, request)
+	scope, resource, target, err := p.resolve(call, request)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +123,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
-	response, err := p.execute(call, request, scope, target)
+	response, err := p.execute(call, request, scope, resource)
 	if err != nil {
 		return nil, err
 	}
@@ -145,131 +139,135 @@ func (p *Provider) denied(_ gateway.Call, decision iam.Decision, target iam.Targ
 	return wireError(403, "PERMISSION_DENIED", decision.Reason+" "+target.Name)
 }
 
-// resolve derives the scope and IAM target for one request.
-func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
-	project := request.Path["project"]
-	scope := scopeOf(project)
-	target := iam.Target{Name: projectResource(project)}
-	ring := request.Path["keyRing"]
-	switch call.Method {
-	case methodLocationsList, methodKeyRingsCreate, methodKeyRingsList:
-		return scope, target, nil
-	case methodKeyRingsGet, methodKeyRingsGetIam, methodKeyRingsSetIam:
-		return p.ringTarget(scope, target, ring)
-	case methodCryptoKeysCreate, methodCryptoKeysList, methodVersionsCreate, methodVersionsList:
-		return p.keyCollectionTarget(scope, target, ring)
-	case methodCryptoKeysGet, methodCryptoKeysUpdate, methodCryptoKeysGetIam,
-		methodCryptoKeysSetIam, methodCryptoKeysEncrypt, methodCryptoKeysDecrypt,
-		methodVersionsGet, methodVersionsDestroy, methodVersionsDisable, methodVersionsEnable:
-		return p.keyTarget(scope, target, ring, request.Path["cryptoKey"])
+// projectMethods and ringMethods are authorized on the project and key ring;
+// every other method is authorized on its crypto key.
+var (
+	projectMethods = map[string]bool{methodLocationsList: true, methodKeyRingsCreate: true, methodKeyRingsList: true}
+	ringMethods    = map[string]bool{
+		methodKeyRingsGet: true, methodKeyRingsGetIam: true, methodKeyRingsSetIam: true,
+		methodCryptoKeysCreate: true, methodCryptoKeysList: true,
+	}
+	versionNumber = regexp.MustCompile(`^[1-9][0-9]{0,8}$`)
+)
+
+// resolve derives the scope, resource reference, and IAM target of one
+// request. A resource that does not exist yet is authorized on its nearest
+// existing ancestor so the caller sees NOT_FOUND rather than an unverified
+// target, matching the real surface's ancestor-inherited permissions.
+func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, ref, iam.Target, error) {
+	resource := refOf(request)
+	scope := scopeOf(resource.project)
+	project := projectResource(resource.project)
+	if err := validateRef(resource); err != nil {
+		return scope, resource, iam.Target{Name: project}, err
+	}
+	switch {
+	case projectMethods[call.Method]:
+		return scope, resource, iam.Target{Name: project}, nil
+	case ringMethods[call.Method]:
+		return scope, resource, p.anchored(resource.ringResource(), project), nil
 	default:
-		return scope, target, status.Errorf(codes.Internal, "Unhandled KMS method %s", call.Method)
+		return scope, resource, p.anchored(resource.keyResource(), resource.ringResource(), project), nil
 	}
 }
 
-// ringTarget resolves the key ring resource targets.
-func (p *Provider) ringTarget(scope state.Scope, target iam.Target, ring string) (state.Scope, iam.Target, error) {
-	if !uid.MatchString(ring) {
-		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid key ring name %q", ring)
+// validateRef rejects malformed path segments before any state access.
+func validateRef(resource ref) error {
+	if !uid.MatchString(resource.location) {
+		return status.Errorf(codes.InvalidArgument, "Invalid location %q", resource.location)
 	}
-	target.Name = keyRingResource(scope.Project, ring)
-	return scope, target, nil
+	if resource.ring != "" && !uid.MatchString(resource.ring) {
+		return status.Errorf(codes.InvalidArgument, "Invalid key ring name %q", resource.ring)
+	}
+	if resource.key != "" && !uid.MatchString(resource.key) {
+		return status.Errorf(codes.InvalidArgument, "Invalid crypto key name %q", resource.key)
+	}
+	if resource.version != "" && !versionNumber.MatchString(resource.version) {
+		return status.Errorf(codes.InvalidArgument, "Invalid crypto key version %q", resource.version)
+	}
+	return nil
 }
 
-// keyCollectionTarget resolves the targets of ring-scoped collections.
-func (p *Provider) keyCollectionTarget(scope state.Scope, target iam.Target, ring string) (state.Scope, iam.Target, error) {
-	if !uid.MatchString(ring) {
-		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid key ring name %q", ring)
+// anchored returns the first indexed candidate, falling back to the last.
+func (p *Provider) anchored(candidates ...string) iam.Target {
+	for _, name := range candidates[:len(candidates)-1] {
+		if _, ok := p.index.Get(name); ok {
+			return iam.Target{Name: name}
+		}
 	}
-	target.Name = keyRingResource(scope.Project, ring)
-	return scope, target, nil
+	return iam.Target{Name: candidates[len(candidates)-1]}
 }
 
-// keyTarget resolves the key resource targets; version methods inherit the
-// key's policy, matching the real surface's permission evaluation.
-func (p *Provider) keyTarget(scope state.Scope, target iam.Target, ring, key string) (state.Scope, iam.Target, error) {
-	if !uid.MatchString(ring) || !uid.MatchString(key) {
-		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid crypto key name %q", key)
+// newGCM builds the AES-GCM cipher of one version's material.
+func newGCM(material []byte) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(material)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errSeal, err)
 	}
-	target.Name = cryptoKeyResource(scope.Project, ring, key)
-	return scope, target, nil
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errSeal, err)
+	}
+	return gcm, nil
 }
 
 // errSeal reports a local crypto failure; the caller adds the operation.
 var errSeal = errors.New("local KMS crypto failed")
 
+// errInvalidCiphertext is the real surface's answer to an unopenable payload.
+var errInvalidCiphertext = status.Error(codes.InvalidArgument, "Decryption failed: the ciphertext is invalid.")
+
 // readRandom fills one buffer from the local CSPRNG.
-func readRandom(buffer []byte) (int, error) {
-	n, err := rand.Read(buffer)
-	if err != nil {
-		return n, fmt.Errorf("%w: %w", errSeal, err)
+func readRandom(buffer []byte) error {
+	if _, err := io.ReadFull(rand.Reader, buffer); err != nil {
+		return fmt.Errorf("%w: %w", errSeal, err)
 	}
-	return n, nil
+	return nil
 }
 
-// random fills one buffer with local randomness under the provider lock.
-func (p *Provider) random(buffer []byte) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	_, err := readRandom(buffer)
-	return err
-}
-
-// seal encrypts one plaintext under the provider-held local key, prefixing
-// the payload with the version number so decrypt reports the true origin.
-func (p *Provider) seal(plaintext, aad []byte, version string) ([]byte, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	block, err := aes.NewCipher(p.key)
+// seal encrypts one plaintext under a version's material. The envelope is
+// "version|nonce||ciphertext"; the version label is authenticated with the AAD.
+func seal(material, plaintext, aad []byte, version string) ([]byte, error) {
+	gcm, err := newGCM(material)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errSeal, err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errSeal, err)
+		return nil, err
 	}
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, fmt.Errorf("%w: %w", errSeal, err)
 	}
-	if len(version) > 255 {
-		return nil, status.Error(codes.InvalidArgument, "Version label is too long")
-	}
-	marker := make([]byte, 1, 1+gcm.NonceSize())
-	marker[0] = byte(len(version)) //nolint:gosec // the length is bounded above
-	sealed := gcm.Seal(append(marker, nonce...), nonce, plaintext, append(aad, []byte(version)...))
-	return append([]byte(version+"|"), sealed...), nil
+	envelope := append([]byte(version+"|"), nonce...)
+	return gcm.Seal(envelope, nonce, plaintext, boundAAD(version, aad)), nil
 }
 
-// open reverses seal and returns the plaintext with the sealing version.
-func (p *Provider) open(sealed, aad []byte) ([]byte, string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	block, err := aes.NewCipher(p.key)
-	if err != nil {
-		return nil, "", fmt.Errorf("%w: %w", errSeal, err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, "", fmt.Errorf("%w: %w", errSeal, err)
-	}
+// envelopeVersion reads the sealing version label from one envelope.
+func envelopeVersion(sealed []byte) (string, error) {
 	split := bytes.IndexByte(sealed, '|')
-	if split < 0 || split > 8 {
-		return nil, "", status.Error(codes.FailedPrecondition, "Ciphertext envelope is not from this key")
+	if split < 1 || !versionNumber.Match(sealed[:split]) {
+		return "", errInvalidCiphertext
 	}
-	version := string(sealed[:split])
-	rest := sealed[split+1:]
-	if len(rest) < gcm.NonceSize()+1 {
-		return nil, "", status.Error(codes.FailedPrecondition, "Ciphertext is truncated")
-	}
-	markerLength := int(rest[0])
-	if markerLength != len(version) {
-		return nil, "", status.Error(codes.FailedPrecondition, "Ciphertext envelope is corrupted")
-	}
-	nonce := rest[1 : 1+gcm.NonceSize()]
-	plaintext, err := gcm.Open(nil, nonce, rest[1+gcm.NonceSize():], append(aad, version...))
+	return string(sealed[:split]), nil
+}
+
+// open reverses seal with the named version's material.
+func open(material, sealed, aad []byte, version string) ([]byte, error) {
+	gcm, err := newGCM(material)
 	if err != nil {
-		return nil, "", status.Error(codes.FailedPrecondition, "Decryption failed: the ciphertext is not sealed by this key")
+		return nil, err
 	}
-	return plaintext, version, nil
+	rest := sealed[len(version)+1:]
+	if len(rest) < gcm.NonceSize()+gcm.Overhead() {
+		return nil, errInvalidCiphertext
+	}
+	nonce := rest[:gcm.NonceSize()]
+	plaintext, err := gcm.Open(nil, nonce, rest[gcm.NonceSize():], boundAAD(version, aad))
+	if err != nil {
+		return nil, errInvalidCiphertext
+	}
+	return plaintext, nil
+}
+
+// boundAAD binds the caller's AAD to the version label.
+func boundAAD(version string, aad []byte) []byte {
+	return append([]byte(version+"|"), aad...)
 }

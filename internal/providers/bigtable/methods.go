@@ -24,14 +24,22 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.instancesUpdate(request, scope)
 	case methodInstancesDelete:
 		return p.instancesDelete(request, scope)
-	case methodClustersList:
-		return p.clustersList(request, scope)
-	case methodClustersGet:
-		return p.clustersGet(request, scope)
 	case methodInstancesGetIam, methodTablesGetIam:
 		return p.getIam(target)
 	case methodInstancesSetIam, methodTablesSetIam:
 		return p.setIam(request, target)
+	default:
+		return p.executeChild(call, request, scope)
+	}
+}
+
+// executeChild dispatches one authorized cluster or table request.
+func (p *Provider) executeChild(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	switch call.Method {
+	case methodClustersList:
+		return p.clustersList(request, scope)
+	case methodClustersGet:
+		return p.clustersGet(request, scope)
 	case methodTablesCreate:
 		return p.tablesCreate(request, scope)
 	case methodTablesGet:
@@ -47,97 +55,112 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	}
 }
 
-// instancesCreate validates and stores one instance with its cluster.
+// instanceCreateBody is the CreateInstance request; clusters map id to spec.
+type instanceCreateBody struct {
+	InstanceID string `json:"instanceId"`
+	Instance   struct {
+		DisplayName string            `json:"displayName"`
+		Type        string            `json:"type"`
+		Edition     string            `json:"edition"`
+		Labels      map[string]string `json:"labels"`
+	} `json:"instance"`
+	Clusters map[string]struct {
+		Location           string `json:"location"`
+		ServeNodes         int    `json:"serveNodes"`
+		DefaultStorageType string `json:"defaultStorageType"`
+	} `json:"clusters"`
+}
+
+// instancesCreate validates and stores one instance with its cluster, then
+// returns the completed long-running operation.
 func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	var body struct {
-		InstanceID string `json:"instanceId"`
-		Instance   struct {
-			Name        string            `json:"name"`
-			DisplayName string            `json:"displayName"`
-			Type        string            `json:"type"`
-			Labels      map[string]string `json:"labels"`
-		} `json:"instance"`
-		Clusters []struct {
-			Name               string `json:"name"`
-			ClusterID          string `json:"clusterId"`
-			Location           string `json:"location"`
-			ServeNodes         int    `json:"serveNodes"`
-			DefaultStorageType string `json:"defaultStorageType"`
-		} `json:"clusters"`
-	}
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid instance body")
-	}
-	name := body.InstanceID
-	if name == "" {
-		name = body.Instance.Name
-	}
-	if index := lastSegment(name); index >= 0 {
-		name = name[index+1:]
-	}
-	if !uid.MatchString(name) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", name)
-	}
-	if len(body.Clusters) != 1 {
-		return nil, status.Error(codes.InvalidArgument, "Exactly one cluster is required")
-	}
-	cluster := body.Clusters[0]
-	clusterID := cluster.ClusterID
-	if clusterID == "" {
-		clusterID = lastNamed(cluster.Name)
-	}
-	if !uid.MatchString(clusterID) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid cluster id %q", clusterID)
-	}
-	if cluster.ServeNodes <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "A cluster requires serveNodes")
-	}
-	location := cluster.Location
-	if index := lastSegment(location); index >= 0 {
-		location = location[index+1:]
-	}
-	storage := cluster.DefaultStorageType
-	if storage == "" {
-		storage = "SSD"
-	}
-	instanceType := body.Instance.Type
-	if instanceType == "" {
-		instanceType = "PRODUCTION"
-	}
-	now := p.clock()
-	var created *instanceRecord
-	err := p.scopes.With(scope, func(s *scopeState) error {
-		if s.instances[name] != nil {
-			return status.Errorf(codes.AlreadyExists, "Instance %s already exists", name)
-		}
-		created = &instanceRecord{
-			Name: name, DisplayName: body.Instance.DisplayName, Type: instanceType,
-			Labels: body.Instance.Labels, CreatedAt: now,
-			Cluster: &clusterRecord{
-				Name: clusterID, Location: location,
-				ServeNodes: cluster.ServeNodes, StorageType: storage,
-				CreatedAt: now,
-			},
-		}
-		s.instances[name] = created
-		return nil
-	})
+	record, err := p.parseInstance(request)
 	if err != nil {
 		return nil, err
 	}
+	err = p.scopes.With(scope, func(s *scopeState) error {
+		if s.instances[record.Name] != nil {
+			return status.Errorf(codes.AlreadyExists, "Instance %s already exists", instanceName(scope.Project, record.Name))
+		}
+		s.instances[record.Name] = record
+		return nil
+	})
+	if err != nil {
+		return nil, err //nolint:wrapcheck // already a wire status
+	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: instanceResource(scope.Project, name), Service: serviceName,
+		Name: instanceResource(scope.Project, record.Name), Service: serviceName,
 		Kind: kindInstance, Parent: projectResource(scope.Project), Scope: scope,
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the instance: %w", indexErr)
 	}
-	return &gateway.RESTResponse{JSON: instanceWire(scope.Project, created)}, nil
+	return &gateway.RESTResponse{JSON: p.createOperation(scope.Project, record)}, nil
 }
 
-// lastSegment finds the final '/' separator, or -1.
-func lastSegment(value string) int {
+// parseInstance decodes and validates one CreateInstance request.
+func (p *Provider) parseInstance(request *gateway.RESTRequest) (*instanceRecord, error) {
+	var body instanceCreateBody
+	if json.Unmarshal(request.JSON, &body) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid instance body")
+	}
+	if !uid.MatchString(body.InstanceID) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", body.InstanceID)
+	}
+	if len(body.Clusters) != 1 {
+		return nil, status.Error(codes.InvalidArgument, "Exactly one cluster is required")
+	}
+	var cluster *clusterRecord
+	for id, spec := range body.Clusters {
+		cluster = &clusterRecord{
+			Name: id, Location: lastNamed(spec.Location),
+			ServeNodes: spec.ServeNodes, StorageType: valueOr(spec.DefaultStorageType, "SSD"),
+		}
+	}
+	if !uid.MatchString(cluster.Name) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid cluster id %q", cluster.Name)
+	}
+	if cluster.ServeNodes <= 0 || cluster.Location == "" {
+		return nil, status.Error(codes.InvalidArgument, "A cluster requires location and serveNodes")
+	}
+	return &instanceRecord{
+		Name: body.InstanceID, DisplayName: body.Instance.DisplayName,
+		Type:    valueOr(body.Instance.Type, "PRODUCTION"),
+		Edition: valueOr(body.Instance.Edition, defaultEdition),
+		Labels:  body.Instance.Labels, Cluster: cluster, CreatedAt: p.clock(),
+	}, nil
+}
+
+// createOperation renders the completed CreateInstance operation. Bigtable
+// names operations under the cluster's zone.
+func (p *Provider) createOperation(project string, record *instanceRecord) map[string]any {
+	number := p.operations.Add(1)
+	result := instanceSummary(project, record)
+	result["@type"] = typeInstance
+	return map[string]any{
+		keyName: fmt.Sprintf("operations/%s/locations/%s/operations/%d",
+			instanceName(project, record.Name), record.Cluster.Location, number),
+		"metadata": map[string]any{
+			"@type":       typeCreateInstanceMetadata,
+			"requestTime": stamp(record.CreatedAt),
+			"finishTime":  stamp(record.CreatedAt),
+		},
+		"done":     true,
+		"response": result,
+	}
+}
+
+// valueOr returns value, or fallback when value is empty.
+func valueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+// lastIndex finds the final separator, or -1.
+func lastIndex(value string, separator byte) int {
 	for i := len(value) - 1; i >= 0; i-- {
-		if value[i] == '/' {
+		if value[i] == separator {
 			return i
 		}
 	}
@@ -146,14 +169,14 @@ func lastSegment(value string) int {
 
 // lastNamed returns the id after the final '/', or the value itself.
 func lastNamed(value string) string {
-	if index := lastSegment(value); index >= 0 {
+	if index := lastIndex(value, '/'); index >= 0 {
 		return value[index+1:]
 	}
 	return value
 }
 
-// instanceWire renders one instance document.
-func instanceWire(project string, record *instanceRecord) map[string]any {
+// instanceSummary renders the instance fields of a create-operation response.
+func instanceSummary(project string, record *instanceRecord) map[string]any {
 	labels := record.Labels
 	if labels == nil {
 		labels = map[string]string{}
@@ -162,10 +185,26 @@ func instanceWire(project string, record *instanceRecord) map[string]any {
 		keyName:       instanceName(project, record.Name),
 		"displayName": record.DisplayName,
 		"type":        record.Type,
+		"edition":     record.Edition,
 		"labels":      labels,
 		"state":       "READY",
-		"createTime":  stamp(record.CreatedAt),
 	}
+}
+
+// instanceWire renders one instance document as instances.get returns it.
+func instanceWire(project string, record *instanceRecord) map[string]any {
+	wire := instanceSummary(project, record)
+	wire["createTime"] = stamp(record.CreatedAt)
+	wire["knowledgeCatalogRegion"] = region(record.Cluster.Location)
+	return wire
+}
+
+// region derives the region of a zone such as us-central1-b.
+func region(zone string) string {
+	if index := lastIndex(zone, '-'); index > 0 {
+		return zone[:index]
+	}
+	return zone
 }
 
 // clusterWire renders one cluster document.
@@ -176,7 +215,6 @@ func clusterWire(project, instance string, record *clusterRecord) map[string]any
 		"serveNodes":         record.ServeNodes,
 		"defaultStorageType": record.StorageType,
 		"state":              "READY",
-		"createTime":         stamp(record.CreatedAt),
 	}
 }
 
@@ -226,33 +264,50 @@ func (p *Provider) instancesUpdate(request *gateway.RESTRequest, scope state.Sco
 	return &gateway.RESTResponse{JSON: instanceWire(scope.Project, record)}, nil
 }
 
-// instancesDelete removes one instance without tables.
+// instancesDelete removes one instance and, as in GCP, all of its tables.
 func (p *Provider) instancesDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	instance := request.Path["instance"]
-	if p.instanceLocked(scope, instance) == nil {
-		return nil, notFound(kindInstance, instance)
-	}
-	nonEmpty := false
+	var tables []string
 	err := p.scopes.With(scope, func(s *scopeState) error {
-		for _, record := range s.tables {
+		if s.instances[instance] == nil {
+			return notFound(kindInstance, instance)
+		}
+		for key, record := range s.tables {
 			if record.Instance == instance {
-				nonEmpty = true
-				return nil
+				tables = append(tables, record.Name)
+				delete(s.tables, key)
 			}
 		}
 		delete(s.instances, instance)
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("remove the instance: %w", err)
+		return nil, err //nolint:wrapcheck // already a wire status
 	}
-	if nonEmpty {
-		return nil, status.Errorf(codes.FailedPrecondition, "Instance %s still contains tables", instance)
+	for _, table := range tables {
+		if forgetErr := p.forget(scope, tableResource(scope.Project, instance, table)); forgetErr != nil {
+			return nil, forgetErr
+		}
 	}
-	if indexErr := p.index.Remove(serviceName, scope, instanceResource(scope.Project, instance)); indexErr != nil {
-		return nil, fmt.Errorf("unregister the instance: %w", indexErr)
+	if forgetErr := p.forget(scope, instanceResource(scope.Project, instance)); forgetErr != nil {
+		return nil, forgetErr
 	}
-	return &gateway.RESTResponse{Status: 204}, nil
+	return emptyResponse(), nil
+}
+
+// forget unregisters a deleted resource and drops its IAM policy so a
+// recreated resource of the same name starts without bindings.
+func (p *Provider) forget(scope state.Scope, resource string) error {
+	if err := p.index.Remove(serviceName, scope, resource); err != nil {
+		return fmt.Errorf("unregister %s: %w", resource, err)
+	}
+	p.engine.Forget(resource)
+	return nil
+}
+
+// emptyResponse is the 200 {} body GCP returns for admin deletes.
+func emptyResponse() *gateway.RESTResponse {
+	return &gateway.RESTResponse{JSON: map[string]any{}}
 }
 
 // clustersList returns the instance's clusters.
@@ -298,7 +353,7 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "A table requires tableId")
 	}
-	if !uid.MatchString(name) {
+	if !tableID.MatchString(name) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid table id %q", name)
 	}
 	granularity := body.Table.Granularity
@@ -314,7 +369,7 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		key := instance + "/" + name
 		if s.tables[key] != nil {
-			return status.Errorf(codes.AlreadyExists, "Table %s already exists", name)
+			return status.Errorf(codes.AlreadyExists, "Table %s already exists", tableName(scope.Project, instance, name))
 		}
 		created = &tableRecord{
 			Instance: instance, Name: name, Families: families,
@@ -324,7 +379,7 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // already a wire status
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: tableResource(scope.Project, instance, name), Service: serviceName,
@@ -343,21 +398,21 @@ func (p *Provider) tableLocked(scope state.Scope, instance, table string) *table
 	return record
 }
 
-// tableWire renders one table document.
+// tableWire renders one table in the default (SCHEMA_VIEW) shape: a family
+// without a garbage-collection rule renders as an empty object.
 func tableWire(project, instance string, record *tableRecord) map[string]any {
 	families := map[string]any{}
 	for _, family := range record.Families {
-		rule := family.GCRule
-		if rule == nil {
-			rule = map[string]any{}
+		wire := map[string]any{}
+		if len(family.GCRule) > 0 {
+			wire["gcRule"] = family.GCRule
 		}
-		families[family.Name] = map[string]any{"gcRule": rule}
+		families[family.Name] = wire
 	}
 	return map[string]any{
 		keyName:          tableName(project, instance, record.Name),
 		"columnFamilies": families,
 		"granularity":    record.Granularity,
-		"createTime":     stamp(record.CreatedAt),
 	}
 }
 
@@ -393,10 +448,6 @@ func (p *Provider) tablesUpdate(request *gateway.RESTRequest, scope state.Scope)
 // tablesModifyFamilies applies create/update/drop column-family modifications.
 func (p *Provider) tablesModifyFamilies(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	instance, table := request.Path["instance"], request.Path["table"]
-	record := p.tableLocked(scope, instance, table)
-	if record == nil {
-		return nil, notFound(kindTable, table)
-	}
 	var body struct {
 		Modifications []struct {
 			ID     string `json:"id"`
@@ -412,36 +463,59 @@ func (p *Provider) tablesModifyFamilies(request *gateway.RESTRequest, scope stat
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid column-family modifications")
 	}
-	for _, mod := range body.Modifications {
-		if mod.Drop {
-			delete(record.Families, mod.ID)
-			continue
+	var wire map[string]any
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		record := s.tables[instance+"/"+table]
+		if record == nil {
+			return notFound(kindTable, table)
 		}
-		rule := mod.Create.GCRule
-		if rule == nil {
-			rule = mod.Update.GCRule
+		for _, mod := range body.Modifications {
+			applyModification(record, mod.ID, mod.Drop, valueOrRule(mod.Create.GCRule, mod.Update.GCRule))
 		}
-		record.Families[mod.ID] = &familyRecord{Name: mod.ID, GCRule: rule}
+		wire = tableWire(scope.Project, instance, record)
+		return nil
+	})
+	if err != nil {
+		return nil, err //nolint:wrapcheck // already a wire status
 	}
-	return &gateway.RESTResponse{JSON: tableWire(scope.Project, instance, record)}, nil
+	return &gateway.RESTResponse{JSON: wire}, nil
+}
+
+// applyModification creates, updates, or drops one column family.
+func applyModification(record *tableRecord, family string, drop bool, rule map[string]any) {
+	if drop {
+		delete(record.Families, family)
+		return
+	}
+	record.Families[family] = &familyRecord{Name: family, GCRule: rule}
+}
+
+// valueOrRule returns the create rule, or the update rule when absent.
+func valueOrRule(create, update map[string]any) map[string]any {
+	if create != nil {
+		return create
+	}
+	return update
 }
 
 // tablesDelete removes one table.
 func (p *Provider) tablesDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	instance, table := request.Path["instance"], request.Path["table"]
-	if p.tableLocked(scope, instance, table) == nil {
-		return nil, notFound(kindTable, table)
-	}
-	var indexErr error
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		delete(s.tables, instance+"/"+table)
-		indexErr = p.index.Remove(serviceName, scope, tableResource(scope.Project, instance, table))
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		key := instance + "/" + table
+		if s.tables[key] == nil {
+			return notFound(kindTable, table)
+		}
+		delete(s.tables, key)
 		return nil
 	})
-	if indexErr != nil {
-		return nil, fmt.Errorf("unregister the table: %w", indexErr)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // already a wire status
 	}
-	return &gateway.RESTResponse{Status: 204}, nil
+	if forgetErr := p.forget(scope, tableResource(scope.Project, instance, table)); forgetErr != nil {
+		return nil, forgetErr
+	}
+	return emptyResponse(), nil
 }
 
 // getIam returns the stored policy of an instance or table.
@@ -450,7 +524,7 @@ func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the Bigtable policy: %v", err)
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }
 
 // setIam stores the policy of an instance or table.
@@ -463,7 +537,7 @@ func (p *Provider) setIam(request *gateway.RESTRequest, target iam.Target) (*gat
 	}
 	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "write the Bigtable policy: %v", err)
+		return nil, err //nolint:wrapcheck // already a wire status
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }

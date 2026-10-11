@@ -8,7 +8,7 @@ var BigtableRoutes = []Route{
 	{"bigtable.instances.list", "GET", "/v2/projects/{project}/instances", false, false},
 	{"bigtable.instances.update", "PATCH", "/v2/projects/{project}/instances/{instance}", true, false},
 	{"bigtable.instances.delete", "DELETE", "/v2/projects/{project}/instances/{instance}", false, false},
-	{"bigtable.instances.getIamPolicy", "GET", "/v2/projects/{project}/instances/{instance}:getIamPolicy", false, false},
+	{"bigtable.instances.getIamPolicy", "POST", "/v2/projects/{project}/instances/{instance}:getIamPolicy", true, false},
 	{"bigtable.instances.setIamPolicy", "POST", "/v2/projects/{project}/instances/{instance}:setIamPolicy", true, false},
 	{"bigtable.clusters.list", "GET", "/v2/projects/{project}/instances/{instance}/clusters", false, false},
 	{"bigtable.clusters.get", "GET", "/v2/projects/{project}/instances/{instance}/clusters/{cluster}", false, false},
@@ -18,6 +18,6 @@ var BigtableRoutes = []Route{
 	{"bigtable.tables.update", "PATCH", "/v2/projects/{project}/instances/{instance}/tables/{table}", true, false},
 	{"bigtable.tables.delete", "DELETE", "/v2/projects/{project}/instances/{instance}/tables/{table}", false, false},
 	{"bigtable.tables.modifyColumnFamilies", "POST", "/v2/projects/{project}/instances/{instance}/tables/{table}:modifyColumnFamilies", true, false},
-	{"bigtable.tables.getIamPolicy", "GET", "/v2/projects/{project}/instances/{instance}/tables/{table}:getIamPolicy", false, false},
+	{"bigtable.tables.getIamPolicy", "POST", "/v2/projects/{project}/instances/{instance}/tables/{table}:getIamPolicy", true, false},
 	{"bigtable.tables.setIamPolicy", "POST", "/v2/projects/{project}/instances/{instance}/tables/{table}:setIamPolicy", true, false},
 }

@@ -1,7 +1,8 @@
 // Package spanner implements the Spanner admin v1 control plane: instance
 // configs (as modeled fixtures), instances, databases, and per-resource IAM.
-// Data-plane sessions/queries are out of scope. No cloud recording covers
-// these methods yet, so nothing here claims recorded conformance.
+// Data-plane sessions/queries are out of scope. The
+// spanner-instance-database-admin recording covers the instance/database
+// lifecycle, instance IAM, and the DDL slice; other methods are unrecorded.
 package spanner
 
 import (
@@ -37,6 +38,7 @@ const (
 	methodDatabasesGetIam   = "spanner.databases.getIamPolicy"
 	methodDatabasesSetIam   = "spanner.databases.setIamPolicy"
 	methodDatabasesApplyDdl = "spanner.databases.applyDdl"
+	methodDatabasesGetDdl   = "spanner.databases.getDdl"
 	methodBackupsList       = "spanner.backups.list"
 )
 
@@ -59,18 +61,24 @@ var permissions = map[string]string{
 	methodDatabasesGetIam:   "spanner.databases.getIamPolicy",
 	methodDatabasesSetIam:   "spanner.databases.setIamPolicy",
 	methodDatabasesApplyDdl: "spanner.databases.updateDdl",
+	methodDatabasesGetDdl:   "spanner.databases.getDdl",
 	methodBackupsList:       "spanner.backups.list",
 }
 
-// uid is the shared resource-name matcher.
 // Wire keys and resource kinds shared by the handlers.
 const (
-	keyName      = "name"
-	kindInstance = "instance"
-	kindDatabase = "database"
+	keyName        = "name"
+	keyDisplayName = "displayName"
+	kindInstance   = "instance"
+	kindDatabase   = "database"
 )
 
+// uid is the instance-id matcher.
 var uid = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}[a-z0-9]$`)
+
+// databaseID is Spanner's database-id rule: 2-30 characters,
+// [a-z][a-z0-9_-]*[a-z0-9]; underscores are valid (the recording uses gl_db).
+var databaseID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,28}[a-z0-9]$`)
 
 // instanceConfig is one modeled regional instance config.
 type instanceConfig struct {
@@ -86,13 +94,14 @@ type instanceRecord struct {
 	ProcessingUnits int
 	Labels          map[string]string
 	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // databaseRecord is one stored Spanner database.
 type databaseRecord struct {
 	Instance  string
 	Name      string
-	DDL       []string
+	Tables    []ddlTable
 	State     string
 	CreatedAt time.Time
 }

@@ -1,11 +1,12 @@
 package cloudkms
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"strconv"
+	"maps"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -14,487 +15,468 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// handler serves one authorized KMS method.
+type handler func(p *Provider, request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error)
+
+// handlers maps every registered method to its implementation.
+var handlers = map[string]handler{
+	methodLocationsList:     (*Provider).locationsList,
+	methodKeyRingsCreate:    (*Provider).keyRingsCreate,
+	methodKeyRingsGet:       (*Provider).keyRingsGet,
+	methodKeyRingsList:      (*Provider).keyRingsList,
+	methodKeyRingsGetIam:    (*Provider).ringGetIam,
+	methodKeyRingsSetIam:    (*Provider).ringSetIam,
+	methodCryptoKeysCreate:  (*Provider).cryptoKeysCreate,
+	methodCryptoKeysGet:     (*Provider).cryptoKeysGet,
+	methodCryptoKeysList:    (*Provider).cryptoKeysList,
+	methodCryptoKeysUpdate:  (*Provider).cryptoKeysUpdate,
+	methodCryptoKeysPrimary: (*Provider).updatePrimaryVersion,
+	methodCryptoKeysGetIam:  (*Provider).keyGetIam,
+	methodCryptoKeysSetIam:  (*Provider).keySetIam,
+	methodCryptoKeysEncrypt: (*Provider).encrypt,
+	methodCryptoKeysDecrypt: (*Provider).decrypt,
+	methodVersionsCreate:    (*Provider).versionsCreate,
+	methodVersionsList:      (*Provider).versionsList,
+	methodVersionsGet:       (*Provider).versionsGet,
+	methodVersionsPatch:     (*Provider).versionsPatch,
+	methodVersionsDestroy:   (*Provider).versionsDestroy,
+}
+
 // execute dispatches one authorized KMS request.
-func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
-	switch call.Method {
-	case methodLocationsList:
-		return locationsList(scope)
-	case methodKeyRingsCreate:
-		return p.keyRingsCreate(request, scope)
-	case methodKeyRingsGet:
-		return p.keyRingsGet(request, scope)
-	case methodKeyRingsList:
-		return p.keyRingsList(scope)
-	default:
-		return p.executeKeys(call, request, scope, target)
+func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	serve, ok := handlers[call.Method]
+	if !ok {
+		return nil, status.Errorf(codes.Internal, "Unhandled KMS method %s", call.Method)
 	}
+	return serve(p, request, scope, resource)
 }
 
-// executeVersions dispatches the crypto key version methods.
-func (p *Provider) executeVersions(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	switch call.Method {
-	case methodVersionsCreate:
-		return p.versionsCreate(request, scope)
-	case methodVersionsList:
-		return p.versionsList(request, scope)
-	case methodVersionsGet:
-		return p.versionsGet(request, scope)
-	case methodVersionsDestroy:
-		return p.versionsState(request, scope, stateDestroyed)
-	case methodVersionsDisable:
-		return p.versionsState(request, scope, stateDisabled)
-	default:
-		return p.versionsState(request, scope, stateEnabled)
-	}
-}
-
-// executeKeys dispatches the crypto key and version methods.
-func (p *Provider) executeKeys(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
-	if strings.HasPrefix(call.Method, "cloudkms.cryptoKeyVersions.") {
-		return p.executeVersions(call, request, scope)
-	}
-	switch call.Method {
-	case methodCryptoKeysGetIam, methodKeyRingsGetIam:
-		return p.getIam(request, scope, target)
-	case methodCryptoKeysSetIam, methodKeyRingsSetIam:
-		return p.setIam(request, scope, target)
-	case methodCryptoKeysCreate:
-		return p.cryptoKeysCreate(request, scope)
-	case methodCryptoKeysGet:
-		return p.cryptoKeysGet(request, scope)
-	case methodCryptoKeysList:
-		return p.cryptoKeysList(request, scope)
-	case methodCryptoKeysUpdate:
-		return p.cryptoKeysUpdate(request, scope)
-	case methodCryptoKeysEncrypt:
-		return p.encrypt(request, scope)
-	default:
-		return p.decrypt(request, scope)
-	}
+// respond wraps one JSON document.
+func respond(document any) (*gateway.RESTResponse, error) {
+	return &gateway.RESTResponse{JSON: document}, nil
 }
 
 // locationsList returns the modeled KMS locations.
-func locationsList(scope state.Scope) (*gateway.RESTResponse, error) {
-	return &gateway.RESTResponse{JSON: map[string]any{"locations": []any{
-		map[string]any{"name": "projects/" + scope.Project + "/locations/" + testLocation,
+func (p *Provider) locationsList(_ *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return respond(map[string]any{"locations": []any{
+		map[string]any{keyName: "projects/" + resource.project + "/locations/" + testLocation,
 			"locationId": testLocation, "displayName": testLocation},
-	}}}, nil
+	}})
 }
 
 // keyRingsCreate validates and stores one key ring.
-func (p *Provider) keyRingsCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring := request.Query.Get("keyRingId")
-	if !uid.MatchString(ring) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid key ring id %q", ring)
+func (p *Provider) keyRingsCreate(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	resource.ring = request.Query.Get("keyRingId")
+	if !uid.MatchString(resource.ring) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid key ring id %q", resource.ring)
 	}
 	var created *keyRingRecord
 	err := p.scopes.With(scope, func(s *scopeState) error {
-		if s.keyRings[ring] != nil {
-			return status.Errorf(codes.AlreadyExists, "The key ring %s already exists", ring)
+		if s.keyRings[resource.ringID()] != nil {
+			return status.Errorf(codes.AlreadyExists, "KeyRing %s already exists.", resource.ringName())
 		}
-		created = &keyRingRecord{Name: ring, CreatedAt: p.clock()}
-		s.keyRings[ring] = created
+		created = &keyRingRecord{Name: resource.ring, CreatedAt: p.clock()}
+		s.keyRings[resource.ringID()] = created
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create the key ring: %w", err)
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: keyRingResource(scope.Project, ring), Service: serviceName,
-		Kind: kindKeyRing, Parent: projectResource(scope.Project), Scope: scope,
+		Name: resource.ringResource(), Service: serviceName,
+		Kind: kindKeyRing, Parent: projectResource(resource.project), Scope: scope,
 	}); indexErr != nil {
 		return nil, gap("index the key ring")
 	}
-	return &gateway.RESTResponse{JSON: keyRingDocument(scope.Project, created)}, nil
+	return respond(keyRingDocument(resource, created))
 }
 
 // keyRingDocument renders the key ring wire shape.
-func keyRingDocument(project string, record *keyRingRecord) map[string]any {
-	return map[string]any{
-		keyName:       fullName(project, ringLocation(record.Name), kindKeyRing, record.Name),
-		keyCreateTime: stamp(record.CreatedAt),
-	}
+func keyRingDocument(resource ref, record *keyRingRecord) map[string]any {
+	resource.ring = record.Name
+	return map[string]any{keyName: resource.ringName(), keyCreateTime: stamp(record.CreatedAt)}
 }
 
 // keyRingsGet returns one key ring.
-func (p *Provider) keyRingsGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring := request.Path["keyRing"]
-	var record *keyRingRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.keyRings[ring]; return nil })
-	if record == nil {
-		return nil, notFound(kindKeyRing, ring)
+func (p *Provider) keyRingsGet(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	var document map[string]any
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		record := s.keyRings[resource.ringID()]
+		if record == nil {
+			return notFound("KeyRing", resource.ringName())
+		}
+		document = keyRingDocument(resource, record)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read the key ring: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: keyRingDocument(scope.Project, record)}, nil
+	return respond(document)
 }
 
-// keyRingsList returns the scope's key rings.
-func (p *Provider) keyRingsList(scope state.Scope) (*gateway.RESTResponse, error) {
+// keyRingsList returns the location's key rings in name order.
+func (p *Provider) keyRingsList(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	items := []any{}
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for _, record := range s.keyRings {
-			items = append(items, keyRingDocument(scope.Project, record))
+		for _, id := range sortedKeys(s.keyRings, resource.location+"/") {
+			items = append(items, keyRingDocument(resource, s.keyRings[id]))
 		}
 		return nil
 	})
-	return &gateway.RESTResponse{JSON: map[string]any{"keyRings": items}}, nil
+	return respond(map[string]any{"keyRings": items})
 }
 
-// cryptoKeysCreate validates and stores one symmetric crypto key with version 1.
-func (p *Provider) cryptoKeysCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring := request.Path["keyRing"]
-	if p.ring(scope, ring) == nil {
-		return nil, notFound(kindKeyRing, ring)
+// sortedKeys lists one map's keys with a prefix in order.
+func sortedKeys[T any](entries map[string]T, prefix string) []string {
+	var names []string
+	for name := range entries {
+		if strings.HasPrefix(name, prefix) && !strings.Contains(name[len(prefix):], "/") {
+			names = append(names, name)
+		}
 	}
-	key := request.Query.Get("cryptoKeyId")
-	if !uid.MatchString(key) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid crypto key id %q", key)
+	sort.Strings(names)
+	return names
+}
+
+// cryptoKeysCreate validates and stores one symmetric crypto key with version 1
+// unless skipInitialVersionCreation is set.
+func (p *Provider) cryptoKeysCreate(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	resource.key = request.Query.Get("cryptoKeyId")
+	if !uid.MatchString(resource.key) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid crypto key id %q", resource.key)
 	}
-	body, parseErr := parseCryptoKeyBody(request.JSON)
-	if parseErr != nil {
-		return nil, parseErr
+	record, err := p.newCryptoKey(request, resource.key)
+	if err != nil {
+		return nil, err
 	}
-	var created *cryptoKeyRecord
-	err := p.scopes.With(scope, func(s *scopeState) error {
-		if s.keyRings[ring] == nil {
-			return notFound(kindKeyRing, ring)
+	err = p.scopes.With(scope, func(s *scopeState) error {
+		if s.keyRings[resource.ringID()] == nil {
+			return notFound("KeyRing", resource.ringName())
 		}
-		if s.cryptoKeys[key] != nil {
-			return status.Errorf(codes.AlreadyExists, "The crypto key %s already exists", key)
+		if s.cryptoKeys[resource.keyID()] != nil {
+			return status.Errorf(codes.AlreadyExists, "CryptoKey %s already exists.", resource.keyName())
 		}
-		material := make([]byte, 32)
-		if err := p.random(material); err != nil {
-			return err
-		}
-		version := &versionRecord{Number: "1", State: stateEnabled, Material: material, CreatedAt: p.clock()}
-		created = &cryptoKeyRecord{
-			Name: key, Purpose: body.Purpose, Algorithm: body.Algorithm,
-			Labels: body.Labels, Rotation: body.RotationPeriod,
-			NextRotation: body.NextRotation,
-			Versions:     map[string]*versionRecord{"1": version},
-			Primary:      "1", CreatedAt: p.clock(),
-		}
-		if body.SkipInitial {
-			version.State = stateDestroyed
-			version.Material = nil
-			created.Primary = ""
-		}
-		s.cryptoKeys[key] = created
+		s.cryptoKeys[resource.keyID()] = record
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create the crypto key: %w", err)
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: cryptoKeyResource(scope.Project, ring, key), Service: serviceName,
-		Kind: kindCryptoKey, Parent: keyRingResource(scope.Project, ring), Scope: scope,
+		Name: resource.keyResource(), Service: serviceName,
+		Kind: kindCryptoKey, Parent: resource.ringResource(), Scope: scope,
 	}); indexErr != nil {
 		return nil, gap("index the crypto key")
 	}
-	return &gateway.RESTResponse{JSON: p.cryptoKeyDocument(scope, ring, created)}, nil
+	return respond(cryptoKeyDocument(resource, record))
 }
 
-// ring returns one key ring record.
-func (p *Provider) ring(scope state.Scope, ring string) *keyRingRecord {
-	var record *keyRingRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.keyRings[ring]; return nil })
-	return record
+// newCryptoKey builds one key record and its initial version from a request.
+func (p *Provider) newCryptoKey(request *gateway.RESTRequest, name string) (*cryptoKeyRecord, error) {
+	body, err := parseCryptoKeyBody(request.JSON)
+	if err != nil {
+		return nil, err
+	}
+	destroy, err := parseDestroyDuration(body.DestroyDuration)
+	if err != nil {
+		return nil, err
+	}
+	now := p.clock()
+	record := &cryptoKeyRecord{
+		Name: name, Purpose: body.Purpose, Algorithm: body.Template.Algorithm,
+		Labels: maps.Clone(body.Labels), Rotation: body.RotationPeriod, NextRotation: body.NextRotation,
+		DestroyDuration: destroy, DestroyText: body.DestroyDuration,
+		Versions: map[string]*versionRecord{}, CreatedAt: now,
+	}
+	if request.Query.Get("skipInitialVersionCreation") == "true" {
+		return record, nil
+	}
+	version, err := newVersion("1", now)
+	if err != nil {
+		return nil, err
+	}
+	record.Versions["1"], record.Primary = version, "1"
+	return record, nil
 }
 
-// cryptoKeyDocument renders the crypto key wire shape.
-func (p *Provider) cryptoKeyDocument(scope state.Scope, ring string, record *cryptoKeyRecord) map[string]any {
-	primary := map[string]any{}
-	if record.Primary != "" {
-		primary = map[string]any{
-			keyName: cryptoKeyName(scope.Project, ring, record.Name) + "/cryptoKeyVersions/" + record.Primary,
-			"state": record.Versions[record.Primary].State,
+// newVersion creates one enabled version with fresh material.
+func newVersion(number string, now time.Time) (*versionRecord, error) {
+	material := make([]byte, 32)
+	if err := readRandom(material); err != nil {
+		return nil, status.Errorf(codes.Internal, "Key generation failed: %v", err)
+	}
+	return &versionRecord{Number: number, State: stateEnabled, Material: material, CreatedAt: now}, nil
+}
+
+// cryptoKeyDocument renders the crypto key wire shape; unset optional fields
+// are omitted, as the real surface does.
+func cryptoKeyDocument(resource ref, record *cryptoKeyRecord) map[string]any {
+	resource.key = record.Name
+	document := map[string]any{
+		keyName:                    resource.keyName(),
+		keyCreateTime:              stamp(record.CreatedAt),
+		"purpose":                  record.Purpose,
+		"versionTemplate":          map[string]any{keyAlgorithm: record.Algorithm, keyProtectionLevel: protectionSoftware},
+		"destroyScheduledDuration": record.DestroyText,
+	}
+	if version := record.Versions[record.Primary]; version != nil {
+		document["primary"] = versionDocument(resource, version)
+	}
+	if len(record.Labels) > 0 {
+		document["labels"] = record.Labels
+	}
+	if record.Rotation != "" {
+		document["rotationPeriod"] = record.Rotation
+	}
+	if record.NextRotation != "" {
+		document["nextRotationTime"] = record.NextRotation
+	}
+	return document
+}
+
+// withKey runs use on one existing crypto key under the scope lock.
+func (p *Provider) withKey(scope state.Scope, resource ref, use func(*cryptoKeyRecord) error) error {
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		if s.keyRings[resource.ringID()] == nil {
+			return notFound("KeyRing", resource.ringName())
 		}
+		record := s.cryptoKeys[resource.keyID()]
+		if record == nil {
+			return notFound("CryptoKey", resource.keyName())
+		}
+		settle(record, p.clock())
+		return use(record)
+	})
+	if err != nil {
+		return fmt.Errorf("open the crypto key: %w", err)
 	}
-	labels := record.Labels
-	if labels == nil {
-		labels = map[string]string{}
+	return nil
+}
+
+// keyResponse runs use on one key and renders the key afterwards.
+func (p *Provider) keyResponse(scope state.Scope, resource ref, use func(*cryptoKeyRecord) error) (*gateway.RESTResponse, error) {
+	var document map[string]any
+	err := p.withKey(scope, resource, func(record *cryptoKeyRecord) error {
+		if err := use(record); err != nil {
+			return err
+		}
+		document = cryptoKeyDocument(resource, record)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("crypto key %s: %w", resource.key, err)
 	}
-	return map[string]any{
-		keyName:            cryptoKeyName(scope.Project, ring, record.Name),
-		keyCreateTime:      stamp(record.CreatedAt),
-		"purpose":          record.Purpose,
-		"versionTemplate":  map[string]any{"algorithm": record.Algorithm, "protectionLevel": "SOFTWARE"},
-		"primary":          primary,
-		"labels":           labels,
-		"rotationPeriod":   record.Rotation,
-		"nextRotationTime": record.NextRotation,
-	}
+	return respond(document)
 }
 
 // cryptoKeysGet returns one crypto key.
-func (p *Provider) cryptoKeysGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record := p.lookupKey(scope, request.Path["keyRing"], request.Path["cryptoKey"])
-	if record == nil {
-		return nil, notFound(kindCryptoKey, request.Path["cryptoKey"])
-	}
-	return &gateway.RESTResponse{JSON: p.cryptoKeyDocument(scope, request.Path["keyRing"], record)}, nil
+func (p *Provider) cryptoKeysGet(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return p.keyResponse(scope, resource, func(*cryptoKeyRecord) error { return nil })
 }
 
-// key returns one crypto key record.
-func (p *Provider) lookupKey(scope state.Scope, ring, key string) *cryptoKeyRecord {
-	var record *cryptoKeyRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if s.keyRings[ring] != nil {
-			record = s.cryptoKeys[key]
-		}
-		return nil
-	})
-	return record
-}
-
-// cryptoKeysList returns the key ring's crypto keys.
-func (p *Provider) cryptoKeysList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring := request.Path["keyRing"]
+// cryptoKeysList returns the key ring's crypto keys in name order.
+func (p *Provider) cryptoKeysList(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	items := []any{}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for _, record := range s.cryptoKeys {
-			items = append(items, p.cryptoKeyDocument(scope, ring, record))
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		if s.keyRings[resource.ringID()] == nil {
+			return notFound("KeyRing", resource.ringName())
+		}
+		for _, id := range sortedKeys(s.cryptoKeys, resource.ringID()+"/") {
+			settle(s.cryptoKeys[id], p.clock())
+			items = append(items, cryptoKeyDocument(resource, s.cryptoKeys[id]))
 		}
 		return nil
 	})
-	return &gateway.RESTResponse{JSON: map[string]any{"cryptoKeys": items}}, nil
-}
-
-// cryptoKeysUpdate replaces labels, rotation, or the primary version.
-func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring, key := request.Path["keyRing"], request.Path["cryptoKey"]
-	record := p.lookupKey(scope, ring, key)
-	if record == nil {
-		return nil, notFound(kindCryptoKey, key)
-	}
-	var body struct {
-		Labels       map[string]string `json:"labels"`
-		Rotation     string            `json:"rotationPeriod"`
-		NextRotation string            `json:"nextRotationTime"`
-		Primary      string            `json:"primary"`
-		PrimaryState string            `json:"primaryState"`
-	}
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid crypto key update")
-	}
-	if body.Primary != "" {
-		if record.Versions[body.Primary] == nil {
-			return nil, notFound("cryptoKeyVersion", body.Primary)
-		}
-		record.Primary = body.Primary
-	}
-	if body.PrimaryState != "" {
-		return nil, gap("primary version state updates")
-	}
-	record.Labels = body.Labels
-	record.Rotation = body.Rotation
-	record.NextRotation = body.NextRotation
-	return &gateway.RESTResponse{JSON: p.cryptoKeyDocument(scope, ring, record)}, nil
-}
-
-// encrypt seals one plaintext with the primary version's material.
-func (p *Provider) encrypt(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring, key := request.Path["keyRing"], request.Path["cryptoKey"]
-	record := p.lookupKey(scope, ring, key)
-	if record == nil {
-		return nil, notFound(kindCryptoKey, key)
-	}
-	var body struct {
-		Plaintext string `json:"plaintext"`
-		AAD       string `json:"additionalAuthenticatedData"`
-	}
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid encrypt request")
-	}
-	plaintext, err := base64.StdEncoding.DecodeString(body.Plaintext)
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, "Plaintext must be base64")
+		return nil, fmt.Errorf("list crypto keys: %w", err)
 	}
-	if len(plaintext) == 0 || len(plaintext) > 64<<10 {
-		return nil, status.Error(codes.InvalidArgument, "Plaintext is empty or oversized")
-	}
-	version := record.Versions[record.Primary]
-	if version == nil || version.State != stateEnabled {
-		return nil, status.Errorf(codes.FailedPrecondition, "The key has no enabled primary version")
-	}
-	aad, aadErr := base64.StdEncoding.DecodeString(body.AAD)
-	if aadErr != nil {
-		return nil, status.Error(codes.InvalidArgument, "AAD must be base64")
-	}
-	sealed, sealErr := p.seal(plaintext, aad, record.Primary)
-	if sealErr != nil {
-		return nil, status.Errorf(codes.Internal, "Local encryption failed: %v", sealErr)
-	}
-	return &gateway.RESTResponse{JSON: map[string]any{
-		keyName:      cryptoKeyName(scope.Project, ring, key) + "/cryptoKeyVersions/" + record.Primary,
-		"ciphertext": base64.StdEncoding.EncodeToString(sealed),
-	}}, nil
+	return respond(map[string]any{"cryptoKeys": items})
 }
 
-// decrypt opens one sealed payload with an enabled version's material.
-func (p *Provider) decrypt(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring, key := request.Path["keyRing"], request.Path["cryptoKey"]
-	record := p.lookupKey(scope, ring, key)
-	if record == nil {
-		return nil, notFound(kindCryptoKey, key)
-	}
-	var body struct {
-		Ciphertext string `json:"ciphertext"`
-		AAD        string `json:"additionalAuthenticatedData"`
-	}
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid decrypt request")
-	}
-	sealed, err := base64.StdEncoding.DecodeString(body.Ciphertext)
-	if err != nil || len(sealed) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Ciphertext must be base64")
-	}
-	aad, aadErr := base64.StdEncoding.DecodeString(body.AAD)
-	if aadErr != nil {
-		return nil, status.Error(codes.InvalidArgument, "AAD must be base64")
-	}
-	// The seal envelope carries the sealing version number; decrypt fails
-	// closed when that version no longer exists or is disabled.
-	plaintext, usedVersion, openErr := p.open(sealed, aad)
-	if openErr != nil {
-		return nil, openErr
-	}
-	version := record.Versions[usedVersion]
-	if version == nil || version.State != stateEnabled {
-		return nil, status.Errorf(codes.FailedPrecondition, "The sealing version %s is not enabled", usedVersion)
-	}
-	return &gateway.RESTResponse{JSON: map[string]any{
-		"plaintext":                 base64.StdEncoding.EncodeToString(plaintext),
-		"usedCiphertextVersionName": cryptoKeyName(scope.Project, ring, key) + "/cryptoKeyVersions/" + version.Number,
-	}}, nil
+// keyUpdateBody is one decoded crypto key PATCH body.
+type keyUpdateBody struct {
+	Labels       map[string]string `json:"labels"`
+	Rotation     string            `json:"rotationPeriod"`
+	NextRotation string            `json:"nextRotationTime"`
+	Template     versionTemplate   `json:"versionTemplate"`
 }
 
-// versionsCreate appends one version with fresh material.
-func (p *Provider) versionsCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring, key := request.Path["keyRing"], request.Path["cryptoKey"]
-	record := p.lookupKey(scope, ring, key)
-	if record == nil {
-		return nil, notFound(kindCryptoKey, key)
+// cryptoKeysUpdate applies the fields named by updateMask.
+func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	paths, err := updateMask(request)
+	if err != nil {
+		return nil, err
 	}
-	material := make([]byte, 32)
-	if err := p.random(material); err != nil {
-		return nil, status.Errorf(codes.Internal, "Key generation failed: %v", err)
+	var body keyUpdateBody
+	if err := decodeBody(request.JSON, &body); err != nil {
+		return nil, err
 	}
-	number := ""
-	err := p.scopes.With(scope, func(_ *scopeState) error {
-		next := len(record.Versions) + 1
-		for record.Versions[strconv.Itoa(next)] != nil {
-			next++
+	for _, path := range paths {
+		if err := validateKeyPath(path, body); err != nil {
+			return nil, err
 		}
-		number = strconv.Itoa(next)
-		record.Versions[number] = &versionRecord{Number: number, State: stateEnabled, Material: material, CreatedAt: p.clock()}
+	}
+	return p.keyResponse(scope, resource, func(record *cryptoKeyRecord) error {
+		for _, path := range paths {
+			applyKeyPath(record, path, body)
+		}
 		return nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("create the crypto key version: %w", err)
-	}
-	if record.Primary == "" {
-		record.Primary = number
-	}
-	return &gateway.RESTResponse{JSON: p.versionDocument(scope, ring, key, record.Versions[number])}, nil
 }
 
-// versionDocument renders one crypto key version wire shape.
-func (p *Provider) versionDocument(scope state.Scope, ring, key string, record *versionRecord) map[string]any {
-	return map[string]any{
-		keyName:           cryptoKeyName(scope.Project, ring, key) + "/cryptoKeyVersions/" + record.Number,
-		"state":           record.State,
-		"algorithm":       "GOOGLE_SYMMETRIC_ENCRYPTION",
-		"protectionLevel": "SOFTWARE",
-		keyCreateTime:     stamp(record.CreatedAt),
-	}
-}
-
-// versionsList returns the crypto key's versions.
-func (p *Provider) versionsList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring, key := request.Path["keyRing"], request.Path["cryptoKey"]
-	record := p.lookupKey(scope, ring, key)
-	if record == nil {
-		return nil, notFound(kindCryptoKey, key)
-	}
-	items := []any{}
-	for number := range record.Versions {
-		items = append(items, p.versionDocument(scope, ring, key, record.Versions[number]))
-	}
-	return &gateway.RESTResponse{JSON: map[string]any{"cryptoKeyVersions": items}}, nil
-}
-
-// versionsGet returns one version.
-func (p *Provider) versionsGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	ring, key, version := request.Path["keyRing"], request.Path["cryptoKey"], request.Path["version"]
-	record := p.lookupKey(scope, ring, key)
-	if record == nil || record.Versions[version] == nil {
-		return nil, notFound("cryptoKeyVersion", version)
-	}
-	return &gateway.RESTResponse{JSON: p.versionDocument(scope, ring, key, record.Versions[version])}, nil
-}
-
-// versionsState applies one state transition to a version.
-func (p *Provider) versionsState(request *gateway.RESTRequest, scope state.Scope, target string) (*gateway.RESTResponse, error) {
-	ring, key, version := request.Path["keyRing"], request.Path["cryptoKey"], request.Path["version"]
-	record := p.lookupKey(scope, ring, key)
-	if record == nil || record.Versions[version] == nil {
-		return nil, notFound("cryptoKeyVersion", version)
-	}
-	stored := record.Versions[version]
-	if stored.State == stateDestroyed {
-		return nil, status.Errorf(codes.FailedPrecondition, "Version %s is destroyed and its state is final", version)
-	}
-	if stored.State == target {
-		return nil, status.Errorf(codes.FailedPrecondition, "Version %s is already %s", version, target)
-	}
-	stored.State = target
-	if target == stateDestroyed {
-		stored.Material = nil
-		if record.Primary == version {
-			record.Primary = ""
+// validateKeyPath accepts the modeled crypto key update mask paths.
+func validateKeyPath(path string, body keyUpdateBody) error {
+	switch path {
+	case "labels", "rotationPeriod", "nextRotationTime":
+		return nil
+	case "versionTemplate.algorithm":
+		if body.Template.Algorithm != algorithmSymmetric {
+			return gap("only " + algorithmSymmetric + " version templates")
 		}
+		return nil
+	default:
+		return status.Errorf(codes.InvalidArgument, "Unsupported update mask path %q", path)
 	}
-	return &gateway.RESTResponse{JSON: p.versionDocument(scope, ring, key, stored)}, nil
 }
 
-// getIam returns the stored policy of a key ring or crypto key.
-func (p *Provider) getIam(_ *gateway.RESTRequest, _ state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
-	policy, err := p.engine.GetPolicy(target.Name)
+// applyKeyPath writes one validated mask path.
+func applyKeyPath(record *cryptoKeyRecord, path string, body keyUpdateBody) {
+	switch path {
+	case "labels":
+		record.Labels = maps.Clone(body.Labels)
+	case "rotationPeriod":
+		record.Rotation = body.Rotation
+	case "nextRotationTime":
+		record.NextRotation = body.NextRotation
+	default:
+		record.Algorithm = body.Template.Algorithm
+	}
+}
+
+// updatePrimaryVersion moves the primary to one enabled version.
+func (p *Provider) updatePrimaryVersion(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	var body struct {
+		Version string `json:"cryptoKeyVersionId"`
+	}
+	if err := decodeBody(request.JSON, &body); err != nil {
+		return nil, err
+	}
+	if !versionNumber.MatchString(body.Version) {
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid cryptoKeyVersionId %q", body.Version)
+	}
+	return p.keyResponse(scope, resource, func(record *cryptoKeyRecord) error {
+		version := record.Versions[body.Version]
+		if version == nil {
+			return notFound("CryptoKeyVersion", resource.versionName(body.Version))
+		}
+		if version.State != stateEnabled {
+			return status.Errorf(codes.FailedPrecondition, "%s is not enabled.", resource.versionName(body.Version))
+		}
+		record.Primary = body.Version
+		return nil
+	})
+}
+
+// updateMask reads the comma-separated updateMask query.
+func updateMask(request *gateway.RESTRequest) ([]string, error) {
+	mask := request.Query.Get("updateMask")
+	if mask == "" {
+		return nil, status.Error(codes.InvalidArgument, "The request must include an update_mask.")
+	}
+	return strings.Split(mask, ","), nil
+}
+
+// decodeBody decodes an optional JSON body.
+func decodeBody(raw []byte, target any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if json.Unmarshal(raw, target) != nil {
+		return status.Error(codes.InvalidArgument, "Invalid JSON payload")
+	}
+	return nil
+}
+
+// ringGetIam, ringSetIam, keyGetIam, and keySetIam serve resource policies.
+func (p *Provider) ringGetIam(_ *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return p.getIam(resource.ringResource(), "KeyRing", resource.ringName())
+}
+
+func (p *Provider) ringSetIam(request *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return p.setIam(request, resource.ringResource(), "KeyRing", resource.ringName())
+}
+
+func (p *Provider) keyGetIam(_ *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return p.getIam(resource.keyResource(), "CryptoKey", resource.keyName())
+}
+
+func (p *Provider) keySetIam(request *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return p.setIam(request, resource.keyResource(), "CryptoKey", resource.keyName())
+}
+
+// getIam returns one resource's policy; an empty policy renders as its etag.
+func (p *Provider) getIam(indexed, kind, name string) (*gateway.RESTResponse, error) {
+	if _, ok := p.index.Get(indexed); !ok {
+		return nil, notFound(kind, name)
+	}
+	policy, err := p.engine.GetPolicy(indexed)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "read KMS policy: %v", err)
+		return nil, fmt.Errorf("read KMS policy: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return respond(policy.Wire())
 }
 
-// setIam stores the policy of a key ring or crypto key.
-func (p *Provider) setIam(request *gateway.RESTRequest, _ state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
+// setIam stores one resource's policy.
+func (p *Provider) setIam(request *gateway.RESTRequest, indexed, kind, name string) (*gateway.RESTResponse, error) {
+	if _, ok := p.index.Get(indexed); !ok {
+		return nil, notFound(kind, name)
+	}
 	var envelope struct {
 		Policy iam.Policy `json:"policy"`
 	}
 	if json.Unmarshal(request.JSON, &envelope) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
 	}
-	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
+	policy, err := p.engine.SetPolicy(indexed, envelope.Policy)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "write KMS policy: %v", err)
+		return nil, fmt.Errorf("write KMS policy: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return respond(policy.Wire())
 }
 
 // parseCryptoKeyBody reads and validates one crypto key create body.
 func parseCryptoKeyBody(raw []byte) (cryptoKeyBody, error) {
 	var body cryptoKeyBody
-	if json.Unmarshal(raw, &body) != nil {
-		return body, status.Error(codes.InvalidArgument, "Invalid crypto key body")
-	}
-	if body.Purpose != "" && body.Purpose != purposeEncryptDecrypt {
-		return body, gap("only symmetric ENCRYPT_DECRYPT keys")
+	if err := decodeBody(raw, &body); err != nil {
+		return body, err
 	}
 	if body.Purpose == "" {
 		body.Purpose = purposeEncryptDecrypt
 	}
-	if body.Algorithm == "" {
-		body.Algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION"
+	if body.Template.Algorithm == "" {
+		body.Template.Algorithm = algorithmSymmetric
+	}
+	if body.DestroyDuration == "" {
+		body.DestroyDuration = defaultDestroyDuration
+	}
+	switch {
+	case body.Purpose != purposeEncryptDecrypt:
+		return body, gap("only symmetric ENCRYPT_DECRYPT keys")
+	case body.Template.Algorithm != algorithmSymmetric:
+		return body, gap("only " + algorithmSymmetric + " keys")
+	case body.Template.ProtectionLevel != "" && body.Template.ProtectionLevel != protectionSoftware:
+		return body, gap("only SOFTWARE protection")
+	case body.ImportOnly:
+		return body, gap("import-only keys")
 	}
 	return body, nil
+}
+
+// parseDestroyDuration accepts the documented 1-to-120-day range.
+func parseDestroyDuration(text string) (time.Duration, error) {
+	duration, err := time.ParseDuration(text)
+	if err != nil || !strings.HasSuffix(text, "s") || duration < 24*time.Hour || duration > 120*24*time.Hour {
+		return 0, status.Errorf(codes.InvalidArgument, "Invalid destroyScheduledDuration %q", text)
+	}
+	return duration, nil
 }

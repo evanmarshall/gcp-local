@@ -6,6 +6,7 @@
 package main
 
 import (
+	"fmt"
 	"context"
 	"encoding/json"
 	"flag"
@@ -77,9 +78,18 @@ func main() {
 			{Role: "roles/resourcemanager.projectIamAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountKeyAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
-			{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
+	}
+	// The scenario identities exist as service accounts, so actAs checks on
+	// them (Cloud Tasks OIDC) evaluate rather than reporting a coverage gap.
+	for i, actor := range []string{"fixture", "allowed", "denied"} {
+		must(index.Put("iam", state.Resource{
+			Name: iam.AccountResource("gcp-local-test", actor+"@gcp-local-test.iam.gserviceaccount.com"), Service: "iam",
+			Kind: "serviceAccount", Number: fmt.Sprintf("1000000000000000000%02d", i),
+			Parent: "//cloudresourcemanager.googleapis.com/projects/gcp-local-test",
+			Scope:  state.Scope{Project: "gcp-local-test", Location: state.Global},
+		}))
 	}
 	resolver := func(ctx context.Context, token string) (gateway.Principal, error) {
 		for _, actor := range []string{"fixture", "allowed", "denied", "peer"} {

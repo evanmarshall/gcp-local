@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,13 +28,22 @@ const (
 	testKeyBody    = "body"
 	testMethodPOST = "POST"
 	testKeyRequest = "httpRequest"
-	testKeyMethod  = "method"
+	testKeyMethod  = "httpMethod"
+	testKeyTask    = "task"
+	testUnreached  = "http://127.0.0.1:1/"
+	keySchedule    = "scheduleTime"
+	keyBindings    = "bindings"
+	keyMaxAttempts = "maxAttempts"
+	keyMaxBackoff  = "maxBackoff"
+	keyMinBackoff  = "minBackoff"
 )
 
 // harness drives the provider through the gateway.
 type harness struct {
-	t    *testing.T
-	gate *gateway.Gateway
+	t        *testing.T
+	gate     *gateway.Gateway
+	engine   *iam.Engine
+	provider *Provider
 }
 
 func newHarness(t *testing.T) *harness {
@@ -57,15 +69,30 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("build the cloudtasks provider: %v", err)
 	}
-	_ = provider
+	if err := index.Put("iam", state.Resource{
+		Name: iam.AccountResource(testProject, email("denied")), Service: "iam", Kind: "serviceAccount",
+		Parent: "//cloudresourcemanager.googleapis.com/projects/" + testProject, Number: "1234567",
+		Scope: state.Scope{Project: testProject, Location: state.Global},
+	}); err != nil {
+		t.Fatalf("register the service account: %v", err)
+	}
 	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g}
+	return &harness{t: t, gate: g, engine: engine, provider: provider}
 }
+
+// email names one test principal's service account.
+func email(token string) string { return token + "@" + testProject + ".iam.gserviceaccount.com" }
 
 // invoke issues one REST request as the fixture principal.
 func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
+	h.t.Helper()
+	return h.invokeAs("actor", verb, path, body)
+}
+
+// invokeAs issues one REST request as the named principal.
+func (h *harness) invokeAs(token, verb, path string, body any) *httptest.ResponseRecorder {
 	h.t.Helper()
 	var encoded []byte
 	if body != nil {
@@ -75,7 +102,7 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Authorization", "Bearer actor")
+	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
 	h.gate.ServeHTTP(recorder, request)
 	return recorder
@@ -121,15 +148,15 @@ func TestTaskLifecycleAndDispatch(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer target.Close()
-	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{testKeyTask: map[string]any{
+		keySchedule:    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 		testKeyRequest: map[string]any{testKeyURL: target.URL, testKeyMethod: testMethodPOST},
-	})
+	}})
 	if recorder.Code != 200 {
 		t.Fatalf("task create status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 	var task struct {
-		Name          string `json:"name"`
-		DispatchCount string `json:"dispatchCount"`
+		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &task); err != nil {
 		t.Fatalf("decode task: %v", err)
@@ -147,17 +174,17 @@ func TestTaskLifecycleAndDispatch(t *testing.T) {
 	if len(listing.Tasks) != 1 {
 		t.Fatalf("listing = %v", listing)
 	}
-	recorder = h.invoke(http.MethodDelete, basePrefix+"/queues/"+testQueue+"/tasks/"+task.Name[len(task.Name)-len("task-"):], nil)
-	if recorder.Code != 200 {
-		t.Fatalf("task delete status = %d", recorder.Code)
+	recorder = h.invoke(http.MethodDelete, basePrefix+"/queues/"+testQueue+"/tasks/"+task.Name[strings.LastIndex(task.Name, "/")+1:], nil)
+	if recorder.Code != 200 || recorder.Body.String() != "{}" {
+		t.Fatalf("task delete status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
 
 func TestTaskOnMissingQueueIsRefused(t *testing.T) {
 	h := newHarness(t)
-	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/missing/tasks", map[string]any{
-		testKeyRequest: map[string]any{testKeyURL: "http://127.0.0.1:1/", testKeyMethod: testMethodPOST},
-	})
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/missing/tasks", map[string]any{testKeyTask: map[string]any{
+		testKeyRequest: map[string]any{testKeyURL: testUnreached, testKeyMethod: testMethodPOST},
+	}})
 	if recorder.Code != 404 {
 		t.Fatalf("task on missing queue status = %d body %s", recorder.Code, recorder.Body.String())
 	}
@@ -171,7 +198,7 @@ func TestQueueIAMPolicyGrantsAndReads(t *testing.T) {
 		t.Fatalf("getIamPolicy status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 	recorder = h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+":setIamPolicy", map[string]any{
-		"policy": map[string]any{"bindings": []any{map[string]any{
+		"policy": map[string]any{keyBindings: []any{map[string]any{
 			"role":    "roles/cloudtasks.enqueuer",
 			"members": []any{"serviceAccount:enqueuer@" + testProject + ".iam.gserviceaccount.com"},
 		}}},
@@ -199,10 +226,10 @@ func TestScheduledTaskWaitsThenDispatches(t *testing.T) {
 	}))
 	defer target.Close()
 	schedule := time.Now().Add(2 * time.Second).UTC().Format(time.RFC3339)
-	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{
-		"scheduleTime": schedule,
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{testKeyTask: map[string]any{
+		keySchedule:    schedule,
 		testKeyRequest: map[string]any{testKeyURL: target.URL, testKeyMethod: testMethodPOST},
-	})
+	}})
 	if recorder.Code != 200 {
 		t.Fatalf("scheduled task create status = %d body %s", recorder.Code, recorder.Body.String())
 	}
@@ -230,10 +257,10 @@ func TestScheduledTaskWaitsThenDispatches(t *testing.T) {
 func TestInvalidScheduleTimeIsRefused(t *testing.T) {
 	h := newHarness(t)
 	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
-	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{
-		"scheduleTime": "not-a-time",
-		testKeyRequest: map[string]any{testKeyURL: "http://127.0.0.1:1/", testKeyMethod: testMethodPOST},
-	})
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{testKeyTask: map[string]any{
+		keySchedule:    "not-a-time",
+		testKeyRequest: map[string]any{testKeyURL: testUnreached, testKeyMethod: testMethodPOST},
+	}})
 	if recorder.Code != 400 {
 		t.Fatalf("invalid schedule status = %d body %s", recorder.Code, recorder.Body.String())
 	}
@@ -269,7 +296,7 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	gap := "this method is not implemented"
 	probe := func(verb, path string) {
 		recorder := h.invoke(verb, path, nil)
-		if body := recorder.Body.String(); recorder.Code == 501 && containsString(body, gap) {
+		if body := recorder.Body.String(); recorder.Code == 501 && strings.Contains(body, gap) {
 			t.Fatalf("%s %s hit the dispatch gap", verb, path)
 		}
 	}
@@ -283,15 +310,208 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, "/v2beta3/projects/"+testProject+"/locations")
 }
 
-func containsString(haystack, needle string) bool {
-	return len(needle) > 0 && len(haystack) >= len(needle) && index(haystack, needle) >= 0
+// queuePath is the REST path of the test queue.
+var queuePath = basePrefix + "/queues/" + testQueue
+
+// decode reads one JSON response body.
+func decode(t *testing.T, recorder *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var value map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &value); err != nil {
+		t.Fatalf("decode %s: %v", recorder.Body.String(), err)
+	}
+	return value
 }
 
-func index(haystack, needle string) int {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return i
+// fieldNames lists a document's sorted top-level field names.
+func fieldNames(value map[string]any) []string {
+	names := make([]string, 0, len(value))
+	for name := range value {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// expectError checks the standard error shape and status.
+func expectError(t *testing.T, recorder *httptest.ResponseRecorder, code int, statusText string) {
+	t.Helper()
+	body, _ := decode(t, recorder)["error"].(map[string]any)
+	if recorder.Code != code || body["code"] != float64(code) || body["status"] != statusText || body["message"] == nil {
+		t.Fatalf("error = %d %s, want %d %s", recorder.Code, recorder.Body.String(), code, statusText)
+	}
+}
+
+// createRetryQueue creates the test queue with the recorded retryConfig.
+func (h *harness) createRetryQueue() map[string]any {
+	h.t.Helper()
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{
+		keyName:       "projects/" + testProject + "/locations/" + testLocation + "/queues/" + testQueue,
+		"retryConfig": map[string]any{keyMaxAttempts: 2, keyMinBackoff: "1s", keyMaxBackoff: "1s"},
+	})
+	if recorder.Code != 200 {
+		h.t.Fatalf("queue create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	return decode(h.t, recorder)
+}
+
+// taskBody builds one task creation body for an HTTP target.
+func taskBody(target string, oidc string) map[string]any {
+	request := map[string]any{testKeyURL: target, testKeyMethod: testMethodPOST, testKeyBody: "Z2NwLWxvY2Fs"}
+	if oidc != "" {
+		request["oidcToken"] = map[string]any{"serviceAccountEmail": oidc}
+	}
+	return map[string]any{testKeyTask: map[string]any{testKeyRequest: request}}
+}
+
+func TestQueueDocumentMatchesRecordedShape(t *testing.T) {
+	h := newHarness(t)
+	queue := h.createRetryQueue()
+	fields := []string{keyName, "rateLimits", "retryConfig", "state", "taskTtl", "tombstoneTtl", "type"}
+	if !reflect.DeepEqual(fieldNames(queue), fields) {
+		t.Fatalf("queue fields = %v", fieldNames(queue))
+	}
+	if queue[keyName] != "projects/"+testProject+"/locations/"+testLocation+"/queues/"+testQueue || queue["state"] != "RUNNING" {
+		t.Fatalf("queue = %v", queue)
+	}
+	retry := map[string]any{keyMaxAttempts: float64(2), keyMaxBackoff: "1s", "maxDoublings": float64(16), keyMinBackoff: "1s"}
+	if !reflect.DeepEqual(queue["retryConfig"], retry) {
+		t.Fatalf("retryConfig = %v", queue["retryConfig"])
+	}
+	for verb, want := range map[string]string{":pause": "PAUSED", ":resume": "RUNNING"} {
+		paused := decode(t, h.invoke(http.MethodPost, queuePath+verb, map[string]any{}))
+		if paused["state"] != want || !reflect.DeepEqual(fieldNames(paused), fields) {
+			t.Fatalf("%s queue = %v", verb, paused)
 		}
 	}
-	return -1
+	recorder := h.invoke(http.MethodDelete, queuePath, nil)
+	if recorder.Code != 200 || recorder.Body.String() != "{}" {
+		t.Fatalf("queue delete = %d %s", recorder.Code, recorder.Body.String())
+	}
+	expectError(t, h.invoke(http.MethodGet, queuePath, nil), 404, "NOT_FOUND")
+}
+
+func TestQueueRetryDefaults(t *testing.T) {
+	h := newHarness(t)
+	queue := decode(t, h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue}))
+	retry := map[string]any{keyMaxAttempts: float64(100), keyMaxBackoff: "3600s", "maxDoublings": float64(16), keyMinBackoff: "0.100s"}
+	if !reflect.DeepEqual(queue["retryConfig"], retry) {
+		t.Fatalf("default retryConfig = %v", queue["retryConfig"])
+	}
+	policy := retryPolicy{MinBackoff: time.Second, MaxBackoff: 10 * time.Second, MaxDoublings: 2}
+	for failures, want := range map[int]time.Duration{1: time.Second, 2: 2 * time.Second, 3: 4 * time.Second, 4: 8 * time.Second, 5: 10 * time.Second} {
+		if got := policy.backoff(failures); got != want {
+			t.Fatalf("backoff(%d) = %v, want %v", failures, got, want)
+		}
+	}
+}
+
+func TestQueueEnqueuerAuthorizesTaskCreate(t *testing.T) {
+	h := newHarness(t)
+	h.createRetryQueue()
+	policy := decode(t, h.invoke(http.MethodPost, queuePath+":getIamPolicy", map[string]any{}))
+	if !reflect.DeepEqual(fieldNames(policy), []string{"etag"}) {
+		t.Fatalf("empty policy = %v", policy)
+	}
+	expectError(t, h.invokeAs("enqueuer", http.MethodPost, queuePath+"/tasks", taskBody("https://10.255.255.1/gcp-local", "")), 403, "PERMISSION_DENIED")
+	granted := decode(t, h.invoke(http.MethodPost, queuePath+":setIamPolicy", map[string]any{"policy": map[string]any{keyBindings: []any{
+		map[string]any{"role": "roles/cloudtasks.enqueuer", "members": []any{"serviceAccount:" + email("enqueuer")}},
+	}}}))
+	if !reflect.DeepEqual(fieldNames(granted), []string{keyBindings, "etag", "version"}) {
+		t.Fatalf("granted policy = %v", granted)
+	}
+	_ = h.invoke(http.MethodPost, queuePath+":pause", map[string]any{}) // Hold the task so its view stays stable.
+	recorder := h.invokeAs("enqueuer", http.MethodPost, queuePath+"/tasks", taskBody("https://10.255.255.1/gcp-local", ""))
+	if recorder.Code != 200 {
+		t.Fatalf("enqueuer create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	task := decode(t, recorder)
+	if !reflect.DeepEqual(fieldNames(task), []string{"createTime", "dispatchDeadline", testKeyRequest, keyName, keySchedule, "view"}) {
+		t.Fatalf("task fields = %v", fieldNames(task))
+	}
+	echo := map[string]any{"headers": map[string]any{"User-Agent": "Google-Cloud-Tasks"}, testKeyMethod: testMethodPOST, testKeyURL: "https://10.255.255.1/gcp-local"}
+	name, _ := task[keyName].(string)
+	if task["view"] != "BASIC" || !reflect.DeepEqual(task[testKeyRequest], echo) || !strings.HasPrefix(name, "projects/"+testProject+"/locations/"+testLocation+"/queues/"+testQueue+"/tasks/") {
+		t.Fatalf("task = %v", task)
+	}
+	expectError(t, h.invokeAs("enqueuer", http.MethodGet, queuePath+"/tasks", nil), 403, "PERMISSION_DENIED")
+}
+
+func TestOIDCTaskRequiresActAs(t *testing.T) {
+	h := newHarness(t)
+	h.createRetryQueue()
+	expectError(t, h.invoke(http.MethodPost, queuePath+"/tasks", taskBody(testUnreached, email("denied"))), 403, "PERMISSION_DENIED")
+	if tasks := decode(t, h.invoke(http.MethodGet, queuePath+"/tasks", nil)); len(tasks) != 0 {
+		t.Fatalf("refused task was stored: %v", tasks)
+	}
+	if _, err := h.engine.SetPolicy(iam.AccountResource(testProject, email("denied")), iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:" + email("actor")}},
+	}}); err != nil {
+		t.Fatalf("grant actAs: %v", err)
+	}
+	_ = h.invoke(http.MethodPost, queuePath+":pause", map[string]any{})
+	if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", taskBody(testUnreached, email("denied"))); recorder.Code != 200 {
+		t.Fatalf("task with actAs = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestNonHTTPTaskURLIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.createRetryQueue()
+	expectError(t, h.invoke(http.MethodPost, queuePath+"/tasks", taskBody("ftp://10.255.255.1/x", "")), 400, "INVALID_ARGUMENT")
+}
+
+// pollTask reads one task until the condition holds or the deadline passes.
+func (h *harness) pollTask(path string, done func(*httptest.ResponseRecorder) bool) *httptest.ResponseRecorder {
+	h.t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if recorder := h.invoke(http.MethodGet, path+"?responseView=BASIC", nil); done(recorder) {
+			return recorder
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	h.t.Fatalf("task %s did not reach the expected state", path)
+	return nil
+}
+
+func TestRetryExhaustionRemovesTask(t *testing.T) {
+	h := newHarness(t)
+	h.provider.retention = 500 * time.Millisecond
+	h.createRetryQueue()
+	created := decode(t, h.invoke(http.MethodPost, queuePath+"/tasks", taskBody(testUnreached, "")))
+	name, _ := created[keyName].(string)
+	path := queuePath + "/tasks/" + name[strings.LastIndex(name, "/")+1:]
+	first := decode(t, h.pollTask(path, func(recorder *httptest.ResponseRecorder) bool {
+		last, _ := decode(t, recorder)["lastAttempt"].(map[string]any)
+		return last["responseStatus"] != nil
+	}))
+	fields := []string{"createTime", "dispatchCount", "dispatchDeadline", "firstAttempt", testKeyRequest, "lastAttempt", keyName, keySchedule, "view"}
+	last, _ := first["lastAttempt"].(map[string]any)
+	response, _ := last["responseStatus"].(map[string]any)
+	if !reflect.DeepEqual(fieldNames(first), fields) || !reflect.DeepEqual(fieldNames(last), []string{"dispatchTime", "responseStatus", "responseTime", "scheduleTime"}) || response["code"] != float64(2) {
+		t.Fatalf("first attempt = %v", first)
+	}
+	started := time.Now()
+	h.pollTask(path, func(recorder *httptest.ResponseRecorder) bool { return recorder.Code == 404 })
+	if elapsed := time.Since(started); elapsed < 500*time.Millisecond {
+		t.Fatalf("task removed after %v; the second attempt waits minBackoff", elapsed)
+	}
+}
+
+func TestSuccessfulDispatchRemovesTask(t *testing.T) {
+	h := newHarness(t)
+	h.createRetryQueue()
+	agents := make(chan string, 4)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		agents <- r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	created := decode(t, h.invoke(http.MethodPost, queuePath+"/tasks", taskBody(target.URL, "")))
+	name, _ := created[keyName].(string)
+	h.pollTask(queuePath+"/tasks/"+name[strings.LastIndex(name, "/")+1:], func(recorder *httptest.ResponseRecorder) bool { return recorder.Code == 404 })
+	if agent := <-agents; agent != "Google-Cloud-Tasks" {
+		t.Fatalf("dispatch User-Agent = %q", agent)
+	}
 }

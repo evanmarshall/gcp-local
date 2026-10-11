@@ -1,0 +1,165 @@
+{
+  "cloudkms-symmetric-key-lifecycle": {
+    "recorded-date": "11-10-2026, 22:11:51",
+    "recorded-content": {
+      "key-created": {
+        "fields": [
+          "createTime",
+          "destroyScheduledDuration",
+          "labels",
+          "name",
+          "primary",
+          "purpose",
+          "versionTemplate"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "name": "projects/<project>/locations/us-central1/keyRings/<ring>/cryptoKeys/<key>",
+        "primary_fields": [
+          "algorithm",
+          "createTime",
+          "generateTime",
+          "name",
+          "protectionLevel",
+          "state"
+        ],
+        "primary_state": "ENABLED",
+        "primary_version": "1",
+        "purpose": "ENCRYPT_DECRYPT"
+      },
+      "denied-encrypt": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "admin-cannot-encrypt": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "policy-read": {
+        "bindings": null,
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200
+      },
+      "encrypter-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "encrypted": {
+        "fields": [
+          "ciphertext",
+          "ciphertextCrc32c",
+          "name",
+          "protectionLevel"
+        ],
+        "http_status": 200,
+        "protectionLevel": "SOFTWARE",
+        "verifiedAdditionalAuthenticatedDataCrc32c": null,
+        "verifiedPlaintextCrc32c": null,
+        "version": "1"
+      },
+      "decrypted": {
+        "fields": [
+          "plaintext",
+          "plaintextCrc32c",
+          "protectionLevel",
+          "usedPrimary"
+        ],
+        "http_status": 200,
+        "matches": true,
+        "protectionLevel": "SOFTWARE",
+        "usedPrimary": true
+      },
+      "wrong-aad": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "version-added": {
+        "algorithm": "GOOGLE_SYMMETRIC_ENCRYPTION",
+        "fields": [
+          "algorithm",
+          "createTime",
+          "generateTime",
+          "name",
+          "protectionLevel",
+          "state"
+        ],
+        "http_status": 200,
+        "protectionLevel": "SOFTWARE",
+        "state": "ENABLED",
+        "version": "2"
+      },
+      "primary-updated": {
+        "http_status": 200,
+        "primary_version": "2"
+      },
+      "encrypted-v2": {
+        "http_status": 200,
+        "version": "2"
+      },
+      "old-ciphertext-decrypts": {
+        "http_status": 200,
+        "usedPrimary": null
+      },
+      "version-disabled": {
+        "fields": [
+          "algorithm",
+          "createTime",
+          "generateTime",
+          "name",
+          "protectionLevel",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DISABLED"
+      },
+      "disabled-decrypt": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "version-destroyed": {
+        "fields": [
+          "algorithm",
+          "createTime",
+          "destroyTime",
+          "generateTime",
+          "name",
+          "protectionLevel",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DESTROY_SCHEDULED"
+      },
+      "versions-listed": {
+        "http_status": 200,
+        "states": [
+          "DESTROY_SCHEDULED",
+          "ENABLED"
+        ]
+      },
+      "cleanup": {
+        "key_versions_destroyed": true
+      }
+    }
+  }
+}

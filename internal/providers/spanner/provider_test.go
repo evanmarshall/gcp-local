@@ -65,15 +65,24 @@ func newHarness(t *testing.T) *harness {
 // invoke issues one REST request as the fixture principal.
 func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
 	h.t.Helper()
+	return h.invokeAs(testToken, verb, path, body)
+}
+
+// invokeAs issues one REST request as serviceAccount:<token>@testProject.
+func (h *harness) invokeAs(token, verb, path string, body any) *httptest.ResponseRecorder {
+	h.t.Helper()
 	var encoded []byte
 	if body != nil {
-		encoded, _ = json.Marshal(body)
+		var err error
+		if encoded, err = json.Marshal(body); err != nil {
+			h.t.Fatalf("encode the request: %v", err)
+		}
 	}
 	request, _ := http.NewRequestWithContext(context.Background(), verb, path, bytes.NewReader(encoded))
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Authorization", "Bearer "+testToken)
+	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
 	h.gate.ServeHTTP(recorder, request)
 	return recorder
@@ -85,7 +94,7 @@ func (h *harness) instance() {
 	recorder := h.invoke(http.MethodPost, testInstances, map[string]any{
 		"instanceId": testInstance,
 		"instance": map[string]any{
-			"config": "regional-us-central1", "displayName": "demo", "nodeCount": 1,
+			keyConfig: "regional-us-central1", keyDisplayName: "demo", "nodeCount": 1,
 		},
 	})
 	if recorder.Code != 200 {
@@ -101,7 +110,7 @@ func TestInstanceAndDatabaseLifecycle(t *testing.T) {
 		t.Fatalf("instance get status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodPost, testInstances+"/"+testInstance+"/databases", map[string]any{
-		"createStatement": "CREATE DATABASE `" + testDatabase + "`",
+		keyCreateStatement: "CREATE DATABASE `" + testDatabase + "`",
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("database create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -116,11 +125,11 @@ func TestInstanceAndDatabaseLifecycle(t *testing.T) {
 		t.Fatalf("non-empty instance delete status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodDelete, testInstances+"/"+testInstance+"/databases/"+testDatabase, nil)
-	if recorder.Code != 204 {
+	if recorder.Code != 200 {
 		t.Fatalf("database delete status = %d", recorder.Code)
 	}
 	recorder = h.invoke(http.MethodDelete, testInstances+"/"+testInstance, nil)
-	if recorder.Code != 204 {
+	if recorder.Code != 200 {
 		t.Fatalf("instance delete status = %d", recorder.Code)
 	}
 }
@@ -140,7 +149,7 @@ func TestInstanceConfigsAreModeled(t *testing.T) {
 func TestUnknownConfigRefused(t *testing.T) {
 	h := newHarness(t)
 	recorder := h.invoke(http.MethodPost, testInstances, map[string]any{
-		"name": testInstance, "config": "regional-nowhere", "nodeCount": 1,
+		keyName: testInstance, keyConfig: "regional-nowhere", "nodeCount": 1,
 	})
 	if recorder.Code != 400 {
 		t.Fatalf("unknown config status = %d", recorder.Code)
@@ -179,10 +188,11 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, "/v1/projects/"+testProject+"/instanceConfigs")
 	probe(http.MethodGet, testInstances+"/"+testInstance)
 	probe(http.MethodGet, testInstances)
-	probe(http.MethodGet, testInstances+"/"+testInstance+":getIamPolicy")
+	probe(http.MethodPost, testInstances+"/"+testInstance+":getIamPolicy")
 	probe(http.MethodGet, testInstances+"/"+testInstance+"/databases")
 	probe(http.MethodGet, testInstances+"/"+testInstance+"/databases/"+testDatabase)
-	probe(http.MethodGet, testInstances+"/"+testInstance+"/databases/"+testDatabase+":getIamPolicy")
+	probe(http.MethodPost, testInstances+"/"+testInstance+"/databases/"+testDatabase+":getIamPolicy")
+	probe(http.MethodGet, testInstances+"/"+testInstance+"/databases/"+testDatabase+"/ddl")
 }
 
 // engineSet replaces the project policy in the test harness.

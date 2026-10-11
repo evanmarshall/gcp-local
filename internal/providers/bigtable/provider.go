@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -20,6 +21,8 @@ type Provider struct {
 	engine *iam.Engine
 	scopes *state.Store[scopeState]
 	clock  func() time.Time
+	// operations numbers create-instance operation names.
+	operations atomic.Uint64
 }
 
 // New registers the Bigtable provider.
@@ -150,35 +153,43 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	switch call.Method {
 	case methodInstancesCreate, methodInstancesList:
 		return scope, target, nil
-	case methodInstancesGet, methodInstancesUpdate, methodInstancesDelete, methodInstancesGetIam, methodInstancesSetIam:
-		if !uid.MatchString(instance) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
-		}
-		if p.instanceLocked(scope, instance) == nil {
-			return scope, target, notFound(kindInstance, instance)
-		}
-		target.Name = instanceResource(project, instance)
-		return scope, target, nil
-	case methodClustersList, methodClustersGet, methodTablesCreate, methodTablesList:
-		if !uid.MatchString(instance) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
-		}
-		if p.instanceLocked(scope, instance) == nil {
-			return scope, target, notFound(kindInstance, instance)
+	case methodInstancesGet, methodInstancesUpdate, methodInstancesDelete, methodInstancesGetIam, methodInstancesSetIam,
+		methodClustersList, methodClustersGet, methodTablesCreate, methodTablesList:
+		if err := p.existingInstance(scope, instance); err != nil {
+			return scope, target, err
 		}
 		target.Name = instanceResource(project, instance)
 		return scope, target, nil
 	default:
-		if !uid.MatchString(instance) || !uid.MatchString(table) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
-		}
-		if p.instanceLocked(scope, instance) == nil {
-			return scope, target, notFound(kindInstance, instance)
-		}
-		if p.tableLocked(scope, instance, table) == nil {
-			return scope, target, notFound(kindTable, table)
+		if err := p.existingTable(scope, instance, table); err != nil {
+			return scope, target, err
 		}
 		target.Name = tableResource(project, instance, table)
 		return scope, target, nil
 	}
+}
+
+// existingInstance validates an instance id and requires the instance.
+func (p *Provider) existingInstance(scope state.Scope, instance string) error {
+	if !uid.MatchString(instance) {
+		return status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
+	}
+	if p.instanceLocked(scope, instance) == nil {
+		return notFound(kindInstance, instance)
+	}
+	return nil
+}
+
+// existingTable validates a table id and requires its instance and table.
+func (p *Provider) existingTable(scope state.Scope, instance, table string) error {
+	if !tableID.MatchString(table) {
+		return status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
+	}
+	if err := p.existingInstance(scope, instance); err != nil {
+		return err
+	}
+	if p.tableLocked(scope, instance, table) == nil {
+		return notFound(kindTable, table)
+	}
+	return nil
 }

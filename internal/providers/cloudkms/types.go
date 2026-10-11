@@ -1,7 +1,8 @@
 // Package cloudkms implements the Cloud KMS v1 control plane: key rings,
 // symmetric crypto keys, versions, and encrypt/decrypt with per-resource IAM.
-// The local crypto uses a provider-held AES-GCM key; no cloud recording covers
-// these methods yet, so nothing here claims recorded conformance.
+// The local crypto uses AES-256-GCM with per-version material. The
+// cloudkms-symmetric-key-lifecycle recording pins the wire shapes and errors
+// of the recorded methods; see docs/cloudkms.md for the boundary.
 package cloudkms
 
 import (
@@ -30,6 +31,7 @@ const (
 	methodCryptoKeysList    = "cloudkms.cryptoKeys.list"
 	methodCryptoKeysGet     = "cloudkms.cryptoKeys.get"
 	methodCryptoKeysUpdate  = "cloudkms.cryptoKeys.update"
+	methodCryptoKeysPrimary = "cloudkms.cryptoKeys.updatePrimaryVersion"
 	methodCryptoKeysGetIam  = "cloudkms.cryptoKeys.getIamPolicy"
 	methodCryptoKeysSetIam  = "cloudkms.cryptoKeys.setIamPolicy"
 	methodCryptoKeysEncrypt = "cloudkms.cryptoKeys.encrypt"
@@ -37,9 +39,8 @@ const (
 	methodVersionsCreate    = "cloudkms.cryptoKeyVersions.create"
 	methodVersionsList      = "cloudkms.cryptoKeyVersions.list"
 	methodVersionsGet       = "cloudkms.cryptoKeyVersions.get"
+	methodVersionsPatch     = "cloudkms.cryptoKeyVersions.patch"
 	methodVersionsDestroy   = "cloudkms.cryptoKeyVersions.destroy"
-	methodVersionsDisable   = "cloudkms.cryptoKeyVersions.disable"
-	methodVersionsEnable    = "cloudkms.cryptoKeyVersions.enable"
 )
 
 // permissions follows the documented Cloud KMS access-control rows.
@@ -54,6 +55,7 @@ var permissions = map[string]string{
 	methodCryptoKeysList:    "cloudkms.cryptoKeys.list",
 	methodCryptoKeysGet:     "cloudkms.cryptoKeys.get",
 	methodCryptoKeysUpdate:  "cloudkms.cryptoKeys.update",
+	methodCryptoKeysPrimary: "cloudkms.cryptoKeys.update",
 	methodCryptoKeysGetIam:  "cloudkms.cryptoKeys.getIamPolicy",
 	methodCryptoKeysSetIam:  "cloudkms.cryptoKeys.setIamPolicy",
 	methodCryptoKeysEncrypt: "cloudkms.cryptoKeyVersions.useToEncrypt",
@@ -61,41 +63,54 @@ var permissions = map[string]string{
 	methodVersionsCreate:    "cloudkms.cryptoKeyVersions.create",
 	methodVersionsList:      "cloudkms.cryptoKeyVersions.list",
 	methodVersionsGet:       "cloudkms.cryptoKeyVersions.get",
+	methodVersionsPatch:     "cloudkms.cryptoKeyVersions.update",
 	methodVersionsDestroy:   "cloudkms.cryptoKeyVersions.destroy",
-	methodVersionsDisable:   "cloudkms.cryptoKeyVersions.update",
-	methodVersionsEnable:    "cloudkms.cryptoKeyVersions.update",
 }
 
-// Resource-name helpers follow the real KMS resource namespace.
+// Resource kinds, version states, and wire keys.
 const (
 	kindKeyRing   = "keyRing"
 	kindCryptoKey = "cryptoKey"
-	kindLocation  = "location"
+	kindVersion   = "cryptoKeyVersion"
 	uidPattern    = `^[a-zA-Z0-9_-]{1,63}$`
 	// State names of a crypto key version.
-	stateEnabled   = "ENABLED"
-	stateDisabled  = "DISABLED"
-	stateDestroyed = "DESTROYED"
+	stateEnabled          = "ENABLED"
+	stateDisabled         = "DISABLED"
+	stateDestroyScheduled = "DESTROY_SCHEDULED"
+	stateDestroyed        = "DESTROYED"
 	// Wire document keys repeated across the response shapes.
-	keyName       = "name"
-	keyCreateTime = "createTime"
-	testLocation  = "us-central1"
-	// purposeEncryptDecrypt is the only implemented key purpose.
-
+	keyName            = "name"
+	keyCreateTime      = "createTime"
+	keyProtectionLevel = "protectionLevel"
+	keyAlgorithm       = "algorithm"
+	keyState           = "state"
+	testLocation       = "us-central1"
+	// The only implemented purpose, algorithm, and protection level.
 	purposeEncryptDecrypt = "ENCRYPT_DECRYPT"
+	algorithmSymmetric    = "GOOGLE_SYMMETRIC_ENCRYPTION"
+	protectionSoftware    = "SOFTWARE"
+	// defaultDestroyDuration is the documented 30-day scheduled-destroy default.
+	defaultDestroyDuration = "2592000s"
 )
 
 // uid is the shared resource-name matcher.
 var uid = regexp.MustCompile(uidPattern)
 
+// versionTemplate is the decoded version template of a key create body.
+type versionTemplate struct {
+	Algorithm       string `json:"algorithm"`
+	ProtectionLevel string `json:"protectionLevel"`
+}
+
 // cryptoKeyBody is one decoded crypto key create body.
 type cryptoKeyBody struct {
-	Purpose        string            `json:"purpose"`
-	Algorithm      string            `json:"algorithm"`
-	Labels         map[string]string `json:"labels"`
-	RotationPeriod string            `json:"rotationPeriod"`
-	NextRotation   string            `json:"nextRotationTime"`
-	SkipInitial    bool              `json:"skipInitialVersionCreation"`
+	Purpose         string            `json:"purpose"`
+	Labels          map[string]string `json:"labels"`
+	RotationPeriod  string            `json:"rotationPeriod"`
+	NextRotation    string            `json:"nextRotationTime"`
+	Template        versionTemplate   `json:"versionTemplate"`
+	DestroyDuration string            `json:"destroyScheduledDuration"`
+	ImportOnly      bool              `json:"importOnly"`
 }
 
 // keyRingRecord is one stored key ring.
@@ -106,26 +121,29 @@ type keyRingRecord struct {
 
 // cryptoKeyRecord is one stored symmetric crypto key.
 type cryptoKeyRecord struct {
-	Name         string
-	Purpose      string
-	Algorithm    string
-	Labels       map[string]string
-	Rotation     string // duration string like 86400s, empty disables
-	Versions     map[string]*versionRecord
-	Primary      string
-	NextRotation string
-	CreatedAt    time.Time
+	Name            string
+	Purpose         string
+	Algorithm       string
+	Labels          map[string]string
+	Rotation        string // duration string like 86400s, empty disables
+	NextRotation    string
+	DestroyDuration time.Duration
+	DestroyText     string
+	Versions        map[string]*versionRecord
+	Primary         string
+	CreatedAt       time.Time
 }
 
 // versionRecord is one stored crypto key version.
 type versionRecord struct {
 	Number    string
-	State     string // ENABLED, DISABLED, DESTROYED
+	State     string // ENABLED, DISABLED, DESTROY_SCHEDULED, DESTROYED
 	Material  []byte
 	CreatedAt time.Time
+	DestroyAt time.Time
 }
 
-// scopeState is one project/location slice of provider state.
+// scopeState is one project slice of provider state, keyed by ref IDs.
 type scopeState struct {
 	keyRings   map[string]*keyRingRecord
 	cryptoKeys map[string]*cryptoKeyRecord
@@ -154,7 +172,7 @@ func wireError(code int, statusText, message string) *gateway.RESTResponse {
 
 // notFound reports the KMS not-found status.
 func notFound(kind, name string) error {
-	return status.Errorf(codes.NotFound, "The resource '%s/%s' was not found", kind, name)
+	return status.Errorf(codes.NotFound, "%s %s not found.", kind, name)
 }
 
 // gap reports an unimplemented slice boundary.
@@ -162,39 +180,46 @@ func gap(message string) error {
 	return status.Error(codes.Unimplemented, "Cloud KMS coverage gap: "+message)
 }
 
-// scopeOf names one project/location scope. Regions are placement attributes
-// (the storage precedent): every KMS resource lives in the project scope.
+// scopeOf names one project scope. Locations are part of each resource
+// reference, so every KMS resource of a project shares one scope.
 func scopeOf(project string) state.Scope {
 	return state.Scope{Project: project, Location: state.Global}
 }
 
-// keyRingResource names one key ring in the IAM index.
-func keyRingResource(project, ring string) string {
-	return "//cloudkms.googleapis.com/projects/" + project + "/locations/" + ringLocation(ring) + "/keyRings/" + ring
+// ref addresses one KMS resource from the request path.
+type ref struct {
+	project, location, ring, key, version string
 }
 
-// cryptoKeyResource names one crypto key in the IAM index.
-func cryptoKeyResource(project, ring, key string) string {
-	return keyRingResource(project, ring) + "/cryptoKeys/" + key
+// refOf reads the resource reference from the route parameters.
+func refOf(request *gateway.RESTRequest) ref {
+	return ref{
+		project: request.Path["project"], location: request.Path["location"],
+		ring: request.Path["keyRing"], key: request.Path["cryptoKey"], version: request.Path["version"],
+	}
 }
 
-// ringLocation maps the request location; global locations keep their name.
-func ringLocation(_ string) string { return testLocation }
+// ringID and keyID are the scope-state map keys.
+func (r ref) ringID() string { return r.location + "/" + r.ring }
+func (r ref) keyID() string  { return r.ringID() + "/" + r.key }
+
+// ringName, keyName, and versionName render canonical KMS resource names.
+func (r ref) ringName() string {
+	return "projects/" + r.project + "/locations/" + r.location + "/keyRings/" + r.ring
+}
+func (r ref) keyName() string { return r.ringName() + "/cryptoKeys/" + r.key }
+func (r ref) versionName(number string) string {
+	return r.keyName() + "/cryptoKeyVersions/" + number
+}
+
+// ringResource and keyResource name the IAM index entries.
+func (r ref) ringResource() string { return "//cloudkms.googleapis.com/" + r.ringName() }
+func (r ref) keyResource() string  { return "//cloudkms.googleapis.com/" + r.keyName() }
 
 // projectResource names the resource-manager project ancestor.
 func projectResource(project string) string {
 	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }
 
-// stamp renders one creation timestamp.
-func stamp(moment time.Time) string { return moment.UTC().Format("2006-01-02T15:04:05.000000Z") }
-
-// cryptoKeyName renders the canonical crypto key name, which nests the ring.
-func cryptoKeyName(project, ring, key string) string {
-	return "projects/" + project + "/locations/" + ringLocation(ring) + "/keyRings/" + ring + "/cryptoKeys/" + key
-}
-
-// fullName renders the canonical KMS resource name.
-func fullName(project, location, kind, id string) string {
-	return "projects/" + project + "/locations/" + location + "/" + kind + "s/" + id
-}
+// stamp renders one timestamp.
+func stamp(moment time.Time) string { return moment.UTC().Format("2006-01-02T15:04:05.000000000Z") }

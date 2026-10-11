@@ -5,16 +5,12 @@ import (
 	"fmt"
 	"maps"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
-
-// maxAttempts bounds the dispatch retries of one task.
-const maxAttempts = 5
 
 // execute dispatches one authorized method to its resource family.
 func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
@@ -74,11 +70,11 @@ func (p *Provider) executeQueueState(call gateway.Call, request *gateway.RESTReq
 func (p *Provider) executeTask(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodTasksCreate:
-		return p.createTask(request, scope)
+		return p.createTask(call, request, scope)
 	case methodTasksGet:
-		return p.getTask(request, scope)
+		return p.getTask(call, request, scope)
 	case methodTasksList:
-		return p.listTasks(request, scope)
+		return p.listTasks(call, request, scope)
 	case methodTasksDelete:
 		return p.deleteTask(request, scope)
 	case methodTasksRun:
@@ -88,52 +84,24 @@ func (p *Provider) executeTask(call gateway.Call, request *gateway.RESTRequest, 
 	}
 }
 
-// queueDocument renders the queue wire shape.
-func queueDocument(project, location string, record *queueRecord) map[string]any {
-	state := record.State
-	if state == "" {
-		state = "RUNNING"
-	}
+// queueDocument renders the queue wire shape; call it under the scope lock.
+func queueDocument(project string, record *queueRecord) map[string]any {
 	return map[string]any{
-		"name":             queueResource(project, location, record.Name),
-		"rateLimits":       record.Rate,
-		"state":            state,
-		"createTime":       stamp(record.Created),
-		"dispatchDeadline": "600s",
+		"name":         queueName(project, record.Location, record.Name),
+		"rateLimits":   maps.Clone(record.Rate),
+		"retryConfig":  record.Retry.wire(),
+		"state":        record.State,
+		"taskTtl":      defaultTaskTTL,
+		"tombstoneTtl": defaultTombstoneTTL,
+		"type":         queueTypePush,
 	}
 }
 
-// taskDocument renders the task wire shape.
-func taskDocument(project, location, queue string, record *taskRecord) map[string]any {
-	headers := map[string]string{}
-	maps.Copy(headers, record.Headers)
-	httpRequest := map[string]any{
-		"url":     record.URL,
-		"method":  record.Method,
-		"headers": headers,
-	}
-	if record.Body != nil {
-		httpRequest["body"] = string(record.Body)
-	}
-	if record.ServiceAccount != "" {
-		httpRequest["oidcToken"] = map[string]any{
-			"serviceAccountEmail": record.ServiceAccount,
-			"audience":            record.Audience,
-		}
-	}
-	return map[string]any{
-		"name":             taskResource(project, location, queue, record.Name),
-		"httpRequest":      httpRequest,
-		"scheduleTime":     scheduleField(record),
-		"createTime":       stamp(record.Created),
-		"dispatchCount":    strconv.Itoa(record.Attempts),
-		"dispatchDeadline": "600s",
-		"view":             "FULL",
-	}
-}
-
-// parseBody decodes one request body as a plain map.
+// parseBody decodes one request body as a plain map; an absent body is empty.
 func parseBody(body []byte) (map[string]any, error) {
+	if len(body) == 0 {
+		return map[string]any{}, nil
+	}
 	var value map[string]any
 	if json.Unmarshal(body, &value) != nil {
 		return nil, statusInvalid("Invalid request body")
@@ -155,42 +123,43 @@ func (p *Provider) createQueue(request *gateway.RESTRequest, scope state.Scope) 
 	if err != nil {
 		return nil, err
 	}
-	id := queueID(request, body)
-	if !validName(id) {
-		return nil, statusInvalid("Invalid queue name " + id)
+	record, err := newQueue(request, body)
+	if err != nil {
+		return nil, err
 	}
-	rate, _ := body["rateLimits"].(map[string]any)
-	now := p.clock()
-	var conflict *gateway.RESTResponse
+	var document map[string]any
 	err = p.scopes.With(scope, func(s *scopeState) error {
-		if s.queues[id] != nil {
-			conflict = wireError(409, "ALREADY_EXISTS", "queue "+id+" already exists")
-			return nil
+		if s.queues[record.Name] != nil {
+			return statusExists("Queue " + record.Name + " already exists")
 		}
-		s.queues[id] = &queueRecord{Name: id, Rate: rate, Created: now}
+		s.queues[record.Name] = record
+		document = queueDocument(scope.Project, record)
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("store the queue: %w", err)
-	}
-	if conflict != nil {
-		return conflict, nil
+		return nil, err //nolint:wrapcheck // status errors carry the wire status
 	}
 	if err := p.index.Put(serviceName, state.Resource{
-		Name: queueResource(scope.Project, request.Path["location"], id), Service: serviceName,
+		Name: queueResource(scope.Project, record.Location, record.Name), Service: serviceName,
 		Kind: "queue", Parent: projectResource(scope.Project), Scope: scope,
 	}); err != nil {
 		return nil, fmt.Errorf("index the queue: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: queueDocument(scope.Project, request.Path["location"], p.mustQueue(scope, id))}, nil
+	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// queueID derives the queue identifier from the path or the body name.
-func queueID(request *gateway.RESTRequest, body map[string]any) string {
-	if id := request.Path["queue"]; id != "" {
-		return id
+// newQueue validates one queue creation body into its record.
+func newQueue(request *gateway.RESTRequest, body map[string]any) (*queueRecord, error) {
+	id := lastSegment(textOf(body["name"]))
+	if !queuePattern.MatchString(id) {
+		return nil, statusInvalid("Invalid queue name " + id)
 	}
-	return lastSegment(textOf(body["name"]))
+	rate, _ := body["rateLimits"].(map[string]any)
+	retry, err := parseRetry(defaultRetry(), body["retryConfig"])
+	if err != nil {
+		return nil, err
+	}
+	return &queueRecord{Name: id, Location: request.Path["location"], Rate: mergeRates(nil, rate), Retry: retry, State: "RUNNING"}, nil
 }
 
 // lastSegment extracts the trailing identifier of a full resource name.
@@ -201,96 +170,124 @@ func lastSegment(name string) string {
 	return name
 }
 
-// validName reports whether the identifier matches the queue/task shape.
-func validName(id string) bool { return uidPattern.MatchString(id) }
-
-// mustQueue reads one queue record under the scope lock.
-func (p *Provider) mustQueue(scope state.Scope, id string) *queueRecord {
-	var record *queueRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.queues[id]; return nil })
-	return record
+// withQueue runs one mutation or read of an existing queue under the scope
+// lock and renders the resulting queue document.
+func (p *Provider) withQueue(scope state.Scope, id string, use func(*scopeState, *queueRecord) error) (*gateway.RESTResponse, error) {
+	var document map[string]any
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		record := s.queues[id]
+		if record == nil {
+			return notFound("queues", id)
+		}
+		if err := use(s, record); err != nil {
+			return err
+		}
+		document = queueDocument(scope.Project, record)
+		return nil
+	})
+	if err != nil {
+		return nil, err //nolint:wrapcheck // status errors carry the wire status
+	}
+	return &gateway.RESTResponse{JSON: document}, nil
 }
+
+// readQueue makes no change.
+func readQueue(*scopeState, *queueRecord) error { return nil }
 
 // getQueue returns one queue document.
 func (p *Provider) getQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record := p.mustQueue(scope, request.Path["queue"])
-	if record == nil {
-		return nil, notFound("queues", request.Path["queue"])
-	}
-	return &gateway.RESTResponse{JSON: queueDocument(scope.Project, request.Path["location"], record)}, nil
+	return p.withQueue(scope, request.Path["queue"], readQueue)
 }
 
 // listQueues returns the project's queues.
 func (p *Provider) listQueues(scope state.Scope) (*gateway.RESTResponse, error) {
-	var names []string
+	var items []any
 	_ = p.scopes.With(scope, func(s *scopeState) error {
+		names := make([]string, 0, len(s.queues))
 		for name := range s.queues {
 			names = append(names, name)
 		}
+		sort.Strings(names)
+		for _, name := range names {
+			items = append(items, queueDocument(scope.Project, s.queues[name]))
+		}
 		return nil
 	})
-	sort.Strings(names)
-	items := make([]any, 0, len(names))
-	for _, name := range names {
-		items = append(items, queueDocument(scope.Project, "us-central1", p.mustQueue(scope, name)))
+	if items == nil {
+		return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{"queues": items}}, nil
 }
 
-// deleteQueue removes one queue and its tasks.
+// removeTasks deletes every task of one queue and returns their keys; call
+// it under the scope lock.
+func removeTasks(s *scopeState, queue string) []string {
+	var keys []string
+	for key, task := range s.tasks {
+		if task.Queue == queue {
+			delete(s.tasks, key)
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// deleteQueue removes one queue, its tasks, and its policy. GCP returns an
+// empty body.
 func (p *Provider) deleteQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	id := request.Path["queue"]
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if s.queues[id] != nil {
-			delete(s.queues, id)
-			for name, task := range s.tasks {
-				if task.Queue == id {
-					delete(s.tasks, name)
-				}
-			}
+	var removed []string
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		if s.queues[id] == nil {
+			return notFound("queues", id)
 		}
+		delete(s.queues, id)
+		removed = removeTasks(s, id)
 		return nil
 	})
-	_ = p.index.Remove(serviceName, scope, queueResource(scope.Project, request.Path["location"], id))
+	if err != nil {
+		return nil, err //nolint:wrapcheck // status errors carry the wire status
+	}
+	for _, key := range removed {
+		p.stopWorker(scope, key)
+	}
+	name := queueResource(scope.Project, request.Path["location"], id)
+	p.engine.Forget(name)
+	_ = p.index.Remove(serviceName, scope, name)
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
 // setQueueState pauses or resumes one queue.
 func (p *Provider) setQueueState(request *gateway.RESTRequest, scope state.Scope, state string) (*gateway.RESTResponse, error) {
-	id := request.Path["queue"]
-	record := p.mustQueue(scope, id)
-	if record == nil {
-		return nil, notFound("queues", id)
-	}
-	record.State = state
-	return &gateway.RESTResponse{JSON: queueDocument(scope.Project, request.Path["location"], record)}, nil
+	return p.withQueue(scope, request.Path["queue"], func(_ *scopeState, record *queueRecord) error {
+		record.State = state
+		return nil
+	})
 }
 
 // purgeQueue removes every task of one queue.
 func (p *Provider) purgeQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	id := request.Path["queue"]
-	record := p.mustQueue(scope, id)
-	if record == nil {
-		return nil, notFound("queues", id)
-	}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for name, task := range s.tasks {
-			if task.Queue == id {
-				delete(s.tasks, name)
-			}
-		}
+	var removed []string
+	response, err := p.withQueue(scope, request.Path["queue"], func(s *scopeState, record *queueRecord) error {
+		removed = removeTasks(s, record.Name)
 		return nil
 	})
-	return &gateway.RESTResponse{JSON: queueDocument(scope.Project, request.Path["location"], record)}, nil
+	for _, key := range removed {
+		p.stopWorker(scope, key)
+	}
+	return response, err
 }
 
 // getQueueIam returns the stored queue policy.
 func (p *Provider) getQueueIam(scope state.Scope, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+	if _, err := p.getQueue(request, scope); err != nil {
+		return nil, err
+	}
 	policy, err := p.engine.GetPolicy(queueResource(scope.Project, request.Path["location"], request.Path["queue"]))
 	if err != nil {
 		return nil, fmt.Errorf("read queue policy: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }
 
 // setQueueIam stores one unconditional version-1 queue policy.
@@ -301,26 +298,31 @@ func (p *Provider) setQueueIam(request *gateway.RESTRequest, scope state.Scope) 
 	if json.Unmarshal(request.JSON, &envelope) != nil {
 		return nil, statusInvalid("Invalid IAM policy")
 	}
+	if _, err := p.getQueue(request, scope); err != nil {
+		return nil, err
+	}
 	policy, err := p.engine.SetPolicy(queueResource(scope.Project, request.Path["location"], request.Path["queue"]), envelope.Policy)
 	if err != nil {
 		return nil, fmt.Errorf("write queue policy: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }
 
-// updateQueue replaces one queue's rate limits.
+// updateQueue patches one queue's rate limits and retry configuration.
 func (p *Provider) updateQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	body, err := parseBody(request.JSON)
 	if err != nil {
 		return nil, err
 	}
-	id := request.Path["queue"]
-	record := p.mustQueue(scope, id)
-	if record == nil {
-		return nil, notFound("queues", id)
-	}
-	if rate, ok := body["rateLimits"].(map[string]any); ok {
-		record.Rate = rate
-	}
-	return &gateway.RESTResponse{JSON: queueDocument(scope.Project, request.Path["location"], record)}, nil
+	return p.withQueue(scope, request.Path["queue"], func(_ *scopeState, record *queueRecord) error {
+		retry, err := parseRetry(record.Retry, body["retryConfig"])
+		if err != nil {
+			return err
+		}
+		if rate, ok := body["rateLimits"].(map[string]any); ok {
+			record.Rate = mergeRates(record.Rate, rate)
+		}
+		record.Retry = retry
+		return nil
+	})
 }

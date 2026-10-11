@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -17,28 +19,44 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
-// Names and keys repeated across the lifecycle tests.
+// Names and keys repeated across the lifecycle tests. The identities mirror
+// the recording: the fixture holds roles/cloudkms.admin on the project, while
+// the allowed and denied callers hold nothing there.
 const (
-	testProject       = "demo-kms"
-	testRing          = "ring-1"
-	testKey           = "key-1"
-	testKeyTwo        = "key-2"
-	testVersionOne    = "1"
-	testToken         = "actor"
-	testRingsPath     = "/v1/projects/" + testProject + "/locations/us-central1/keyRings"
-	testRingPath      = testRingsPath + "/" + testRing
-	testKeyPath       = testRingPath + "/cryptoKeys"
-	testActor         = "serviceAccount:actor@" + testProject + ".iam.gserviceaccount.com"
-	testResourceAad   = "additionalAuthenticatedData"
-	keyTestPlaintext  = "plaintext"
-	keyTestCiphertext = "ciphertext"
+	testProject     = "gcp-local-test"
+	testRing        = "gcp-local-conformance"
+	testKey         = "gl-run"
+	testFixture     = "fixture"
+	testAllowed     = "allowed"
+	testDenied      = "denied"
+	testRingsPath   = "/v1/projects/" + testProject + "/locations/us-central1/keyRings"
+	testRingPath    = testRingsPath + "/" + testRing
+	testKeysPath    = testRingPath + "/cryptoKeys"
+	testKeyPath     = testKeysPath + "/" + testKey
+	testVersions    = testKeyPath + "/cryptoKeyVersions"
+	testAadField    = "additionalAuthenticatedData"
+	testPlainField  = "plaintext"
+	testCipherField = "ciphertext"
+	testEncrypter   = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+	testPlaintext   = "gcp-local synthetic plaintext"
+	testAad         = "gcp-local-aad"
+	testLabels      = "labels"
+	testPolicy      = "policy"
+	testBindings    = "bindings"
+	testVersionID   = "cryptoKeyVersionId"
+	testRotation    = "7776000s"
 )
 
 // harness drives the provider through the gateway.
 type harness struct {
-	t     *testing.T
-	gate  *gateway.Gateway
-	index *state.Index
+	t        *testing.T
+	gate     *gateway.Gateway
+	provider *Provider
+}
+
+// member names one test identity as an IAM member.
+func member(actor string) string {
+	return "serviceAccount:" + actor + "@" + testProject + ".iam.gserviceaccount.com"
 }
 
 func newHarness(t *testing.T) *harness {
@@ -50,32 +68,28 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("build the iam engine: %v", err)
 	}
 	if err := index.Put("resourcemanager", state.Resource{
-		Name: "//cloudresourcemanager.googleapis.com/projects/" + testProject, Service: "resourcemanager",
+		Name: projectResource(testProject), Service: "resourcemanager",
 		Kind: "project", Number: "123456", Scope: state.Scope{Project: testProject, Location: state.Global},
 	}); err != nil {
 		t.Fatalf("register the project: %v", err)
 	}
-	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, iam.Policy{
-		Bindings: []iam.Binding{
-			// cloudkms.admin manages keys but cannot use them in GCP.
-			{Role: "roles/cloudkms.admin", Members: []string{testActor}},
-			{Role: "roles/cloudkms.cryptoKeyEncrypterDecrypter", Members: []string{testActor}},
-		},
+	if _, err := engine.SetPolicy(projectResource(testProject), iam.Policy{
+		Bindings: []iam.Binding{{Role: "roles/cloudkms.admin", Members: []string{member(testFixture)}}},
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)
 	}
-	_, err = New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine)
+	provider, err := New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine)
 	if err != nil {
 		t.Fatalf("build the kms provider: %v", err)
 	}
 	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
-		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
+		return gateway.Principal{State: gateway.Authenticated, Subject: member(token), Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, index: index}
+	return &harness{t: t, gate: g, provider: provider}
 }
 
-// invoke issues one REST request as the fixture principal.
-func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
+// as issues one REST request as the named actor.
+func (h *harness) as(actor, verb, path string, body any) *httptest.ResponseRecorder {
 	h.t.Helper()
 	var encoded []byte
 	if body != nil {
@@ -85,225 +99,400 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Authorization", "Bearer "+testToken)
+	request.Header.Set("Authorization", "Bearer "+actor)
 	recorder := httptest.NewRecorder()
 	h.gate.ServeHTTP(recorder, request)
 	return recorder
 }
 
-// ring creates the fixture key ring.
+// invoke issues one REST request as the fixture.
+func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
+	h.t.Helper()
+	return h.as(testFixture, verb, path, body)
+}
+
+// ok requires HTTP 200 and decodes the body.
+func (h *harness) ok(recorder *httptest.ResponseRecorder, step string) map[string]any {
+	h.t.Helper()
+	if recorder.Code != 200 {
+		h.t.Fatalf("%s status = %d body %s", step, recorder.Code, recorder.Body.String())
+	}
+	var document map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &document); err != nil {
+		h.t.Fatalf("%s decode: %v", step, err)
+	}
+	return document
+}
+
+// fails requires one wire error: HTTP status, error.code, and error.status.
+func (h *harness) fails(recorder *httptest.ResponseRecorder, step string, code int, statusText string) {
+	h.t.Helper()
+	var body struct {
+		Error struct {
+			Code   int    `json:"code"`
+			Status string `json:"status"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(recorder.Body.Bytes(), &body)
+	if recorder.Code != code || body.Error.Code != code || body.Error.Status != statusText {
+		h.t.Fatalf("%s = %d %+v, want %d %s; body %s", step, recorder.Code, body.Error, code, statusText, recorder.Body.String())
+	}
+}
+
+// fields requires a document's sorted top-level field names.
+func (h *harness) fields(document map[string]any, step string, want ...string) {
+	h.t.Helper()
+	got := make([]string, 0, len(document))
+	for name := range document {
+		got = append(got, name)
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		h.t.Fatalf("%s fields = %v, want %v", step, got, want)
+	}
+}
+
+// ring creates the fixture key ring as the recorded setup does.
 func (h *harness) ring() {
 	h.t.Helper()
-	recorder := h.invoke(http.MethodPost, testRingsPath+"?keyRingId="+testRing, map[string]any{})
-	if recorder.Code != 200 {
-		h.t.Fatalf("key ring create status = %d body %s", recorder.Code, recorder.Body.String())
-	}
+	h.ok(h.invoke(http.MethodPost, testRingsPath+"?keyRingId="+testRing, map[string]any{}), "ring create")
 }
 
-// key creates the fixture crypto key inside the fixture ring.
-func (h *harness) key() {
+// key creates the recorded labeled key and returns its document.
+func (h *harness) key() map[string]any {
 	h.t.Helper()
 	h.ring()
-	recorder := h.invoke(http.MethodPost, testKeyPath+"?cryptoKeyId="+testKey,
-		map[string]any{"purpose": purposeEncryptDecrypt})
-	if recorder.Code != 200 {
-		h.t.Fatalf("crypto key create status = %d body %s", recorder.Code, recorder.Body.String())
+	return h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
+		"purpose": purposeEncryptDecrypt, testLabels: map[string]string{"managed-by": "gcp-local", "gcp-local-run": "run"},
+	}), "key create")
+}
+
+// grant gives the allowed caller encrypt/decrypt on the key.
+func (h *harness) grant() {
+	h.t.Helper()
+	h.ok(h.invoke(http.MethodPost, testKeyPath+":setIamPolicy", map[string]any{testPolicy: map[string]any{
+		"etag": "MA==", testBindings: []any{encrypterBinding()},
+	}}), "grant")
+}
+
+// encrypt seals the recorded plaintext and AAD as actor.
+func (h *harness) encrypt(actor string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	return h.as(actor, http.MethodPost, testKeyPath+":encrypt", map[string]any{
+		testPlainField: b64(testPlaintext), testAadField: b64(testAad)})
+}
+
+// decrypt opens one ciphertext as the allowed caller with the given AAD.
+func (h *harness) decrypt(ciphertext, aad string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	return h.as(testAllowed, http.MethodPost, testKeyPath+":decrypt", map[string]any{
+		testCipherField: ciphertext, testAadField: b64(aad)})
+}
+
+// encrypterBinding grants the allowed caller encrypt/decrypt.
+func encrypterBinding() map[string]any {
+	return map[string]any{"role": testEncrypter, "members": []string{member(testAllowed)}}
+}
+
+func b64(text string) string { return base64.StdEncoding.EncodeToString([]byte(text)) }
+
+// versionOf returns the trailing version number of a version name.
+func versionOf(name any) string {
+	text, _ := name.(string)
+	return text[strings.LastIndex(text, "/")+1:]
+}
+
+func TestMissingKeyRingReadsNotFoundThenCreates(t *testing.T) {
+	h := newHarness(t)
+	h.fails(h.invoke(http.MethodGet, testRingPath, nil), "missing ring get", 404, "NOT_FOUND")
+	h.ring()
+	ring := h.ok(h.invoke(http.MethodGet, testRingPath, nil), "ring get")
+	h.fields(ring, "ring", keyCreateTime, keyName)
+	h.fails(h.invoke(http.MethodPost, testRingsPath+"?keyRingId="+testRing, map[string]any{}), "duplicate ring", 409, "ALREADY_EXISTS")
+}
+
+func TestMissingResourcesNeverTouchAncestors(t *testing.T) {
+	h := newHarness(t)
+	h.fails(h.invoke(http.MethodGet, testRingPath+":getIamPolicy", nil), "missing ring policy", 404, "NOT_FOUND")
+	h.fails(h.invoke(http.MethodPost, testRingPath+":setIamPolicy", map[string]any{testPolicy: map[string]any{}}), "missing ring set policy", 404, "NOT_FOUND")
+	h.fails(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{}), "key in missing ring", 404, "NOT_FOUND")
+	h.ring()
+	h.fails(h.invoke(http.MethodGet, testKeyPath, nil), "missing key", 404, "NOT_FOUND")
+	h.fails(h.invoke(http.MethodPost, testKeyPath+":setIamPolicy", map[string]any{testPolicy: map[string]any{}}), "missing key set policy", 404, "NOT_FOUND")
+	// Missing resources are authorized on their ancestor, so a caller with no
+	// project grant still sees the denial rather than existence.
+	h.fails(h.as(testDenied, http.MethodGet, testKeyPath, nil), "denied missing key", 403, "PERMISSION_DENIED")
+}
+
+func TestRecordedKeyCreateShape(t *testing.T) {
+	h := newHarness(t)
+	key := h.key()
+	h.fields(key, "key-created", keyCreateTime, "destroyScheduledDuration", testLabels, keyName, "primary", "purpose", "versionTemplate")
+	if key[keyName] != "projects/"+testProject+"/locations/us-central1/keyRings/"+testRing+"/cryptoKeys/"+testKey || key["purpose"] != purposeEncryptDecrypt {
+		t.Fatalf("key = %v", key)
+	}
+	primary, _ := key["primary"].(map[string]any)
+	h.fields(primary, "primary", keyAlgorithm, keyCreateTime, "generateTime", keyName, keyProtectionLevel, keyState)
+	if primary[keyState] != stateEnabled || versionOf(primary[keyName]) != "1" {
+		t.Fatalf("primary = %v", primary)
 	}
 }
 
-func TestKeyRingAndCryptoKeyLifecycle(t *testing.T) {
+func TestRecordedPermissionsAndPolicy(t *testing.T) {
 	h := newHarness(t)
 	h.key()
-	recorder := h.invoke(http.MethodGet, testRingPath, nil)
-	if recorder.Code != 200 {
-		t.Fatalf("key ring get status = %d", recorder.Code)
+	h.fails(h.encrypt(testDenied), "denied-encrypt", 403, "PERMISSION_DENIED")
+	h.fails(h.encrypt(testFixture), "admin-cannot-encrypt", 403, "PERMISSION_DENIED")
+	policy := h.ok(h.invoke(http.MethodGet, testKeyPath+":getIamPolicy", nil), "policy-read")
+	h.fields(policy, "policy-read", "etag")
+	granted := h.ok(h.invoke(http.MethodPost, testKeyPath+":setIamPolicy", map[string]any{testPolicy: map[string]any{
+		"etag": policy["etag"], testBindings: []any{encrypterBinding()},
+	}}), "encrypter-granted")
+	h.fields(granted, "encrypter-granted", testBindings, "etag", "version")
+	h.ok(h.encrypt(testAllowed), "allowed encrypt")
+	h.fails(h.encrypt(testDenied), "still denied", 403, "PERMISSION_DENIED")
+}
+
+func TestRecordedEncryptDecryptShapes(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	h.grant()
+	sealed := h.ok(h.encrypt(testAllowed), "encrypted")
+	h.fields(sealed, "encrypted", testCipherField, "ciphertextCrc32c", keyName, keyProtectionLevel)
+	if versionOf(sealed[keyName]) != "1" || sealed[keyProtectionLevel] != protectionSoftware {
+		t.Fatalf("encrypted = %v", sealed)
 	}
-	recorder = h.invoke(http.MethodGet, testRingPath+"/cryptoKeys/"+testKey, nil)
-	if recorder.Code != 200 {
-		t.Fatalf("crypto key get status = %d", recorder.Code)
+	ciphertext, _ := sealed[testCipherField].(string)
+	opened := h.ok(h.decrypt(ciphertext, testAad), "decrypted")
+	h.fields(opened, "decrypted", testPlainField, "plaintextCrc32c", keyProtectionLevel, "usedPrimary")
+	if opened[testPlainField] != b64(testPlaintext) || opened["usedPrimary"] != true {
+		t.Fatalf("decrypted = %v", opened)
 	}
-	var key struct {
-		Primary struct {
-			Name  string `json:"name"`
+	h.fails(h.decrypt(ciphertext, "other"), "wrong-aad", 400, "INVALID_ARGUMENT")
+}
+
+func TestRecordedVersionRotationLifecycle(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	h.grant()
+	sealed := h.ok(h.encrypt(testAllowed), "encrypted")
+	ciphertext, _ := sealed[testCipherField].(string)
+	added := h.ok(h.invoke(http.MethodPost, testVersions, map[string]any{}), "version-added")
+	h.fields(added, "version-added", keyAlgorithm, keyCreateTime, "generateTime", keyName, keyProtectionLevel, keyState)
+	if versionOf(added[keyName]) != "2" || added[keyState] != stateEnabled || added[keyAlgorithm] != algorithmSymmetric {
+		t.Fatalf("version-added = %v", added)
+	}
+	promoted := h.ok(h.invoke(http.MethodPost, testKeyPath+":updatePrimaryVersion", map[string]any{testVersionID: "2"}), "primary-updated")
+	primary, _ := promoted["primary"].(map[string]any)
+	if versionOf(primary[keyName]) != "2" {
+		t.Fatalf("primary-updated = %v", promoted)
+	}
+	second := h.ok(h.encrypt(testAllowed), "encrypted-v2")
+	if versionOf(second[keyName]) != "2" {
+		t.Fatalf("encrypted-v2 = %v", second)
+	}
+	old := h.ok(h.decrypt(ciphertext, testAad), "old-ciphertext-decrypts")
+	if _, present := old["usedPrimary"]; present {
+		t.Fatalf("old-ciphertext-decrypts = %v", old)
+	}
+	recordedDisableDestroy(h, ciphertext)
+}
+
+// recordedDisableDestroy continues the recorded lifecycle from the version-1
+// ciphertext: disable, refused decrypt, scheduled destroy, and listing.
+func recordedDisableDestroy(h *harness, ciphertext string) {
+	h.t.Helper()
+	disabled := h.ok(h.invoke(http.MethodPatch, testVersions+"/1?updateMask=state", map[string]any{keyState: stateDisabled}), "version-disabled")
+	h.fields(disabled, "version-disabled", keyAlgorithm, keyCreateTime, "generateTime", keyName, keyProtectionLevel, keyState)
+	if disabled[keyState] != stateDisabled {
+		h.t.Fatalf("version-disabled = %v", disabled)
+	}
+	h.fails(h.decrypt(ciphertext, testAad), "disabled-decrypt", 400, "FAILED_PRECONDITION")
+	destroyed := h.ok(h.invoke(http.MethodPost, testVersions+"/1:destroy", map[string]any{}), "version-destroyed")
+	h.fields(destroyed, "version-destroyed", keyAlgorithm, keyCreateTime, "destroyTime", "generateTime", keyName, keyProtectionLevel, keyState)
+	if destroyed[keyState] != stateDestroyScheduled {
+		h.t.Fatalf("version-destroyed = %v", destroyed)
+	}
+	if got := h.versionStates(); !reflect.DeepEqual(got, []string{stateDestroyScheduled, stateEnabled}) {
+		h.t.Fatalf("versions-listed = %v", got)
+	}
+}
+
+// versionStates lists the key's version states in sorted order.
+func (h *harness) versionStates() []string {
+	h.t.Helper()
+	var listed struct {
+		Versions []struct {
 			State string `json:"state"`
-		} `json:"primary"`
+		} `json:"cryptoKeyVersions"`
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &key); err != nil {
-		t.Fatalf("decode key: %v", err)
+	recorder := h.invoke(http.MethodGet, testVersions, nil)
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listed); err != nil || recorder.Code != 200 {
+		h.t.Fatalf("version list = %d %v", recorder.Code, err)
 	}
-	if key.Primary.State != stateEnabled {
-		t.Fatalf("primary = %+v", key.Primary)
+	states := make([]string, 0, len(listed.Versions))
+	for _, version := range listed.Versions {
+		states = append(states, version.State)
 	}
-	// Duplicate creation is refused.
-	recorder = h.invoke(http.MethodPost, testRingsPath+"?keyRingId="+testRing, map[string]any{})
-	if recorder.Code != 409 {
-		t.Fatalf("duplicate ring status = %d body %s", recorder.Code, recorder.Body.String())
-	}
-	recorder = h.invoke(http.MethodGet, testRingPath, nil)
-	if recorder.Code != 200 {
-		t.Fatalf("ring list status = %d", recorder.Code)
-	}
+	sort.Strings(states)
+	return states
 }
 
-func TestEncryptDecryptRoundTrip(t *testing.T) {
+func TestRecordedCleanupDestroysRemainingVersions(t *testing.T) {
 	h := newHarness(t)
 	h.key()
-	plaintext := base64.StdEncoding.EncodeToString([]byte("payload-value"))
-	recorder := h.invoke(http.MethodPost, testKeyPath+"/"+testKey+":encrypt",
-		map[string]any{keyTestPlaintext: plaintext})
-	if recorder.Code != 200 {
-		t.Fatalf("encrypt status = %d body %s", recorder.Code, recorder.Body.String())
+	h.ok(h.invoke(http.MethodPost, testVersions, map[string]any{}), "version 2")
+	h.ok(h.invoke(http.MethodPost, testVersions+"/1:destroy", map[string]any{}), "destroy 1")
+	h.ok(h.invoke(http.MethodPost, testVersions+"/2:destroy", map[string]any{}), "destroy 2")
+	if got := h.versionStates(); !reflect.DeepEqual(got, []string{stateDestroyScheduled, stateDestroyScheduled}) {
+		t.Fatalf("states = %v", got)
 	}
-	var sealed struct {
-		Ciphertext string `json:"ciphertext"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &sealed); err != nil {
-		t.Fatalf("decode ciphertext: %v", err)
-	}
-	recorder = h.invoke(http.MethodPost, testKeyPath+"/"+testKey+":decrypt",
-		map[string]any{keyTestCiphertext: sealed.Ciphertext})
-	if recorder.Code != 200 {
-		t.Fatalf("decrypt status = %d body %s", recorder.Code, recorder.Body.String())
-	}
-	var opened struct {
-		Plaintext string `json:"plaintext"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &opened); err != nil {
-		t.Fatalf("decode plaintext: %v", err)
-	}
-	decoded, decodeErr := base64.StdEncoding.DecodeString(opened.Plaintext)
-	if decodeErr != nil || string(decoded) != "payload-value" {
-		t.Fatalf("round trip mismatch: %q %v", opened.Plaintext, decodeErr)
-	}
-	// AAD binding: encrypting with AAD and decrypting without fails closed.
-	recorder = h.invoke(http.MethodPost, testKeyPath+"/"+testKey+":encrypt",
-		map[string]any{keyTestPlaintext: plaintext, testResourceAad: "YQ=="})
-	var bound struct {
-		Ciphertext string `json:"ciphertext"`
-	}
-	_ = json.Unmarshal(recorder.Body.Bytes(), &bound)
-	recorder = h.invoke(http.MethodPost, testKeyPath+"/"+testKey+":decrypt",
-		map[string]any{keyTestCiphertext: bound.Ciphertext})
-	if recorder.Code != 412 && recorder.Code != 400 {
-		t.Fatalf("missing AAD decrypt status = %d", recorder.Code)
+	h.fails(h.invoke(http.MethodPost, testVersions+"/1:destroy", map[string]any{}), "destroy twice", 400, "FAILED_PRECONDITION")
+	h.ok(h.invoke(http.MethodGet, testKeyPath, nil), "key read after destroy")
+	// Scheduled destruction completes after the default 30-day duration.
+	h.provider.clock = func() time.Time { return time.Now().Add(31 * 24 * time.Hour) }
+	if got := h.versionStates(); !reflect.DeepEqual(got, []string{stateDestroyed, stateDestroyed}) {
+		t.Fatalf("settled states = %v", got)
 	}
 }
 
-func TestVersionStateTransitionsGateCrypto(t *testing.T) {
+func TestVersionPatchValidation(t *testing.T) {
 	h := newHarness(t)
 	h.key()
-	recorder := h.invoke(http.MethodPost, testKeyPath+"/"+testKey+"/cryptoKeyVersions/"+testVersionOne+":disable", map[string]any{})
-	if recorder.Code != 200 {
-		t.Fatalf("disable status = %d body %s", recorder.Code, recorder.Body.String())
-	}
-	// Encrypt with a disabled primary fails closed.
-	recorder = h.invoke(http.MethodPost, testKeyPath+"/"+testKey+":encrypt",
-		map[string]any{keyTestPlaintext: base64.StdEncoding.EncodeToString([]byte("x"))})
-	if recorder.Code != 400 && recorder.Code != 412 {
-		t.Fatalf("disabled primary encrypt status = %d", recorder.Code)
-	}
-	// A destroyed version is final.
-	h.invoke(http.MethodPost, testKeyPath+"/"+testKey+"/cryptoKeyVersions/"+testVersionOne+":enable", map[string]any{})
-	recorder = h.invoke(http.MethodPost, testKeyPath+"/"+testKey+"/cryptoKeyVersions/"+testVersionOne+":destroy", map[string]any{})
-	if recorder.Code != 200 {
-		t.Fatalf("destroy status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodPost, testKeyPath+"/"+testKey+"/cryptoKeyVersions/"+testVersionOne+":enable", map[string]any{})
-	if recorder.Code != 400 {
-		t.Fatalf("re-enable destroyed status = %d body %s", recorder.Code, recorder.Body.String())
+	h.fails(h.invoke(http.MethodPatch, testVersions+"/1", map[string]any{keyState: stateDisabled}), "no mask", 400, "INVALID_ARGUMENT")
+	h.fails(h.invoke(http.MethodPatch, testVersions+"/1?updateMask=state", map[string]any{keyState: stateDestroyed}), "bad state", 400, "INVALID_ARGUMENT")
+	h.fails(h.invoke(http.MethodPatch, testVersions+"/9?updateMask=state", map[string]any{keyState: stateDisabled}), "missing version", 404, "NOT_FOUND")
+	h.ok(h.invoke(http.MethodPatch, testVersions+"/1?updateMask=state", map[string]any{keyState: stateDisabled}), "disable")
+	h.fails(h.encrypt(testFixture), "admin still cannot encrypt", 403, "PERMISSION_DENIED")
+	h.fails(h.invoke(http.MethodPost, testKeyPath+":updatePrimaryVersion", map[string]any{testVersionID: "1"}), "disabled primary", 400, "FAILED_PRECONDITION")
+	h.ok(h.invoke(http.MethodPatch, testVersions+"/1?updateMask=state", map[string]any{keyState: stateEnabled}), "enable")
+	h.ok(h.invoke(http.MethodPost, testVersions+"/1:destroy", map[string]any{}), "destroy")
+	h.fails(h.invoke(http.MethodPatch, testVersions+"/1?updateMask=state", map[string]any{keyState: stateEnabled}), "enable destroyed", 400, "FAILED_PRECONDITION")
+	// The invented enable/disable verbs are not routed.
+	if recorder := h.invoke(http.MethodPost, testVersions+"/1:disable", map[string]any{}); recorder.Code == 200 {
+		t.Fatalf(":disable is still routed")
 	}
 }
 
-func TestVersionedEncryptDecryptAcrossVersions(t *testing.T) {
+func TestDisabledPrimaryRefusesEncrypt(t *testing.T) {
 	h := newHarness(t)
 	h.key()
-	// Version 2 gets fresh material. The real surface keeps the primary
-	// version until an explicit update, so move it before encrypting.
-	recorder := h.invoke(http.MethodPost, testKeyPath+"/"+testKey+"/cryptoKeyVersions", map[string]any{})
-	if recorder.Code != 200 {
-		t.Fatalf("version create status = %d body %s", recorder.Code, recorder.Body.String())
-	}
-	recorder = h.invoke(http.MethodPatch, testKeyPath+"/"+testKey, map[string]any{"primary": "2"})
-	if recorder.Code != 200 {
-		t.Fatalf("primary update status = %d body %s", recorder.Code, recorder.Body.String())
-	}
-	plaintext := base64.StdEncoding.EncodeToString([]byte("second"))
-	recorder = h.invoke(http.MethodPost, testKeyPath+"/"+testKey+":encrypt", map[string]any{keyTestPlaintext: plaintext})
-	var sealed struct {
-		Name       string `json:"name"`
-		Ciphertext string `json:"ciphertext"`
-	}
-	_ = json.Unmarshal(recorder.Body.Bytes(), &sealed)
-	if !strings.HasSuffix(sealed.Name, "/cryptoKeyVersions/2") {
-		t.Fatalf("encrypt used %s", sealed.Name)
-	}
-	recorder = h.invoke(http.MethodPost, testKeyPath+"/"+testKey+":decrypt", map[string]any{keyTestCiphertext: sealed.Ciphertext})
-	var opened struct {
-		Used string `json:"usedCiphertextVersionName"`
-	}
-	_ = json.Unmarshal(recorder.Body.Bytes(), &opened)
-	if !strings.HasSuffix(opened.Used, "/cryptoKeyVersions/2") {
-		t.Fatalf("decrypt used %s", opened.Used)
-	}
+	h.grant()
+	h.ok(h.invoke(http.MethodPatch, testVersions+"/1?updateMask=state", map[string]any{keyState: stateDisabled}), "disable")
+	h.fails(h.encrypt(testAllowed), "disabled primary encrypt", 400, "FAILED_PRECONDITION")
 }
 
-func TestKeyRingIamPolicy(t *testing.T) {
+func TestCiphertextIsBoundToItsKey(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	h.grant()
+	sealed := h.ok(h.encrypt(testAllowed), "encrypt")
+	other := testKeysPath + "/other"
+	h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId=other", map[string]any{}), "other key")
+	h.ok(h.invoke(http.MethodPost, other+":setIamPolicy", map[string]any{testPolicy: map[string]any{
+		testBindings: []any{encrypterBinding()},
+	}}), "grant other")
+	recorder := h.as(testAllowed, http.MethodPost, other+":decrypt", map[string]any{
+		testCipherField: sealed[testCipherField], testAadField: b64(testAad)})
+	h.fails(recorder, "cross-key decrypt", 400, "INVALID_ARGUMENT")
+	h.fails(h.decrypt(b64("garbage"), testAad), "garbage", 400, "INVALID_ARGUMENT")
+}
+
+func TestEncryptChecksums(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	h.grant()
+	body := map[string]any{testPlainField: b64(testPlaintext), "plaintextCrc32c": checksum([]byte(testPlaintext))}
+	sealed := h.ok(h.as(testAllowed, http.MethodPost, testKeyPath+":encrypt", body), "verified encrypt")
+	if sealed["verifiedPlaintextCrc32c"] != true {
+		t.Fatalf("encrypt = %v", sealed)
+	}
+	if _, present := sealed["verifiedAdditionalAuthenticatedDataCrc32c"]; present {
+		t.Fatalf("unsent AAD checksum reported verified: %v", sealed)
+	}
+	body["plaintextCrc32c"] = "1"
+	h.fails(h.as(testAllowed, http.MethodPost, testKeyPath+":encrypt", body), "bad checksum", 400, "INVALID_ARGUMENT")
+}
+
+func TestKeyUpdateMaskAndRotation(t *testing.T) {
 	h := newHarness(t)
 	h.ring()
-	recorder := h.invoke(http.MethodGet, testRingPath+":getIamPolicy", nil)
-	if recorder.Code != 200 {
-		t.Fatalf("getIam status = %d", recorder.Code)
+	created := h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
+		"purpose": purposeEncryptDecrypt, "rotationPeriod": testRotation, "nextRotationTime": "2030-01-01T00:00:00Z",
+	}), "rotating key")
+	if created["rotationPeriod"] != testRotation || created["destroyScheduledDuration"] != defaultDestroyDuration {
+		t.Fatalf("created = %v", created)
 	}
-	recorder = h.invoke(http.MethodPost, testRingPath+":setIamPolicy", map[string]any{
-		"policy": iam.Policy{Version: 3, Bindings: []iam.Binding{
-			{Role: "roles/cloudkms.cryptoKeyEncrypterDecrypter", Members: []string{"serviceAccount:app@other.iam.gserviceaccount.com"}},
-		}},
-	})
-	if recorder.Code != 200 {
-		t.Fatalf("setIam status = %d body %s", recorder.Code, recorder.Body.String())
+	if _, present := created[testLabels]; present {
+		t.Fatalf("empty labels rendered: %v", created)
+	}
+	h.fails(h.invoke(http.MethodPatch, testKeyPath, map[string]any{testLabels: map[string]string{"a": "b"}}), "no mask", 400, "INVALID_ARGUMENT")
+	labeled := h.ok(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=labels", map[string]any{testLabels: map[string]string{"a": "b"}}), testLabels)
+	if labeled["rotationPeriod"] != testRotation || labeled[testLabels] == nil {
+		t.Fatalf("labeled = %v", labeled)
+	}
+	// The released Terraform provider clears rotation this way on destroy.
+	cleared := h.ok(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=rotationPeriod,nextRotationTime",
+		map[string]any{"rotationPeriod": nil, "nextRotationTime": nil}), "clear rotation")
+	if _, present := cleared["rotationPeriod"]; present {
+		t.Fatalf("cleared = %v", cleared)
+	}
+	h.fails(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=primary", map[string]any{}), "invented primary path", 400, "INVALID_ARGUMENT")
+}
+
+func TestSkipInitialVersionCreation(t *testing.T) {
+	h := newHarness(t)
+	h.ring()
+	key := h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey+"&skipInitialVersionCreation=true", map[string]any{}), "empty key")
+	if _, present := key["primary"]; present {
+		t.Fatalf("key = %v", key)
+	}
+	h.ok(h.invoke(http.MethodPost, testVersions, map[string]any{}), "first version")
+	key = h.ok(h.invoke(http.MethodGet, testKeyPath, nil), "key")
+	primary, _ := key["primary"].(map[string]any)
+	if versionOf(primary[keyName]) != "1" {
+		t.Fatalf("key = %v", key)
 	}
 }
 
-func TestEncryptRefusedWithoutPermission(t *testing.T) {
+func TestKeyRingIamPolicyAndLists(t *testing.T) {
 	h := newHarness(t)
 	h.key()
-	// A viewer-only principal can read but not use the key.
-	recorder := h.invoke(http.MethodPost, testRingPath+":setIamPolicy", map[string]any{
-		"policy": iam.Policy{Version: 3, Bindings: []iam.Binding{
-			{Role: "roles/cloudkms.viewer", Members: []string{"serviceAccount:viewer@" + testProject + ".iam.gserviceaccount.com"}},
-		}},
-	})
-	if recorder.Code != 200 {
-		t.Fatalf("setIam status = %d", recorder.Code)
+	h.fields(h.ok(h.invoke(http.MethodGet, testRingPath+":getIamPolicy", nil), "ring policy"), "ring policy", "etag")
+	h.ok(h.invoke(http.MethodPost, testRingPath+":setIamPolicy", map[string]any{testPolicy: map[string]any{
+		testBindings: []any{encrypterBinding()},
+	}}), "ring grant")
+	// A ring-level grant reaches the key through the resource hierarchy.
+	h.ok(h.encrypt(testAllowed), "ring-granted encrypt")
+	rings := h.ok(h.invoke(http.MethodGet, testRingsPath, nil), "ring list")
+	keys := h.ok(h.invoke(http.MethodGet, testKeysPath, nil), "key list")
+	if items, _ := rings["keyRings"].([]any); len(items) != 1 {
+		t.Fatalf("rings = %v", rings)
 	}
-	request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost,
-		testKeyPath+"/"+testKey+":encrypt", bytes.NewReader([]byte(`{"plaintext":"eA=="}`)))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer viewer")
-	recorder = httptest.NewRecorder()
-	h.gate.ServeHTTP(recorder, request)
-	if recorder.Code != 403 {
-		t.Fatalf("viewer encrypt status = %d body %s", recorder.Code, recorder.Body.String())
+	if items, _ := keys["cryptoKeys"].([]any); len(items) != 1 {
+		t.Fatalf("keys = %v", keys)
 	}
 }
 
 func TestEveryRouteIsHandled(t *testing.T) {
 	h := newHarness(t)
 	h.key()
-	gap := "this method is not implemented"
-	probe := func(verb, path string) {
-		recorder := h.invoke(verb, path, nil)
-		if recorder.Code == 501 && strings.Contains(recorder.Body.String(), gap) {
-			t.Fatalf("%s %s hit the dispatch gap", verb, path)
+	probe := func(verb, path string, body any) {
+		recorder := h.invoke(verb, path, body)
+		if recorder.Code == 501 || recorder.Code == 500 || recorder.Code == 404 {
+			t.Fatalf("%s %s = %d %s", verb, path, recorder.Code, recorder.Body.String())
 		}
 	}
-	probe(http.MethodGet, "/v1/projects/"+testProject+"/locations/us-central1")
-	probe(http.MethodGet, testRingsPath)
-	probe(http.MethodGet, testRingsPath)
-	probe(http.MethodGet, testRingPath+":getIamPolicy")
-	probe(http.MethodGet, testRingPath+"/cryptoKeys/"+testKey)
-	probe(http.MethodGet, testKeyPath)
-	probe(http.MethodGet, testRingPath+"/cryptoKeys/"+testKey+":getIamPolicy")
-	probe(http.MethodGet, testRingPath+"/cryptoKeys/"+testKey+"/cryptoKeyVersions")
-	probe(http.MethodGet, testRingPath+"/cryptoKeys/"+testKey+"/cryptoKeyVersions/"+testVersionOne)
+	probe(http.MethodGet, "/v1/projects/"+testProject+"/locations/us-central1", nil)
+	probe(http.MethodGet, testRingsPath, nil)
+	probe(http.MethodGet, testRingPath, nil)
+	probe(http.MethodGet, testRingPath+":getIamPolicy", nil)
+	probe(http.MethodGet, testKeysPath, nil)
+	probe(http.MethodGet, testKeyPath, nil)
+	probe(http.MethodGet, testKeyPath+":getIamPolicy", nil)
+	probe(http.MethodGet, testVersions, nil)
+	probe(http.MethodGet, testVersions+"/1", nil)
+	probe(http.MethodPost, testKeyPath+":updatePrimaryVersion", map[string]any{testVersionID: "1"})
+	probe(http.MethodPatch, testVersions+"/1?updateMask=state", map[string]any{keyState: stateEnabled})
 }

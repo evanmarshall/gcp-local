@@ -86,6 +86,19 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
+// locked runs use under the scope lock. Scope failures are wrapped; use's
+// own gRPC status errors are returned unchanged so the gateway keeps their code.
+func (p *Provider) locked(scope state.Scope, use func(*scopeState) error) error {
+	var failure error
+	if err := p.scopes.With(scope, func(s *scopeState) error {
+		failure = use(s)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("open the spanner scope: %w", err)
+	}
+	return failure
+}
+
 // registerPermissions binds every method to its permission.
 func registerPermissions(engine *iam.Engine) error {
 	for method, permission := range permissions {
@@ -139,52 +152,65 @@ func (p *Provider) denied(_ gateway.Call, decision iam.Decision, target iam.Targ
 	return wireError(403, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", "The caller", permission, target.Name))
 }
 
-// resolve derives the scope and IAM target for one request. Instance methods
-// authorize against the instance; database methods inherit via the instance;
-// config and list methods authorize against the project.
+// resolve derives the scope and IAM target for one request. Instance and
+// instance-child methods authorize against the instance; database methods
+// authorize against the database, inheriting via the instance; config and
+// project-list methods authorize against the project.
 func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
 	project := request.Path["project"]
 	scope := scopeOf(project)
 	target := iam.Target{Name: projectResource(project)}
 	instance, database := request.Path["instance"], request.Path["database"]
+	var err error
 	switch call.Method {
 	case methodConfigsGet, methodConfigsList, methodInstancesCreate, methodInstancesList:
 		return scope, target, nil
-	case methodInstancesGet, methodInstancesUpdate, methodInstancesDelete, methodInstancesGetIam, methodInstancesSetIam:
-		if !uid.MatchString(instance) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
-		}
-		if p.instanceLocked(scope, instance) == nil {
-			return scope, target, notFound(kindInstance, instance)
-		}
-		target.Name = instanceResource(project, instance)
-		return scope, target, nil
 	case methodBackupsList:
-		if !uid.MatchString(instance) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
-		}
-		target.Name = instanceResource(project, instance)
-		return scope, target, nil
-	case methodDatabasesList, methodDatabasesCreate:
-		if !uid.MatchString(instance) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
-		}
-		if p.instanceLocked(scope, instance) == nil {
-			return scope, target, notFound(kindInstance, instance)
-		}
-		target.Name = instanceResource(project, instance)
-		return scope, target, nil
+		err = validInstance(instance)
+	case methodInstancesGet, methodInstancesUpdate, methodInstancesDelete, methodInstancesGetIam,
+		methodInstancesSetIam, methodDatabasesList, methodDatabasesCreate:
+		err = p.existingInstance(scope, instance)
 	default:
-		if !uid.MatchString(instance) || !uid.MatchString(database) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid database id %q", database)
+		if err = p.existingDatabase(scope, instance, database); err == nil {
+			target.Name = databaseResource(project, instance, database)
 		}
-		if p.instanceLocked(scope, instance) == nil {
-			return scope, target, notFound(kindInstance, instance)
-		}
-		if p.databaseLocked(scope, instance, database) == nil {
-			return scope, target, notFound(kindDatabase, database)
-		}
-		target.Name = databaseResource(project, instance, database)
-		return scope, target, nil
+		return scope, target, err
 	}
+	if err == nil {
+		target.Name = instanceResource(project, instance)
+	}
+	return scope, target, err
+}
+
+// validInstance checks the instance id syntax.
+func validInstance(instance string) error {
+	if !uid.MatchString(instance) {
+		return status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
+	}
+	return nil
+}
+
+// existingInstance checks that the instance id is valid and stored.
+func (p *Provider) existingInstance(scope state.Scope, instance string) error {
+	if err := validInstance(instance); err != nil {
+		return err
+	}
+	if p.instanceLocked(scope, instance) == nil {
+		return notFound(kindInstance, instance)
+	}
+	return nil
+}
+
+// existingDatabase checks that the database and its instance are stored.
+func (p *Provider) existingDatabase(scope state.Scope, instance, database string) error {
+	if !databaseID.MatchString(database) {
+		return status.Errorf(codes.InvalidArgument, "Invalid database id %q", database)
+	}
+	if err := p.existingInstance(scope, instance); err != nil {
+		return err
+	}
+	if p.databaseLocked(scope, instance, database) == nil {
+		return notFound(kindDatabase, database)
+	}
+	return nil
 }

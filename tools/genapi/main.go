@@ -438,16 +438,17 @@ func spannerRoutes(_ bool) []byte {
 		{"spanner.instances.list", verbGET, base + "/instances", false, false},
 		{"spanner.instances.update", verbPATCH, base + "/instances/{instance}", true, false},
 		{"spanner.instances.delete", verbDELETE, base + "/instances/{instance}", false, false},
-		{"spanner.instances.getIamPolicy", verbGET, base + "/instances/{instance}:getIamPolicy", false, false},
+		{"spanner.instances.getIamPolicy", verbPOST, base + "/instances/{instance}:getIamPolicy", true, false},
 		{"spanner.instances.setIamPolicy", verbPOST, base + "/instances/{instance}:setIamPolicy", true, false},
 		{"spanner.databases.create", verbPOST, base + "/instances/{instance}/databases", true, false},
 		{"spanner.databases.get", verbGET, base + "/instances/{instance}/databases/{database}", false, false},
 		{"spanner.databases.list", verbGET, base + "/instances/{instance}/databases", false, false},
 		{"spanner.databases.update", verbPATCH, base + "/instances/{instance}/databases/{database}", true, false},
 		{"spanner.databases.applyDdl", verbPATCH, base + "/instances/{instance}/databases/{database}/ddl", true, false},
+		{"spanner.databases.getDdl", verbGET, base + "/instances/{instance}/databases/{database}/ddl", false, false},
 		{"spanner.databases.delete", verbDELETE, base + "/instances/{instance}/databases/{database}", false, false},
 		{"spanner.backups.list", verbGET, base + "/instances/{instance}/backups", false, false},
-		{"spanner.databases.getIamPolicy", verbGET, base + "/instances/{instance}/databases/{database}:getIamPolicy", false, false},
+		{"spanner.databases.getIamPolicy", verbPOST, base + "/instances/{instance}/databases/{database}:getIamPolicy", true, false},
 		{"spanner.databases.setIamPolicy", verbPOST, base + "/instances/{instance}/databases/{database}:setIamPolicy", true, false},
 	}
 	var body strings.Builder
@@ -480,7 +481,7 @@ func bigtableRoutes(_ bool) []byte {
 		{"bigtable.instances.list", verbGET, base + "/instances", false, false},
 		{"bigtable.instances.update", verbPATCH, base + "/instances/{instance}", true, false},
 		{"bigtable.instances.delete", verbDELETE, base + "/instances/{instance}", false, false},
-		{"bigtable.instances.getIamPolicy", verbGET, base + "/instances/{instance}:getIamPolicy", false, false},
+		{"bigtable.instances.getIamPolicy", verbPOST, base + "/instances/{instance}:getIamPolicy", true, false},
 		{"bigtable.instances.setIamPolicy", verbPOST, base + "/instances/{instance}:setIamPolicy", true, false},
 		{"bigtable.clusters.list", verbGET, base + "/instances/{instance}/clusters", false, false},
 		{"bigtable.clusters.get", verbGET, base + "/instances/{instance}/clusters/{cluster}", false, false},
@@ -490,7 +491,7 @@ func bigtableRoutes(_ bool) []byte {
 		{"bigtable.tables.update", verbPATCH, base + "/instances/{instance}/tables/{table}", true, false},
 		{"bigtable.tables.delete", verbDELETE, base + "/instances/{instance}/tables/{table}", false, false},
 		{"bigtable.tables.modifyColumnFamilies", verbPOST, base + "/instances/{instance}/tables/{table}:modifyColumnFamilies", true, false},
-		{"bigtable.tables.getIamPolicy", verbGET, base + "/instances/{instance}/tables/{table}:getIamPolicy", false, false},
+		{"bigtable.tables.getIamPolicy", verbPOST, base + "/instances/{instance}/tables/{table}:getIamPolicy", true, false},
 		{"bigtable.tables.setIamPolicy", verbPOST, base + "/instances/{instance}/tables/{table}:setIamPolicy", true, false},
 	}
 	var body strings.Builder
@@ -739,12 +740,13 @@ func cloudKMSRoutes(_ bool) []byte {
 		{"cloudkms.cryptoKeys.setIamPolicy", verbPOST, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}:setIamPolicy", true, false},
 		{"cloudkms.cryptoKeys.encrypt", verbPOST, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}:encrypt", true, false},
 		{"cloudkms.cryptoKeys.decrypt", verbPOST, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}:decrypt", true, false},
+		{"cloudkms.cryptoKeys.updatePrimaryVersion", verbPOST, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}:updatePrimaryVersion", true, false},
 		{"cloudkms.cryptoKeyVersions.create", verbPOST, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions", true, false},
 		{"cloudkms.cryptoKeyVersions.list", verbGET, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions", false, false},
 		{"cloudkms.cryptoKeyVersions.get", verbGET, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}", false, false},
+		// State changes use PATCH with updateMask=state; GCP has no enable/disable verbs.
+		{"cloudkms.cryptoKeyVersions.patch", verbPATCH, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}", true, false},
 		{"cloudkms.cryptoKeyVersions.destroy", verbPOST, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:destroy", true, false},
-		{"cloudkms.cryptoKeyVersions.disable", verbPOST, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:disable", true, false},
-		{"cloudkms.cryptoKeyVersions.enable", verbPOST, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:enable", true, false},
 	}
 	var body strings.Builder
 	fmt.Fprint(&body, "// Code generated by tools/genapi; DO NOT EDIT.\npackage generated\n\n")

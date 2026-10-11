@@ -1,0 +1,175 @@
+{
+  "bigtable-instance-table-admin": {
+    "recorded-date": "11-10-2026, 22:21:28",
+    "recorded-content": {
+      "instance-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.CreateInstanceMetadata",
+        "response_fields": [
+          "@type",
+          "displayName",
+          "edition",
+          "labels",
+          "name",
+          "state",
+          "type"
+        ],
+        "response_type": "type.googleapis.com/google.bigtable.admin.v2.Instance"
+      },
+      "instance-read": {
+        "displayName": "gcp-local conformance",
+        "fields": [
+          "createTime",
+          "displayName",
+          "edition",
+          "knowledgeCatalogRegion",
+          "labels",
+          "name",
+          "state",
+          "type"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "name": "projects/<project>/instances/<instance>",
+        "state": "READY",
+        "type": "PRODUCTION"
+      },
+      "clusters": {
+        "clusters": [
+          {
+            "defaultStorageType": "HDD",
+            "fields": [
+              "defaultStorageType",
+              "location",
+              "name",
+              "serveNodes",
+              "state"
+            ],
+            "location": "projects/<project>/locations/us-central1-b",
+            "name": "projects/<project>/instances/<instance>/clusters/<cluster>",
+            "serveNodes": 1,
+            "state": "READY"
+          }
+        ],
+        "http_status": 200
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "policy-read": {
+        "bindings": null,
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200
+      },
+      "viewer-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/bigtable.viewer"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "viewer-read": {
+        "http_status": 200
+      },
+      "viewer-cannot-create-table": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "table-created": {
+        "columnFamilies": {
+          "cf1": {}
+        },
+        "fields": [
+          "columnFamilies",
+          "granularity",
+          "name"
+        ],
+        "granularity": "MILLIS",
+        "http_status": 200,
+        "name": "projects/<project>/instances/<instance>/tables/t1"
+      },
+      "families-modified": {
+        "columnFamilies": {
+          "cf1": {},
+          "cf2": {}
+        },
+        "fields": [
+          "columnFamilies",
+          "granularity",
+          "name"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/instances/<instance>/tables/t1"
+      },
+      "table-read": {
+        "columnFamilies": {
+          "cf1": {},
+          "cf2": {}
+        },
+        "fields": [
+          "columnFamilies",
+          "granularity",
+          "name"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/instances/<instance>/tables/t1"
+      },
+      "duplicate-table": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "table-deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "table-absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "duplicate-instance": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "instance-deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "instance-absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "instance_absent": true
+      }
+    }
+  }
+}

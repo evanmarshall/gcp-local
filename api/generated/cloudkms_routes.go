@@ -17,10 +17,10 @@ var CloudKMSRoutes = []Route{
 	{"cloudkms.cryptoKeys.setIamPolicy", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}:setIamPolicy", true, false},
 	{"cloudkms.cryptoKeys.encrypt", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}:encrypt", true, false},
 	{"cloudkms.cryptoKeys.decrypt", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}:decrypt", true, false},
+	{"cloudkms.cryptoKeys.updatePrimaryVersion", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}:updatePrimaryVersion", true, false},
 	{"cloudkms.cryptoKeyVersions.create", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions", true, false},
 	{"cloudkms.cryptoKeyVersions.list", "GET", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions", false, false},
 	{"cloudkms.cryptoKeyVersions.get", "GET", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}", false, false},
+	{"cloudkms.cryptoKeyVersions.patch", "PATCH", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}", true, false},
 	{"cloudkms.cryptoKeyVersions.destroy", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:destroy", true, false},
-	{"cloudkms.cryptoKeyVersions.disable", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:disable", true, false},
-	{"cloudkms.cryptoKeyVersions.enable", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:enable", true, false},
 }

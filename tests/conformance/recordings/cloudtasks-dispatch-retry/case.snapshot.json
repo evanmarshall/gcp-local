@@ -1,0 +1,152 @@
+{
+  "cloudtasks-dispatch-retry": {
+    "recorded-date": "11-10-2026, 22:04:46",
+    "recorded-content": {
+      "queue-created": {
+        "fields": [
+          "name",
+          "rateLimits",
+          "retryConfig",
+          "state",
+          "taskTtl",
+          "tombstoneTtl",
+          "type"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/locations/us-central1/queues/<queue>",
+        "retryConfig": {
+          "maxAttempts": 2,
+          "maxBackoff": "1s",
+          "maxDoublings": 16,
+          "minBackoff": "1s"
+        },
+        "state": "RUNNING"
+      },
+      "denied-enqueue": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "policy-read": {
+        "bindings": null,
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200
+      },
+      "enqueuer-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/cloudtasks.enqueuer"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "task-created": {
+        "fields": [
+          "createTime",
+          "dispatchDeadline",
+          "httpRequest",
+          "name",
+          "scheduleTime",
+          "view"
+        ],
+        "httpRequest": {
+          "headers": {
+            "User-Agent": "Google-Cloud-Tasks"
+          },
+          "httpMethod": "POST",
+          "url": "https://10.255.255.1/gcp-local"
+        },
+        "http_status": 200,
+        "name_in_queue": true,
+        "view": "BASIC"
+      },
+      "enqueuer-cannot-list": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "first-attempt": {
+        "fields": [
+          "createTime",
+          "dispatchCount",
+          "dispatchDeadline",
+          "firstAttempt",
+          "httpRequest",
+          "lastAttempt",
+          "name",
+          "scheduleTime",
+          "view"
+        ],
+        "last_attempt_fields": [
+          "dispatchTime",
+          "responseStatus",
+          "responseTime",
+          "scheduleTime"
+        ],
+        "response_status_code": 2,
+        "seen": true
+      },
+      "removed-after-retries": {
+        "removed": true
+      },
+      "oidc-without-act-as": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "invalid-url": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "paused": {
+        "fields": [
+          "name",
+          "rateLimits",
+          "retryConfig",
+          "state",
+          "taskTtl",
+          "tombstoneTtl",
+          "type"
+        ],
+        "http_status": 200,
+        "state": "PAUSED"
+      },
+      "resumed": {
+        "fields": [
+          "name",
+          "rateLimits",
+          "retryConfig",
+          "state",
+          "taskTtl",
+          "tombstoneTtl",
+          "type"
+        ],
+        "http_status": 200,
+        "state": "RUNNING"
+      },
+      "deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "queue_absent": true
+      }
+    }
+  }
+}

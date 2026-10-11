@@ -1,8 +1,8 @@
 // Package bigtable implements the Bigtable admin v2 control plane: instances
 // with one modeled cluster, tables with column families, app-profile-level
 // IAM via instances, and per-resource IAM. Data-plane row reads/writes are
-// out of scope. No cloud recording covers these methods yet, so nothing here
-// claims recorded conformance.
+// out of scope. The bigtable-instance-table-admin recording covers the
+// instance, cluster, table, column-family, and instance IAM shapes.
 package bigtable
 
 import (
@@ -69,16 +69,27 @@ const (
 	kindTable    = "table"
 )
 
+// uid matches instance and cluster ids.
 var uid = regexp.MustCompile(`^[a-z][a-z0-9-]{1,30}[a-z0-9]$`)
+
+// tableID matches Bigtable table ids: [_a-zA-Z0-9][-_.a-zA-Z0-9]*, 1-50 chars.
+var tableID = regexp.MustCompile(`^[_a-zA-Z0-9][-_.a-zA-Z0-9]{0,49}$`)
+
+// Long-running operation type URLs for instance creation.
+const (
+	typeCreateInstanceMetadata = "type.googleapis.com/google.bigtable.admin.v2.CreateInstanceMetadata"
+	typeInstance               = "type.googleapis.com/google.bigtable.admin.v2.Instance"
+)
+
+// defaultEdition is the instance edition GCP assigns when none is requested.
+const defaultEdition = "ENTERPRISE"
 
 // clusterRecord is the single modeled cluster of one instance.
 type clusterRecord struct {
-	Name         string
-	Location     string
-	ServeNodes   int
-	StorageType  string
-	DefaultWrite bool
-	CreatedAt    time.Time
+	Name        string
+	Location    string
+	ServeNodes  int
+	StorageType string
 }
 
 // instanceRecord is one stored Bigtable instance.
@@ -86,6 +97,7 @@ type instanceRecord struct {
 	Name        string
 	DisplayName string
 	Type        string
+	Edition     string
 	Labels      map[string]string
 	Cluster     *clusterRecord
 	CreatedAt   time.Time

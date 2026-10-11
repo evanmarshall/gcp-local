@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +38,18 @@ const (
 	methodQueuesSetIam  = "cloudtasks.queues.setIamPolicy"
 	methodLocationsList = "cloudtasks.locations.list"
 )
+
+// Engine-only plans for state-dependent task checks; they have no route.
+const (
+	methodTasksActAs    = "cloudtasks.tasks.actAs"
+	methodTasksFullView = "cloudtasks.tasks.fullView"
+)
+
+// statePermissions bind the engine-only plans to their permissions.
+var statePermissions = map[string]string{
+	methodTasksActAs:    "iam.serviceAccounts.actAs",
+	methodTasksFullView: "cloudtasks.tasks.fullView",
+}
 
 // permissions follow the documented Cloud Tasks access-control rows.
 var permissions = map[string]string{
@@ -71,7 +85,9 @@ type Provider struct {
 	clock   func() time.Time
 	client  *http.Client
 	mu      sync.Mutex
-	workers map[string]context.CancelFunc
+	workers map[string]*worker
+	// retention keeps an exhausted task readable after its last attempt.
+	retention time.Duration
 }
 
 // errProviderShape rejects an incomplete provider construction.
@@ -87,10 +103,11 @@ func New(_ context.Context, config DeliveryConfig, registry *gateway.Registry, m
 	}
 	p := &Provider{
 		index: index, engine: engine, tokens: config.Tokens,
-		scopes:  state.NewStore(newScopeState, state.GlobalScope),
-		client:  &http.Client{Timeout: 10 * time.Second},
-		clock:   time.Now,
-		workers: map[string]context.CancelFunc{},
+		scopes:    state.NewStore(newScopeState, state.GlobalScope),
+		client:    dispatchClient(),
+		clock:     time.Now,
+		workers:   map[string]*worker{},
+		retention: exhaustedRetention,
 	}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
@@ -112,6 +129,18 @@ func New(_ context.Context, config DeliveryConfig, registry *gateway.Registry, m
 		}
 	}
 	return p, nil
+}
+
+// dispatchClient bounds each attempt; a target that never answers fails as a
+// transport error well inside the queue's retry schedule.
+func dispatchClient() *http.Client {
+	client := &http.Client{Timeout: 10 * time.Second}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport := base.Clone()
+		transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
+		client.Transport = transport
+	}
+	return client
 }
 
 // emptyBackend satisfies the backend contract for an in-memory provider.
@@ -136,39 +165,64 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
+// workerKey addresses one task's dispatch worker.
+func workerKey(scope state.Scope, key string) string { return scope.Project + "\x00" + key }
+
 // stopWorkers cancels the dispatch workers of one scope.
 func (p *Provider) stopWorkers(scope state.Scope) {
 	p.mu.Lock()
-	for key, cancel := range p.workers {
-		if key == scope.Project {
-			cancel()
+	for key, active := range p.workers {
+		if strings.HasPrefix(key, scope.Project+"\x00") {
+			active.cancel()
 			delete(p.workers, key)
 		}
 	}
 	p.mu.Unlock()
 }
 
+// stopWorker cancels one task's dispatch worker.
+func (p *Provider) stopWorker(scope state.Scope, key string) {
+	p.mu.Lock()
+	if active := p.workers[workerKey(scope, key)]; active != nil {
+		active.cancel()
+		delete(p.workers, workerKey(scope, key))
+	}
+	p.mu.Unlock()
+}
+
 // registerPermissions binds every method to its permission.
 func registerPermissions(engine *iam.Engine) error {
-	for method, permission := range permissions {
-		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-			return fmt.Errorf("register %s: %w", method, err)
+	for _, table := range []map[string]string{permissions, statePermissions} {
+		for method, permission := range table {
+			if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
+				return fmt.Errorf("register %s: %w", method, err)
+			}
 		}
 	}
 	return nil
 }
 
-// recordState is one stored queue or task.
+// queueRecord is one stored queue.
 type queueRecord struct {
-	Name    string
-	Rate    map[string]any
-	State   string // RUNNING, PAUSED
-	Created time.Time
+	Name     string
+	Location string
+	Rate     map[string]any
+	Retry    retryPolicy
+	State    string // RUNNING, PAUSED
 }
 
-// taskRecord is one stored task.
+// attemptRecord is one dispatch attempt. Code is the RPC status of the
+// response; a transport failure is UNKNOWN, as GCP reports it.
+type attemptRecord struct {
+	Schedule, Dispatch, Response time.Time
+	Code                         codes.Code
+	Message                      string
+}
+
+// taskRecord is one stored task; GCP removes a task once it succeeds or
+// exhausts its queue's attempts.
 type taskRecord struct {
-	Name           string
+	ID             string
 	Queue          string
 	URL            string
 	Method         string
@@ -176,12 +230,16 @@ type taskRecord struct {
 	Headers        map[string]string
 	ServiceAccount string
 	Audience       string
-	Attempts       int
-	State          string // PENDING, SUCCEEDED, FAILED
-	Detail         string
 	Created        time.Time
 	ScheduleAt     time.Time
+	Dispatches     int
+	Responses      int
+	First, Last    *attemptRecord
+	wake           chan struct{}
 }
+
+// taskKey addresses one task; task IDs are unique only within a queue.
+func taskKey(queue, id string) string { return queue + "/" + id }
 
 // scopeState is one project slice of provider state.
 type scopeState struct {
@@ -204,8 +262,8 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Cloud Tasks request")
 	}
-	scope, target := p.resolve(call, request)
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	scope := scopeOf(request.Path["project"])
+	decision, target, authorizeErr := p.authorize(call, request)
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
@@ -225,12 +283,39 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
-// resolve derives the scope and IAM target for one request.
-func (p *Provider) resolve(_ gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target) {
-	project := request.Path["project"]
-	scope := scopeOf(project)
-	target := iam.Target{Name: projectResource(project)}
-	return scope, target
+// authorize checks the method against its queue, so queue policies grant
+// queue and task access. A queue that is not indexed authorizes through the
+// project anchor and then reads 404.
+func (p *Provider) authorize(call gateway.Call, request *gateway.RESTRequest) (iam.Decision, iam.Target, error) {
+	project := iam.Target{Name: projectResource(request.Path["project"])}
+	target := project
+	if queue := request.Path["queue"]; queue != "" {
+		target = iam.Target{Name: queueResource(request.Path["project"], request.Path["location"], queue)}
+	}
+	decision, err := p.engine.Authorize(call, target, nil)
+	if target != project && status.Code(err) == codes.Unimplemented {
+		target = project
+		decision, err = p.engine.Authorize(call, target, nil)
+	}
+	return decision, target, err //nolint:wrapcheck // callers read the IAM status code
+}
+
+// authorizeActAs requires iam.serviceAccounts.actAs on the OIDC service
+// account before a task that mints its token is stored.
+func (p *Provider) authorizeActAs(call gateway.Call, project, email string) error {
+	account := iam.AccountResource(project, email)
+	call.Method, call.Resource = methodTasksActAs, account
+	_, err := p.engine.Authorize(call, iam.Target{Name: account}, nil)
+	switch status.Code(err) {
+	case codes.OK:
+		return nil
+	case codes.PermissionDenied, codes.Unauthenticated:
+		return status.Error(codes.PermissionDenied, "The caller lacks iam.serviceAccounts.actAs on "+email)
+	case codes.Unimplemented:
+		return gap("OIDC tokens require a declared same-project local service account")
+	default:
+		return fmt.Errorf("authorize the OIDC service account: %w", err)
+	}
 }
 
 // projectResource names the resource-manager project ancestor.
@@ -247,12 +332,10 @@ func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.T
 			break
 		}
 	}
-	actor := call.Principal.Subject
-	code := 403
 	if call.Principal.State != gateway.Authenticated {
-		actor, code = "Anonymous caller", 401
+		return wireError(401, "UNAUTHENTICATED", "Request had invalid authentication credentials.")
 	}
-	return wireError(code, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", actor, permission, target.Name))
+	return wireError(403, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", call.Principal.Subject, permission, target.Name))
 }
 
 // wireError builds the Cloud Tasks error body.
