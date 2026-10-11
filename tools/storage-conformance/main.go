@@ -26,6 +26,7 @@ import (
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
 	pubsubprovider "github.com/evanmarshall/gcp-local/internal/providers/pubsub"
+	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -62,6 +63,7 @@ func main() {
 			{Role: "roles/bigquery.dataEditor", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/spanner.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/pubsub.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/run.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}
@@ -100,6 +102,8 @@ func main() {
 	tokens, tokenErr := identity.NewIDTokens(engine, index)
 	must(tokenErr)
 	_, err = pubsubprovider.New(registry, server.Backends, index, engine, pubsubprovider.Config{Java: java, JAR: jar, IDTokens: tokens})
+	must(err)
+	_, err = runprovider.New(context.Background(), runprovider.Config{BaseURL: "http://127.0.0.1:4566"}, registry, server.Backends, index, engine, runprovider.NoopRuntime{})
 	must(err)
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
 	must(err)
