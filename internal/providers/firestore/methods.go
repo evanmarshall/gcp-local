@@ -3,6 +3,8 @@ package firestore
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,13 +52,20 @@ func (p *Provider) upsert(_ gateway.Call, request *gateway.RESTRequest, scope st
 	if body.Fields == nil {
 		return nil, status.Error(codes.InvalidArgument, "A document requires a fields object")
 	}
+	// A field mask limits the write to the named top-level fields; without one
+	// the document is replaced, as GCP does.
+	mask := request.Query["updateMask.fieldPaths"]
+	if err := checkMask(mask); err != nil {
+		return nil, err
+	}
 	now := p.clock()
 	var created bool
+	var stored *documentRecord
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		key := documentKey(collection, id)
 		existing := s.documents[key]
 		created = existing == nil
-		stored := &documentRecord{Collection: collection, ID: id, Fields: body.Fields, CreateTime: stamp(now), UpdateTime: stamp(now)}
+		stored = &documentRecord{Collection: collection, ID: id, Fields: maskedFields(existing, body.Fields, mask), CreateTime: stamp(now), UpdateTime: stamp(now)}
 		if existing != nil {
 			stored.CreateTime = existing.CreateTime
 		}
@@ -76,7 +85,37 @@ func (p *Provider) upsert(_ gateway.Call, request *gateway.RESTRequest, scope st
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	return &gateway.RESTResponse{JSON: documentWire(scope.Project, collection, id, body.Fields, now, now)}, nil
+	return &gateway.RESTResponse{JSON: documentWire(scope.Project, collection, id, stored.Fields, parseStamp(stored.CreateTime), now)}, nil
+}
+
+// checkMask refuses nested update mask paths, an explicit coverage gap.
+func checkMask(mask []string) error {
+	for _, path := range mask {
+		if strings.ContainsAny(path, ".`") {
+			return status.Error(codes.Unimplemented, "Firestore coverage gap: nested update mask paths are not implemented")
+		}
+	}
+	return nil
+}
+
+// maskedFields applies a top-level field mask to the stored document; with no
+// mask the written fields replace the document.
+func maskedFields(existing *documentRecord, written map[string]any, mask []string) map[string]any {
+	if len(mask) == 0 {
+		return written
+	}
+	fields := map[string]any{}
+	if existing != nil {
+		maps.Copy(fields, existing.Fields)
+	}
+	for _, path := range mask {
+		if value, ok := written[path]; ok {
+			fields[path] = value
+		} else {
+			delete(fields, path)
+		}
+	}
+	return fields
 }
 
 // get returns one document.
@@ -125,8 +164,9 @@ func (p *Provider) remove(request *gateway.RESTRequest, scope state.Scope) (*gat
 	if err != nil {
 		return nil, fmt.Errorf("remove the document: %w", err)
 	}
+	// Deleting an absent document succeeds in GCP.
 	if !existed {
-		return nil, notFound(kindDocument, id)
+		return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 	}
 	if err := p.index.Remove(serviceName, scope, documentResource(scope.Project, collection, id)); err != nil {
 		return nil, fmt.Errorf("unregister the document: %w", err)

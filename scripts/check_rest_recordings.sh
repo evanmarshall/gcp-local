@@ -10,7 +10,7 @@ python=${GCP_LOCAL_TEST_PYTHON:-.venv-tools/bin/python}
 sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance
 "$python" scripts/run_isolated.py \
   --server-json '["bin/storage-conformance"]' --ready-url http://127.0.0.1:4566/_local/health -- \
-  "$python" -m pytest tests/conformance/secretmanager tests/conformance/serviceaccounts tests/conformance/projectiam tests/conformance/artifactregistry \
+  "$python" -m pytest tests/conformance/secretmanager tests/conformance/serviceaccounts tests/conformance/projectiam tests/conformance/artifactregistry tests/conformance/firestore \
   --gcp-mode local --gcp-project gcp-local-test \
   --gcp-endpoint http://127.0.0.1:4566 --gcp-artifacts .artifacts/rest-provider \
   --gcp-provider-version "gcp-local/${GITHUB_SHA:-working-tree}" \

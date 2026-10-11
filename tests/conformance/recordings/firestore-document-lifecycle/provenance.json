@@ -1,0 +1,48 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-11T21:41:18.199301+00:00",
+  "scenario": {
+    "id": "firestore-document-lifecycle",
+    "service": "firestore",
+    "transport": "rest-v1",
+    "revision": "d582ce2c5008ca02116c87cf5f0e36bf4a810f3597f1390d09d977c5ed0b199c",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "fd484beb35bcab3adf0c8b6b36e3073b0d3eac5e141264e5ecc2b5f3ce2ad57b",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/firestore.py": "33cf1f29187868bac68dee2a07af8d190e98d44312e9f3a2e57434e90b71ac78",
+      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
+      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "tests/conformance/firestore/conftest.py": "f4bb7a0c71ece932a9f73f4e6ebeeda48ca2e97df9b391e904c68a1f2d5ddde8"
+    },
+    "scope": {
+      "services": [
+        "firestore"
+      ],
+      "location": "global",
+      "limits": {
+        "max_documents": 2,
+        "max_collections": 1,
+        "max_run_seconds": 600
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

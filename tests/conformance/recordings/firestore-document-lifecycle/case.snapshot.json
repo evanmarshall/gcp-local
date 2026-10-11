@@ -1,0 +1,224 @@
+{
+  "firestore-document-lifecycle": {
+    "recorded-date": "11-10-2026, 21:41:18",
+    "recorded-content": {
+      "created": {
+        "field_values": {
+          "count": {
+            "integerValue": "42"
+          },
+          "enabled": {
+            "booleanValue": true
+          },
+          "missing": {
+            "nullValue": null
+          },
+          "nested": {
+            "mapValue": {
+              "fields": {
+                "inner": {
+                  "stringValue": "x"
+                }
+              }
+            }
+          },
+          "ratio": {
+            "doubleValue": 0.5
+          },
+          "tags": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "a"
+                },
+                {
+                  "integerValue": "7"
+                }
+              ]
+            }
+          },
+          "title": {
+            "stringValue": "gcp-local conformance"
+          },
+          "when": {
+            "timestampValue": "2026-01-02T03:04:05.123456Z"
+          }
+        },
+        "fields": [
+          "createTime",
+          "fields",
+          "name",
+          "updateTime"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/databases/(default)/documents/<collection>/doc1"
+      },
+      "read": {
+        "field_values": {
+          "count": {
+            "integerValue": "42"
+          },
+          "enabled": {
+            "booleanValue": true
+          },
+          "missing": {
+            "nullValue": null
+          },
+          "nested": {
+            "mapValue": {
+              "fields": {
+                "inner": {
+                  "stringValue": "x"
+                }
+              }
+            }
+          },
+          "ratio": {
+            "doubleValue": 0.5
+          },
+          "tags": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "a"
+                },
+                {
+                  "integerValue": "7"
+                }
+              ]
+            }
+          },
+          "title": {
+            "stringValue": "gcp-local conformance"
+          },
+          "when": {
+            "timestampValue": "2026-01-02T03:04:05.123456Z"
+          }
+        },
+        "fields": [
+          "createTime",
+          "fields",
+          "name",
+          "updateTime"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/databases/(default)/documents/<collection>/doc1"
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-write": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "masked-patch": {
+        "field_values": {
+          "count": {
+            "integerValue": "42"
+          },
+          "enabled": {
+            "booleanValue": true
+          },
+          "missing": {
+            "nullValue": null
+          },
+          "nested": {
+            "mapValue": {
+              "fields": {
+                "inner": {
+                  "stringValue": "x"
+                }
+              }
+            }
+          },
+          "ratio": {
+            "doubleValue": 0.5
+          },
+          "tags": {
+            "arrayValue": {
+              "values": [
+                {
+                  "stringValue": "a"
+                },
+                {
+                  "integerValue": "7"
+                }
+              ]
+            }
+          },
+          "title": {
+            "stringValue": "renamed"
+          },
+          "when": {
+            "timestampValue": "2026-01-02T03:04:05.123456Z"
+          }
+        },
+        "fields": [
+          "createTime",
+          "fields",
+          "name",
+          "updateTime"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/databases/(default)/documents/<collection>/doc1"
+      },
+      "unmasked-patch": {
+        "field_values": {
+          "only": {
+            "stringValue": "left"
+          }
+        },
+        "fields": [
+          "createTime",
+          "fields",
+          "name",
+          "updateTime"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/databases/(default)/documents/<collection>/doc1"
+      },
+      "duplicate-create": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "second-created": {
+        "http_status": 200
+      },
+      "listed": {
+        "fields": [
+          "documents"
+        ],
+        "http_status": 200,
+        "names": [
+          "projects/<project>/databases/(default)/documents/<collection>/doc1",
+          "projects/<project>/databases/(default)/documents/<collection>/doc2"
+        ]
+      },
+      "missing-read": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "delete-missing": {
+        "body": {},
+        "http_status": 200
+      },
+      "absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "collection_emptied": true
+      }
+    }
+  }
+}
