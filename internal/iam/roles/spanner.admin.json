@@ -1,0 +1,24 @@
+{
+ "description": "Full control of Spanner instances and databases.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "spanner.databases.create",
+  "spanner.databases.delete",
+  "spanner.databases.get",
+  "spanner.databases.getIamPolicy",
+  "spanner.databases.list",
+  "spanner.databases.setIamPolicy",
+  "spanner.databases.update",
+  "spanner.instanceConfigs.get",
+  "spanner.instanceConfigs.list",
+  "spanner.instances.create",
+  "spanner.instances.delete",
+  "spanner.instances.get",
+  "spanner.instances.getIamPolicy",
+  "spanner.instances.list",
+  "spanner.instances.setIamPolicy",
+  "spanner.instances.update"
+ ],
+ "name": "roles/spanner.admin",
+ "stage": "GA"
+}

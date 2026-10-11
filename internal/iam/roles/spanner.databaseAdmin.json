@@ -1,0 +1,15 @@
+{
+ "description": "Manage Spanner databases inside existing instances.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "spanner.databases.create",
+  "spanner.databases.delete",
+  "spanner.databases.get",
+  "spanner.databases.list",
+  "spanner.databases.update",
+  "spanner.instances.get",
+  "spanner.instances.list"
+ ],
+ "name": "roles/spanner.databaseAdmin",
+ "stage": "GA"
+}

@@ -27,6 +27,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
+	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -114,7 +115,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcListen, "grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner")
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
@@ -276,6 +277,9 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleFirestore(ctx, selected, registry, server, index, engine); err != nil {
 		return err
 	}
+	if err := assembleSpanner(ctx, selected, registry, server, index, engine); err != nil {
+		return err
+	}
 	if err := assembleBigQuery(ctx, selected, registry, server, index, engine); err != nil {
 		return err
 	}
@@ -345,6 +349,17 @@ func assembleCloudKMS(ctx context.Context, selected map[string]bool, registry *g
 	}
 	if _, err := cloudkmsprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Cloud KMS provider: %w", err)
+	}
+	return nil
+}
+
+// assembleSpanner registers the Spanner provider.
+func assembleSpanner(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["spanner"] {
+		return nil
+	}
+	if _, err := spannerprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Spanner provider: %w", err)
 	}
 	return nil
 }

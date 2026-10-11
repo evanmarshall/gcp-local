@@ -152,6 +152,21 @@
    "file": "bigquery.dataViewer.json",
    "name": "roles/bigquery.dataViewer",
    "sha256": "3184a0663ea3c4c37363d2ef0642c6f6abeee83dd99939fbb66a685b01cc80b0"
+  },
+  {
+   "file": "spanner.admin.json",
+   "name": "roles/spanner.admin",
+   "sha256": "1f0ef651e6f0db6a65f746846e3835d89ee29ac5f824dfbb513c296083dcfb2d"
+  },
+  {
+   "file": "spanner.databaseAdmin.json",
+   "name": "roles/spanner.databaseAdmin",
+   "sha256": "44256ae60ccf9ac7dcc9812f6c8028df5f223b549604ae44d29ff4231b1f9eef"
+  },
+  {
+   "file": "spanner.viewer.json",
+   "name": "roles/spanner.viewer",
+   "sha256": "d2632f82c816c5590e9631fe47fa9462dd30644da6c31da3473e1507f663cf1b"
   }
  ]
 }

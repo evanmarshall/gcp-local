@@ -86,6 +86,7 @@ func contracts() []generated.Route {
 	routes = append(routes, generated.CloudKMSRoutes...)
 	routes = append(routes, generated.FirestoreRoutes...)
 	routes = append(routes, generated.BigQueryRoutes...)
+	routes = append(routes, generated.SpannerRoutes...)
 	routes = append(routes, generated.CloudTasksRoutes...)
 	routes = append(routes, generated.PubSubRestRoutes...)
 	sort.SliceStable(routes, func(i, j int) bool {

@@ -1,0 +1,15 @@
+{
+ "description": "Read Spanner instances, databases, and configs.",
+ "etag": "AA==",
+ "includedPermissions": [
+  "spanner.databases.get",
+  "spanner.databases.list",
+  "spanner.instanceConfigs.get",
+  "spanner.instanceConfigs.list",
+  "spanner.instances.get",
+  "spanner.instances.getIamPolicy",
+  "spanner.instances.list"
+ ],
+ "name": "roles/spanner.viewer",
+ "stage": "GA"
+}
