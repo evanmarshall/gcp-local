@@ -106,6 +106,10 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, targ
 		}
 		policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
 		if err != nil {
+			// The engine's own statuses (a stale etag is ABORTED) reach the caller.
+			if _, ok := status.FromError(err); ok {
+				return nil, err //nolint:wrapcheck // already a wire status
+			}
 			return nil, status.Errorf(codes.Internal, "write the project policy: %v", err)
 		}
 		return &gateway.RESTResponse{JSON: policy}, nil

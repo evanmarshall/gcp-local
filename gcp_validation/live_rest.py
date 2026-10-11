@@ -96,7 +96,8 @@ class RestClient:
     def request(self, actor, method, path, *, query=None, body=None, timeout=30):
         if actor not in ACTORS:
             raise ValueError('Unknown scenario identity')
-        if not path.startswith('/v1/projects/' + self.target.project + '/'):
+        prefix = '/v1/projects/' + self.target.project
+        if not (path.startswith(prefix + '/') or path.startswith(prefix + ':')):
             raise ValueError('Select an explicit path in the selected project')
         headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + self.token(actor)}
         if self.target.mode != 'local':

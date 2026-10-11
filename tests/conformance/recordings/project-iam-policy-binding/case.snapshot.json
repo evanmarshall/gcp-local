@@ -1,0 +1,52 @@
+{
+  "project-iam-policy-binding": {
+    "recorded-date": "11-10-2026, 18:29:12",
+    "recorded-content": {
+      "fixture-read": {
+        "etag_present": true,
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "version": 1
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "allowed-read-before-grant": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "binding-added": {
+        "etag_changed": true,
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "preserved": true,
+        "scenario_binding": true
+      },
+      "stale-etag": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ABORTED"
+      },
+      "binding-removed": {
+        "http_status": 200,
+        "preserved": true,
+        "scenario_binding": false
+      },
+      "cleanup": {
+        "prior_bindings_preserved": true,
+        "scenario_binding_absent": true
+      }
+    }
+  }
+}
