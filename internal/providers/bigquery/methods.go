@@ -26,9 +26,10 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodDatasetsUpdate:
 		return p.datasetsUpdate(request, scope)
 	case methodDatasetsGetIam, methodDatasetsSetIam:
-		return p.datasetIam(call, request, target)
+		// Recorded: dataset IAM methods need allowlisting; access is per table.
+		return wireError(400, "INVALID_ARGUMENT", "This feature requires allowlisting."), nil
 	case methodTablesGetIam, methodTablesSetIam:
-		return p.datasetIam(call, request, target)
+		return p.tableIam(call, request, target)
 	case methodDatasetsDelete:
 		return p.datasetsDelete(request, scope)
 	default:
@@ -75,9 +76,13 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 		} `json:"datasetReference"`
 		Labels       map[string]string `json:"labels"`
 		FriendlyName string            `json:"friendlyName"`
+		Location     string            `json:"location"`
 	}
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid dataset body")
+	}
+	if body.Location == "" {
+		body.Location = "US"
 	}
 	dataset := request.Path["datasetId"]
 	if dataset == "" {
@@ -92,7 +97,7 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 			return status.Errorf(codes.AlreadyExists, "Dataset %s already exists", dataset)
 		}
 		s.datasets[dataset] = &datasetRecord{
-			ID: dataset, Labels: body.Labels, FriendlyName: body.FriendlyName, CreatedAt: now,
+			ID: dataset, Labels: body.Labels, FriendlyName: body.FriendlyName, Location: body.Location, CreatedAt: now,
 		}
 		return nil
 	})
@@ -100,7 +105,7 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 		return nil, fmt.Errorf("create the dataset: %w", err)
 	}
 	created := &datasetRecord{
-		ID: dataset, Labels: body.Labels, FriendlyName: body.FriendlyName, CreatedAt: now,
+		ID: dataset, Labels: body.Labels, FriendlyName: body.FriendlyName, Location: body.Location, CreatedAt: now,
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: datasetResource(scope.Project, dataset), Service: serviceName,
@@ -125,14 +130,29 @@ func datasetWire(project, dataset string, record *datasetRecord) map[string]any 
 	if record != nil {
 		created = record.CreatedAt
 	}
-	return map[string]any{
-		"id":               dataset,
-		"datasetReference": map[string]any{"datasetId": dataset, "projectId": project},
-		"friendlyName":     friendly,
-		"labels":           labels,
-		"creationTime":     strconv.FormatInt(created.UnixMilli(), 10),
+	location := "US"
+	if record != nil && record.Location != "" {
+		location = record.Location
+	}
+	document := map[string]any{
+		keyKind:            "bigquery#dataset",
+		"id":               project + ":" + dataset,
+		keyETag:            etagOf(created),
+		"selfLink":         selfLink + project + "/datasets/" + dataset,
+		"datasetReference": map[string]any{"datasetId": dataset, keyProjectID: project},
+		keyLocation:        location,
+		"type":             "DEFAULT",
+		"access":           defaultAccess(),
+		keyCreationTime:    strconv.FormatInt(created.UnixMilli(), 10),
 		"lastModifiedTime": strconv.FormatInt(created.UnixMilli(), 10),
 	}
+	if len(labels) > 0 {
+		document["labels"] = labels
+	}
+	if friendly != "" {
+		document["friendlyName"] = friendly
+	}
+	return document
 }
 
 // datasetsGet returns one dataset.
@@ -182,27 +202,55 @@ func (p *Provider) datasetsDelete(request *gateway.RESTRequest, scope state.Scop
 	if p.datasetLocked(scope, dataset) == nil {
 		return nil, notFound(kindDataset, dataset)
 	}
-	nonEmpty := false
+	contents := request.Query.Get("deleteContents") == "true"
+	var removed []string
 	err := p.scopes.With(scope, func(s *scopeState) error {
-		for key := range s.tables {
-			if strings.HasPrefix(key, dataset+"/") {
-				nonEmpty = true
-				return nil
-			}
-		}
-		delete(s.datasets, dataset)
+		removed = s.takeDataset(dataset, contents)
 		return nil
 	})
+	nonEmpty := len(removed) > 0
 	if err != nil {
 		return nil, fmt.Errorf("remove the dataset: %w", err)
 	}
-	if nonEmpty {
-		return nil, status.Errorf(codes.FailedPrecondition, "Dataset %s still contains tables", dataset)
+	if nonEmpty && !contents {
+		return nil, status.Errorf(codes.InvalidArgument, "Dataset %s is still in use", dataset)
+	}
+	if err := p.unindexTables(scope, dataset, removed); err != nil {
+		return nil, err
 	}
 	if indexErr := p.index.Remove(serviceName, scope, datasetResource(scope.Project, dataset)); indexErr != nil {
 		return nil, fmt.Errorf("unregister the dataset: %w", indexErr)
 	}
 	return &gateway.RESTResponse{Status: 204}, nil
+}
+
+// takeDataset deletes a dataset, and its tables when contents is set, and
+// returns the dataset's table ids; a non-empty dataset without contents stays.
+func (s *scopeState) takeDataset(dataset string, contents bool) []string {
+	var tables []string
+	for key, table := range s.tables {
+		if strings.HasPrefix(key, dataset+"/") {
+			tables = append(tables, table.ID)
+		}
+	}
+	if len(tables) > 0 && !contents {
+		return tables
+	}
+	for _, table := range tables {
+		delete(s.tables, tableKey(dataset, table))
+	}
+	delete(s.datasets, dataset)
+	return tables
+}
+
+// unindexTables removes deleted tables from the resource index.
+func (p *Provider) unindexTables(scope state.Scope, dataset string, tables []string) error {
+	for _, table := range tables {
+		if err := p.index.Remove(serviceName, scope, tableResource(scope.Project, dataset, table)); err != nil {
+			return fmt.Errorf("unregister the table: %w", err)
+		}
+	}
+	return nil
 }
 
 // tableLocked reads one table under the scope lock.
@@ -245,13 +293,13 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 		if s.tables[key] != nil {
 			return status.Errorf(codes.AlreadyExists, "Table %s already exists", table)
 		}
-		s.tables[key] = &tableRecord{Dataset: dataset, ID: table, Schema: body.Schema, CreatedAt: now}
+		s.tables[key] = &tableRecord{Dataset: dataset, ID: table, Schema: body.Schema, Location: s.datasets[dataset].Location, CreatedAt: now}
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create the table: %w", err)
 	}
-	created := &tableRecord{Dataset: dataset, ID: table, Schema: body.Schema, CreatedAt: now}
+	created := p.tableLocked(scope, dataset, table)
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: tableResource(scope.Project, dataset, table), Service: serviceName,
 		Kind: kindTable, Parent: datasetResource(scope.Project, dataset), Scope: scope,
@@ -272,17 +320,36 @@ func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *t
 	if record != nil {
 		friendly = record.FriendlyName
 	}
-	return map[string]any{
-		"id": table,
+	location := record.Location
+	if location == "" {
+		location = "US"
+	}
+	document := map[string]any{
+		keyKind:    "bigquery#table",
+		"id":       scope.Project + ":" + dataset + "." + table,
+		keyETag:    etagOf(record.CreatedAt),
+		"selfLink": selfLink + scope.Project + "/datasets/" + dataset + "/tables/" + table,
 		"tableReference": map[string]any{
-			"datasetId": dataset, "projectId": scope.Project, "tableId": table,
+			"datasetId": dataset, keyProjectID: scope.Project, "tableId": table,
 		},
 		"schema":           record.Schema,
-		"labels":           labels,
-		"friendlyName":     friendly,
-		"creationTime":     strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
+		"type":             "TABLE",
+		keyLocation:        location,
+		keyCreationTime:    strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
 		"lastModifiedTime": strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
 	}
+	// Storage counters: streamed rows stay in the buffer and are not counted.
+	for _, counter := range []string{"numBytes", "numLongTermBytes", "numRows", "numActiveLogicalBytes",
+		"numTotalLogicalBytes", "numLongTermLogicalBytes"} {
+		document[counter] = "0"
+	}
+	if len(labels) > 0 {
+		document["labels"] = labels
+	}
+	if friendly != "" {
+		document["friendlyName"] = friendly
+	}
+	return document
 }
 
 // tablesGet returns one table.
@@ -383,7 +450,7 @@ func (p *Provider) rowsInsert(request *gateway.RESTRequest, scope state.Scope) (
 	if err != nil {
 		return nil, fmt.Errorf("insert the rows: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{"kind": "bigquery#tableDataInsertAllResponse"}}, nil
+	return &gateway.RESTResponse{JSON: map[string]any{keyKind: "bigquery#tableDataInsertAllResponse"}}, nil
 }
 
 // rowsList returns the stored rows newest-last.
@@ -393,24 +460,22 @@ func (p *Provider) rowsList(request *gateway.RESTRequest, scope state.Scope) (*g
 	if record == nil {
 		return nil, notFound(kindTable, table)
 	}
-	rows := []any{}
-	for _, row := range record.Rows {
-		rows = append(rows, map[string]any{"f": []any{map[string]any{"v": row}}})
-	}
 	return &gateway.RESTResponse{JSON: map[string]any{
-		"totalRows": strconv.Itoa(len(rows)),
-		"rows":      rows,
+		keyKind:     "bigquery#tableDataList",
+		keyETag:     etagOf(record.CreatedAt),
+		"totalRows": strconv.Itoa(len(record.Rows)),
+		"rows":      bqRows(schemaFields(record.Schema), record.Rows),
 	}}, nil
 }
 
-// datasetIam reads or writes the dataset's stored IAM policy.
-func (p *Provider) datasetIam(call gateway.Call, request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
-	if call.Method == methodDatasetsGetIam {
+// tableIam reads or writes the table's stored IAM policy.
+func (p *Provider) tableIam(call gateway.Call, request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
+	if call.Method == methodTablesGetIam {
 		policy, err := p.engine.GetPolicy(target.Name)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "read the dataset policy: %v", err)
+			return nil, status.Errorf(codes.Internal, "read the table policy: %v", err)
 		}
-		return &gateway.RESTResponse{JSON: policy}, nil
+		return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 	}
 	var envelope struct {
 		Policy iam.Policy `json:"policy"`
@@ -420,7 +485,10 @@ func (p *Provider) datasetIam(call gateway.Call, request *gateway.RESTRequest, t
 	}
 	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "write the dataset policy: %v", err)
+		if _, ok := status.FromError(err); ok {
+			return nil, err //nolint:wrapcheck // already a wire status
+		}
+		return nil, status.Errorf(codes.Internal, "write the table policy: %v", err)
 	}
 	return &gateway.RESTResponse{JSON: policy}, nil
 }
@@ -433,6 +501,7 @@ func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*
 	var body struct {
 		Query        string `json:"query"`
 		UseLegacySQL bool   `json:"useLegacySql"`
+		DryRun       bool   `json:"dryRun"`
 	}
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid query body")
@@ -448,7 +517,7 @@ func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*
 	if table == nil {
 		return nil, notFound("table", parsed.table)
 	}
-	fields := schemaFields(table.Schema)
+	fields := nullableFields(schemaFields(table.Schema))
 	if len(parsed.columns) > 0 {
 		projected := []map[string]any{}
 		for _, field := range fields {
@@ -480,20 +549,17 @@ func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*
 		rows = append(rows, projected)
 	}
 	jobID := "job_" + strconv.Itoa(int(p.clock().UnixNano()))
-	job := &jobRecord{ID: jobID, Fields: fields, Rows: rows, CreatedAt: p.clock()}
+	job := &jobRecord{ID: jobID, Fields: fields, Rows: rows, Location: table.Location, CreatedAt: p.clock()}
+	if body.DryRun {
+		return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, true)}, nil
+	}
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		s.jobs[jobID] = job
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{
-		"jobReference": map[string]any{"projectId": scope.Project, "jobId": jobID},
-		"jobComplete":  true,
-		"schema":       map[string]any{"fields": fields},
-		"rows":         bqRows(fields, rows),
-		"totalRows":    len(rows),
-	}}, nil
+	return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, false)}, nil
 }
 
 // jobsResults returns the stored result of one query job.
@@ -502,13 +568,7 @@ func (p *Provider) jobsResults(request *gateway.RESTRequest, scope state.Scope) 
 	if job == nil {
 		return nil, notFound("job", request.Path["jobId"])
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{
-		"jobReference": map[string]any{"projectId": scope.Project, "jobId": job.ID},
-		"jobComplete":  true,
-		"schema":       map[string]any{"fields": job.Fields},
-		"rows":         bqRows(job.Fields, job.Rows),
-		"totalRows":    len(job.Rows),
-	}}, nil
+	return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, false)}, nil
 }
 
 // jobLocked reads one job under the scope lock.
@@ -545,7 +605,8 @@ func parseQuery(query string) (parsedQuery, error) {
 		table = after[:index]
 		filter = strings.TrimSpace(after[index+len(" WHERE "):])
 	}
-	parts := strings.Split(table, ".")
+	// Standard SQL quotes a full table path in backticks.
+	parts := strings.Split(strings.Trim(strings.TrimSpace(table), "`"), ".")
 	switch len(parts) {
 	case 2:
 		parsed.dataset, parsed.table = parts[0], parts[1]
@@ -613,7 +674,7 @@ func bqRows(fields []map[string]any, rows []map[string]any) []any {
 		cells := []any{}
 		for _, field := range fields {
 			name, _ := field["name"].(string)
-			cells = append(cells, map[string]any{"v": row[name]})
+			cells = append(cells, map[string]any{"v": cellValue(row[name])})
 		}
 		out = append(out, map[string]any{"f": cells})
 	}

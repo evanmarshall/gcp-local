@@ -1,0 +1,228 @@
+{
+  "bigquery-dataset-rows-query": {
+    "recorded-date": "11-10-2026, 21:51:42",
+    "recorded-content": {
+      "dataset-created": {
+        "datasetReference": {
+          "datasetId": "<dataset>",
+          "projectId": "<project>"
+        },
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "etag",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200,
+        "id": "<project>:<dataset>",
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "location": "US"
+      },
+      "denied-dataset-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "table-created": {
+        "fields": [
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "type"
+        ],
+        "http_status": 200,
+        "id": "<project>:<dataset>.t1",
+        "schema": {
+          "fields": [
+            {
+              "mode": "REQUIRED",
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "n",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "ok",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "type": "TABLE"
+      },
+      "rows-inserted": {
+        "fields": [
+          "kind"
+        ],
+        "http_status": 200,
+        "insertErrors": null,
+        "kind": "bigquery#tableDataInsertAllResponse"
+      },
+      "rows-listed": {
+        "http_status": 200,
+        "rows": [
+          [
+            "alpha",
+            "1",
+            "true"
+          ],
+          [
+            "beta",
+            "2",
+            "false"
+          ]
+        ]
+      },
+      "query": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "job_reference_fields": [
+          "jobId",
+          "location",
+          "projectId"
+        ],
+        "rows": [
+          [
+            "alpha",
+            "1"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "n",
+              "type": "INTEGER"
+            }
+          ]
+        },
+        "totalRows": "1"
+      },
+      "dry-run": {
+        "bytes_processed_present": true,
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobReference",
+          "kind",
+          "location",
+          "schema",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed"
+        ],
+        "jobComplete": true
+      },
+      "dataset-iam-unavailable": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "table-policy-read": {
+        "bindings": null,
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200
+      },
+      "viewer-granted": {
+        "http_status": 200,
+        "viewer_bound": true
+      },
+      "viewer-reads-rows": {
+        "http_status": 200,
+        "rows": [
+          [
+            "alpha",
+            "1",
+            "true"
+          ],
+          [
+            "beta",
+            "2",
+            "false"
+          ]
+        ]
+      },
+      "viewer-cannot-insert": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "viewer-cannot-query": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "delete-non-empty": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "dataset-deleted": {
+        "body_bytes": 0,
+        "http_status": 204
+      },
+      "absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "dataset_absent": true
+      }
+    }
+  }
+}

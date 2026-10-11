@@ -6,6 +6,7 @@
 1	ANN202	gcp_validation/sdk_storage.py
 1	ANN204	gcp_validation/artifactregistry.py
 1	ANN204	gcp_validation/authorization.py
+1	ANN204	gcp_validation/bigquery.py
 1	ANN204	gcp_validation/firestore.py
 1	ANN204	gcp_validation/normalization.py
 1	ANN204	gcp_validation/projectiam.py
@@ -30,12 +31,14 @@
 1	D103	gcp_validation/pubsub_scope.py
 1	D107	gcp_validation/artifactregistry.py
 1	D107	gcp_validation/authorization.py
+1	D107	gcp_validation/bigquery.py
 1	D107	gcp_validation/firestore.py
 1	D107	gcp_validation/normalization.py
 1	D107	gcp_validation/projectiam.py
 1	D107	gcp_validation/sdk_storage.py
 1	D107	gcp_validation/serviceaccounts.py
 1	D401	gcp_validation/artifactregistry.py
+1	D401	gcp_validation/bigquery.py
 1	D401	gcp_validation/firestore.py
 1	D401	gcp_validation/projectiam.py
 1	D401	gcp_validation/pubsub.py
@@ -44,6 +47,8 @@
 1	E501	gcp_validation/normalization.py
 1	E501	tests/conformance/artifactregistry/conftest.py
 1	E501	tests/conformance/artifactregistry/test_artifactregistry.py
+1	E501	tests/conformance/bigquery/conftest.py
+1	E501	tests/conformance/bigquery/test_bigquery.py
 1	E501	tests/conformance/firestore/conftest.py
 1	E501	tests/conformance/firestore/test_firestore.py
 1	E501	tests/conformance/projectiam/test_policy.py
@@ -53,6 +58,7 @@
 1	E501	tests/conformance/secretmanager/test_secrets.py
 1	E501	tests/conformance/serviceaccounts/test_accounts.py
 1	I001	gcp_validation/artifactregistry.py
+1	I001	gcp_validation/bigquery.py
 1	I001	gcp_validation/live_rest.py
 1	I001	gcp_validation/pubsub_scope.py
 1	I001	gcp_validation/sandbox.py
@@ -61,6 +67,7 @@
 1	I001	gcp_validation/serviceaccounts.py
 1	I001	gcp_validation/storage.py
 1	I001	tests/conformance/artifactregistry/conftest.py
+1	I001	tests/conformance/bigquery/conftest.py
 1	I001	tests/conformance/conftest.py
 1	I001	tests/conformance/firestore/conftest.py
 1	ICN001	tests/conformance/test_storage_bucket_updates.py
@@ -71,16 +78,20 @@
 1	PLR0915	gcp_validation/sandbox.py
 1	PLW0108	gcp_validation/storage.py
 1	PT018	gcp_validation/secretmanager.py
+1	RUF005	gcp_validation/bigquery.py
 1	RUF012	gcp_validation/sdk_storage.py
 1	S101	gcp_validation/authorization.py
 1	S101	gcp_validation/secretmanager.py
 1	S105	gcp_validation/pubsub.py
 1	S106	gcp_validation/sdk_storage.py
+1	S310	gcp_validation/bigquery.py
 1	S310	gcp_validation/live_rest.py
 1	S310	gcp_validation/secretmanager.py
 1	S310	gcp_validation/storage.py
 1	S324	tests/conformance/test_storage_sdk.py
+1	S608	gcp_validation/bigquery.py
 1	T201	gcp_validation/artifactregistry.py
+1	T201	gcp_validation/bigquery.py
 1	T201	gcp_validation/firestore.py
 1	T201	gcp_validation/projectiam.py
 1	T201	gcp_validation/pubsub.py
@@ -95,6 +106,7 @@
 10	ANN201	gcp_validation/artifactregistry.py
 10	ANN201	gcp_validation/projectiam.py
 10	E501	gcp_validation/artifactregistry.py
+11	ANN201	gcp_validation/bigquery.py
 11	E501	gcp_validation/live_rest.py
 11	E501	gcp_validation/serviceaccounts.py
 11	PLC0415	gcp_validation/pubsub.py
@@ -128,6 +140,8 @@
 2	FURB162	tests/conformance/test_storage_bucket_updates.py
 2	I001	gcp_validation/pubsub.py
 20	ANN201	gcp_validation/secretmanager.py
+24	E501	gcp_validation/bigquery.py
+26	ANN001	gcp_validation/bigquery.py
 3	ANN001	gcp_validation/federation.py
 3	ANN204	gcp_validation/live_rest.py
 3	ANN204	gcp_validation/secretmanager.py
@@ -159,6 +173,7 @@
 4	ANN201	gcp_validation/sdk_storage.py
 4	ANN204	gcp_validation/pubsub.py
 4	D102	gcp_validation/firestore.py
+4	D103	gcp_validation/bigquery.py
 4	E501	gcp_validation/federation.py
 4	E501	tests/conformance/test_storage_authorization.py
 4	E501	tests/conformance/test_storage_multipart.py
@@ -175,6 +190,7 @@
 5	PLC0415	gcp_validation/sdk_storage.py
 6	ANN001	gcp_validation/sdk_storage.py
 6	ARG002	gcp_validation/storage.py
+6	D102	gcp_validation/bigquery.py
 6	D102	gcp_validation/normalization.py
 6	E501	gcp_validation/firestore.py
 6	E501	gcp_validation/sandbox.py

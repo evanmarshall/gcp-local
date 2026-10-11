@@ -77,6 +77,7 @@ type datasetRecord struct {
 	ID           string
 	Labels       map[string]string
 	FriendlyName string
+	Location     string
 	CreatedAt    time.Time
 }
 
@@ -88,6 +89,7 @@ type tableRecord struct {
 	Labels       map[string]string
 	FriendlyName string
 	Rows         []map[string]any
+	Location     string
 	CreatedAt    time.Time
 }
 
@@ -96,6 +98,7 @@ type jobRecord struct {
 	ID        string
 	Fields    []map[string]any
 	Rows      []map[string]any
+	Location  string
 	CreatedAt time.Time
 }
 

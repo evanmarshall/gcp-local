@@ -72,7 +72,6 @@
 3	gocognit	internal/providers/pubsub/provider.go
 3	gocognit	internal/providers/storage/provider.go
 3	goconst	internal/providers/storage/provider.go
-4	goconst	internal/providers/bigquery/methods.go
 4	goconst	internal/providers/pubsub/permissions.go
 4	goconst	internal/providers/pubsub/rest.go
 4	wrapcheck	internal/providers/storage/state.go

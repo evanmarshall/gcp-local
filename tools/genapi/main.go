@@ -391,6 +391,7 @@ func bigqueryRoutes(_ bool) []byte {
 		{"bigquery.datasets.getIamPolicy", verbPOST, base + "/{datasetId}:getIamPolicy", false, false},
 		{"bigquery.datasets.setIamPolicy", verbPOST, base + "/{datasetId}:setIamPolicy", true, false},
 		{"bigquery.tables.getIamPolicy", verbGET, rows + ":getIamPolicy", false, false},
+		{"bigquery.tables.getIamPolicy", verbPOST, rows + ":getIamPolicy", false, false},
 		{"bigquery.tables.setIamPolicy", verbPOST, rows + ":setIamPolicy", true, false},
 		{"bigquery.datasets.get", verbGET, base + "/{datasetId}", false, false},
 		{"bigquery.datasets.list", verbGET, base, false, false},

@@ -37,7 +37,7 @@ func testProjectPolicy() string {
 	roles := []string{
 		"roles/resourcemanager.projectIamAdmin", "roles/storage.admin",
 		"roles/cloudkms.admin", "roles/secretmanager.admin", "roles/cloudtasks.admin",
-		"roles/datastore.user", "roles/datastore.indexAdmin", "roles/bigquery.dataOwner",
+		"roles/datastore.user", "roles/datastore.indexAdmin", "roles/bigquery.dataOwner", "roles/bigquery.jobUser",
 		"roles/spanner.admin", "roles/pubsub.admin", "roles/run.admin", "roles/compute.admin",
 		"roles/artifactregistry.admin", "roles/bigtable.admin",
 	}
