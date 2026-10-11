@@ -17,6 +17,7 @@ var CloudTasksRoutes = []Route{
 	{"cloudtasks.tasks.delete", "DELETE", "/v2beta3/projects/{project}/locations/{location}/queues/{queue}/tasks/{task}", false, false},
 	{"cloudtasks.tasks.run", "POST", "/v2beta3/projects/{project}/locations/{location}/queues/{queue}/tasks/{task}:run", false, false},
 	{"cloudtasks.queues.getIamPolicy", "GET", "/v2beta3/projects/{project}/locations/{location}/queues/{queue}:getIamPolicy", false, false},
+	{"cloudtasks.queues.getIamPolicy", "POST", "/v2beta3/projects/{project}/locations/{location}/queues/{queue}:getIamPolicy", false, false},
 	{"cloudtasks.queues.setIamPolicy", "POST", "/v2beta3/projects/{project}/locations/{location}/queues/{queue}:setIamPolicy", true, false},
 	{"cloudtasks.locations.list", "GET", "/v2beta3/projects/{project}/locations", false, false},
 }

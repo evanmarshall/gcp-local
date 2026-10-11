@@ -71,14 +71,21 @@ func TestAccCloudTasksQueueLifecycle(t *testing.T) {
 func testQueueConfig(name string) string {
 	return fmt.Sprintf(`
 resource "google_cloud_tasks_queue" "queue" {
- name = "%s"
+ name = "%[1]s"
  location = "us-central1"
  rate_limits {
   max_dispatches_per_second = 5
   max_concurrent_dispatches = 2
  }
 }
-`, name)
+
+resource "google_cloud_tasks_queue_iam_member" "member" {
+ name     = google_cloud_tasks_queue.queue.name
+ location = "us-central1"
+ role     = "roles/cloudtasks.enqueuer"
+ member   = "serviceAccount:fixture@%[2]s.iam.gserviceaccount.com"
+}
+`, name, projectID)
 }
 
 // testQueueConfigUpdated raises the dispatch rate.
