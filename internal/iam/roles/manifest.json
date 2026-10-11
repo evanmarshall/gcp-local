@@ -146,12 +146,12 @@
   {
    "file": "bigquery.dataEditor.json",
    "name": "roles/bigquery.dataEditor",
-   "sha256": "d69893e2c5ebe50cd47e41ac43116363e4b5595150c529dc6a99246355850bf4"
+   "sha256": "96f83e6e1a217bea1495f94d0168ec6df16a93cfc568471952440d2eabc5713a"
   },
   {
    "file": "bigquery.dataViewer.json",
    "name": "roles/bigquery.dataViewer",
-   "sha256": "de9b40151b98aa07cb8d3b31b1b99643556becbc51e53022c6a787d62b3ff327"
+   "sha256": "391776175061f10b7afb9e6ac23f56746bfb33c4dcb7b7eaecfe37fb60e5f6fa"
   },
   {
    "file": "spanner.admin.json",
@@ -216,7 +216,7 @@
   {
    "file": "bigquery.admin.json",
    "name": "roles/bigquery.admin",
-   "sha256": "f399ed35a759fd4d0c79e226441de3829792c2f8c763391f0a73eb5e1ac91198"
+   "sha256": "c356422f80760d2260b54899c0d95713a1776180a9d87c1edafe62fbc63e3dcd"
   },
   {
    "file": "cloudkms.cryptoKeyEncrypter.json",

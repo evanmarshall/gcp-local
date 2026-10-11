@@ -8,6 +8,7 @@
   "bigquery.jobs.get",
   "bigquery.tables.get",
   "bigquery.tables.getData",
+  "bigquery.tables.getIamPolicy",
   "bigquery.tables.list"
  ],
  "name": "roles/bigquery.dataViewer",

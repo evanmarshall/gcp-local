@@ -27,6 +27,8 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.datasetsUpdate(request, scope)
 	case methodDatasetsGetIam, methodDatasetsSetIam:
 		return p.datasetIam(call, request, target)
+	case methodTablesGetIam, methodTablesSetIam:
+		return p.datasetIam(call, request, target)
 	case methodDatasetsDelete:
 		return p.datasetsDelete(request, scope)
 	default:
