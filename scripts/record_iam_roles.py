@@ -29,9 +29,31 @@ ROLES = {
         "secretmanager.admin", "secretmanager.secretAccessor", "secretmanager.viewer",
     ),
     "cloudtasks": ("cloudtasks.admin", "cloudtasks.enqueuer"),
-    "networkmanagement": ("networkmanagement.viewer",),
-    "kms": ("cloudkms.admin", "cloudkms.cryptoKeyEncrypterDecrypter", "cloudkms.viewer"),
-    "firestore": ("datastore.user", "datastore.viewer"),
+    "networkmanagement": ("networkmanagement.admin", "networkmanagement.viewer"),
+    "kms": (
+        "cloudkms.admin",
+        "cloudkms.cryptoKeyEncrypter",
+        "cloudkms.cryptoKeyEncrypterDecrypter",
+        "cloudkms.viewer",
+    ),
+    "firestore": ("datastore.indexAdmin", "datastore.user", "datastore.viewer"),
+    "bigquery": (
+        "bigquery.admin",
+        "bigquery.dataEditor",
+        "bigquery.dataOwner",
+        "bigquery.dataViewer",
+        "bigquery.jobUser",
+        "bigquery.resourceViewer",
+    ),
+    "bigtable": ("bigtable.admin", "bigtable.user", "bigtable.viewer"),
+    "spanner": ("spanner.admin", "spanner.databaseAdmin", "spanner.viewer"),
+    "artifactregistry": (
+        "artifactregistry.admin", "artifactregistry.repoAdmin", "artifactregistry.reader",
+    ),
+    "serviceaccounts": (
+        "iam.serviceAccountAdmin", "iam.serviceAccountKeyAdmin", "iam.serviceAccountViewer",
+    ),
+    "resourcemanager": ("resourcemanager.projectIamAdmin",),
 }
 
 
@@ -41,12 +63,15 @@ def main() -> int:
     parser.add_argument("--account", required=True)
     parser.add_argument("--quota-project", required=True)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--service", choices=sorted(ROLES), default="storage")
+    parser.add_argument(
+        "--service", choices=sorted(ROLES), action="append", help="repeatable; default storage"
+    )
     parser.add_argument("--allow-live", action="store_true", required=True)
     args = parser.parse_args()
+    services = args.service or ["storage"]
     args.output.mkdir(parents=True, exist_ok=False)
     files = []
-    for role in ROLES[args.service]:
+    for role in (role for service in services for role in ROLES[service]):
         # Predefined roles are global: gcloud rejects --project for this command.
         raw = subprocess.check_output(
             [
@@ -72,7 +97,7 @@ def main() -> int:
         "source": "https://iam.googleapis.com/v1/roles/{role}",
         "recorded_at": datetime.now(UTC).isoformat(),
         "scope": "Read-only predefined "
-        + args.service
+        + ", ".join(services)
         + " role definitions; no resource mutation or grant",
         "roles": files,
     }

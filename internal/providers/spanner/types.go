@@ -55,7 +55,7 @@ var permissions = map[string]string{
 	methodDatabasesGet:      "spanner.databases.get",
 	methodDatabasesList:     "spanner.databases.list",
 	methodDatabasesUpdate:   "spanner.databases.update",
-	methodDatabasesDelete:   "spanner.databases.delete",
+	methodDatabasesDelete:   "spanner.databases.drop",
 	methodDatabasesGetIam:   "spanner.databases.getIamPolicy",
 	methodDatabasesSetIam:   "spanner.databases.setIamPolicy",
 	methodDatabasesApplyDdl: "spanner.databases.updateDdl",

@@ -33,8 +33,8 @@ var permissions = map[string]string{
 	methodDocumentsCreate: "datastore.entities.create",
 	methodDocumentsUpdate: "datastore.entities.update",
 	methodDocumentsDelete: "datastore.entities.delete",
-	methodFieldsGet:       "datastore.indexes.get",
-	methodFieldsUpdate:    "datastore.indexes.update",
+	methodFieldsGet:       "datastore.schemas.get",
+	methodFieldsUpdate:    "datastore.schemas.update",
 }
 
 // Resource-name helpers follow the real Firestore namespace.

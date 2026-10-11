@@ -52,7 +52,10 @@ func loadRoles() (map[string]map[string]bool, error) {
 		if err := json.Unmarshal(raw, &role); err != nil {
 			return nil, fmt.Errorf("decode role snapshot %s: %w", entry.File, err)
 		}
-		if role.Name != entry.Name || role.Stage != "GA" || len(role.IncludedPermissions) == 0 {
+		// Predefined roles such as cloudtasks.enqueuer are still BETA in GCP;
+		// deprecated, disabled, and alpha roles stay rejected.
+		stable := role.Stage == "GA" || role.Stage == "BETA"
+		if role.Name != entry.Name || !stable || len(role.IncludedPermissions) == 0 {
 			return nil, errRoleSnapshot
 		}
 		permissions := map[string]bool{}

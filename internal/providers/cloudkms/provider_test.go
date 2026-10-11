@@ -57,7 +57,9 @@ func newHarness(t *testing.T) *harness {
 	}
 	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, iam.Policy{
 		Bindings: []iam.Binding{
+			// cloudkms.admin manages keys but cannot use them in GCP.
 			{Role: "roles/cloudkms.admin", Members: []string{testActor}},
+			{Role: "roles/cloudkms.cryptoKeyEncrypterDecrypter", Members: []string{testActor}},
 		},
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)

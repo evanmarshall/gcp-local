@@ -1,6 +1,6 @@
 # Firestore (local slice)
 
-Firestore v1 documents control plane: collection-level creates, document upsert/get/list/delete with database-attached IAM (`roles/datastore.user` and `roles/datastore.viewer` snapshots pin the baselines; Firestore permission names are the Cloud Datastore ones).
+Firestore v1 documents control plane: collection-level creates, document upsert/get/list/delete with database-attached IAM (recorded `roles/datastore.*` snapshots pin the baselines; Firestore permission names are the Cloud Datastore ones, and field/TTL configuration checks `datastore.schemas.*`, the current name for `datastore.indexes.*`).
 
 ## Local-modeled surfaces
 

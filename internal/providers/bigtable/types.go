@@ -56,7 +56,7 @@ var permissions = map[string]string{
 	methodTablesList:      "bigtable.tables.list",
 	methodTablesUpdate:    "bigtable.tables.update",
 	methodTablesDelete:    "bigtable.tables.delete",
-	methodTablesModifyFam: "bigtable.tables.modifyColumnFamilies",
+	methodTablesModifyFam: "bigtable.tables.update",
 	methodTablesGetIam:    "bigtable.tables.getIamPolicy",
 	methodTablesSetIam:    "bigtable.tables.setIamPolicy",
 }

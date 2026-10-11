@@ -62,7 +62,7 @@ func newHarness(t *testing.T) *harness {
 	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/demo-net", iam.Policy{
 		Bindings: []iam.Binding{
 			{Role: "roles/compute.admin", Members: []string{"serviceAccount:actor@demo-net.iam.gserviceaccount.com"}},
-			{Role: "roles/networkmanagement.viewer", Members: []string{"serviceAccount:actor@demo-net.iam.gserviceaccount.com"}},
+			{Role: "roles/networkmanagement.admin", Members: []string{"serviceAccount:actor@demo-net.iam.gserviceaccount.com"}},
 		},
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)

@@ -14,7 +14,7 @@ is selected with `--services=...,artifactregistry`.
 - Repository mode (STANDARD_REPOSITORY by default) and cleanupPolicyDryRun
   round-trip so the pinned Terraform case stays stable.
 - Predefined roles pinned: `roles/artifactregistry.admin`,
-  `roles/artifactregistry.repositoryAdmin`, `roles/artifactregistry.reader`.
+  `roles/artifactregistry.repoAdmin`, `roles/artifactregistry.reader`.
 
 ## Explicit gaps
 

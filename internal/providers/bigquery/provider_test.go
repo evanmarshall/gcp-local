@@ -53,7 +53,13 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("register the project: %v", err)
 	}
 	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, iam.Policy{
-		Bindings: []iam.Binding{{Role: "roles/bigquery.dataEditor", Members: []string{testActor}}},
+		// Real dataEditor cannot delete datasets or run jobs; the actor holds
+		// the recorded owner and job-user roles that do.
+		Bindings: []iam.Binding{
+			{Role: "roles/bigquery.dataOwner", Members: []string{testActor}},
+			{Role: "roles/bigquery.jobUser", Members: []string{testActor}},
+			{Role: "roles/bigquery.resourceViewer", Members: []string{testActor}},
+		},
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)
 	}

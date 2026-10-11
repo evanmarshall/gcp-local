@@ -1,6 +1,6 @@
 # BigQuery (local slice)
 
-BigQuery v2 control plane: datasets, tables with typed schemas, insertAll row storage, and tabledata reads with per-dataset/table IAM (`roles/bigquery.dataEditor` and `roles/bigquery.dataViewer` snapshots pin the baselines).
+BigQuery v2 control plane: datasets, tables with typed schemas, insertAll row storage, and tabledata reads with per-dataset/table IAM (recorded `roles/bigquery.*` snapshots pin the baselines; dataset listing checks `bigquery.datasets.get` and insertAll checks `bigquery.tables.updateData`, as in GCP).
 
 ## Local-modeled surfaces
 

@@ -22,7 +22,10 @@
     "cloudtasks.tasks.fullView",
     "cloudtasks.tasks.get",
     "cloudtasks.tasks.list",
-    "cloudtasks.tasks.run"
+    "cloudtasks.tasks.run",
+    "monitoring.timeSeries.list",
+    "resourcemanager.projects.get",
+    "resourcemanager.projects.list"
   ],
   "name": "roles/cloudtasks.admin",
   "stage": "GA",

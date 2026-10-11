@@ -46,7 +46,11 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("register the project: %v", err)
 	}
 	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, iam.Policy{
-		Bindings: []iam.Binding{{Role: "roles/iam.serviceAccountAdmin", Members: []string{testActor}}},
+		Bindings: []iam.Binding{
+			{Role: "roles/iam.serviceAccountAdmin", Members: []string{testActor}},
+			// Key management sits in its own role in GCP.
+			{Role: "roles/iam.serviceAccountKeyAdmin", Members: []string{testActor}},
+		},
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)
 	}

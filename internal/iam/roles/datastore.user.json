@@ -1,16 +1,32 @@
 {
- "description": "Read and write Cloud Firestore documents.",
- "etag": "AA==",
- "includedPermissions": [
-  "datastore.entities.create",
-  "datastore.entities.delete",
-  "datastore.entities.get",
-  "datastore.entities.list",
-  "datastore.entities.update",
-  "datastore.indexes.get",
-  "datastore.indexes.list",
-  "datastore.indexes.update"
- ],
- "name": "roles/datastore.user",
- "stage": "GA"
+  "description": "Provides read/write access to data in a Cloud Datastore database. Intended for application developers and service accounts.",
+  "etag": "AA==",
+  "includedPermissions": [
+    "appengine.applications.get",
+    "databasesconsole.locations.get",
+    "databasesconsole.locations.list",
+    "databasesconsole.studioQueries.create",
+    "databasesconsole.studioQueries.delete",
+    "databasesconsole.studioQueries.search",
+    "databasesconsole.studioQueries.update",
+    "datastore.databases.get",
+    "datastore.databases.getMetadata",
+    "datastore.databases.list",
+    "datastore.entities.allocateIds",
+    "datastore.entities.create",
+    "datastore.entities.delete",
+    "datastore.entities.get",
+    "datastore.entities.list",
+    "datastore.entities.update",
+    "datastore.namespaces.get",
+    "datastore.namespaces.list",
+    "datastore.schemas.list",
+    "datastore.statistics.get",
+    "datastore.statistics.list",
+    "resourcemanager.projects.get",
+    "resourcemanager.projects.list"
+  ],
+  "name": "roles/datastore.user",
+  "stage": "GA",
+  "title": "Cloud Datastore User"
 }

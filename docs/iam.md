@@ -16,14 +16,15 @@ Conditions (v3, CEL, fail-closed), deny rules (v3, deny-overrides-allow), and pr
 
 ## Role snapshots
 
-Ten complete predefined roles were read from GCP on 2026-10-05: Storage Admin, Object User, Object Viewer, and Object Creator; Pub/Sub Admin, Publisher, Subscriber, and Viewer; Service Account User and Service Account Token Creator. `internal/iam/roles/manifest.json` records their source and hashes, verified when the evaluator loads. Role permissions are data; they do not expand the registered method/request coverage. Ordinary builds/tests never fetch roles or credentials. The recorder defaults to Storage; select `--service pubsub` or `--service identity` for the additional sets.
+All 50 committed predefined roles were read from GCP on 2026-10-11 with `roles.get` (full view), replacing earlier Cloud Run, Compute, Secret Manager, Cloud Tasks, Network Management, KMS, Firestore, BigQuery, Bigtable, Spanner, Artifact Registry, service-account, and Resource Manager files that had been hand-authored with invented contents. The ten Storage, Pub/Sub, and identity roles recorded on 2026-10-05 were byte-identical on re-read. `internal/iam/roles/manifest.json` records the source and hashes, verified when the evaluator loads; GA and BETA roles load, other launch stages are rejected. Role permissions are data; they do not expand the registered method/request coverage. Ordinary builds/tests never fetch roles or credentials. The recorder defaults to Storage; repeat `--service` to record several sets into one manifest.
 
 To propose a later read-only refresh under an authorized account/quota project:
 
 ```sh
 python3 scripts/record_iam_roles.py --allow-live \
   --account YOUR_ACCOUNT --quota-project YOUR_SANDBOX \
-  --output .artifacts/roles-candidate
+  --output .artifacts/roles-candidate \
+  --service storage --service pubsub  # repeat for every committed set
 ```
 
 Inspect the candidate and its permission changes before replacing committed files and updating affected conformance evidence. The recorder never changes project IAM or grants permissions.

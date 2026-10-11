@@ -1,13 +1,13 @@
 {
- "description": "Encrypt and decrypt using existing crypto keys.",
- "etag": "AA==",
- "includedPermissions": [
-  "cloudkms.cryptoKeyVersions.useToDecrypt",
-  "cloudkms.cryptoKeyVersions.useToEncrypt",
-  "cloudkms.cryptoKeys.get",
-  "cloudkms.keyRings.get",
-  "cloudkms.locations.get"
- ],
- "name": "roles/cloudkms.cryptoKeyEncrypter",
- "stage": "GA"
+  "description": "Enables Encrypt operations",
+  "etag": "AA==",
+  "includedPermissions": [
+    "cloudkms.cryptoKeyVersions.useToEncrypt",
+    "cloudkms.locations.get",
+    "cloudkms.locations.list",
+    "resourcemanager.projects.get"
+  ],
+  "name": "roles/cloudkms.cryptoKeyEncrypter",
+  "stage": "GA",
+  "title": "Cloud KMS CryptoKey Encrypter"
 }

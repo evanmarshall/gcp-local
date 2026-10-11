@@ -1,6 +1,6 @@
 # Cloud KMS (local slice)
 
-Cloud KMS v1 control plane: key rings, symmetric crypto keys, versions, and encrypt/decrypt with per-resource IAM (`cloudkms.*` permission rows; `roles/cloudkms.admin`, `roles/cloudkms.cryptoKeyEncrypterDecrypter`, and `roles/cloudkms.viewer` snapshots pin the baselines).
+Cloud KMS v1 control plane: key rings, symmetric crypto keys, versions, and encrypt/decrypt with per-resource IAM (`cloudkms.*` permission rows; recorded `roles/cloudkms.*` snapshots pin the baselines; as in GCP, `roles/cloudkms.admin` manages keys but cannot encrypt or decrypt).
 
 ## Local-modeled surfaces
 
