@@ -52,7 +52,7 @@ func main() {
 	must(err)
 	for i, project := range []string{"gcp-local-test", "synthetic-peer"} {
 		name := "//cloudresourcemanager.googleapis.com/projects/" + project
-		number := "100000000001"
+		number := "000000000001"
 		if i == 1 {
 			number = "000000000002"
 		}
