@@ -57,6 +57,7 @@ func TestAccKMSKeyRingCryptoKey(t *testing.T) {
 					resource.TestCheckResourceAttr("google_kms_key_ring.ring", "name", ringName),
 					resource.TestCheckResourceAttr("google_kms_crypto_key.key", "name", keyName),
 					resource.TestCheckResourceAttr("google_kms_crypto_key.key", "rotation_period", "7776000s"),
+					resource.TestCheckResourceAttr("google_kms_key_ring_iam_member.member", "role", "roles/cloudkms.cryptoKeyEncrypterDecrypter"),
 				),
 			},
 		},
@@ -75,6 +76,12 @@ resource "google_kms_crypto_key" "key" {
  name           = "%s"
  key_ring       = google_kms_key_ring.ring.id
  rotation_period = "7776000s"
+}
+
+resource "google_kms_key_ring_iam_member" "member" {
+ key_ring_id = google_kms_key_ring.ring.id
+ role        = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+ member      = "serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"
 }
 `, ringName, keyName)
 }
