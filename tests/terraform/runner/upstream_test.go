@@ -154,12 +154,6 @@ func calculateCrc32cHash(data []byte) string {
 
 func testAccStorageBucket_basic(bucketName string) string {
 	return fmt.Sprintf(`
-resource "google_storage_bucket_iam_member" "member" {
- bucket  = google_storage_bucket.bucket.name
- role    = "roles/storage.objectViewer"
- member  = "serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"
-}
-
 resource "google_storage_bucket" "bucket" {
   name     = "%s"
   location = "US"
