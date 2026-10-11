@@ -71,7 +71,15 @@ resource "google_artifact_registry_repository" "repository" {
    "gcp-local-run" = "terraform"
  }
 }
-`, name)
+
+resource "google_artifact_registry_repository_iam_member" "member" {
+ repository = google_artifact_registry_repository.repository.name
+ location   = "us-central1"
+ project    = %q
+ role       = "roles/artifactregistry.reader"
+ member     = "serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"
+}
+`, name, projectID)
 }
 
 // testAccArtifactRegistryDestroy verifies the repository is gone.
