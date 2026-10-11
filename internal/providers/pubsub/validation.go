@@ -97,7 +97,7 @@ func validateModifyAckDeadline(r *pb.ModifyAckDeadlineRequest) error {
 
 // validateSubscription checks the subscription fields and its push configuration.
 func validateSubscription(r *pb.Subscription) error {
-	if err := fields(r, "name", "topic", "labels", "ack_deadline_seconds", "message_retention_duration", "push_config"); err != nil {
+	if err := fields(r, "name", "topic", "labels", "ack_deadline_seconds", "message_retention_duration", "attributes", "push_config"); err != nil {
 		return err
 	}
 	if r.GetPushConfig() != nil {

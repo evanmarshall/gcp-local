@@ -50,10 +50,17 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	switch twin {
 	case subscriber + "CreateSubscription":
 		var body struct {
-			Topic                    string         `json:"topic"`
-			AckDeadlineSeconds       int32          `json:"ackDeadlineSeconds"`
-			MessageRetentionDuration string         `json:"messageRetentionDuration"`
-			PushConfig               *pb.PushConfig `json:"pushConfig"`
+			Topic                    string `json:"topic"`
+			AckDeadlineSeconds       int32  `json:"ackDeadlineSeconds"`
+			MessageRetentionDuration string `json:"messageRetentionDuration"`
+			PushConfig               struct {
+				PushEndpoint string            `json:"pushEndpoint"`
+				Attributes   map[string]string `json:"attributes"`
+				OidcToken    struct {
+					ServiceAccountEmail string `json:"serviceAccountEmail"`
+					Audience            string `json:"audience"`
+				} `json:"oidcToken"`
+			} `json:"pushConfig"`
 		}
 		if json.Unmarshal(request.JSON, &body) != nil {
 			return nil, status.Error(codes.InvalidArgument, "Invalid subscription body")
@@ -66,12 +73,30 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 		if deadline == 0 {
 			deadline = 10
 		}
+		// Push config is decoded manually: the generated protobuf structs carry
+		// snake_case json tags, the REST wire is camelCase, and OidcToken is a
+		// oneof that a plain decode cannot populate at all.
+		var push *pb.PushConfig
+		if body.PushConfig.PushEndpoint != "" || len(body.PushConfig.Attributes) > 0 || body.PushConfig.OidcToken.ServiceAccountEmail != "" {
+			push = &pb.PushConfig{
+				PushEndpoint: body.PushConfig.PushEndpoint,
+				Attributes:   body.PushConfig.Attributes,
+			}
+			if body.PushConfig.OidcToken.ServiceAccountEmail != "" || body.PushConfig.OidcToken.Audience != "" {
+				push.AuthenticationMethod = &pb.PushConfig_OidcToken_{
+					OidcToken: &pb.PushConfig_OidcToken{
+						ServiceAccountEmail: body.PushConfig.OidcToken.ServiceAccountEmail,
+						Audience:            body.PushConfig.OidcToken.Audience,
+					},
+				}
+			}
+		}
 		sub := &pb.Subscription{
 			Name:                     restSubscriptionName(project, request.Path["subscription"]),
 			Topic:                    topic,
 			AckDeadlineSeconds:       deadline,
 			MessageRetentionDuration: durationFromSeconds(body.MessageRetentionDuration),
-			PushConfig:               body.PushConfig,
+			PushConfig:               push,
 		}
 		// The v2 CreateSubscription call takes the Subscription directly.
 		return sub, nil

@@ -108,7 +108,7 @@ func ownedBucket(t *testing.T) string {
 			write("passed")
 			return
 		}
-		if code != 200 || bucket["projectNumber"] != "000000000001" || bucket["name"] != name {
+		if code != 200 || bucket["projectNumber"] != "100000000001" || bucket["name"] != name {
 			t.Error("Fixture ownership mismatch")
 			return
 		}

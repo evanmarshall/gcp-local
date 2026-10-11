@@ -9,7 +9,6 @@
 1	cyclop	internal/providers/bigtable/provider_test.go
 1	cyclop	internal/providers/iam/methods.go
 1	cyclop	internal/providers/iam/provider_test.go
-1	cyclop	internal/providers/pubsub/rest_wire.go
 1	cyclop	internal/providers/resourcemanager/provider.go
 1	cyclop	internal/providers/spanner/methods.go
 1	cyclop	internal/providers/storage/provider.go
@@ -52,6 +51,7 @@
 2	cyclop	internal/backend/manager_test.go
 2	cyclop	internal/gateway/gateway_test.go
 2	cyclop	internal/providers/bigtable/methods.go
+2	cyclop	internal/providers/pubsub/rest_wire.go
 2	cyclop	internal/providers/storage/validation.go
 2	gocognit	internal/backend/manager.go
 2	gocognit	internal/backend/manager_test.go

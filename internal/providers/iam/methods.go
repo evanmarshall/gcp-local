@@ -89,7 +89,7 @@ func (p *Provider) accountsCreate(request *gateway.RESTRequest, scope state.Scop
 		return nil, err
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: accountResource(scope.Project, id), Service: serviceName,
+		Name: accountResource(scope.Project, accountEmail(scope.Project, id)), Service: serviceName,
 		Kind: kindAccount, Parent: projectResource(scope.Project), Scope: scope,
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the service account: %w", indexErr)
@@ -174,7 +174,7 @@ func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scop
 	var indexErr error
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		delete(s.accounts, account)
-		indexErr = p.index.Remove(serviceName, scope, accountResource(scope.Project, account))
+		indexErr = p.index.Remove(serviceName, scope, accountResource(scope.Project, accountEmail(scope.Project, account)))
 		return nil
 	})
 	if indexErr != nil {

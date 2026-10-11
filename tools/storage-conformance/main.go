@@ -52,7 +52,7 @@ func main() {
 	must(err)
 	for i, project := range []string{"gcp-local-test", "synthetic-peer"} {
 		name := "//cloudresourcemanager.googleapis.com/projects/" + project
-		number := "000000000001"
+		number := "100000000001"
 		if i == 1 {
 			number = "000000000002"
 		}
@@ -74,6 +74,7 @@ func main() {
 			{Role: "roles/bigtable.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/resourcemanager.projectIamAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}

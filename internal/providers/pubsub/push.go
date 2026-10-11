@@ -33,7 +33,7 @@ type pushSubscription struct {
 }
 
 func validatePush(config *pb.PushConfig) error {
-	if err := fields(config, "push_endpoint", "oidc_token"); err != nil {
+	if err := fields(config, "push_endpoint", "attributes", "oidc_token"); err != nil {
 		return err
 	}
 	if config.GetOidcToken() == nil {

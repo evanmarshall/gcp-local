@@ -156,7 +156,7 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		if p.accountLocked(scope, account) == nil {
 			return scope, target, notFound(kindAccount, account)
 		}
-		target.Name = accountResource(project, account)
+		target.Name = accountResource(project, accountEmail(project, account))
 		return scope, target, nil
 	case methodKeysList:
 		if !uid.MatchString(account) {
@@ -165,7 +165,7 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		if p.accountLocked(scope, account) == nil {
 			return scope, target, notFound(kindAccount, account)
 		}
-		target.Name = accountResource(project, account)
+		target.Name = accountResource(project, accountEmail(project, account))
 		return scope, target, nil
 	case methodKeysCreate:
 		if !uid.MatchString(account) {
@@ -174,7 +174,7 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		if p.accountLocked(scope, account) == nil {
 			return scope, target, notFound(kindAccount, account)
 		}
-		target.Name = accountResource(project, account)
+		target.Name = accountResource(project, accountEmail(project, account))
 		return scope, target, nil
 	default:
 		if !uid.MatchString(account) {
@@ -183,7 +183,7 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		if p.accountLocked(scope, account) == nil {
 			return scope, target, notFound(kindAccount, account)
 		}
-		target.Name = accountResource(project, account)
+		target.Name = accountResource(project, accountEmail(project, account))
 		return scope, target, nil
 	}
 }
