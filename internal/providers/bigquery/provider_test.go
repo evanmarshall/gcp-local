@@ -224,3 +224,68 @@ func (h *harness) engineSet(policy iam.Policy) (iam.Policy, error) {
 	}
 	return policy, nil
 }
+
+func TestJobsQueryAndResults(t *testing.T) {
+	h := newHarness(t)
+	recorder := h.invoke(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": testDataset}})
+	if recorder.Code != 200 {
+		t.Fatalf("dataset create status = %d", recorder.Code)
+	}
+	recorder = h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", map[string]any{
+		"tableReference": map[string]any{"datasetId": testDataset, "tableId": testTable},
+		"schema":         map[string]any{"fields": []any{map[string]any{"name": "title", "type": "STRING"}, map[string]any{"name": "rank", "type": "INTEGER"}}},
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("table create status = %d", recorder.Code)
+	}
+	recorder = h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables/"+testTable+"/insertAll", map[string]any{
+		"rows": []any{
+			map[string]any{"json": map[string]any{"title": "fire-and-fog", "rank": 1}},
+			map[string]any{"json": map[string]any{"title": "still-wind", "rank": 2}},
+		},
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("insertAll status = %d", recorder.Code)
+	}
+
+	recorder = h.invoke(http.MethodPost, "/bigquery/v2/projects/"+testProject+"/queries", map[string]any{
+		"query": "SELECT title FROM " + testDataset + "." + testTable + " WHERE rank = 2",
+	})
+	if recorder.Code != 200 {
+		t.Fatalf("jobs.query status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	var result struct {
+		JobReference struct {
+			JobID string `json:"jobId"`
+		} `json:"jobReference"`
+		Rows []struct {
+			F []struct {
+				V string `json:"v"`
+			} `json:"f"`
+		} `json:"rows"`
+		TotalRows any `json:"totalRows"`
+	}
+	if json.Unmarshal(recorder.Body.Bytes(), &result) != nil {
+		t.Fatalf("decode the query result: %v", recorder.Body.String())
+	}
+	if result.JobReference.JobID == "" || len(result.Rows) != 1 || result.Rows[0].F[0].V != "still-wind" {
+		t.Fatalf("unexpected query result %+v", result)
+	}
+	recorder = h.invoke(http.MethodGet, "/bigquery/v2/projects/"+testProject+"/queries/"+result.JobReference.JobID, nil)
+	if recorder.Code != 200 {
+		t.Fatalf("getQueryResults status = %d", recorder.Code)
+	}
+
+	recorder = h.invoke(http.MethodPost, "/bigquery/v2/projects/"+testProject+"/queries", map[string]any{
+		"query": "SELECT SUM(title) FROM " + testDataset + "." + testTable,
+	})
+	if recorder.Code != 501 {
+		t.Fatalf("unsupported function status = %d", recorder.Code)
+	}
+	recorder = h.invoke(http.MethodPost, "/bigquery/v2/projects/"+testProject+"/queries", map[string]any{
+		"query": "SELECT title FROM " + testDataset + ".missing",
+	})
+	if recorder.Code != 404 {
+		t.Fatalf("missing table status = %d", recorder.Code)
+	}
+}

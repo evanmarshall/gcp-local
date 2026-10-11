@@ -159,6 +159,9 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		return scope, target, nil
 	case methodDatasetsList:
 		return scope, target, nil
+	case methodJobsQuery, methodJobsResults:
+		// Query jobs authorize at the project, like the documented rows.
+		return scope, target, nil
 	}
 	if !uid.MatchString(dataset) {
 		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid dataset id %q", dataset)

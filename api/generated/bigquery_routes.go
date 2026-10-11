@@ -15,4 +15,6 @@ var BigQueryRoutes = []Route{
 	{"bigquery.tables.update", "PATCH", "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}", true, false},
 	{"bigquery.tabledata.insertAll", "POST", "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}/insertAll", true, false},
 	{"bigquery.tabledata.list", "GET", "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}/data", false, false},
+	{"bigquery.jobs.query", "POST", "/bigquery/v2/projects/{project}/queries", true, false},
+	{"bigquery.jobs.getQueryResults", "GET", "/bigquery/v2/projects/{project}/queries/{jobId}", false, false},
 }

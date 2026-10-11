@@ -4,9 +4,10 @@
  "includedPermissions": [
   "bigquery.datasets.get",
   "bigquery.datasets.list",
+  "bigquery.jobs.get",
   "bigquery.tables.get",
-  "bigquery.tables.list",
-  "bigquery.tables.getData"
+  "bigquery.tables.getData",
+  "bigquery.tables.list"
  ],
  "name": "roles/bigquery.dataViewer",
  "stage": "GA"

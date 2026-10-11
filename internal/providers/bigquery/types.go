@@ -32,6 +32,8 @@ const (
 	methodTablesUpdate   = "bigquery.tables.update"
 	methodRowsInsert     = "bigquery.tabledata.insertAll"
 	methodRowsList       = "bigquery.tabledata.list"
+	methodJobsQuery      = "bigquery.jobs.query"
+	methodJobsResults    = "bigquery.jobs.getQueryResults"
 )
 
 // permissions follows the documented BigQuery access-control rows.
@@ -48,6 +50,8 @@ var permissions = map[string]string{
 	methodTablesUpdate:   "bigquery.tables.update",
 	methodRowsInsert:     "bigquery.tabledata.insertAll",
 	methodRowsList:       "bigquery.tables.getData",
+	methodJobsQuery:      "bigquery.jobs.create",
+	methodJobsResults:    "bigquery.jobs.get",
 }
 
 // Resource-name helpers follow the real BigQuery namespace.
@@ -79,22 +83,33 @@ type tableRecord struct {
 	CreatedAt    time.Time
 }
 
+// jobRecord is one stored query job with its materialized result.
+type jobRecord struct {
+	ID        string
+	Fields    []map[string]any
+	Rows      []map[string]any
+	CreatedAt time.Time
+}
+
 // scopeState is one project slice of provider state.
 type scopeState struct {
 	datasets map[string]*datasetRecord
 	tables   map[string]*tableRecord
+	jobs     map[string]*jobRecord
 }
 
 func newScopeState() scopeState {
 	return scopeState{
 		datasets: map[string]*datasetRecord{},
 		tables:   map[string]*tableRecord{},
+		jobs:     map[string]*jobRecord{},
 	}
 }
 
 func (s *scopeState) reset() {
 	s.datasets = map[string]*datasetRecord{}
 	s.tables = map[string]*tableRecord{}
+	s.jobs = map[string]*jobRecord{}
 }
 
 // errProviderShape rejects an incomplete provider construction.

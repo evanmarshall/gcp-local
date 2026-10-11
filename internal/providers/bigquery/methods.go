@@ -46,6 +46,10 @@ func (p *Provider) executeTables(call gateway.Call, request *gateway.RESTRequest
 		return p.tablesDelete(request, scope)
 	case methodRowsInsert:
 		return p.rowsInsert(request, scope)
+	case methodJobsQuery:
+		return p.jobsQuery(request, scope)
+	case methodJobsResults:
+		return p.jobsResults(request, scope)
 	default:
 		return p.rowsList(request, scope)
 	}
@@ -392,4 +396,199 @@ func (p *Provider) rowsList(request *gateway.RESTRequest, scope state.Scope) (*g
 		"totalRows": strconv.Itoa(len(rows)),
 		"rows":      rows,
 	}}, nil
+}
+
+// jobsQuery runs a bounded local SELECT against one stored table.
+// Supported grammar: SELECT * | column[, column] FROM dataset.table
+// [WHERE column = literal]; joins, aggregations, and functions are refused
+// as explicit gaps rather than approximated.
+func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	var body struct {
+		Query        string `json:"query"`
+		UseLegacySQL bool   `json:"useLegacySql"`
+	}
+	if json.Unmarshal(request.JSON, &body) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid query body")
+	}
+	if body.UseLegacySQL {
+		return nil, status.Error(codes.Unimplemented, "Legacy SQL is not supported")
+	}
+	parsed, parseErr := parseQuery(body.Query)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	table := p.tableLocked(scope, parsed.dataset, parsed.table)
+	if table == nil {
+		return nil, notFound("table", parsed.table)
+	}
+	fields := schemaFields(table.Schema)
+	if len(parsed.columns) > 0 {
+		projected := []map[string]any{}
+		for _, field := range fields {
+			for _, want := range parsed.columns {
+				if field["name"] == want {
+					projected = append(projected, field)
+					break
+				}
+			}
+		}
+		if len(projected) != len(parsed.columns) {
+			return nil, status.Errorf(codes.InvalidArgument, "Unknown column in query")
+		}
+		fields = projected
+	}
+	rows := []map[string]any{}
+	for _, row := range table.Rows {
+		if parsed.filterColumn != "" {
+			value, ok := row[parsed.filterColumn]
+			if !ok || !literalEquals(value, parsed.filterValue) {
+				continue
+			}
+		}
+		projected := map[string]any{}
+		for _, field := range fields {
+			name, _ := field["name"].(string)
+			projected[name] = row[name]
+		}
+		rows = append(rows, projected)
+	}
+	jobID := "job_" + strconv.Itoa(int(p.clock().UnixNano()))
+	job := &jobRecord{ID: jobID, Fields: fields, Rows: rows, CreatedAt: p.clock()}
+	if err := p.scopes.With(scope, func(s *scopeState) error {
+		s.jobs[jobID] = job
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{
+		"jobReference": map[string]any{"projectId": scope.Project, "jobId": jobID},
+		"jobComplete":  true,
+		"schema":       map[string]any{"fields": fields},
+		"rows":         bqRows(fields, rows),
+		"totalRows":    len(rows),
+	}}, nil
+}
+
+// jobsResults returns the stored result of one query job.
+func (p *Provider) jobsResults(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	job := p.jobLocked(scope, request.Path["jobId"])
+	if job == nil {
+		return nil, notFound("job", request.Path["jobId"])
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{
+		"jobReference": map[string]any{"projectId": scope.Project, "jobId": job.ID},
+		"jobComplete":  true,
+		"schema":       map[string]any{"fields": job.Fields},
+		"rows":         bqRows(job.Fields, job.Rows),
+		"totalRows":    len(job.Rows),
+	}}, nil
+}
+
+// jobLocked reads one job under the scope lock.
+func (p *Provider) jobLocked(scope state.Scope, job string) *jobRecord {
+	var record *jobRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.jobs[job]; return nil })
+	return record
+}
+
+// parsedQuery is the bounded SELECT the local engine accepts.
+type parsedQuery struct {
+	dataset, table string
+	columns        []string
+	filterColumn   string
+	filterValue    string
+}
+
+// parseQuery parses the supported SELECT subset.
+func parseQuery(query string) (parsedQuery, error) {
+	parsed := parsedQuery{}
+	upper := strings.ToUpper(strings.TrimSpace(query))
+	if !strings.HasPrefix(upper, "SELECT ") {
+		return parsed, status.Error(codes.Unimplemented, "Only SELECT statements are supported")
+	}
+	rest := strings.TrimSpace(query[len("SELECT "):])
+	from := strings.Index(strings.ToUpper(rest), " FROM ")
+	if from < 0 {
+		return parsed, status.Errorf(codes.InvalidArgument, "Missing FROM clause in %q", query)
+	}
+	columns := strings.TrimSpace(rest[:from])
+	after := strings.TrimSpace(rest[from+len(" FROM "):])
+	table, filter := after, ""
+	if index := strings.Index(strings.ToUpper(after), " WHERE "); index >= 0 {
+		table = after[:index]
+		filter = strings.TrimSpace(after[index+len(" WHERE "):])
+	}
+	parts := strings.Split(table, ".")
+	switch len(parts) {
+	case 2:
+		parsed.dataset, parsed.table = parts[0], parts[1]
+	case 3:
+		parsed.dataset, parsed.table = parts[1], parts[2]
+	default:
+		return parsed, status.Errorf(codes.InvalidArgument, "Unreadable table reference %q", table)
+	}
+	if !uid.MatchString(parsed.dataset) || !uid.MatchString(parsed.table) {
+		return parsed, status.Errorf(codes.InvalidArgument, "Invalid table reference %q", table)
+	}
+	if columns != "*" {
+		for _, column := range strings.Split(columns, ",") {
+			name := strings.TrimSpace(column)
+			if !uid.MatchString(name) {
+				return parsed, status.Errorf(codes.Unimplemented, "Only plain column projections are supported: %q", name)
+			}
+			parsed.columns = append(parsed.columns, name)
+		}
+	}
+	if filter != "" {
+		segments := strings.SplitN(filter, "=", 2)
+		if len(segments) != 2 {
+			return parsed, status.Errorf(codes.Unimplemented, "Only equality filters are supported")
+		}
+		parsed.filterColumn = strings.TrimSpace(segments[0])
+		parsed.filterValue = strings.Trim(strings.TrimSpace(segments[1]), "'\"")
+		if !uid.MatchString(parsed.filterColumn) {
+			return parsed, status.Errorf(codes.InvalidArgument, "Invalid filter column %q", parsed.filterColumn)
+		}
+	}
+	return parsed, nil
+}
+
+// schemaFields returns the schema's field list.
+func schemaFields(schema map[string]any) []map[string]any {
+	fields, _ := schema["fields"].([]any)
+	out := []map[string]any{}
+	for _, field := range fields {
+		if entry, ok := field.(map[string]any); ok {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// literalEquals compares one stored value against the filter literal.
+func literalEquals(value any, literal string) bool {
+	switch typed := value.(type) {
+	case string:
+		return typed == literal
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64) == literal
+	case int:
+		return strconv.Itoa(typed) == literal
+	default:
+		return false
+	}
+}
+
+// bqRows renders stored rows in the BigQuery cell shape.
+func bqRows(fields []map[string]any, rows []map[string]any) []any {
+	out := []any{}
+	for _, row := range rows {
+		cells := []any{}
+		for _, field := range fields {
+			name, _ := field["name"].(string)
+			cells = append(cells, map[string]any{"v": row[name]})
+		}
+		out = append(out, map[string]any{"f": cells})
+	}
+	return out
 }

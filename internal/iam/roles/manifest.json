@@ -146,12 +146,12 @@
   {
    "file": "bigquery.dataEditor.json",
    "name": "roles/bigquery.dataEditor",
-   "sha256": "d01fa831e69192be05d690171c022d4f9f2655a02ea71b6408f8889895b03dfa"
+   "sha256": "508d07aaf5243b8f197065e59a2ef8da22c7cd18e0124cfe402784b1764114ed"
   },
   {
    "file": "bigquery.dataViewer.json",
    "name": "roles/bigquery.dataViewer",
-   "sha256": "3184a0663ea3c4c37363d2ef0642c6f6abeee83dd99939fbb66a685b01cc80b0"
+   "sha256": "2d2c3deb87b578773e5a89a3d120bdbbefa16b5904303e61bf607669beae3570"
   },
   {
    "file": "spanner.admin.json",
