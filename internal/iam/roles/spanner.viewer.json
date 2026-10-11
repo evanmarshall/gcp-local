@@ -2,6 +2,7 @@
  "description": "Read Spanner instances, databases, and configs.",
  "etag": "AA==",
  "includedPermissions": [
+  "spanner.backups.list",
   "spanner.databases.get",
   "spanner.databases.list",
   "spanner.instanceConfigs.get",

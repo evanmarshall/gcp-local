@@ -154,17 +154,35 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		if !uid.MatchString(instance) {
 			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
 		}
+		if p.instanceLocked(scope, instance) == nil {
+			return scope, target, notFound(kindInstance, instance)
+		}
+		target.Name = instanceResource(project, instance)
+		return scope, target, nil
+	case methodBackupsList:
+		if !uid.MatchString(instance) {
+			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
+		}
 		target.Name = instanceResource(project, instance)
 		return scope, target, nil
 	case methodDatabasesList, methodDatabasesCreate:
 		if !uid.MatchString(instance) {
 			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
 		}
+		if p.instanceLocked(scope, instance) == nil {
+			return scope, target, notFound(kindInstance, instance)
+		}
 		target.Name = instanceResource(project, instance)
 		return scope, target, nil
 	default:
 		if !uid.MatchString(instance) || !uid.MatchString(database) {
 			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid database id %q", database)
+		}
+		if p.instanceLocked(scope, instance) == nil {
+			return scope, target, notFound(kindInstance, instance)
+		}
+		if p.databaseLocked(scope, instance, database) == nil {
+			return scope, target, notFound(kindDatabase, database)
 		}
 		target.Name = databaseResource(project, instance, database)
 		return scope, target, nil

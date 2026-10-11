@@ -3,7 +3,6 @@ package spanner
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -42,6 +41,10 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.databasesList(request, scope)
 	case methodDatabasesUpdate:
 		return p.databasesUpdate(request, scope)
+	case methodDatabasesApplyDdl:
+		return p.databasesApplyDdl(request, scope)
+	case methodBackupsList:
+		return p.backupsList(request, scope)
 	default:
 		return p.databasesDelete(request, scope)
 	}
@@ -86,26 +89,30 @@ func (p *Provider) configList() (*gateway.RESTResponse, error) {
 // instancesCreate validates and stores one instance.
 func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	var body struct {
-		Name            string            `json:"name"`
-		DisplayName     string            `json:"displayName"`
-		Config          string            `json:"config"`
-		NodeCount       int               `json:"nodeCount"`
-		ProcessingUnits int               `json:"processingUnits"`
-		Labels          map[string]string `json:"labels"`
+		InstanceID string `json:"instanceId"`
+		Instance   struct {
+			Name            string            `json:"name"`
+			DisplayName     string            `json:"displayName"`
+			Config          string            `json:"config"`
+			NodeCount       int               `json:"nodeCount"`
+			ProcessingUnits int               `json:"processingUnits"`
+			Labels          map[string]string `json:"labels"`
+		} `json:"instance"`
 	}
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid instance body")
 	}
-	id := strconv.Itoa(len(body.Name))
-	_ = id
-	name := body.Name
+	name := body.InstanceID
+	if name == "" {
+		name = body.Instance.Name
+	}
 	if index := lastSegment(name); index >= 0 {
 		name = name[index+1:]
 	}
 	if !uid.MatchString(name) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid instance id %q", name)
 	}
-	config := body.Config
+	config := body.Instance.Config
 	if index := lastSegment(config); index >= 0 {
 		config = config[index+1:]
 	}
@@ -119,7 +126,7 @@ func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Sco
 	if !found {
 		return nil, status.Errorf(codes.InvalidArgument, "Unknown instance config %q", config)
 	}
-	if body.NodeCount == 0 && body.ProcessingUnits == 0 {
+	if body.Instance.NodeCount == 0 && body.Instance.ProcessingUnits == 0 {
 		return nil, status.Error(codes.InvalidArgument, "An instance requires nodeCount or processingUnits")
 	}
 	now := p.clock()
@@ -129,11 +136,11 @@ func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Sco
 			return status.Errorf(codes.AlreadyExists, "Instance %s already exists", name)
 		}
 		created = &instanceRecord{
-			Name: name, Config: config, DisplayName: body.DisplayName,
-			ProcessingUnits: body.ProcessingUnits, Labels: body.Labels, CreatedAt: now,
+			Name: name, Config: config, DisplayName: body.Instance.DisplayName,
+			ProcessingUnits: body.Instance.ProcessingUnits, Labels: body.Instance.Labels, CreatedAt: now,
 		}
-		if body.NodeCount > 0 {
-			created.ProcessingUnits = body.NodeCount * 1000
+		if body.Instance.NodeCount > 0 {
+			created.ProcessingUnits = body.Instance.NodeCount * 1000
 		}
 		if created.ProcessingUnits == 0 {
 			created.ProcessingUnits = 1000
@@ -150,7 +157,9 @@ func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Sco
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the instance: %w", indexErr)
 	}
-	return &gateway.RESTResponse{JSON: instanceWire(scope.Project, created)}, nil
+	return &gateway.RESTResponse{JSON: map[string]any{
+		"done": true, "response": instanceWire(scope.Project, created),
+	}}, nil
 }
 
 // lastSegment finds the final '/' separator, or -1.
@@ -299,7 +308,9 @@ func (p *Provider) databasesCreate(request *gateway.RESTRequest, scope state.Sco
 		return nil, fmt.Errorf("index the database: %w", indexErr)
 	}
 	record := p.databaseLocked(scope, instance, name)
-	return &gateway.RESTResponse{JSON: p.databaseWire(scope.Project, instance, record)}, nil
+	return &gateway.RESTResponse{JSON: map[string]any{
+		"done": true, "response": p.databaseWire(scope.Project, instance, record),
+	}}, nil
 }
 
 // databaseIDFromStatement extracts the id after DATABASE in a DDL statement.
@@ -395,6 +406,30 @@ func (p *Provider) databasesDelete(request *gateway.RESTRequest, scope state.Sco
 		return nil, fmt.Errorf("unregister the database: %w", indexErr)
 	}
 	return &gateway.RESTResponse{Status: 204}, nil
+}
+
+// databasesApplyDdl records one DDL application on a database.
+func (p *Provider) databasesApplyDdl(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	instance, database := request.Path["instance"], request.Path["database"]
+	record := p.databaseLocked(scope, instance, database)
+	if record == nil {
+		return nil, notFound(kindDatabase, database)
+	}
+	var body struct {
+		Statements []string `json:"statements"`
+	}
+	if json.Unmarshal(request.JSON, &body) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid DDL body")
+	}
+	record.DDL = append(record.DDL, body.Statements...)
+	return &gateway.RESTResponse{JSON: map[string]any{
+		"done": true, "response": p.databaseWire(scope.Project, instance, record),
+	}}, nil
+}
+
+// backupsList returns the instance's modeled backups: none exist locally.
+func (p *Provider) backupsList(_ *gateway.RESTRequest, _ state.Scope) (*gateway.RESTResponse, error) {
+	return &gateway.RESTResponse{JSON: map[string]any{"backups": []any{}}}, nil
 }
 
 // getIam returns the stored policy of an instance or database.

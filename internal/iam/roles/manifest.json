@@ -156,17 +156,17 @@
   {
    "file": "spanner.admin.json",
    "name": "roles/spanner.admin",
-   "sha256": "1f0ef651e6f0db6a65f746846e3835d89ee29ac5f824dfbb513c296083dcfb2d"
+   "sha256": "82e226cdc5b598d6340131fc1512c50f54fcbf37babe884b797e3f53568600c7"
   },
   {
    "file": "spanner.databaseAdmin.json",
    "name": "roles/spanner.databaseAdmin",
-   "sha256": "44256ae60ccf9ac7dcc9812f6c8028df5f223b549604ae44d29ff4231b1f9eef"
+   "sha256": "02ea4b776bffa38b7c50f58432f6a13932aea9cf628b8ef9a9c2816768a5d39d"
   },
   {
    "file": "spanner.viewer.json",
    "name": "roles/spanner.viewer",
-   "sha256": "d2632f82c816c5590e9631fe47fa9462dd30644da6c31da3473e1507f663cf1b"
+   "sha256": "fbaafd2d3c2de3ecc0bc7b84be328cf7f75a139a68d39071923bff0d28815d88"
   },
   {
    "file": "bigtable.admin.json",

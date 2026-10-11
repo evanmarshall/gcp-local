@@ -17,7 +17,9 @@ The runner uses `terraform-plugin-testing v1.15.0` and the unmodified, checksum-
 | Destroy/check clients | Explicit loopback Storage client with no proxy/redirects, bounded response/time limits, and actual 404 verification |
 | Post-apply lifecycle | Additional refresh and unchanged plan checks after each configuration, including label removals and file replacement |
 
-The original bucket/object attribute checks remain except for the documented regional RPO assertion. Provider `terraform_labels` is excluded from import comparison because the adapter adds an ownership default label; effective labels remain checked. Import tests cover qualified IDs only. These are adapted upstream cases, not an unmodified provider-wide certification.
+The original bucket/object attribute checks remain except for the documented regional RPO assertion.
+The locally adapted `TestAccSpannerInstanceAndDatabase` is not an extracted upstream function: it drives `google_spanner_instance` and `google_spanner_database` with the same pinned provider through `spanner_custom_endpoint`, fixture credentials, and the modeled regional configs. Its assertions (names, processing units, post-destroy 404) and destroy probe follow the same owned-name and isolation rules.
+ Provider `terraform_labels` is excluded from import comparison because the adapter adds an ownership default label; effective labels remain checked. Import tests cover qualified IDs only. These are adapted upstream cases, not an unmodified provider-wide certification.
 
 ## Endpoint audit
 

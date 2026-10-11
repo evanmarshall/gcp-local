@@ -431,7 +431,9 @@ func spannerRoutes(_ bool) []byte {
 		{"spanner.databases.get", verbGET, base + "/instances/{instance}/databases/{database}", false, false},
 		{"spanner.databases.list", verbGET, base + "/instances/{instance}/databases", false, false},
 		{"spanner.databases.update", verbPATCH, base + "/instances/{instance}/databases/{database}", true, false},
+		{"spanner.databases.applyDdl", verbPATCH, base + "/instances/{instance}/databases/{database}/ddl", true, false},
 		{"spanner.databases.delete", verbDELETE, base + "/instances/{instance}/databases/{database}", false, false},
+		{"spanner.backups.list", verbGET, base + "/instances/{instance}/backups", false, false},
 		{"spanner.databases.getIamPolicy", verbGET, base + "/instances/{instance}/databases/{database}:getIamPolicy", false, false},
 		{"spanner.databases.setIamPolicy", verbPOST, base + "/instances/{instance}/databases/{database}:setIamPolicy", true, false},
 	}

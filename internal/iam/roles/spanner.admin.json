@@ -2,6 +2,8 @@
  "description": "Full control of Spanner instances and databases.",
  "etag": "AA==",
  "includedPermissions": [
+  "spanner.backups.list",
+  "spanner.databases.applyDdl",
   "spanner.databases.create",
   "spanner.databases.delete",
   "spanner.databases.get",
@@ -9,6 +11,7 @@
   "spanner.databases.list",
   "spanner.databases.setIamPolicy",
   "spanner.databases.update",
+  "spanner.databases.updateDdl",
   "spanner.instanceConfigs.get",
   "spanner.instanceConfigs.list",
   "spanner.instances.create",

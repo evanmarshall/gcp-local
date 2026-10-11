@@ -20,42 +20,46 @@ const serviceName = "spanner"
 
 // Method name constants; the generated route table uses the same identifiers.
 const (
-	methodConfigsGet      = "spanner.instanceConfigs.get"
-	methodConfigsList     = "spanner.instanceConfigs.list"
-	methodInstancesCreate = "spanner.instances.create"
-	methodInstancesGet    = "spanner.instances.get"
-	methodInstancesList   = "spanner.instances.list"
-	methodInstancesUpdate = "spanner.instances.update"
-	methodInstancesDelete = "spanner.instances.delete"
-	methodInstancesGetIam = "spanner.instances.getIamPolicy"
-	methodInstancesSetIam = "spanner.instances.setIamPolicy"
-	methodDatabasesCreate = "spanner.databases.create"
-	methodDatabasesGet    = "spanner.databases.get"
-	methodDatabasesList   = "spanner.databases.list"
-	methodDatabasesUpdate = "spanner.databases.update"
-	methodDatabasesDelete = "spanner.databases.delete"
-	methodDatabasesGetIam = "spanner.databases.getIamPolicy"
-	methodDatabasesSetIam = "spanner.databases.setIamPolicy"
+	methodConfigsGet        = "spanner.instanceConfigs.get"
+	methodConfigsList       = "spanner.instanceConfigs.list"
+	methodInstancesCreate   = "spanner.instances.create"
+	methodInstancesGet      = "spanner.instances.get"
+	methodInstancesList     = "spanner.instances.list"
+	methodInstancesUpdate   = "spanner.instances.update"
+	methodInstancesDelete   = "spanner.instances.delete"
+	methodInstancesGetIam   = "spanner.instances.getIamPolicy"
+	methodInstancesSetIam   = "spanner.instances.setIamPolicy"
+	methodDatabasesCreate   = "spanner.databases.create"
+	methodDatabasesGet      = "spanner.databases.get"
+	methodDatabasesList     = "spanner.databases.list"
+	methodDatabasesUpdate   = "spanner.databases.update"
+	methodDatabasesDelete   = "spanner.databases.delete"
+	methodDatabasesGetIam   = "spanner.databases.getIamPolicy"
+	methodDatabasesSetIam   = "spanner.databases.setIamPolicy"
+	methodDatabasesApplyDdl = "spanner.databases.applyDdl"
+	methodBackupsList       = "spanner.backups.list"
 )
 
 // permissions follows the documented Spanner access-control rows.
 var permissions = map[string]string{
-	methodConfigsGet:      "spanner.instanceConfigs.get",
-	methodConfigsList:     "spanner.instanceConfigs.list",
-	methodInstancesCreate: "spanner.instances.create",
-	methodInstancesGet:    "spanner.instances.get",
-	methodInstancesList:   "spanner.instances.list",
-	methodInstancesUpdate: "spanner.instances.update",
-	methodInstancesDelete: "spanner.instances.delete",
-	methodInstancesGetIam: "spanner.instances.getIamPolicy",
-	methodInstancesSetIam: "spanner.instances.setIamPolicy",
-	methodDatabasesCreate: "spanner.databases.create",
-	methodDatabasesGet:    "spanner.databases.get",
-	methodDatabasesList:   "spanner.databases.list",
-	methodDatabasesUpdate: "spanner.databases.update",
-	methodDatabasesDelete: "spanner.databases.delete",
-	methodDatabasesGetIam: "spanner.databases.getIamPolicy",
-	methodDatabasesSetIam: "spanner.databases.setIamPolicy",
+	methodConfigsGet:        "spanner.instanceConfigs.get",
+	methodConfigsList:       "spanner.instanceConfigs.list",
+	methodInstancesCreate:   "spanner.instances.create",
+	methodInstancesGet:      "spanner.instances.get",
+	methodInstancesList:     "spanner.instances.list",
+	methodInstancesUpdate:   "spanner.instances.update",
+	methodInstancesDelete:   "spanner.instances.delete",
+	methodInstancesGetIam:   "spanner.instances.getIamPolicy",
+	methodInstancesSetIam:   "spanner.instances.setIamPolicy",
+	methodDatabasesCreate:   "spanner.databases.create",
+	methodDatabasesGet:      "spanner.databases.get",
+	methodDatabasesList:     "spanner.databases.list",
+	methodDatabasesUpdate:   "spanner.databases.update",
+	methodDatabasesDelete:   "spanner.databases.delete",
+	methodDatabasesGetIam:   "spanner.databases.getIamPolicy",
+	methodDatabasesSetIam:   "spanner.databases.setIamPolicy",
+	methodDatabasesApplyDdl: "spanner.databases.updateDdl",
+	methodBackupsList:       "spanner.backups.list",
 }
 
 // uid is the shared resource-name matcher.

@@ -83,7 +83,10 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 func (h *harness) instance() {
 	h.t.Helper()
 	recorder := h.invoke(http.MethodPost, testInstances, map[string]any{
-		"name": testInstance, "config": "regional-us-central1", "displayName": "demo", "nodeCount": 1,
+		"instanceId": testInstance,
+		"instance": map[string]any{
+			"config": "regional-us-central1", "displayName": "demo", "nodeCount": 1,
+		},
 	})
 	if recorder.Code != 200 {
 		h.t.Fatalf("instance create status = %d body %s", recorder.Code, recorder.Body.String())
