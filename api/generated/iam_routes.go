@@ -12,5 +12,7 @@ var IAMRoutes = []Route{
 	{"iam.serviceAccounts.setIamPolicy", "POST", "/v1/projects/{project}/serviceAccounts/{serviceAccount}:setIamPolicy", true, false},
 	{"iam.serviceAccountKeys.create", "POST", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys", true, false},
 	{"iam.serviceAccountKeys.list", "GET", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys", false, false},
+	{"iam.serviceAccountKeys.get", "GET", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys/{keyId}", false, false},
+	{"iam.serviceAccountKeys.get", "GET", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys/{keyId}", false, false},
 	{"iam.serviceAccountKeys.delete", "DELETE", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys/{keyId}", false, false},
 }

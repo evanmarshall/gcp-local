@@ -33,6 +33,8 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.setIam(request, target)
 	case methodKeysList:
 		return p.keysList(request, scope)
+	case methodKeysGet:
+		return p.keysGet(request, scope)
 	case methodKeysCreate:
 		return p.keysCreate(request, scope)
 	case methodKeysDelete:
@@ -229,6 +231,20 @@ func keyWire(_ *accountRecord, key *keyRecord) map[string]any {
 		"validAfterTime":  stamp(key.CreatedAt),
 		"validBeforeTime": "3999-12-31T23:59:59.999999Z",
 	}
+}
+
+// keysGet returns one synthesized key.
+func (p *Provider) keysGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	record := p.accountLocked(scope, request.Path["serviceAccount"])
+	if record == nil {
+		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+	}
+	keyID := "projects/" + record.Project + "/serviceAccounts/" + record.ID + "/keys/" + request.Path["keyId"]
+	key, ok := record.Keys[keyID]
+	if !ok {
+		return nil, notFound(kindKey, request.Path["keyId"])
+	}
+	return &gateway.RESTResponse{JSON: keyWire(record, key)}, nil
 }
 
 // keysDelete removes one synthesized key.

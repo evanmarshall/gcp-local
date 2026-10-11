@@ -50,6 +50,10 @@ resource "google_service_account" "account" {
  account_id   = "%s"
  display_name = "acceptance"
 }
+
+resource "google_service_account_key" "key" {
+ service_account_id = google_service_account.account.name
+}
 `, name),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("google_service_account.account", "account_id", name),

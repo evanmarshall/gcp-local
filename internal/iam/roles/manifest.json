@@ -206,12 +206,12 @@
   {
    "file": "iam.serviceAccountAdmin.json",
    "name": "roles/iam.serviceAccountAdmin",
-   "sha256": "8f7a3b7b1eff91fa97abd8adc4168d2fbdeb1e6c08c232b78b66c753d11d8275"
+   "sha256": "25031c7e25b7631d89900208c7799398e7f0492300050206720ff4e23728ad59"
   },
   {
    "file": "iam.serviceAccountViewer.json",
    "name": "roles/iam.serviceAccountViewer",
-   "sha256": "27a2ae78112bc58b1c99f6272330b6eaa8ba29005849fba8a648fbccfdf2881b"
+   "sha256": "0da339b45e5c1f85631a976fab39f31fb1723f49bb7781fa235742bd2de5f935"
   }
  ]
 }

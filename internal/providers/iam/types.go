@@ -29,6 +29,7 @@ const (
 	methodKeysCreate     = "iam.serviceAccountKeys.create"
 	methodKeysList       = "iam.serviceAccountKeys.list"
 	methodKeysDelete     = "iam.serviceAccountKeys.delete"
+	methodKeysGet        = "iam.serviceAccountKeys.get"
 )
 
 // permissions follows the documented access-control rows.
@@ -43,6 +44,7 @@ var permissions = map[string]string{
 	methodKeysCreate:     "iam.serviceAccountKeys.create",
 	methodKeysList:       "iam.serviceAccountKeys.list",
 	methodKeysDelete:     "iam.serviceAccountKeys.delete",
+	methodKeysGet:        "iam.serviceAccountKeys.get",
 }
 
 // uid is the shared resource-name matcher.
