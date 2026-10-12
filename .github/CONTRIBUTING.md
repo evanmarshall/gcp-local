@@ -77,6 +77,7 @@ Every other file in `scripts/` supports a check or a documented workflow:
 | `live/plan_sandbox.py`, `live/plan_pubsub.py`, `live/record_iam_roles.py` | Live-cloud planning and role recording ([sandbox](../docs/contributing/gcp-sandbox.md), [Pub/Sub](../docs/services/messaging/pubsub.md), [IAM](../docs/architecture/iam.md)) |
 | `live/prepare_ci_profile.py`, `live/cleanup_ci.py` | Used only by the cloud-conformance and drift workflows |
 | `live/drift.py` | Runs the weekly drift plan ([drift job](../docs/contributing/gcp-sandbox.md#weekly-drift-job)) |
+| `live/batch.py` | Records or revalidates many scenarios in parallel ([validation](../docs/contributing/validation.md)) |
 | `dev/setup_git.sh` | Configure fast-forward defaults and the pre-push hook |
 | `moo/setup.sh`, `moo/install.sh`, `moo/provision.sh`, `moo/smoke.py` | Moo baseline setup and its smoke ([moo guide](../docs/contributing/moo.md)) |
 | `moo/smoke_protocols.py`, `moo/protocol_guest.py`, `moo/smoke_docker.py`, `moo/install_compose.py` | Moo runtime diagnostics ([moo guide](../docs/contributing/moo.md#smoke-checks)) |

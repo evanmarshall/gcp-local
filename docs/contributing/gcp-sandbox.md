@@ -80,4 +80,4 @@ gh workflow run gcp-drift.yml --ref main
 python scripts/live/drift.py --check   # offline: every planned test and scope exists
 ```
 
-The fixture account needs standing setup roles for every planned service, since the job can't add grants. A run costs well under $1.
+The fixture account keeps standing setup roles for every planned service, since the job can't add grants: `storage.admin`, `serviceusage.serviceUsageConsumer`, `artifactregistry.admin`, `logging.admin`, `aiplatform.user`, `bigquery.admin`, `datastore.user`, `cloudtasks.admin`, `cloudkms.admin`, `iam.serviceAccountAdmin`, `secretmanager.admin`, and `pubsub.admin`. Recording anything else adds its role for the run and removes it after. Never grant the fixture project-level `iam.serviceAccountUser` or the allowed account standing `bigquery.jobUser`: the Cloud Tasks, Cloud Scheduler, and BigQuery denial checks need them absent. A run costs well under $1.

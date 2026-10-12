@@ -58,6 +58,17 @@ Record and revalidate, after authorization:
 
 Repeat with `--gcp-mode revalidate` and a fresh artifacts directory.
 
+Many scenarios at once, in parallel:
+
+```sh
+S=~/.config/gcp-local/PROJECT/scopes   # private, outside Git
+.venv-tools/bin/python scripts/live/batch.py --mode record --profile "$PWD/.env" --scopes "$S" --write-approved-scopes
+.venv-tools/bin/python scripts/live/batch.py --mode record --profile "$PWD/.env" --scopes "$S" --dry-run
+.venv-tools/bin/python scripts/live/batch.py --mode record --profile "$PWD/.env" --scopes "$S" --jobs 4 [--only NAME ...]
+```
+
+`--write-approved-scopes` writes each scenario's exact scope from its loader; run it only for an authorized run. Scenarios that take the same sandbox lock (one per service) share a lane and run in order; lanes run in parallel, so a full re-record takes about as long as its slowest lane (Cloud SQL, about 25 minutes) instead of the sum. Project IAM runs alone at the end because it rewrites the project policy. Each run logs to `.artifacts/live/<mode>/<name>.log`. Promote candidates as below.
+
 ## Network isolation
 
 `scripts/run/isolated.py` runs a server and a test command in a Linux network namespace with only loopback. It waits up to 20 seconds for the readiness URL, enforces a deadline, kills both process groups, and strips cloud credential and proxy variables. Missing local methods fail; nothing falls back to Google. It needs Linux, `unshare`, `iproute2`, and root or namespace permission. On macOS use moo. `pytest-socket` alone is not isolation: subprocesses, Go programs, and containers bypass it.
