@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -297,7 +298,7 @@ func (p *Provider) fieldUpdate(request *gateway.RESTRequest, scope state.Scope) 
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("store the field configuration: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{
 		"done":     true,

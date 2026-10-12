@@ -70,12 +70,10 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 // emptyBackend satisfies the backend contract for an in-memory provider.
 type emptyBackend struct{}
 
-func (emptyBackend) Start(context.Context) error    { return nil }
-func (emptyBackend) Ready(context.Context) error    { return nil }
-func (emptyBackend) Stop(context.Context) error     { return nil }
-func (emptyBackend) Reset(context.Context) error    { return nil }
-func (emptyBackend) Snapshot(context.Context) error { return backend.ErrPersistenceUnsupported }
-func (emptyBackend) Restore(context.Context) error  { return backend.ErrPersistenceUnsupported }
+func (emptyBackend) Start(context.Context) error { return nil }
+func (emptyBackend) Ready(context.Context) error { return nil }
+func (emptyBackend) Stop(context.Context) error  { return nil }
+func (emptyBackend) Reset(context.Context) error { return nil }
 
 // Reset clears the scope's accounts.
 func (p *Provider) Reset(scope state.Scope) error {
@@ -128,44 +126,16 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	// GCP addresses accounts by email; the provider keys them by account id.
 	account := strings.TrimSuffix(request.Path["serviceAccount"], "@"+project+".iam.gserviceaccount.com")
 	request.Path["serviceAccount"] = account
-	switch call.Method {
-	case methodAccountsCreate, methodAccountsList:
-		return scope, target, nil
-	case methodAccountsGet, methodAccountsUpdate, methodAccountsDelete, methodAccountsGetIam, methodAccountsSetIam:
-		if !uid.MatchString(account) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", account)
-		}
-		if p.accountLocked(scope, account) == nil {
-			return scope, target, provider.NotFound(kindAccount, account)
-		}
-		target.Name = accountResource(project, accountEmail(project, account))
-		return scope, target, nil
-	case methodKeysList:
-		if !uid.MatchString(account) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", account)
-		}
-		if p.accountLocked(scope, account) == nil {
-			return scope, target, provider.NotFound(kindAccount, account)
-		}
-		target.Name = accountResource(project, accountEmail(project, account))
-		return scope, target, nil
-	case methodKeysCreate:
-		if !uid.MatchString(account) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", account)
-		}
-		if p.accountLocked(scope, account) == nil {
-			return scope, target, provider.NotFound(kindAccount, account)
-		}
-		target.Name = accountResource(project, accountEmail(project, account))
-		return scope, target, nil
-	default:
-		if !uid.MatchString(account) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", account)
-		}
-		if p.accountLocked(scope, account) == nil {
-			return scope, target, provider.NotFound(kindAccount, account)
-		}
-		target.Name = accountResource(project, accountEmail(project, account))
+	if call.Method == methodAccountsCreate || call.Method == methodAccountsList {
 		return scope, target, nil
 	}
+	// Every other method, including the key methods, acts on one existing account.
+	if !uid.MatchString(account) {
+		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", account)
+	}
+	if p.accountLocked(scope, account) == nil {
+		return scope, target, provider.NotFound(kindAccount, account)
+	}
+	target.Name = accountResource(project, accountEmail(project, account))
+	return scope, target, nil
 }

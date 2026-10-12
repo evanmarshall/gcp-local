@@ -51,30 +51,20 @@ func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Mess
 	if err != nil {
 		return call, err
 	}
-	parts, pattern := strings.Split(resource, "/"), strings.Split(info.ResourcePattern, "/")
-	if info.ResourcePattern == "**" {
-		pattern = make([]string, len(parts))
-		for i := range pattern {
-			pattern[i] = "*"
-		}
-	}
-	// A trailing ** matches zero or more further segments, as in Google's
-	// HTTP templates: projects/*/databases/*/documents/** names the database
-	// root and every nested document or collection below it.
-	if last := len(pattern) - 1; last > 0 && pattern[last] == "**" && len(parts) >= last {
-		expanded := make([]string, 0, len(parts))
-		expanded = append(expanded, pattern[:last]...)
-		for len(expanded) < len(parts) {
-			expanded = append(expanded, "*")
-		}
-		pattern = expanded
-	}
+	return call, bindResource(&call, resource, info.ResourcePattern)
+}
+
+// bindResource checks resource against the contract's pattern and records it,
+// with its project and location segments, on call.
+func bindResource(call *Call, resource, resourcePattern string) error {
+	parts := strings.Split(resource, "/")
+	pattern := expandPattern(resourcePattern, len(parts))
 	if len(parts) != len(pattern) {
-		return call, status.Error(codes.InvalidArgument, "Malformed resource name")
+		return status.Error(codes.InvalidArgument, "Malformed resource name")
 	}
 	for i, part := range parts {
-		if part == "" || part == "." || part == ".." || (pattern[i] != "*" && part != pattern[i]) {
-			return call, status.Error(codes.InvalidArgument, "Malformed resource name")
+		if !segmentMatches(part, pattern[i]) {
+			return status.Error(codes.InvalidArgument, "Malformed resource name")
 		}
 		if i > 0 && parts[i-1] == "projects" {
 			call.Project = part
@@ -84,8 +74,44 @@ func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Mess
 		}
 	}
 	call.Resource = resource
-	return call, nil
+	return nil
 }
+
+// segmentMatches rejects empty and dot segments and requires a literal pattern
+// segment to match exactly.
+func segmentMatches(part, pattern string) bool {
+	if part == "" || part == "." || part == ".." {
+		return false
+	}
+	return pattern == "*" || part == pattern
+}
+
+// expandPattern turns a contract resource pattern into one entry per segment
+// for a resource of the given length. A pattern of ** matches any segments.
+// A trailing ** matches zero or more further segments, as in Google's HTTP
+// templates: projects/*/databases/*/documents/** names the database root and
+// every nested document or collection below it.
+func expandPattern(resourcePattern string, segments int) []string {
+	if resourcePattern == "**" {
+		pattern := make([]string, segments)
+		for i := range pattern {
+			pattern[i] = "*"
+		}
+		return pattern
+	}
+	pattern := strings.Split(resourcePattern, "/")
+	last := len(pattern) - 1
+	if last <= 0 || pattern[last] != "**" || segments < last {
+		return pattern
+	}
+	expanded := make([]string, 0, segments)
+	expanded = append(expanded, pattern[:last]...)
+	for len(expanded) < segments {
+		expanded = append(expanded, "*")
+	}
+	return expanded
+}
+
 func resourceField(message proto.Message, path string) (string, error) {
 	current := message.ProtoReflect()
 	fields := strings.Split(path, ".")

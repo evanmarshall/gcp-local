@@ -47,16 +47,7 @@ type OrgPolicyDeclaration struct {
 // declared local service accounts are bootstrapped. Other service resources are
 // published by their owning providers after backend success.
 func Load(path string) (*Engine, *state.Index, error) {
-	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		return nil, nil, errConfigMode
-	}
-	file, err := os.Open(path) //nolint:gosec // the operator selects the config path explicitly
-	if err != nil {
-		return nil, nil, errConfigOpen
-	}
-	defer file.Close()
-	config, err := decodeConfig(file)
+	config, err := readConfig(path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -72,20 +63,42 @@ func Load(path string) (*Engine, *state.Index, error) {
 	if err := publishAccounts(index, engine, config.ServiceAccounts, seen); err != nil {
 		return nil, nil, err
 	}
-	for resource, policy := range config.Policies {
-		if _, err := engine.SetPolicy(resource, policy); err != nil {
-			return nil, nil, err
-		}
-	}
-	for resource, features := range config.Unsupported {
-		if err := engine.MarkUnsupported(resource, features); err != nil {
-			return nil, nil, err
-		}
+	if err := engine.publishPolicies(config); err != nil {
+		return nil, nil, err
 	}
 	if err := engine.publishSignalFamilies(config); err != nil {
 		return nil, nil, err
 	}
 	return engine, index, nil
+}
+
+// readConfig opens an operator-private regular file and decodes it.
+func readConfig(path string) (Config, error) {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return Config{}, errConfigMode
+	}
+	file, err := os.Open(path) //nolint:gosec // the operator selects the config path explicitly
+	if err != nil {
+		return Config{}, errConfigOpen
+	}
+	defer file.Close()
+	return decodeConfig(file)
+}
+
+// publishPolicies loads the declared allow policies and unsupported features.
+func (e *Engine) publishPolicies(config Config) error {
+	for resource, policy := range config.Policies {
+		if _, err := e.SetPolicy(resource, policy); err != nil {
+			return err
+		}
+	}
+	for resource, features := range config.Unsupported {
+		if err := e.MarkUnsupported(resource, features); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // publishSignalFamilies loads the org-policy and perimeter declarations.

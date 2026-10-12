@@ -56,7 +56,7 @@ var restTwins = map[string]string{
 	restSubsSetIam:          policyRPC + "SetIamPolicy",
 }
 
-// registerRestPermissions binds every REST method to its twin's permission.
+// REST IAM policy methods share one gRPC twin, so each carries its own permission.
 const (
 	restTopicsGetIam = "pubsub.http.topics.getIamPolicy"
 	restTopicsSetIam = "pubsub.http.topics.setIamPolicy"
@@ -64,12 +64,13 @@ const (
 	restSubsSetIam   = "pubsub.http.subscriptions.setIamPolicy"
 )
 
+// registerRestPermissions binds every REST method to its twin's permission.
 func (p *Provider) registerRestPermissions() error {
 	restPermissions := map[string]string{
-		restTopicsGetIam: "pubsub.topics.getIamPolicy",
-		restTopicsSetIam: "pubsub.topics.setIamPolicy",
-		restSubsGetIam:   "pubsub.subscriptions.getIamPolicy",
-		restSubsSetIam:   "pubsub.subscriptions.setIamPolicy",
+		restTopicsGetIam: permTopicsGetIam,
+		restTopicsSetIam: permTopicsSetIam,
+		restSubsGetIam:   permSubscriptionsGetIam,
+		restSubsSetIam:   permSubscriptionsSetIam,
 	}
 	for method, twin := range restTwins {
 		permission, ok := restPermissions[method]
@@ -126,17 +127,15 @@ func (p *Provider) handleRest(call gateway.Call, raw any) (any, error) {
 	}
 	project := request.Path["project"]
 	call.Resource = restResourceFor(call.Method, project, request)
-	isPolicy := strings.Contains(twin, "IAMPolicy")
-	if isPolicy {
+	if strings.Contains(twin, "IAMPolicy") {
 		// The policy surface is provider-owned: the resource name is the
 		// canonical topic/subscription, not a backend resource.
-		return p.handleRestPolicy(call, request, project, call.Method)
+		return p.handleRestPolicy(call, request, project)
 	}
 	call.Method = twin // the twin drives authorization and the emulator call
-
-	protoRequest, buildErr := p.buildRestProto(twin, project, request)
-	if buildErr != nil {
-		return nil, buildErr
+	protoRequest, err := p.buildRestProto(twin, project, request)
+	if err != nil {
+		return nil, err
 	}
 	if err := p.preflight(call, protoRequest); err != nil {
 		return nil, err
@@ -150,8 +149,8 @@ func (p *Provider) handleRest(call gateway.Call, raw any) (any, error) {
 
 // handleRestPolicy serves the REST topic/subscription IAM surface through the
 // same validation, authorization, and engine update as the gRPC handler.
-func (p *Provider) handleRestPolicy(call gateway.Call, request *gateway.RESTRequest, project, restMethod string) (*gateway.RESTResponse, error) {
-	call.Method = restTwins[restMethod]
+func (p *Provider) handleRestPolicy(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
+	call.Method = restTwins[call.Method]
 	call.Project = project
 	var protoRequest proto.Message
 	if call.Method == policyRPC+"GetIamPolicy" {
@@ -185,42 +184,12 @@ func (p *Provider) restSession(call gateway.Call, protoRequest proto.Message) (p
 	var response proto.Message
 	err := p.manager.Use(call.Context, keyOf(call), func(session context.Context, active backend.Backend) error {
 		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
-		if err := p.authorize(call, protoRequest); err != nil {
-			return err
-		}
-		return p.restForward(session, active, call, protoRequest, &response)
+		var err error
+		response, err = p.execute(call, protoRequest, active)
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("run the pub/sub session: %w", err)
 	}
 	return response, nil
-}
-
-// restForward validates the mutation against the index, forwards to the
-// emulator, and settles the push lifecycle.
-func (p *Provider) restForward(session context.Context, active backend.Backend,
-	call gateway.Call, protoRequest proto.Message, response *proto.Message,
-) error {
-	b, err := driverOf(active)
-	if err != nil {
-		return err
-	}
-	creating, deleting := mutationKind(call.Method)
-	if creating {
-		if _, found := p.index.Get(canonical(call.Resource)); found {
-			return status.Error(codes.AlreadyExists, "Pub/Sub resource already exists")
-		}
-	}
-	forwarded, push, splitErr := p.splitPushConfig(call, protoRequest)
-	if splitErr != nil {
-		return splitErr
-	}
-	*response, err = invoke(session, b, call.Method, forwarded)
-	if !creating && !deleting {
-		if err == nil {
-			p.restorePush(*response)
-		}
-		return err
-	}
-	return p.settleMutation(session, b, call, *response, forwarded, push, creating, err)
 }

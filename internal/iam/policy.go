@@ -94,73 +94,123 @@ func (e *Engine) GetPolicy(resource string) (Policy, error) {
 	}
 	return emptyPolicy(), nil
 }
+
+// SetPolicy validates, compiles, and stores an allow policy. Validation runs in
+// the order GCP reports failures, and nothing is stored unless every check passes.
 func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	owner, ok := e.index.Get(resource)
 	if !ok {
 		return Policy{}, status.Error(codes.NotFound, "Policy resource is not registered")
 	}
-	if policy.Version != 0 && policy.Version != 1 && policy.Version != 3 {
-		return Policy{}, status.Error(codes.Unimplemented, "Unsupported policy version")
+	if err := validatePolicyShape(policy); err != nil {
+		return Policy{}, err
 	}
-	if policy.Version != 3 {
-		for _, binding := range policy.Bindings {
-			if len(binding.Condition) > 0 {
-				return Policy{}, status.Errorf(codes.InvalidArgument, "Specified policy version (%d) must be at least 3 based on the policy's contents. "+
-					"For more information, please refer to https://cloud.google.com/iam/help/allow-policies/versions.", max(policy.Version, 1))
-			}
-		}
-		if len(policy.DenyRules) > 0 {
-			return Policy{}, status.Error(codes.Unimplemented, "Deny rules require policy version 3")
-		}
+	denies, err := compileDenies(policy.DenyRules)
+	if err != nil {
+		return Policy{}, err
+	}
+	conditions, err := e.compileBindings(policy.Bindings)
+	if err != nil {
+		return Policy{}, err
+	}
+	return e.storePolicy(resource, owner, policy, conditions, denies)
+}
+
+// validatePolicyShape checks the version, version-gated features, deny rule
+// shape, and binding count before any binding is compiled.
+func validatePolicyShape(policy Policy) error {
+	if err := validateVersion(policy); err != nil {
+		return err
 	}
 	for _, rule := range policy.DenyRules {
 		if len(rule.DeniedPrincipals) == 0 || len(rule.DeniedPermissions) == 0 {
-			return Policy{}, status.Error(codes.InvalidArgument, "A deny rule requires denied principals and permissions")
+			return status.Error(codes.InvalidArgument, "A deny rule requires denied principals and permissions")
 		}
 	}
 	if len(policy.Bindings) > 1000 {
-		return Policy{}, status.Error(codes.InvalidArgument, "Policy has too many bindings")
+		return status.Error(codes.InvalidArgument, "Policy has too many bindings")
 	}
-	var compiledConditions []conditionGuard
-	var compiledDenies []storedDeny
-	for index, rule := range policy.DenyRules {
-		compiled := storedDeny{rule: rule}
-		if len(rule.DenialCondition) > 0 {
-			condition, compileErr := compileCondition(rule.DenialCondition)
-			if compileErr != nil {
-				return Policy{}, status.Error(codes.Unimplemented, compileErr.Error())
-			}
-			compiled.condition = condition
-		}
-		_ = index
-		compiledDenies = append(compiledDenies, compiled)
+	return nil
+}
+
+// validateVersion rejects unknown versions and v3-only features in older ones.
+func validateVersion(policy Policy) error {
+	if policy.Version != 0 && policy.Version != 1 && policy.Version != 3 {
+		return status.Error(codes.Unimplemented, "Unsupported policy version")
 	}
-	for index, binding := range policy.Bindings {
+	if policy.Version == 3 {
+		return nil
+	}
+	for _, binding := range policy.Bindings {
 		if len(binding.Condition) > 0 {
-			compiled, compileErr := compileCondition(binding.Condition)
-			if compileErr != nil {
-				return Policy{}, status.Error(codes.InvalidArgument, "Condition expression compilation failed: "+compileErr.Error())
+			return status.Errorf(codes.InvalidArgument, "Specified policy version (%d) must be at least 3 based on the policy's contents. "+
+				"For more information, please refer to https://cloud.google.com/iam/help/allow-policies/versions.", max(policy.Version, 1))
+		}
+	}
+	if len(policy.DenyRules) > 0 {
+		return status.Error(codes.Unimplemented, "Deny rules require policy version 3")
+	}
+	return nil
+}
+
+// compileDenies compiles each deny rule's optional denial condition.
+func compileDenies(rules []DenyRule) ([]storedDeny, error) {
+	var compiled []storedDeny
+	for _, rule := range rules {
+		deny := storedDeny{rule: rule}
+		if len(rule.DenialCondition) > 0 {
+			condition, err := compileCondition(rule.DenialCondition)
+			if err != nil {
+				return nil, status.Error(codes.Unimplemented, err.Error())
 			}
-			// Guards are keyed by the binding's own position in the policy.
-			compiledConditions = append(compiledConditions, conditionGuard{
-				bindingIndex: index, condition: compiled,
-			})
+			deny.condition = condition
+		}
+		compiled = append(compiled, deny)
+	}
+	return compiled, nil
+}
+
+// compileBindings validates each binding in order and compiles its condition.
+// Guards are keyed by the binding's own position in the policy.
+func (e *Engine) compileBindings(bindings []Binding) ([]conditionGuard, error) {
+	var guards []conditionGuard
+	for index, binding := range bindings {
+		if len(binding.Condition) > 0 {
+			condition, err := compileCondition(binding.Condition)
+			if err != nil {
+				return nil, status.Error(codes.InvalidArgument, "Condition expression compilation failed: "+err.Error())
+			}
+			guards = append(guards, conditionGuard{bindingIndex: index, condition: condition})
 		}
 		if _, ok := e.roles[binding.Role]; !ok {
-			return Policy{}, status.Error(codes.Unimplemented, "Role is outside the pinned supported role set")
+			return nil, status.Error(codes.Unimplemented, "Role is outside the pinned supported role set")
 		}
-		if len(binding.Members) == 0 || len(binding.Members) > 1000 {
-			return Policy{}, status.Error(codes.InvalidArgument, "Supply one to one thousand members per binding")
-		}
-		for _, member := range binding.Members {
-			if member == "allUsers" || member == "allAuthenticatedUsers" {
-				continue
-			}
-			if (!strings.HasPrefix(member, "user:") && !strings.HasPrefix(member, "serviceAccount:")) || !strings.Contains(member, "@") || strings.ContainsAny(member, " \r\n\t") {
-				return Policy{}, status.Error(codes.Unimplemented, "IAM member type is unsupported")
-			}
+		if err := validateMembers(binding.Members); err != nil {
+			return nil, err
 		}
 	}
+	return guards, nil
+}
+
+// validateMembers accepts the public principals and user/service-account emails.
+func validateMembers(members []string) error {
+	if len(members) == 0 || len(members) > 1000 {
+		return status.Error(codes.InvalidArgument, "Supply one to one thousand members per binding")
+	}
+	for _, member := range members {
+		if member == "allUsers" || member == "allAuthenticatedUsers" {
+			continue
+		}
+		if (!strings.HasPrefix(member, "user:") && !strings.HasPrefix(member, "serviceAccount:")) || !strings.Contains(member, "@") || strings.ContainsAny(member, " \r\n\t") {
+			return status.Error(codes.Unimplemented, "IAM member type is unsupported")
+		}
+	}
+	return nil
+}
+
+// storePolicy commits a compiled policy under the etag check and assigns the
+// next revision as its etag.
+func (e *Engine) storePolicy(resource string, owner state.Resource, policy Policy, conditions []conditionGuard, denies []storedDeny) (Policy, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	previous := emptyPolicy()
@@ -178,7 +228,7 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	policy.ETag = base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(e.revision, 10)))
 	e.policies[resource] = storedPolicy{
 		policy: policy, owner: owner.Service, scope: owner.Scope,
-		conditions: compiledConditions, denies: compiledDenies, pab: policy.PAB,
+		conditions: conditions, denies: denies, pab: policy.PAB,
 	}
 	return clonePolicy(policy), nil
 }

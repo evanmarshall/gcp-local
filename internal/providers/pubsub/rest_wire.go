@@ -49,59 +49,11 @@ func (p *Provider) buildRestProto(twin, project string, request *gateway.RESTReq
 func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway.RESTRequest) (proto.Message, error) {
 	switch twin {
 	case subscriber + "CreateSubscription":
-		var body struct {
-			Topic                    string            `json:"topic"`
-			AckDeadlineSeconds       int32             `json:"ackDeadlineSeconds"`
-			MessageRetentionDuration string            `json:"messageRetentionDuration"`
-			Labels                   map[string]string `json:"labels"`
-			PushConfig               struct {
-				PushEndpoint string            `json:"pushEndpoint"`
-				Attributes   map[string]string `json:"attributes"`
-				OidcToken    struct {
-					ServiceAccountEmail string `json:"serviceAccountEmail"`
-					Audience            string `json:"audience"`
-				} `json:"oidcToken"`
-			} `json:"pushConfig"`
+		subscription, err := subscriptionFromREST(project, request)
+		if err != nil {
+			return nil, err
 		}
-		if json.Unmarshal(request.JSON, &body) != nil {
-			return nil, status.Error(codes.InvalidArgument, "Invalid subscription body")
-		}
-		topic := body.Topic
-		if !strings.HasPrefix(topic, "projects/") {
-			topic = restTopicName(project, topic)
-		}
-		deadline := body.AckDeadlineSeconds
-		if deadline == 0 {
-			deadline = 10
-		}
-		// Push config is decoded manually: the generated protobuf structs carry
-		// snake_case json tags, the REST wire is camelCase, and OidcToken is a
-		// oneof that a plain decode cannot populate at all.
-		var push *pb.PushConfig
-		if body.PushConfig.PushEndpoint != "" || len(body.PushConfig.Attributes) > 0 || body.PushConfig.OidcToken.ServiceAccountEmail != "" {
-			push = &pb.PushConfig{
-				PushEndpoint: body.PushConfig.PushEndpoint,
-				Attributes:   body.PushConfig.Attributes,
-			}
-			if body.PushConfig.OidcToken.ServiceAccountEmail != "" || body.PushConfig.OidcToken.Audience != "" {
-				push.AuthenticationMethod = &pb.PushConfig_OidcToken_{
-					OidcToken: &pb.PushConfig_OidcToken{
-						ServiceAccountEmail: body.PushConfig.OidcToken.ServiceAccountEmail,
-						Audience:            body.PushConfig.OidcToken.Audience,
-					},
-				}
-			}
-		}
-		sub := &pb.Subscription{
-			Name:                     restSubscriptionName(project, request.Path["subscription"]),
-			Topic:                    topic,
-			AckDeadlineSeconds:       deadline,
-			MessageRetentionDuration: durationFromSeconds(body.MessageRetentionDuration),
-			Labels:                   body.Labels,
-			PushConfig:               push,
-		}
-		// The v2 CreateSubscription call takes the Subscription directly.
-		return sub, nil
+		return subscription, nil
 	case subscriber + "GetSubscription":
 		return &pb.GetSubscriptionRequest{Subscription: restSubscriptionName(project, request.Path["subscription"])}, nil
 	case subscriber + "DeleteSubscription":
@@ -109,6 +61,66 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	default:
 		return &pb.ListSubscriptionsRequest{Project: "projects/" + project}, nil
 	}
+}
+
+// restSubscription is the camelCase REST body of CreateSubscription.
+type restSubscription struct {
+	Topic                    string            `json:"topic"`
+	AckDeadlineSeconds       int32             `json:"ackDeadlineSeconds"`
+	MessageRetentionDuration string            `json:"messageRetentionDuration"`
+	Labels                   map[string]string `json:"labels"`
+	PushConfig               restPushConfig    `json:"pushConfig"`
+}
+
+type restPushConfig struct {
+	PushEndpoint string            `json:"pushEndpoint"`
+	Attributes   map[string]string `json:"attributes"`
+	OidcToken    struct {
+		ServiceAccountEmail string `json:"serviceAccountEmail"`
+		Audience            string `json:"audience"`
+	} `json:"oidcToken"`
+}
+
+// subscriptionFromREST converts a REST CreateSubscription body. The v2
+// CreateSubscription call takes the Subscription directly.
+func subscriptionFromREST(project string, request *gateway.RESTRequest) (*pb.Subscription, error) {
+	var body restSubscription
+	if json.Unmarshal(request.JSON, &body) != nil {
+		return nil, status.Error(codes.InvalidArgument, "Invalid subscription body")
+	}
+	topic := body.Topic
+	if !strings.HasPrefix(topic, "projects/") {
+		topic = restTopicName(project, topic)
+	}
+	deadline := body.AckDeadlineSeconds
+	if deadline == 0 {
+		deadline = 10
+	}
+	return &pb.Subscription{
+		Name:                     restSubscriptionName(project, request.Path["subscription"]),
+		Topic:                    topic,
+		AckDeadlineSeconds:       deadline,
+		MessageRetentionDuration: durationFromSeconds(body.MessageRetentionDuration),
+		Labels:                   body.Labels,
+		PushConfig:               body.PushConfig.proto(),
+	}, nil
+}
+
+// proto decodes the push config manually: the generated protobuf structs carry
+// snake_case json tags, the REST wire is camelCase, and OidcToken is a oneof
+// that a plain decode cannot populate at all. An empty config stays nil.
+func (c restPushConfig) proto() *pb.PushConfig {
+	oidc := c.OidcToken
+	if c.PushEndpoint == "" && len(c.Attributes) == 0 && oidc.ServiceAccountEmail == "" {
+		return nil
+	}
+	push := &pb.PushConfig{PushEndpoint: c.PushEndpoint, Attributes: c.Attributes}
+	if oidc.ServiceAccountEmail != "" || oidc.Audience != "" {
+		push.AuthenticationMethod = &pb.PushConfig_OidcToken_{
+			OidcToken: &pb.PushConfig_OidcToken{ServiceAccountEmail: oidc.ServiceAccountEmail, Audience: oidc.Audience},
+		}
+	}
+	return push
 }
 
 // durationFromSeconds parses one "3600s" duration string; empty stays nil.

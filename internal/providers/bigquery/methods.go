@@ -1,11 +1,12 @@
 package bigquery
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -34,12 +35,12 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodDatasetsDelete:
 		return p.datasetsDelete(request, scope)
 	default:
-		return p.executeTables(call, request, scope, target)
+		return p.executeTables(call, request, scope)
 	}
 }
 
 // executeTables dispatches the table and row methods.
-func (p *Provider) executeTables(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, _ iam.Target) (*gateway.RESTResponse, error) {
+func (p *Provider) executeTables(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodTablesCreate:
 		return p.tablesCreate(request, scope)
@@ -62,7 +63,7 @@ func (p *Provider) executeTables(call gateway.Call, request *gateway.RESTRequest
 	}
 }
 
-// datasetRecordLocked reads one dataset under the scope lock.
+// datasetLocked reads one dataset under the scope lock.
 func (p *Provider) datasetLocked(scope state.Scope, dataset string) *datasetRecord {
 	var record *datasetRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.datasets[dataset]; return nil })
@@ -82,31 +83,22 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid dataset body")
 	}
-	if body.Location == "" {
-		body.Location = "US"
-	}
-	dataset := request.Path["datasetId"]
-	if dataset == "" {
-		dataset = body.DatasetReference.DatasetID
-	}
+	dataset := cmp.Or(request.Path["datasetId"], body.DatasetReference.DatasetID)
 	if !uid.MatchString(dataset) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid dataset id %q", dataset)
 	}
-	now := p.clock()
+	created := &datasetRecord{
+		ID: dataset, Labels: body.Labels, FriendlyName: body.FriendlyName, Location: cmp.Or(body.Location, "US"), CreatedAt: p.clock(),
+	}
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		if s.datasets[dataset] != nil {
 			return status.Errorf(codes.AlreadyExists, "Dataset %s already exists", dataset)
 		}
-		s.datasets[dataset] = &datasetRecord{
-			ID: dataset, Labels: body.Labels, FriendlyName: body.FriendlyName, Location: body.Location, CreatedAt: now,
-		}
+		s.datasets[dataset] = created
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create the dataset: %w", err)
-	}
-	created := &datasetRecord{
-		ID: dataset, Labels: body.Labels, FriendlyName: body.FriendlyName, Location: body.Location, CreatedAt: now,
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: datasetResource(scope.Project, dataset), Service: serviceName,
@@ -117,42 +109,34 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 	return &gateway.RESTResponse{JSON: datasetWire(scope.Project, dataset, created)}, nil
 }
 
+// datasetWire renders one dataset document.
 func datasetWire(project, dataset string, record *datasetRecord) map[string]any {
-	labels := map[string]string{}
-	if record != nil && record.Labels != nil {
-		labels = record.Labels
-	}
-	friendly := ""
-	if record != nil {
-		friendly = record.FriendlyName
-	}
-	created := time.Time{}
-	if record != nil {
-		created = record.CreatedAt
-	}
-	location := "US"
-	if record != nil && record.Location != "" {
-		location = record.Location
-	}
+	created := record.CreatedAt
 	document := map[string]any{
 		keyKind:            "bigquery#dataset",
 		"id":               project + ":" + dataset,
 		keyETag:            etagOf(created),
 		"selfLink":         selfLink + project + "/datasets/" + dataset,
 		"datasetReference": map[string]any{"datasetId": dataset, keyProjectID: project},
-		keyLocation:        location,
+		keyLocation:        cmp.Or(record.Location, "US"),
 		"type":             "DEFAULT",
 		"access":           defaultAccess(),
 		keyCreationTime:    strconv.FormatInt(created.UnixMilli(), 10),
 		"lastModifiedTime": strconv.FormatInt(created.UnixMilli(), 10),
 	}
+	addDescriptors(document, record.Labels, record.FriendlyName)
+	return document
+}
+
+// addDescriptors sets the optional labels and friendlyName, which the real
+// surface omits when empty.
+func addDescriptors(document map[string]any, labels map[string]string, friendlyName string) {
 	if len(labels) > 0 {
 		document["labels"] = labels
 	}
-	if friendly != "" {
-		document["friendlyName"] = friendly
+	if friendlyName != "" {
+		document["friendlyName"] = friendlyName
 	}
-	return document
 }
 
 func (p *Provider) datasetsGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
@@ -207,11 +191,10 @@ func (p *Provider) datasetsDelete(request *gateway.RESTRequest, scope state.Scop
 		removed = s.takeDataset(dataset, contents)
 		return nil
 	})
-	nonEmpty := len(removed) > 0
 	if err != nil {
 		return nil, fmt.Errorf("remove the dataset: %w", err)
 	}
-	if nonEmpty && !contents {
+	if len(removed) > 0 && !contents {
 		return nil, status.Errorf(codes.InvalidArgument, "Dataset %s is still in use", dataset)
 	}
 	if err := p.unindexTables(scope, dataset, removed); err != nil {
@@ -273,10 +256,7 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid table body")
 	}
-	table := request.Path["tableId"]
-	if table == "" {
-		table = body.TableReference.TableID
-	}
+	table := cmp.Or(request.Path["tableId"], body.TableReference.TableID)
 	if !uid.MatchString(table) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
 	}
@@ -311,18 +291,6 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 // tableWire renders one table document from its already-fetched record; the
 // scope lock is held by the caller, so this must not re-enter the store.
 func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *tableRecord) map[string]any {
-	labels := map[string]string{}
-	if record != nil && record.Labels != nil {
-		labels = record.Labels
-	}
-	friendly := ""
-	if record != nil {
-		friendly = record.FriendlyName
-	}
-	location := record.Location
-	if location == "" {
-		location = "US"
-	}
 	document := map[string]any{
 		keyKind:    "bigquery#table",
 		"id":       scope.Project + ":" + dataset + "." + table,
@@ -333,7 +301,7 @@ func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *t
 		},
 		"schema":           record.Schema,
 		"type":             "TABLE",
-		keyLocation:        location,
+		keyLocation:        cmp.Or(record.Location, "US"),
 		keyCreationTime:    strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
 		"lastModifiedTime": strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
 	}
@@ -342,12 +310,7 @@ func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *t
 		"numTotalLogicalBytes", "numLongTermLogicalBytes"} {
 		document[counter] = "0"
 	}
-	if len(labels) > 0 {
-		document["labels"] = labels
-	}
-	if friendly != "" {
-		document["friendlyName"] = friendly
-	}
+	addDescriptors(document, record.Labels, record.FriendlyName)
 	return document
 }
 
@@ -430,14 +393,11 @@ func (p *Provider) rowsInsert(request *gateway.RESTRequest, scope state.Scope) (
 	if len(body.Rows) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "insertAll requires at least one row")
 	}
-	inserted := make([]string, 0, len(body.Rows))
 	for _, row := range body.Rows {
 		if row.JSON == nil {
 			return nil, status.Error(codes.InvalidArgument, "Each row requires a json object")
 		}
-		inserted = append(inserted, "stored")
 	}
-	_ = inserted
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		stored := s.tables[tableKey(dataset, table)]
 		for _, row := range body.Rows {
@@ -515,37 +475,11 @@ func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*
 	if table == nil {
 		return nil, provider.NotFound("table", parsed.table)
 	}
-	fields := nullableFields(schemaFields(table.Schema))
-	if len(parsed.columns) > 0 {
-		projected := []map[string]any{}
-		for _, field := range fields {
-			for _, want := range parsed.columns {
-				if field["name"] == want {
-					projected = append(projected, field)
-					break
-				}
-			}
-		}
-		if len(projected) != len(parsed.columns) {
-			return nil, status.Errorf(codes.InvalidArgument, "Unknown column in query")
-		}
-		fields = projected
+	fields, err := projectFields(nullableFields(schemaFields(table.Schema)), parsed.columns)
+	if err != nil {
+		return nil, err
 	}
-	rows := []map[string]any{}
-	for _, row := range table.Rows {
-		if parsed.filterColumn != "" {
-			value, ok := row[parsed.filterColumn]
-			if !ok || !literalEquals(value, parsed.filterValue) {
-				continue
-			}
-		}
-		projected := map[string]any{}
-		for _, field := range fields {
-			name, _ := field["name"].(string)
-			projected[name] = row[name]
-		}
-		rows = append(rows, projected)
-	}
+	rows := selectRows(table.Rows, fields, parsed)
 	jobID := "job_" + strconv.Itoa(int(p.clock().UnixNano()))
 	job := &jobRecord{ID: jobID, Fields: fields, Rows: rows, Location: table.Location, CreatedAt: p.clock()}
 	if body.DryRun {
@@ -555,9 +489,47 @@ func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*
 		s.jobs[jobID] = job
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("store query job: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, false)}, nil
+}
+
+// projectFields keeps the schema fields named by an explicit column list, in
+// schema order; an empty list selects every field.
+func projectFields(fields []map[string]any, columns []string) ([]map[string]any, error) {
+	if len(columns) == 0 {
+		return fields, nil
+	}
+	projected := []map[string]any{}
+	for _, field := range fields {
+		if name, _ := field["name"].(string); slices.Contains(columns, name) {
+			projected = append(projected, field)
+		}
+	}
+	if len(projected) != len(columns) {
+		return nil, status.Errorf(codes.InvalidArgument, "Unknown column in query")
+	}
+	return projected, nil
+}
+
+// selectRows applies the equality filter and projects each matching row.
+func selectRows(stored []map[string]any, fields []map[string]any, query parsedQuery) []map[string]any {
+	rows := []map[string]any{}
+	for _, row := range stored {
+		if query.filterColumn != "" {
+			value, ok := row[query.filterColumn]
+			if !ok || !literalEquals(value, query.filterValue) {
+				continue
+			}
+		}
+		projected := make(map[string]any, len(fields))
+		for _, field := range fields {
+			name, _ := field["name"].(string)
+			projected[name] = row[name]
+		}
+		rows = append(rows, projected)
+	}
+	return rows
 }
 
 // jobsResults returns the stored result of one query job.
@@ -586,24 +558,43 @@ type parsedQuery struct {
 
 // parseQuery parses the supported SELECT subset.
 func parseQuery(query string) (parsedQuery, error) {
-	parsed := parsedQuery{}
 	upper := strings.ToUpper(strings.TrimSpace(query))
 	if !strings.HasPrefix(upper, "SELECT ") {
-		return parsed, status.Error(codes.Unimplemented, "Only SELECT statements are supported")
+		return parsedQuery{}, status.Error(codes.Unimplemented, "Only SELECT statements are supported")
 	}
 	rest := strings.TrimSpace(query[len("SELECT "):])
 	from := strings.Index(strings.ToUpper(rest), " FROM ")
 	if from < 0 {
-		return parsed, status.Errorf(codes.InvalidArgument, "Missing FROM clause in %q", query)
+		return parsedQuery{}, status.Errorf(codes.InvalidArgument, "Missing FROM clause in %q", query)
 	}
 	columns := strings.TrimSpace(rest[:from])
-	after := strings.TrimSpace(rest[from+len(" FROM "):])
-	table, filter := after, ""
-	if index := strings.Index(strings.ToUpper(after), " WHERE "); index >= 0 {
-		table = after[:index]
-		filter = strings.TrimSpace(after[index+len(" WHERE "):])
+	table, filter := splitWhere(strings.TrimSpace(rest[from+len(" FROM "):]))
+	parsed, err := parseTableReference(table)
+	if err != nil {
+		return parsedQuery{}, err
 	}
-	// Standard SQL quotes a full table path in backticks.
+	if parsed.columns, err = parseColumns(columns); err != nil {
+		return parsedQuery{}, err
+	}
+	if parsed.filterColumn, parsed.filterValue, err = parseFilter(filter); err != nil {
+		return parsedQuery{}, err
+	}
+	return parsed, nil
+}
+
+// splitWhere separates the table reference from an optional WHERE clause.
+func splitWhere(clause string) (string, string) {
+	index := strings.Index(strings.ToUpper(clause), " WHERE ")
+	if index < 0 {
+		return clause, ""
+	}
+	return clause[:index], strings.TrimSpace(clause[index+len(" WHERE "):])
+}
+
+// parseTableReference reads dataset.table or project.dataset.table; Standard
+// SQL quotes a full table path in backticks.
+func parseTableReference(table string) (parsedQuery, error) {
+	parsed := parsedQuery{}
 	parts := strings.Split(strings.Trim(strings.TrimSpace(table), "`"), ".")
 	switch len(parts) {
 	case 2:
@@ -616,27 +607,39 @@ func parseQuery(query string) (parsedQuery, error) {
 	if !uid.MatchString(parsed.dataset) || !uid.MatchString(parsed.table) {
 		return parsed, status.Errorf(codes.InvalidArgument, "Invalid table reference %q", table)
 	}
-	if columns != "*" {
-		for _, column := range strings.Split(columns, ",") {
-			name := strings.TrimSpace(column)
-			if !uid.MatchString(name) {
-				return parsed, status.Errorf(codes.Unimplemented, "Only plain column projections are supported: %q", name)
-			}
-			parsed.columns = append(parsed.columns, name)
-		}
-	}
-	if filter != "" {
-		segments := strings.SplitN(filter, "=", 2)
-		if len(segments) != 2 {
-			return parsed, status.Errorf(codes.Unimplemented, "Only equality filters are supported")
-		}
-		parsed.filterColumn = strings.TrimSpace(segments[0])
-		parsed.filterValue = strings.Trim(strings.TrimSpace(segments[1]), "'\"")
-		if !uid.MatchString(parsed.filterColumn) {
-			return parsed, status.Errorf(codes.InvalidArgument, "Invalid filter column %q", parsed.filterColumn)
-		}
-	}
 	return parsed, nil
+}
+
+// parseColumns reads a plain column list; "*" selects every column.
+func parseColumns(columns string) ([]string, error) {
+	if columns == "*" {
+		return nil, nil
+	}
+	var names []string
+	for column := range strings.SplitSeq(columns, ",") {
+		name := strings.TrimSpace(column)
+		if !uid.MatchString(name) {
+			return nil, status.Errorf(codes.Unimplemented, "Only plain column projections are supported: %q", name)
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// parseFilter reads an optional `column = literal` WHERE clause.
+func parseFilter(filter string) (string, string, error) {
+	if filter == "" {
+		return "", "", nil
+	}
+	segments := strings.SplitN(filter, "=", 2)
+	if len(segments) != 2 {
+		return "", "", status.Errorf(codes.Unimplemented, "Only equality filters are supported")
+	}
+	column := strings.TrimSpace(segments[0])
+	if !uid.MatchString(column) {
+		return "", "", status.Errorf(codes.InvalidArgument, "Invalid filter column %q", column)
+	}
+	return column, strings.Trim(strings.TrimSpace(segments[1]), "'\""), nil
 }
 
 // schemaFields returns the schema's field list.
@@ -667,9 +670,9 @@ func literalEquals(value any, literal string) bool {
 
 // bqRows renders stored rows in the BigQuery cell shape.
 func bqRows(fields []map[string]any, rows []map[string]any) []any {
-	out := []any{}
+	out := make([]any, 0, len(rows))
 	for _, row := range rows {
-		cells := []any{}
+		cells := make([]any, 0, len(fields))
 		for _, field := range fields {
 			name, _ := field["name"].(string)
 			cells = append(cells, map[string]any{"v": cellValue(row[name])})

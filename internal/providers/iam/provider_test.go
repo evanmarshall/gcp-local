@@ -65,12 +65,25 @@ func newHarness(t *testing.T) *harness {
 	return &harness{t: t, gate: g, engine: engine, index: index}
 }
 
+// expect issues one REST request and fails the test unless it returns want.
+func (h *harness) expect(verb, path string, body any, want int) *httptest.ResponseRecorder {
+	h.t.Helper()
+	recorder := h.invoke(verb, path, body)
+	if recorder.Code != want {
+		h.t.Fatalf("%s %s status = %d, want %d: %s", verb, path, recorder.Code, want, recorder.Body.String())
+	}
+	return recorder
+}
+
 // invoke issues one REST request as the fixture principal.
 func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
 	h.t.Helper()
 	var encoded []byte
 	if body != nil {
-		encoded, _ = json.Marshal(body)
+		var err error
+		if encoded, err = json.Marshal(body); err != nil {
+			h.t.Fatalf("encode the request body: %v", err)
+		}
 	}
 	request, _ := http.NewRequestWithContext(context.Background(), verb, path, bytes.NewReader(encoded))
 	if encoded != nil {
@@ -84,31 +97,16 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 
 func TestAccountAndKeyLifecycle(t *testing.T) {
 	h := newHarness(t)
-	recorder := h.invoke(http.MethodPost, testBase, map[string]any{
+	h.expect(http.MethodPost, testBase, map[string]any{
 		"accountId": testAccount, "displayName": "worker",
-	})
-	if recorder.Code != 200 {
-		t.Fatalf("account create status = %d body %s", recorder.Code, recorder.Body.String())
-	}
-	recorder = h.invoke(http.MethodGet, testBase+"/"+testAccount, nil)
-	if recorder.Code != 200 {
-		t.Fatalf("account get status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodGet, testBase, nil)
-	if recorder.Code != 200 {
-		t.Fatalf("account list status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodPatch, testBase+"/"+testAccount, map[string]any{
+	}, 200)
+	h.expect(http.MethodGet, testBase+"/"+testAccount, nil, 200)
+	h.expect(http.MethodGet, testBase, nil, 200)
+	h.expect(http.MethodPatch, testBase+"/"+testAccount, map[string]any{
 		"serviceAccount": map[string]any{"displayName": "renamed", "description": "worker account"},
 		"updateMask":     "displayName,description",
-	})
-	if recorder.Code != 200 {
-		t.Fatalf("account update status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodPost, testBase+"/"+testAccount+"/keys", map[string]any{})
-	if recorder.Code != 200 {
-		t.Fatalf("key create status = %d body %s", recorder.Code, recorder.Body.String())
-	}
+	}, 200)
+	recorder := h.expect(http.MethodPost, testBase+"/"+testAccount+"/keys", map[string]any{}, 200)
 	var created struct {
 		Name           string `json:"name"`
 		PrivateKeyData string `json:"privateKeyData"`
@@ -116,22 +114,10 @@ func TestAccountAndKeyLifecycle(t *testing.T) {
 	if json.Unmarshal(recorder.Body.Bytes(), &created) != nil || created.Name == "" || created.PrivateKeyData == "" {
 		t.Fatalf("unexpected key body %s", recorder.Body.String())
 	}
-	recorder = h.invoke(http.MethodGet, testBase+"/"+testAccount+"/keys", nil)
-	if recorder.Code != 200 {
-		t.Fatalf("key list status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodDelete, testBase+"/"+testAccount+"/keys/"+created.Name[strings.LastIndex(created.Name, "/")+1:], nil)
-	if recorder.Code != 200 {
-		t.Fatalf("key delete status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodDelete, testBase+"/"+testAccount, nil)
-	if recorder.Code != 200 {
-		t.Fatalf("account delete status = %d", recorder.Code)
-	}
-	recorder = h.invoke(http.MethodGet, testBase+"/"+testAccount, nil)
-	if recorder.Code != 404 {
-		t.Fatalf("post-destroy get status = %d", recorder.Code)
-	}
+	h.expect(http.MethodGet, testBase+"/"+testAccount+"/keys", nil, 200)
+	h.expect(http.MethodDelete, testBase+"/"+testAccount+"/keys/"+created.Name[strings.LastIndex(created.Name, "/")+1:], nil, 200)
+	h.expect(http.MethodDelete, testBase+"/"+testAccount, nil, 200)
+	h.expect(http.MethodGet, testBase+"/"+testAccount, nil, 404)
 }
 
 // TestCreatedAccountIndexesItsUniqueID proves a created account is published

@@ -56,23 +56,42 @@ func exchange(t *testing.T, s *Service, values url.Values) (int, map[string]any)
 	}
 	return recorder.Code, body
 }
+
+// accessToken extracts the access token from a token response body.
+func accessToken(t *testing.T, body map[string]any) string {
+	t.Helper()
+	token, ok := body["access_token"].(string)
+	if !ok {
+		t.Fatalf("missing access token: %v", body)
+	}
+	return token
+}
+
+// requireAppPrincipal resolves token and requires the enrolled application
+// principal with exactly the cloud-platform scope.
+func requireAppPrincipal(t *testing.T, s *Service, token string) gateway.Principal {
+	t.Helper()
+	p, err := s.Resolve(context.Background(), token)
+	if err != nil || p.State != gateway.Authenticated || p.Subject != appSubject || p.Project != testProjectName {
+		t.Fatalf("%+v %v", p, err)
+	}
+	if len(p.Scopes) != 1 || p.Scopes[0] != CloudPlatform {
+		t.Fatalf("scopes: %v", p.Scopes)
+	}
+	return p
+}
+
 func TestExchangeExpiryAndPrincipalStates(t *testing.T) {
 	s, clock := service(t)
 	code, body := exchange(t, s, form())
 	if code != 200 {
 		t.Fatal(body)
 	}
-	token, ok := body["access_token"].(string)
-	if !ok {
-		t.Fatalf("missing access token: %v", body)
-	}
+	token := accessToken(t, body)
 	if !strings.HasPrefix(token, "gl.") || body["expires_in"] != float64(600) {
 		t.Fatal("invalid access token contract")
 	}
-	p, err := s.Resolve(context.Background(), token)
-	if err != nil || p.State != gateway.Authenticated || p.Subject != appSubject || p.Project != testProjectName || len(p.Scopes) != 1 || p.Scopes[0] != CloudPlatform {
-		t.Fatalf("%+v %v", p, err)
-	}
+	p := requireAppPrincipal(t, s, token)
 	p.Scopes[0] = "mutated"
 	p, _ = s.Resolve(context.Background(), token)
 	if p.Scopes[0] != CloudPlatform {
@@ -87,16 +106,15 @@ func TestExchangeExpiryAndPrincipalStates(t *testing.T) {
 	if next["access_token"] == token {
 		t.Fatal("refresh reused old handle")
 	}
-	nextToken, ok := next["access_token"].(string)
-	if !ok {
-		t.Fatalf("missing refreshed token: %v", next)
-	}
-	p, _ = s.Resolve(context.Background(), nextToken)
+	p, _ = s.Resolve(context.Background(), accessToken(t, next))
 	if p.State != gateway.Authenticated {
 		t.Fatal(p)
 	}
+}
+func TestResolveWithoutIssuedTokenHasNoSubject(t *testing.T) {
+	s, _ := service(t)
 	for input, want := range map[string]gateway.PrincipalState{"": gateway.Anonymous, "unknown": gateway.Unknown, subjectSecret: gateway.Unknown} {
-		p, _ = s.Resolve(context.Background(), input)
+		p, _ := s.Resolve(context.Background(), input)
 		if p.State != want || p.Subject != "" {
 			t.Fatalf("unexpected state: %+v", p)
 		}
@@ -122,6 +140,33 @@ func TestExchangeRejectsUnknownCredentialsAndUnsupportedFeatures(t *testing.T) {
 		t.Fatal("accepted repeated credential")
 	}
 }
+
+// serveMetadata sends one GET to the metadata handler, with or without the
+// Metadata-Flavor header.
+func serveMetadata(handler http.Handler, path string, header bool) *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
+	if header {
+		request.Header.Set("Metadata-Flavor", "Google")
+	}
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+// requireMetadataSubject requires a metadata token response minted for the
+// application principal.
+func requireMetadataSubject(t *testing.T, s *Service, response *httptest.ResponseRecorder) {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.Resolve(context.Background(), accessToken(t, body))
+	if p.Subject != appSubject {
+		t.Fatal("metadata selected another account")
+	}
+}
+
 func TestMetadataIsBoundToOnePrincipal(t *testing.T) {
 	s, _ := service(t)
 	handler, err := s.Metadata(appSubject)
@@ -143,28 +188,12 @@ func TestMetadataIsBoundToOnePrincipal(t *testing.T) {
 		{"/computeMetadata/v1/instance/service-accounts/default/token", false, 403},
 		{"/computeMetadata/v1/instance/service-accounts/default/identity", true, 501},
 	} {
-		response := httptest.NewRecorder()
-		request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, tc.path, nil)
-		if tc.header {
-			request.Header.Set("Metadata-Flavor", "Google")
-		}
-		handler.ServeHTTP(response, request)
+		response := serveMetadata(handler, tc.path, tc.header)
 		if response.Code != tc.status {
 			t.Fatalf("%s: %d %s", tc.path, response.Code, response.Body.String())
 		}
 		if response.Code == 200 {
-			var body map[string]any
-			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-				t.Fatal(err)
-			}
-			token, ok := body["access_token"].(string)
-			if !ok {
-				t.Fatalf("missing access token: %v", body)
-			}
-			p, _ := s.Resolve(context.Background(), token)
-			if p.Subject != appSubject {
-				t.Fatal("metadata selected another account")
-			}
+			requireMetadataSubject(t, s, response)
 		}
 	}
 	response := httptest.NewRecorder()
@@ -179,10 +208,7 @@ func TestMetadataIsBoundToOnePrincipal(t *testing.T) {
 func TestInspectionDoesNotExposeTokensAndInvalidTokensStayUnauthenticated(t *testing.T) {
 	s, clock := service(t)
 	_, body := exchange(t, s, form())
-	token, ok := body["access_token"].(string)
-	if !ok {
-		t.Fatalf("missing access token: %v", body)
-	}
+	token := accessToken(t, body)
 	for _, tc := range []struct {
 		token  string
 		status int
@@ -238,6 +264,8 @@ func TestConfigurationRequiresExplicitPrivateEnrollment(t *testing.T) {
 	if _, err := Load(link); err == nil {
 		t.Fatal("read symlinked credential config")
 	}
+}
+func TestEnrollmentRequiresLongSecretAndEmptyConfigHasNoPrincipal(t *testing.T) {
 	if _, err := New(Config{Principals: []Enrollment{{Subject: appSubject, Project: testProjectName, SubjectToken: "short"}}}, nil); err == nil {
 		t.Fatal("accepted short subject credential")
 	}

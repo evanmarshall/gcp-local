@@ -14,7 +14,6 @@ import (
 
 var ErrFailed = errors.New("backend failed; explicit reset is required")
 var ErrClosed = errors.New("backend manager is shut down")
-var ErrPersistenceUnsupported = errors.New("backend snapshots and restore are unsupported")
 var errDefinitionInvalid = errors.New("backend definition and positive lifecycle timeouts are required")
 var errServiceRegistered = errors.New("backend service already registered")
 var errServiceUnregistered = errors.New("backend service is not registered")
@@ -24,18 +23,21 @@ type Key struct {
 	Service string      `json:"service"`
 	Scope   state.Scope `json:"scope"`
 }
+
 type Backend interface {
 	Start(context.Context) error
 	Ready(context.Context) error
 	Stop(context.Context) error
 	Reset(context.Context) error
 }
+
 type Definition struct {
 	Validate func(state.Scope) error
 	// New constructs an inert driver; process/filesystem side effects start in Start.
 	New        func(state.Scope) (Backend, error)
 	AfterReset func(state.Scope) error
 }
+
 type Phase string
 
 const (
@@ -54,6 +56,7 @@ type Status struct {
 	Snapshot bool   `json:"snapshot"`
 	Restore  bool   `json:"restore"`
 }
+
 type instance struct {
 	gate       chan struct{}
 	mu         sync.RWMutex
@@ -95,6 +98,7 @@ func (i *instance) phase(phase Phase, failure string) {
 	i.status.Phase = phase
 	i.status.Failure = failure
 }
+
 func (i *instance) snapshot() Status { i.mu.RLock(); defer i.mu.RUnlock(); return i.status }
 func (i *instance) acquire(ctx context.Context) error {
 	select {
@@ -104,6 +108,7 @@ func (i *instance) acquire(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
+
 func (i *instance) release() { <-i.gate }
 
 type Manager struct {
@@ -183,6 +188,7 @@ func (m *Manager) Register(service string, definition Definition) error {
 	m.definitions[service] = definition
 	return nil
 }
+
 func (m *Manager) get(key Key) (*instance, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -205,17 +211,6 @@ func (m *Manager) get(key Key) (*instance, error) {
 		m.instances[key] = &instance{gate: make(chan struct{}, 1), status: Status{Key: key, Phase: Stopped}, definition: definition}
 	}
 	return m.instances[key], nil
-}
-func (m *Manager) Require(ctx context.Context, key Key) (Backend, error) {
-	instance, err := m.get(key)
-	if err != nil {
-		return nil, err
-	}
-	if err := instance.acquire(ctx); err != nil {
-		return nil, err
-	}
-	defer instance.release()
-	return m.require(ctx, key, instance)
 }
 
 // Use serializes one provider operation with reset and shutdown. Providers call
@@ -241,56 +236,86 @@ func (m *Manager) Use(ctx context.Context, key Key, operation func(context.Conte
 	return operation(ctx, active)
 }
 
+// require returns the instance's ready backend, starting it on first use.
+// The caller holds the instance gate.
 func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Backend, error) {
-	var err error
 	// Shutdown may have started while this caller waited for the instance gate.
-	m.mu.Lock()
-	closed := m.closed
-	m.mu.Unlock()
-	if closed {
+	if m.isClosed() {
 		return nil, ErrClosed
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	phase := instance.snapshot().Phase
-	if phase == Failed {
+	switch instance.snapshot().Phase {
+	case Failed:
 		return nil, ErrFailed
+	case Ready:
+		return m.probe(ctx, instance)
+	default:
+		return m.start(ctx, key, instance)
 	}
-	if phase == Ready {
-		probe, cancel := context.WithTimeout(ctx, m.startTimeout)
-		defer cancel()
-		stopCancel := context.AfterFunc(m.lifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
-		defer stopCancel()
-		if err := instance.backend.Ready(probe); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			m.fail(instance, "readiness") //nolint:contextcheck // cleanup must outlive the cancelled request
-			return nil, fmt.Errorf("backend readiness: %w", err)
+}
+
+func (m *Manager) isClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed
+}
+
+// probe rechecks an already ready backend. A cancelled caller leaves it healthy.
+func (m *Manager) probe(ctx context.Context, instance *instance) (Backend, error) {
+	probe, cancel := context.WithTimeout(ctx, m.startTimeout)
+	defer cancel()
+	stopCancel := context.AfterFunc(m.lifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
+	defer stopCancel()
+	if err := instance.backend.Ready(probe); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
-		return instance.backend, nil
+		m.fail(instance, "readiness") //nolint:contextcheck // cleanup must outlive the cancelled request
+		return nil, fmt.Errorf("backend readiness: %w", err)
 	}
+	return instance.backend, nil
+}
+
+// start constructs the backend if needed, starts it, and waits for readiness
+// within the start timeout.
+func (m *Manager) start(ctx context.Context, key Key, instance *instance) (Backend, error) {
 	instance.phase(Starting, "")
 	deadline, cancel := context.WithTimeout(ctx, m.startTimeout)
 	defer cancel()
 	stopCancel := context.AfterFunc(m.lifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
 	defer stopCancel()
-	if instance.backend == nil {
-		instance.backend, err = instance.definition.New(key.Scope)
-		if err != nil {
-			instance.phase(Failed, "construct")
-			return nil, err
-		}
-		if instance.backend == nil {
-			instance.phase(Failed, "construct")
-			return nil, errFactoryNil
-		}
+	if err := instance.construct(key.Scope); err != nil {
+		return nil, err
 	}
 	if err := instance.backend.Start(deadline); err != nil {
 		m.fail(instance, "start") //nolint:contextcheck // cleanup must outlive the cancelled request
 		return nil, fmt.Errorf("backend start: %w", err)
 	}
+	return m.awaitReady(deadline, instance)
+}
+
+// construct builds the inert driver once; a reset instance reuses it.
+func (i *instance) construct(scope state.Scope) error {
+	if i.backend != nil {
+		return nil
+	}
+	var err error
+	i.backend, err = i.definition.New(scope)
+	if err == nil && i.backend == nil {
+		err = errFactoryNil
+	}
+	if err != nil {
+		i.phase(Failed, "construct")
+		return err
+	}
+	return nil
+}
+
+// awaitReady polls readiness until it succeeds, the process exits, or the
+// start deadline passes.
+func (m *Manager) awaitReady(deadline context.Context, instance *instance) (Backend, error) {
 	timer := time.NewTicker(20 * time.Millisecond)
 	defer timer.Stop()
 	for {
@@ -311,6 +336,7 @@ func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Bac
 		}
 	}
 }
+
 func (m *Manager) fail(instance *instance, operation string) {
 	// A cancelled request must not cancel cleanup of its partially started child.
 	ctx, cancel := context.WithTimeout(context.Background(), m.stopTimeout)
@@ -326,16 +352,6 @@ func (m *Manager) fail(instance *instance, operation string) {
 	instance.phase(Failed, operation)
 }
 
-// Preload uses the same lazy path. On startup failure the caller must Shutdown
-// the manager to stop earlier successful instances; no provider state is reset.
-func (m *Manager) Preload(ctx context.Context, keys []Key) error {
-	for _, key := range keys {
-		if _, err := m.Require(ctx, key); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 func (m *Manager) Reset(ctx context.Context, key Key) error {
 	ctx, cancel := context.WithTimeout(ctx, m.stopTimeout)
 	defer cancel()
@@ -349,10 +365,7 @@ func (m *Manager) Reset(ctx context.Context, key Key) error {
 		return err
 	}
 	defer instance.release()
-	m.mu.Lock()
-	closed := m.closed
-	m.mu.Unlock()
-	if closed {
+	if m.isClosed() {
 		return ErrClosed
 	}
 	instance.phase(Resetting, "")
@@ -377,6 +390,7 @@ func (m *Manager) Reset(ctx context.Context, key Key) error {
 	instance.phase(Stopped, "")
 	return nil
 }
+
 func (m *Manager) Shutdown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, m.stopTimeout)
 	defer cancel()
@@ -391,28 +405,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	// Stop independent backends concurrently, sharing the caller's total deadline.
 	result := make(chan error, len(instances))
 	for _, instance := range instances {
-		go func() {
-			if err := instance.acquire(ctx); err != nil {
-				result <- err
-				return
-			}
-			defer instance.release()
-			instance.phase(Stopping, "")
-			if err := instance.drainSessions(ctx); err != nil {
-				instance.phase(Failed, "shutdown sessions")
-				result <- err
-				return
-			}
-			if instance.backend != nil {
-				if err := instance.backend.Stop(ctx); err != nil {
-					instance.phase(Failed, "shutdown")
-					result <- err
-					return
-				}
-			}
-			instance.phase(Stopped, "")
-			result <- nil
-		}()
+		go func() { result <- instance.shutdown(ctx) }()
 	}
 	var failures []error
 	for range instances {
@@ -422,6 +415,28 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 	return errors.Join(failures...)
 }
+
+// shutdown drains sessions and stops one instance under its gate.
+func (i *instance) shutdown(ctx context.Context) error {
+	if err := i.acquire(ctx); err != nil {
+		return err
+	}
+	defer i.release()
+	i.phase(Stopping, "")
+	if err := i.drainSessions(ctx); err != nil {
+		i.phase(Failed, "shutdown sessions")
+		return err
+	}
+	if i.backend != nil {
+		if err := i.backend.Stop(ctx); err != nil {
+			i.phase(Failed, "shutdown")
+			return fmt.Errorf("backend stop: %w", err)
+		}
+	}
+	i.phase(Stopped, "")
+	return nil
+}
+
 func (m *Manager) Status() []Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -435,9 +450,3 @@ func (m *Manager) Status() []Status {
 	})
 	return result
 }
-
-// Snapshot reports that this manager has no complete provider+backend snapshot
-// format. Restoring only the index would leave backend objects missing or
-// inconsistent, so persistence stays unsupported.
-func (m *Manager) Snapshot(context.Context) error { return ErrPersistenceUnsupported }
-func (m *Manager) Restore(context.Context) error  { return ErrPersistenceUnsupported }

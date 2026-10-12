@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
@@ -75,7 +74,6 @@ import (
 	service := loggingpb.File_google_logging_v2_logging_proto.Services().ByName("LoggingServiceV2")
 	name := string(service.Name())
 	fmt.Fprintf(&out, "type %sServer struct { loggingpb.Unimplemented%sServer; Dispatch PubSubDispatch }\n", name, name)
-	resourceVariable := regexp.MustCompile(`\{([^=}]+)=([^}]+)\}`)
 	for j := range service.Methods().Len() {
 		m := service.Methods().Get(j)
 		methodName := string(m.Name())
@@ -84,8 +82,7 @@ import (
 		streaming := m.IsStreamingClient() || m.IsStreamingServer()
 		field, pattern := "", ""
 		if rule, ok := proto.GetExtension(m.Options(), annotations.E_Http).(*annotations.HttpRule); ok && rule != nil {
-			path := rule.GetGet() + rule.GetPost() + rule.GetPut() + rule.GetPatch() + rule.GetDelete()
-			if match := resourceVariable.FindStringSubmatch(path); match != nil {
+			if match := resourceVariable.FindStringSubmatch(rulePath(rule)); match != nil {
 				field, pattern = match[1], match[2]
 			}
 		}
@@ -95,13 +92,9 @@ import (
 			}
 			fmt.Fprintf(&out, "func(s *%sServer) %s(stream loggingpb.%s_%sServer) error { return s.Dispatch.Stream(%q,stream) }\n", name, methodName, name, methodName, id)
 		} else {
-			fmt.Fprintf(&out, `func(s *%sServer) %s(ctx context.Context, request *%s) (*%s,error) {
- result,err:=s.Dispatch.Unary(ctx,%q,request); if err!=nil{return nil,err}
- response,ok:=result.(*%s); if !ok || response==nil{return nil,status.Error(codes.Internal,"Provider returned an invalid response type")}; return response,nil
-}
-`, name, methodName, input, output, id, output)
+			unaryStub(&out, name, methodName, input, output, id)
 		}
-		fmt.Fprintf(&descriptors, "{%q,%q,%q,%v,func() proto.Message{return &%s{}},func() proto.Message{return &%s{}}},\n", id, field, pattern, streaming, input, output)
+		rpcDescriptor(&descriptors, id, field, pattern, streaming, input, output)
 	}
 	descriptors.WriteString("}\n")
 	out.Write(descriptors.Bytes())

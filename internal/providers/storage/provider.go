@@ -32,7 +32,14 @@ type Provider struct {
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("storage requires registry, lifecycle, index, and iam")
 
-var methods = []string{MethodBucketsInsert, MethodBucketsList, MethodBucketsGet, MethodBucketsPatch, MethodBucketsDelete, MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy, MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete}
+// registeredMethods are the gateway routes this provider serves. Folder create
+// arrives as storage.folders.insert from the generated route table.
+var registeredMethods = []string{
+	MethodBucketsInsert, MethodBucketsList, MethodBucketsGet, MethodBucketsPatch, MethodBucketsDelete,
+	MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy,
+	MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete,
+	MethodFoldersInsert, MethodFoldersGet, MethodFoldersList, MethodFoldersDelete,
+}
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
@@ -55,7 +62,7 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 	}); err != nil {
 		return nil, fmt.Errorf("register the storage backend: %w", err)
 	}
-	for _, method := range append(methods, "storage.folders.insert", "storage.folders.get", "storage.folders.list", "storage.folders.delete") {
+	for _, method := range registeredMethods {
 		if err := registry.Register(method, p.handle); err != nil {
 			return nil, fmt.Errorf("register %s: %w", method, err)
 		}
@@ -139,70 +146,41 @@ func denialText(call gateway.Call, target, permission string) (int, string, stri
 	}
 	return httpCode, reason, message
 }
+
+// request carries one Storage call from target resolution through execution.
+type request struct {
+	call   gateway.Call
+	rest   *gateway.RESTRequest
+	target iam.Target
+	scope  state.Scope
+	bucket string
+	object string
+	upload *uploadRequest
+}
+
+func isProjectMethod(method string) bool {
+	return method == MethodBucketsInsert || method == MethodBucketsList
+}
+
+func isFolderMethod(method string) bool { return strings.HasPrefix(method, "storage.folders.") }
+
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
-	r, ok := raw.(*gateway.RESTRequest)
-	if !ok {
-		return nil, status.Error(codes.Internal, "Invalid Storage request")
-	}
-	if err := validateQuery(call.Method, r); err != nil {
-		return nil, err
-	}
-	bucket, object := r.Path["bucket"], r.Path["object"]
-	var upload *uploadRequest
-	if call.Method == MethodObjectsInsert {
-		var err error
-		upload, err = parseUpload(r)
-		if err != nil {
-			return nil, err
-		}
-		object = upload.name
-	}
-	target, scope, projectMethod, refused, err := p.resolveTarget(call, bucket, object)
+	req, refused, err := p.newRequest(call, raw)
 	if refused != nil || err != nil {
 		return refused, err
 	}
-	call.Resource = target.Name
-	call.Location = state.Global
 	// This preflight permits lazy startup/state resolution only. Every operation
 	// reauthorizes under the backend gate before data access or mutation.
-	denied, _, err := p.authorize(call, target, nil, false)
+	denied, _, err := p.authorize(req.call, req.target, nil, false)
 	if denied != nil || err != nil {
 		return denied, err
 	}
 	var response *gateway.RESTResponse
-	err = p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(session context.Context, driver backend.Backend) error {
-		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
-		b, backendErr := backendOf(driver)
-		if backendErr != nil {
-			return backendErr
-		}
-		if !projectMethod {
-			resource, found := p.index.Get(BucketResource(bucket))
-			if !found || resource.Scope != scope {
-				response = notFound(bucket, "")
-				return nil
-			}
-		}
-		features, current, featureErr := p.objectFeatures(session, b, call, bucket, object)
-		if featureErr != nil {
-			return featureErr
-		}
-		denied, id, authorizeErr := p.authorize(call, target, features, true)
-		if authorizeErr != nil {
-			return authorizeErr
-		}
-		if denied != nil {
-			response = denied
-			return nil
-		}
-		response, err = p.execute(session, b, call, r, scope, bucket, object, upload, current)
-		if response != nil {
-			if response.Headers == nil {
-				response.Headers = http.Header{}
-			}
-			response.Headers.Set("X-Gcp-Local-Decision-Id", id)
-		}
-		return err
+	err = p.manager.Use(req.call.Context, backend.Key{Service: serviceName, Scope: req.scope}, func(session context.Context, driver backend.Backend) error {
+		req.call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
+		var serveErr error
+		response, serveErr = p.serve(session, driver, req)
+		return serveErr
 	})
 	if err != nil {
 		return response, fmt.Errorf("forward %s: %w", call.Method, err)
@@ -210,36 +188,83 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
+// newRequest validates the REST input and resolves the IAM target and backend
+// scope. A refusal is a wire response; an error is a gateway status.
+func (p *Provider) newRequest(call gateway.Call, raw any) (request, *gateway.RESTResponse, error) {
+	r, ok := raw.(*gateway.RESTRequest)
+	if !ok {
+		return request{}, nil, status.Error(codes.Internal, "Invalid Storage request")
+	}
+	if err := validateQuery(call.Method, r); err != nil {
+		return request{}, nil, err
+	}
+	req := request{call: call, rest: r, bucket: r.Path["bucket"], object: r.Path["object"]}
+	if call.Method == MethodObjectsInsert {
+		upload, err := parseUpload(r)
+		if err != nil {
+			return request{}, nil, err
+		}
+		req.upload, req.object = upload, upload.name
+	}
+	target, scope, refused, err := p.resolveTarget(call, req.bucket, req.object)
+	if refused != nil || err != nil {
+		return request{}, refused, err
+	}
+	req.target, req.scope = target, scope
+	req.call.Resource = target.Name
+	req.call.Location = state.Global
+	return req, nil, nil
+}
+
+// serve runs one request under the backend gate: it rechecks bucket ownership,
+// resolves object features, authorizes completely, and only then executes.
+func (p *Provider) serve(ctx context.Context, driver backend.Backend, req request) (*gateway.RESTResponse, error) {
+	b, err := backendOf(driver)
+	if err != nil {
+		return nil, err
+	}
+	if !isProjectMethod(req.call.Method) {
+		if resource, found := p.index.Get(BucketResource(req.bucket)); !found || resource.Scope != req.scope {
+			return notFound(req.bucket, ""), nil
+		}
+	}
+	features, current, err := p.objectFeatures(ctx, b, req.call, req.bucket, req.object)
+	if err != nil {
+		return nil, err
+	}
+	denied, id, err := p.authorize(req.call, req.target, features, true)
+	if err != nil {
+		return nil, err
+	}
+	if denied != nil {
+		return denied, nil
+	}
+	response, err := p.execute(ctx, b, req, current)
+	if response != nil {
+		if response.Headers == nil {
+			response.Headers = http.Header{}
+		}
+		response.Headers.Set("X-Gcp-Local-Decision-Id", id)
+	}
+	return response, err
+}
+
 // resolveTarget derives the IAM target and backend scope for one request. A
 // project-scoped method addresses the project; every other method addresses the
 // bucket, whose recorded scope decides the backend instance. An unknown bucket
 // is refused with a notFound response.
-func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.Target, state.Scope, bool, *gateway.RESTResponse, error) {
+func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.Target, state.Scope, *gateway.RESTResponse, error) {
+	if isProjectMethod(call.Method) {
+		return p.projectTarget(call.Project)
+	}
 	target := iam.Target{Name: BucketResource(bucket)}
-	scope := state.Scope{Location: state.Global}
-	projectMethod := call.Method == MethodBucketsInsert || call.Method == MethodBucketsList
-	if projectMethod {
-		scope.Project = call.Project
-		target.Name = provider.ProjectResource(call.Project)
-		project, ok := p.index.Get(target.Name)
-		if !ok || project.Kind != kindProjectRef || !numericProjectNumber.MatchString(project.Number) {
-			return iam.Target{}, state.Scope{}, projectMethod, nil, gap("configure the explicit project and numeric project number")
-		}
-		return target, scope, projectMethod, nil, nil
-	}
-	if strings.HasPrefix(call.Method, "storage.folders.") || call.Method == "storage.folders.insert" {
-		resource, found := p.index.Get(target.Name)
-		if !found {
-			return iam.Target{}, state.Scope{}, projectMethod, notFound(bucket, ""), nil
-		}
-		return target, resource.Scope, projectMethod, nil, nil
-	}
 	resource, found := p.index.Get(target.Name)
 	if !found {
-		return iam.Target{}, state.Scope{}, projectMethod, notFound(bucket, ""), nil
+		return iam.Target{}, state.Scope{}, notFound(bucket, ""), nil
 	}
-	scope = resource.Scope
-	call.Project = scope.Project
+	if isFolderMethod(call.Method) {
+		return target, resource.Scope, nil, nil
+	}
 	// IAM condition attributes use Storage's documented resource names.
 	target.Attributes = iam.ResourceAttributes{Name: "projects/_/buckets/" + bucket,
 		Type: "storage.googleapis.com/Bucket", Service: "storage.googleapis.com"}
@@ -249,7 +274,18 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 		target.Attributes.Name += "/objects/" + object
 		target.Attributes.Type = "storage.googleapis.com/Object"
 	}
-	return target, scope, projectMethod, nil, nil
+	return target, resource.Scope, nil, nil
+}
+
+// projectTarget resolves a project-scoped method, which needs the explicit
+// project and its numeric project number.
+func (p *Provider) projectTarget(project string) (iam.Target, state.Scope, *gateway.RESTResponse, error) {
+	name := provider.ProjectResource(project)
+	ref, ok := p.index.Get(name)
+	if !ok || ref.Kind != kindProjectRef || !numericProjectNumber.MatchString(ref.Number) {
+		return iam.Target{}, state.Scope{}, nil, gap("configure the explicit project and numeric project number")
+	}
+	return iam.Target{Name: name}, state.Scope{Project: project, Location: state.Global}, nil, nil
 }
 
 // objectFeatures resolves whether an inserted object already exists, which the
@@ -289,8 +325,6 @@ func objectPath(bucket, object string) string {
 	return "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(object)
 }
 
-// Forward only a provider-selected route over upstream's memory transport. A
-// caller URL, authorization header, proxy, or notification endpoint never enters it.
 // decodeBackendJSON re-materializes an upstream JSON payload as the response
 // body, stripping the upstream's pagination links and quoting its etag.
 func decodeBackendJSON(payload []byte, response *gateway.RESTResponse) {
@@ -317,6 +351,12 @@ func decodeBackendJSON(payload []byte, response *gateway.RESTResponse) {
 	}
 }
 
+// maxBackendPayload bounds a backend response: the largest object plus metadata.
+const maxBackendPayload = maxObjectSize + (1 << 20)
+
+// forward sends only a provider-selected route over upstream's memory
+// transport. A caller URL, authorization header, proxy, or notification
+// endpoint never enters it.
 func (b *memoryBackend) forward(ctx context.Context, method, path string, query url.Values, headers http.Header, body []byte) (*gateway.RESTResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, method, "http://storage.invalid"+path+"?"+query.Encode(), bytes.NewReader(body))
 	if err != nil {
@@ -332,25 +372,34 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 		return nil, status.Error(codes.Unavailable, "Storage backend request failed")
 	}
 	defer result.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(result.Body, maxObjectSize+(1<<20)+1))
+	payload, err := readBackendPayload(result.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read backend response: %w", err)
-	}
-	if len(payload) > maxObjectSize+(1<<20) {
-		return nil, status.Error(codes.ResourceExhausted, "Storage response exceeds supported size")
+		return nil, err
 	}
 	response := &gateway.RESTResponse{Status: result.StatusCode, Headers: result.Header.Clone()}
 	response.Headers.Del("Content-Length")
 	if strings.Contains(result.Header.Get("Content-Type"), "application/json") && (result.StatusCode >= 300 || query.Get("alt") != altMedia) {
 		decodeBackendJSON(payload, response)
-	} else {
-		response.Body = bytes.NewReader(payload)
-		if generation := response.Headers.Get("X-Goog-Generation"); generation != "" {
-			response.Headers.Set("ETag", `"`+objectETag(generation, "1")+`"`)
-			response.Headers.Set("X-Goog-Metageneration", "1")
-		}
+		return response, nil
+	}
+	response.Body = bytes.NewReader(payload)
+	if generation := response.Headers.Get("X-Goog-Generation"); generation != "" {
+		response.Headers.Set("ETag", `"`+objectETag(generation, "1")+`"`)
+		response.Headers.Set("X-Goog-Metageneration", "1")
 	}
 	return response, nil
+}
+
+// readBackendPayload reads a backend body, refusing one over maxBackendPayload.
+func readBackendPayload(body io.Reader) ([]byte, error) {
+	payload, err := io.ReadAll(io.LimitReader(body, maxBackendPayload+1))
+	if err != nil {
+		return nil, fmt.Errorf("read backend response: %w", err)
+	}
+	if len(payload) > maxBackendPayload {
+		return nil, status.Error(codes.ResourceExhausted, "Storage response exceeds supported size")
+	}
+	return payload, nil
 }
 
 // Upstream links use its private origin. SDKs derive their URLs from the
@@ -380,70 +429,102 @@ func objectETag(generation, metageneration string) string {
 	return base64.StdEncoding.EncodeToString([]byte(generation + ":" + metageneration))
 }
 
-func (p *Provider) execute(ctx context.Context, b *memoryBackend, call gateway.Call, r *gateway.RESTRequest, scope state.Scope, bucket, object string, upload *uploadRequest, current map[string]any) (*gateway.RESTResponse, error) {
-	if strings.HasPrefix(call.Method, "storage.folders.") {
-		return p.executeFolder(call, r, scope, bucket)
+func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
+	if isFolderMethod(req.call.Method) {
+		return p.executeFolder(req.call.Method, req.rest, req.scope, req.bucket)
 	}
-	path := "/storage/v1/b/" + url.PathEscape(bucket)
-	switch call.Method {
+	path := "/storage/v1/b/" + url.PathEscape(req.bucket)
+	switch req.call.Method {
 	case MethodBucketsInsert:
-		return p.createBucket(ctx, b, r, scope)
+		return p.createBucket(ctx, b, req.rest, req.scope)
 	case MethodBucketsPatch:
-		return p.patchBucket(ctx, b, r, scope, bucket)
+		return p.patchBucket(ctx, b, req.rest, req.scope, req.bucket)
 	case MethodBucketsGetIamPolicy:
-		return p.readBucketPolicy(bucket)
+		return p.readBucketPolicy(req.bucket)
 	case MethodBucketsSetIamPolicy:
-		return p.writeBucketPolicy(bucket, r)
+		return p.writeBucketPolicy(req.bucket, req.rest)
 	case MethodBucketsList:
-		return p.listBuckets(ctx, b, r, scope)
+		return p.listBuckets(ctx, b, req.rest, req.scope)
 	case MethodBucketsGet:
-		return p.getBucket(ctx, b, r, scope, path)
+		return p.getBucket(ctx, b, req.rest, req.scope, path)
 	case MethodBucketsDelete:
-		return p.deleteBucket(ctx, b, r, scope, path, bucket)
-	case MethodObjectsList:
-		return b.forward(ctx, "GET", path+"/o", r.Query, nil, nil)
+		return p.deleteBucket(ctx, b, req.rest, req.scope, path, req.bucket)
 	}
-	return p.executeObject(ctx, b, call, r, bucket, object, upload, current)
+	return executeObject(ctx, b, req, current)
 }
 
-// executeObject handles the object methods, which share one precondition pass.
-func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, call gateway.Call, r *gateway.RESTRequest, bucket, object string, upload *uploadRequest, current map[string]any) (*gateway.RESTResponse, error) {
-	if call.Method != MethodObjectsInsert {
-		response, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		if response.Status == 404 {
-			return notFound(bucket, object), nil
-		}
-		if response.Status != 200 {
-			return response, nil
-		}
-		body, bodyErr := jsonObject(response.JSON)
-		if bodyErr != nil {
-			return nil, bodyErr
-		}
-		current = body
+// executeObject serves the object methods.
+func executeObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
+	switch req.call.Method {
+	case MethodObjectsList:
+		return b.forward(ctx, "GET", "/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", req.rest.Query, nil, nil)
+	case MethodObjectsInsert:
+		return insertObject(ctx, b, req, current)
 	}
-	if response, err := preconditions(r, current, call.Method); response != nil || err != nil {
+	return readOrDeleteObject(ctx, b, req)
+}
+
+// insertObject uploads an object once its preconditions hold against the
+// existing object resolved during authorization.
+func insertObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
+	if response, err := preconditions(req.rest, current, MethodObjectsInsert); response != nil || err != nil {
 		return response, err
 	}
-	if call.Method == MethodObjectsInsert {
-		return b.forward(ctx, "POST", "/upload/storage/v1/b/"+url.PathEscape(bucket)+"/o", upload.query, upload.headers, upload.body)
+	upload := req.upload
+	return b.forward(ctx, "POST", "/upload/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", upload.query, upload.headers, upload.body)
+}
+
+// readOrDeleteObject serves object get and delete, which share one
+// precondition pass over the current object.
+func readOrDeleteObject(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
+	current, refused, err := currentObject(ctx, b, req.bucket, req.object)
+	if refused != nil || err != nil {
+		return refused, err
 	}
-	if generation := r.Query.Get("generation"); generation != "" && current["generation"] != generation {
-		return notFound(bucket, object), nil
+	if response, err := preconditions(req.rest, current, req.call.Method); response != nil || err != nil {
+		return response, err
 	}
-	if call.Method == MethodObjectsGet {
-		return b.forward(ctx, "GET", objectPath(bucket, object), r.Query, r.Headers, nil)
+	if generation := req.rest.Query.Get("generation"); generation != "" && current["generation"] != generation {
+		return notFound(req.bucket, req.object), nil
 	}
-	response, err := b.forward(ctx, "DELETE", objectPath(bucket, object), r.Query, nil, nil)
-	if err == nil && response.Status == 200 {
+	if req.call.Method == MethodObjectsGet {
+		return b.forward(ctx, "GET", objectPath(req.bucket, req.object), req.rest.Query, req.rest.Headers, nil)
+	}
+	response, err := b.forward(ctx, "DELETE", objectPath(req.bucket, req.object), req.rest.Query, nil, nil)
+	if err == nil {
+		noContentOnSuccess(response)
+	}
+	return response, err
+}
+
+// currentObject reads an object's metadata. A missing object becomes a notFound
+// refusal and any other non-200 backend response is returned as is.
+func currentObject(ctx context.Context, b *memoryBackend, bucket, object string) (map[string]any, *gateway.RESTResponse, error) {
+	response, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch response.Status {
+	case 200:
+	case 404:
+		return nil, notFound(bucket, object), nil
+	default:
+		return nil, response, nil
+	}
+	body, err := jsonObject(response.JSON)
+	if err != nil {
+		return nil, nil, err
+	}
+	return body, nil, nil
+}
+
+// noContentOnSuccess turns the backend's 200 delete reply into Storage's empty 204.
+func noContentOnSuccess(response *gateway.RESTResponse) {
+	if response.Status == 200 {
 		response.Status = 204
 		response.JSON = nil
 		response.Body = nil
 	}
-	return response, err
 }
 
 // readBucketPolicy returns the IAM policy for one bucket.
@@ -550,11 +631,7 @@ func (p *Provider) deleteBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	if err != nil {
 		return response, err
 	}
-	if response.Status == 200 {
-		response.Status = 204
-		response.JSON = nil
-		response.Body = nil
-	}
+	noContentOnSuccess(response)
 	if response.Status == 204 {
 		err = p.catalog.ForgetBucket(scope, bucket)
 		p.iam.Forget(BucketResource(bucket))
@@ -565,57 +642,89 @@ func (p *Provider) deleteBucket(ctx context.Context, b *memoryBackend, r *gatewa
 // executeFolder serves the Storage Control folders surface. Folders are
 // provider-owned because the storage backend does not model them; state lives
 // in the catalog and clears with the scope.
-func (p *Provider) executeFolder(call gateway.Call, r *gateway.RESTRequest, scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
-	folderID := r.Path["folder"]
-	folderWire := func(record Folder) map[string]any {
-		return map[string]any{"name": record.Name, "bucket": bucket}
-	}
-	folderMissing := func() *gateway.RESTResponse {
-		return &gateway.RESTResponse{Status: 404, JSON: map[string]any{"error": map[string]any{"code": 404, "message": "No such object: folders/" + folderID}}}
-	}
-	switch call.Method {
-	case MethodFoldersCreate, "storage.folders.insert":
-		var body struct {
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(r.JSON, &body) != nil || body.Name == "" {
-			return nil, provider.Invalid("Expected a folder name")
-		}
-		folderID = body.Name
-		if _, ok, _ := p.catalog.Folder(scope, bucket, folderID); ok {
-			return &gateway.RESTResponse{Status: 409, JSON: map[string]any{"error": map[string]any{"code": 409, "message": "Folder already exists"}}}, nil
-		}
-		if err := p.catalog.PublishFolder(scope, Folder{Bucket: bucket, Name: folderID}); err != nil {
-			return nil, fmt.Errorf("publish folder: %w", err)
-		}
-		return &gateway.RESTResponse{JSON: folderWire(Folder{Bucket: bucket, Name: folderID})}, nil
+func (p *Provider) executeFolder(method string, r *gateway.RESTRequest, scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
+	switch method {
+	case MethodFoldersCreate, MethodFoldersInsert:
+		return p.createFolder(r, scope, bucket)
 	case MethodFoldersGet:
-		record, ok, err := p.catalog.Folder(scope, bucket, folderID)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return folderMissing(), nil
-		}
-		return &gateway.RESTResponse{JSON: folderWire(record)}, nil
+		return p.getFolder(scope, bucket, r.Path["folder"])
 	case MethodFoldersList:
-		items, err := p.catalog.Folders(scope, bucket)
-		if err != nil {
-			return nil, err
-		}
-		wired := []any{}
-		for _, record := range items {
-			wired = append(wired, folderWire(record))
-		}
-		return &gateway.RESTResponse{JSON: map[string]any{"folders": wired}}, nil
+		return p.listFolders(scope, bucket)
 	default:
-		removed, err := p.catalog.DeleteFolder(scope, bucket, folderID)
-		if err != nil {
-			return nil, err
-		}
-		if !removed {
-			return folderMissing(), nil
-		}
-		return &gateway.RESTResponse{Status: 204}, nil
+		return p.deleteFolder(scope, bucket, r.Path["folder"])
 	}
+}
+
+// folderDocument is the wire shape of one folder.
+func folderDocument(folder Folder) map[string]any {
+	return map[string]any{keyName: folder.Name, "bucket": folder.Bucket}
+}
+
+// folderErrorBody is the Storage Control error body, which has no errors[] list.
+type folderErrorBody struct {
+	Error struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func folderError(code int, message string) *gateway.RESTResponse {
+	var body folderErrorBody
+	body.Error.Code, body.Error.Message = code, message
+	return &gateway.RESTResponse{Status: code, JSON: body}
+}
+
+func folderMissing(id string) *gateway.RESTResponse {
+	return folderError(404, "No such object: folders/"+id)
+}
+
+func (p *Provider) createFolder(r *gateway.RESTRequest, scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(r.JSON, &body) != nil || body.Name == "" {
+		return nil, provider.Invalid("Expected a folder name")
+	}
+	if _, exists, _ := p.catalog.Folder(scope, bucket, body.Name); exists {
+		return folderError(409, "Folder already exists"), nil
+	}
+	folder := Folder{Bucket: bucket, Name: body.Name}
+	if err := p.catalog.PublishFolder(scope, folder); err != nil {
+		return nil, fmt.Errorf("publish folder: %w", err)
+	}
+	return &gateway.RESTResponse{JSON: folderDocument(folder)}, nil
+}
+
+func (p *Provider) getFolder(scope state.Scope, bucket, id string) (*gateway.RESTResponse, error) {
+	folder, found, err := p.catalog.Folder(scope, bucket, id)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return folderMissing(id), nil
+	}
+	return &gateway.RESTResponse{JSON: folderDocument(folder)}, nil
+}
+
+func (p *Provider) listFolders(scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
+	folders, err := p.catalog.Folders(scope, bucket)
+	if err != nil {
+		return nil, err
+	}
+	documents := []any{}
+	for _, folder := range folders {
+		documents = append(documents, folderDocument(folder))
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{"folders": documents}}, nil
+}
+
+func (p *Provider) deleteFolder(scope state.Scope, bucket, id string) (*gateway.RESTResponse, error) {
+	removed, err := p.catalog.DeleteFolder(scope, bucket, id)
+	if err != nil {
+		return nil, err
+	}
+	if !removed {
+		return folderMissing(id), nil
+	}
+	return &gateway.RESTResponse{Status: 204}, nil
 }

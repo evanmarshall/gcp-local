@@ -31,12 +31,6 @@ type Server struct {
 	ready           atomic.Bool
 }
 
-// New builds a Server with an empty gateway. Tests use it to exercise listener and
-// shutdown behavior without registering providers; production uses WithGateway.
-func New(version string, shutdownTimeout time.Duration) *Server {
-	return WithGateway(version, shutdownTimeout, gateway.New(nil, nil))
-}
-
 func WithGateway(version string, shutdownTimeout time.Duration, g *gateway.Gateway) *Server {
 	s := &Server{ShutdownTimeout: shutdownTimeout, GRPC: g.NewGRPCServer(), Backends: backend.NewManager(30*time.Second, shutdownTimeout)}
 	s.HTTP = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,49 +128,17 @@ var errListeners = errors.New("supply http/grpc listeners and pair the metadata 
 var errShutdownTimeout = errors.New("shutdown timeout must be positive")
 
 func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
-	httpListener, grpcListener := listeners.HTTP, listeners.GRPC
-	if httpListener == nil || grpcListener == nil || (s.Metadata == nil) != (listeners.Metadata == nil) {
-		for _, listener := range []net.Listener{httpListener, grpcListener, listeners.Metadata} {
-			if listener != nil {
-				_ = listener.Close()
-			}
-		}
-		return errListeners
-	}
-	closeListeners := func() {
-		_ = httpListener.Close()
-		_ = grpcListener.Close()
-		if listeners.Metadata != nil {
-			_ = listeners.Metadata.Close()
-		}
-	}
-
-	if s.ShutdownTimeout <= 0 {
-		closeListeners()
-		return errShutdownTimeout
+	if err := s.validate(listeners); err != nil {
+		listeners.close()
+		return err
 	}
 	if ctx.Err() != nil {
-		closeListeners()
-		cleanup, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
-		defer cancel()
-		if err := s.Backends.Shutdown(cleanup); err != nil { //nolint:contextcheck // draining must outlive the cancelled request
-			return fmt.Errorf("drain backends: %w", err)
-		}
-		return nil
+		listeners.close()
+		return s.drainBackends() //nolint:contextcheck // draining must outlive the cancelled request
 	}
 	s.ready.Store(true)
-	count := 2
-	if listeners.Metadata != nil {
-		count++
-	}
-	served := make(chan error, count)
-	go func() { served <- s.HTTP.Serve(httpListener) }()
-	go func() { served <- s.GRPC.Serve(grpcListener) }()
-	if listeners.Metadata != nil {
-		go func() { served <- s.Metadata.Serve(listeners.Metadata) }()
-	}
+	served, remaining := s.serve(listeners)
 	var serveErr error
-	remaining := count
 	select {
 	case serveErr = <-served:
 		remaining--
@@ -186,8 +148,72 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 	s.Backends.DrainSessions()
 	deadline, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
 	defer cancel()
-	httpCount := 1
+	shutdownErr := s.shutdownTransports(deadline) //nolint:contextcheck // draining must outlive the cancelled request
+	serveErr = awaitServers(served, remaining, serveErr)
+	if err := s.Backends.Shutdown(deadline); err != nil { //nolint:contextcheck // draining must outlive the cancelled request
+		shutdownErr = errors.Join(shutdownErr, err)
+	}
+	if shutdownErr != nil {
+		return shutdownErr
+	}
+	if isServerClosed(serveErr) {
+		return nil
+	}
+	return serveErr
+}
+
+// validate requires both service listeners, a metadata listener exactly when a
+// metadata server is configured, and a positive drain budget.
+func (s *Server) validate(listeners Listeners) error {
+	if listeners.HTTP == nil || listeners.GRPC == nil || (s.Metadata == nil) != (listeners.Metadata == nil) {
+		return errListeners
+	}
+	if s.ShutdownTimeout <= 0 {
+		return errShutdownTimeout
+	}
+	return nil
+}
+
+// close releases every supplied listener.
+func (l Listeners) close() {
+	for _, listener := range []net.Listener{l.HTTP, l.GRPC, l.Metadata} {
+		if listener != nil {
+			_ = listener.Close()
+		}
+	}
+}
+
+// drainBackends stops managed backends when Serve is cancelled before it starts.
+func (s *Server) drainBackends() error {
+	cleanup, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout)
+	defer cancel()
+	if err := s.Backends.Shutdown(cleanup); err != nil {
+		return fmt.Errorf("drain backends: %w", err)
+	}
+	return nil
+}
+
+// serve starts each transport on its listener and returns the channel their
+// Serve results arrive on, with the number of transports started.
+func (s *Server) serve(listeners Listeners) (<-chan error, int) {
+	count := 2
 	if listeners.Metadata != nil {
+		count++
+	}
+	served := make(chan error, count)
+	go func() { served <- s.HTTP.Serve(listeners.HTTP) }()
+	go func() { served <- s.GRPC.Serve(listeners.GRPC) }()
+	if listeners.Metadata != nil {
+		go func() { served <- s.Metadata.Serve(listeners.Metadata) }()
+	}
+	return served, count
+}
+
+// shutdownTransports drains HTTP, metadata, and gRPC under one deadline. Past
+// the deadline it stops gRPC streams and closes HTTP servers that failed to drain.
+func (s *Server) shutdownTransports(deadline context.Context) error {
+	httpCount := 1
+	if s.Metadata != nil {
 		httpCount++
 	}
 	httpDone := make(chan error, httpCount)
@@ -208,28 +234,36 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 	for range httpCount {
 		if err := <-httpDone; err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
-			_ = s.HTTP.Close()
-			if s.Metadata != nil {
-				_ = s.Metadata.Close()
-			}
+			s.closeHTTP()
 		}
 	}
+	return shutdownErr
+}
+
+// closeHTTP forcibly closes the HTTP servers' remaining connections.
+func (s *Server) closeHTTP() {
+	_ = s.HTTP.Close()
+	if s.Metadata != nil {
+		_ = s.Metadata.Close()
+	}
+}
+
+// awaitServers collects the remaining Serve results, keeping the last
+// unexpected failure over serveErr.
+func awaitServers(served <-chan error, remaining int, serveErr error) error {
 	for range remaining {
-		if err := <-served; err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, grpc.ErrServerStopped) {
+		if err := <-served; err != nil && !isServerClosed(err) {
 			serveErr = err
 		}
 	}
-	if err := s.Backends.Shutdown(deadline); err != nil { //nolint:contextcheck // draining must outlive the cancelled request
-		shutdownErr = errors.Join(shutdownErr, err)
-	}
-	if shutdownErr != nil {
-		return shutdownErr
-	}
-	if errors.Is(serveErr, http.ErrServerClosed) || errors.Is(serveErr, grpc.ErrServerStopped) {
-		return nil
-	}
 	return serveErr
 }
+
+// isServerClosed reports the errors transports return after a requested shutdown.
+func isServerClosed(err error) bool {
+	return errors.Is(err, http.ErrServerClosed) || errors.Is(err, grpc.ErrServerStopped)
+}
+
 func writeJSON(w http.ResponseWriter, code int, value any) {
 	// Marshal before committing a status so an encoding failure is still
 	// reportable as a 500 instead of a silent truncated 200.

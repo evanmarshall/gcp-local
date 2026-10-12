@@ -153,6 +153,13 @@ func (p *Process) Reset(ctx context.Context) error {
 	return p.config.ResetAssets(ctx)
 }
 
+// isLoopbackHTTP reports whether u is a plain http URL on an explicit numeric
+// loopback host and port, without credentials or a fragment.
+func isLoopbackHTTP(u *url.URL) bool {
+	ip := net.ParseIP(u.Hostname())
+	return u.Scheme == "http" && ip != nil && ip.IsLoopback() && u.Port() != "" && u.User == nil && u.Fragment == ""
+}
+
 // HTTPProbe accepts only explicit numeric loopback HTTP endpoints, with no
 // proxy, redirects, or credentials. Provider-specific probes can use gRPC too.
 func HTTPProbe(endpoint string) (func(context.Context) error, error) {
@@ -160,8 +167,7 @@ func HTTPProbe(endpoint string) (func(context.Context) error, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse readiness endpoint: %w", err)
 	}
-	ip := net.ParseIP(parsed.Hostname())
-	if parsed.Scheme != "http" || ip == nil || !ip.IsLoopback() || parsed.Port() == "" || parsed.User != nil || parsed.Fragment != "" {
+	if !isLoopbackHTTP(parsed) {
 		return nil, errProbeEndpoint
 	}
 	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

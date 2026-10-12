@@ -58,14 +58,17 @@ func newHarness(t *testing.T) *harness {
 	return &harness{t: t, gate: g, engine: engine}
 }
 
-// invoke issues one REST request as the fixture principal.
-func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
+// post issues one REST POST as the fixture principal.
+func (h *harness) post(path string, body any) *httptest.ResponseRecorder {
 	h.t.Helper()
 	var encoded []byte
 	if body != nil {
-		encoded, _ = json.Marshal(body)
+		var err error
+		if encoded, err = json.Marshal(body); err != nil {
+			h.t.Fatalf("encode the request body: %v", err)
+		}
 	}
-	request, _ := http.NewRequestWithContext(context.Background(), verb, path, bytes.NewReader(encoded))
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, path, bytes.NewReader(encoded))
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -77,11 +80,11 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 
 func TestProjectPolicyRoundTrip(t *testing.T) {
 	h := newHarness(t)
-	recorder := h.invoke(http.MethodPost, testBase+":getIamPolicy", map[string]any{})
+	recorder := h.post(testBase+":getIamPolicy", map[string]any{})
 	if recorder.Code != 200 {
 		t.Fatalf("getIamPolicy status = %d", recorder.Code)
 	}
-	recorder = h.invoke(http.MethodPost, testBase+":setIamPolicy", map[string]any{
+	recorder = h.post(testBase+":setIamPolicy", map[string]any{
 		"policy": map[string]any{
 			"bindings": []any{map[string]any{
 				"role":    "roles/resourcemanager.projectIamAdmin",
@@ -92,15 +95,15 @@ func TestProjectPolicyRoundTrip(t *testing.T) {
 	if recorder.Code != 200 {
 		t.Fatalf("setIamPolicy status = %d body %s", recorder.Code, recorder.Body.String())
 	}
-	recorder = h.invoke(http.MethodPost, testBase+":getIamPolicy", map[string]any{})
+	recorder = h.post(testBase+":getIamPolicy", map[string]any{})
 	if recorder.Code != 200 {
 		t.Fatalf("post-set getIamPolicy status = %d", recorder.Code)
 	}
-	recorder = h.invoke(http.MethodPost, "/v1/projects/bad_upper:setIamPolicy", map[string]any{})
+	recorder = h.post("/v1/projects/bad_upper:setIamPolicy", map[string]any{})
 	if recorder.Code != 400 {
 		t.Fatalf("invalid project status = %d", recorder.Code)
 	}
-	recorder = h.invoke(http.MethodPost, "/v1/projects/missing:getIamPolicy", map[string]any{})
+	recorder = h.post("/v1/projects/missing:getIamPolicy", map[string]any{})
 	if recorder.Code != 404 {
 		t.Fatalf("missing project status = %d", recorder.Code)
 	}

@@ -69,12 +69,10 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 // emptyBackend satisfies the backend contract for an in-memory provider.
 type emptyBackend struct{}
 
-func (emptyBackend) Start(context.Context) error    { return nil }
-func (emptyBackend) Ready(context.Context) error    { return nil }
-func (emptyBackend) Stop(context.Context) error     { return nil }
-func (emptyBackend) Reset(context.Context) error    { return nil }
-func (emptyBackend) Snapshot(context.Context) error { return backend.ErrPersistenceUnsupported }
-func (emptyBackend) Restore(context.Context) error  { return backend.ErrPersistenceUnsupported }
+func (emptyBackend) Start(context.Context) error { return nil }
+func (emptyBackend) Ready(context.Context) error { return nil }
+func (emptyBackend) Stop(context.Context) error  { return nil }
+func (emptyBackend) Reset(context.Context) error { return nil }
 
 // Reset clears the scope's repositories.
 func (p *Provider) Reset(scope state.Scope) error {

@@ -69,12 +69,10 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 // emptyBackend satisfies the backend contract for an in-memory provider.
 type emptyBackend struct{}
 
-func (emptyBackend) Start(context.Context) error    { return nil }
-func (emptyBackend) Ready(context.Context) error    { return nil }
-func (emptyBackend) Stop(context.Context) error     { return nil }
-func (emptyBackend) Reset(context.Context) error    { return nil }
-func (emptyBackend) Snapshot(context.Context) error { return backend.ErrPersistenceUnsupported }
-func (emptyBackend) Restore(context.Context) error  { return backend.ErrPersistenceUnsupported }
+func (emptyBackend) Start(context.Context) error { return nil }
+func (emptyBackend) Ready(context.Context) error { return nil }
+func (emptyBackend) Stop(context.Context) error  { return nil }
+func (emptyBackend) Reset(context.Context) error { return nil }
 
 // Reset clears the scope's datasets, tables, and rows.
 func (p *Provider) Reset(scope state.Scope) error {
@@ -133,23 +131,17 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	target := iam.Target{Name: provider.ProjectResource(project)}
 	dataset, table := request.Path["datasetId"], request.Path["tableId"]
 	switch call.Method {
-	case methodDatasetsCreate:
-		// The collection-level create takes the dataset id from the body.
-		return scope, target, nil
-	case methodDatasetsList:
-		return scope, target, nil
-	case methodJobsQuery, methodJobsResults:
-		// Query jobs authorize at the project, like the documented rows.
+	case methodDatasetsCreate, methodDatasetsList, methodJobsQuery, methodJobsResults:
+		// The collection-level create takes the dataset id from the body, and
+		// query jobs authorize at the project, like the documented rows.
 		return scope, target, nil
 	}
 	if !uid.MatchString(dataset) {
 		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid dataset id %q", dataset)
 	}
 	switch call.Method {
-	case methodDatasetsGet, methodDatasetsDelete, methodDatasetsUpdate, methodDatasetsGetIam, methodDatasetsSetIam:
-		target.Name = datasetResource(project, dataset)
-		return scope, target, nil
-	case methodTablesCreate, methodTablesList:
+	case methodDatasetsGet, methodDatasetsDelete, methodDatasetsUpdate, methodDatasetsGetIam, methodDatasetsSetIam,
+		methodTablesCreate, methodTablesList:
 		target.Name = datasetResource(project, dataset)
 		return scope, target, nil
 	case methodRowsInsert:

@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -174,12 +175,7 @@ func (s *scopeState) instanceUser(uses func(*instanceRecord) bool) string {
 
 // sortedKeys returns the map's keys in order, for deterministic choices.
 func sortedKeys[T any](values map[string]T) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(values))
 }
 
 // Sentinel record states for the shared handlers.

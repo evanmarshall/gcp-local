@@ -81,10 +81,7 @@ func TestRESTDispatchPreservesEscapedResourcesAndIdentity(t *testing.T) {
 	calls := make(chan Call, 1)
 	register(t, r, "storage.objects.get", func(call Call, input any) (any, error) {
 		req, ok := input.(*RESTRequest)
-		if !ok {
-			return nil, errBadDecodedRequest
-		}
-		if req.Path["bucket"] != "bucket" || req.Path["object"] != "folder/a%?.txt" || req.Headers.Get(authorizationHeader) != "" {
+		if !ok || !decodedEscapedObject(req) {
 			return nil, errBadDecodedRequest
 		}
 		calls <- call
@@ -103,10 +100,27 @@ func TestRESTDispatchPreservesEscapedResourcesAndIdentity(t *testing.T) {
 	if code != 200 || body["name"] != "folder/a%?.txt" || headers.Get("X-Gcp-Local-Trace-Id") != trace {
 		t.Fatalf("%d %v %v", code, body, headers)
 	}
-	call := <-calls
-	if call.Method != "storage.objects.get" || call.Project != "" || call.Location != "global" || call.TraceID != trace || call.Principal.Subject != "fixture" || call.Principal.Project != "caller-project" {
+	want := callSummary{Method: "storage.objects.get", Location: "global", Resource: "/storage/v1/b/bucket/o/folder/a%?.txt", TraceID: trace, State: Authenticated, Subject: "fixture", PrincipalProject: "caller-project"}
+	if call := <-calls; summarize(call) != want {
 		t.Fatalf("%+v", call)
 	}
+}
+
+// decodedEscapedObject reports whether the object path arrived unescaped and
+// the bearer token was stripped before the provider saw the request.
+func decodedEscapedObject(req *RESTRequest) bool {
+	return req.Path["bucket"] == "bucket" && req.Path["object"] == "folder/a%?.txt" && req.Headers.Get(authorizationHeader) == ""
+}
+
+// callSummary is the comparable part of a Call that dispatch tests assert.
+type callSummary struct {
+	Method, Project, Location, Resource, TraceID string
+	State                                        PrincipalState
+	Subject, PrincipalProject                    string
+}
+
+func summarize(call Call) callSummary {
+	return callSummary{Method: call.Method, Project: call.Project, Location: call.Location, Resource: call.Resource, TraceID: call.TraceID, State: call.Principal.State, Subject: call.Principal.Subject, PrincipalProject: call.Principal.Project}
 }
 func TestRESTValidationBeforeDispatchAndExplicitGaps(t *testing.T) {
 	r := NewRegistry()
@@ -203,15 +217,21 @@ func TestRESTErrorsPreserveDetailsAndHideInternalFailures(t *testing.T) {
 			t.Fatalf("%d %v", code, body)
 		}
 		if code == 403 {
-			details, ok := detail["details"].([]any)
-			if !ok || len(details) == 0 {
-				t.Fatalf("missing error details: %v", detail)
-			}
-			first, ok := details[0].(map[string]any)
-			if !ok || first["reason"] != permissionDeniedReason {
-				t.Fatal(details)
-			}
+			assertPermissionReason(t, detail)
 		}
+	}
+}
+
+// assertPermissionReason checks that a REST error body kept its ErrorInfo reason.
+func assertPermissionReason(t *testing.T, detail map[string]any) {
+	t.Helper()
+	details, ok := detail["details"].([]any)
+	if !ok || len(details) == 0 {
+		t.Fatalf("missing error details: %v", detail)
+	}
+	first, ok := details[0].(map[string]any)
+	if !ok || first["reason"] != permissionDeniedReason {
+		t.Fatal(details)
 	}
 }
 func TestRESTCancellationReachesProvider(t *testing.T) {
@@ -280,7 +300,8 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := <-calls
-	if response.GetName() != call.Resource || call.Project != "synthetic" || call.Location != "global" || call.Principal.State != Unknown || len(call.TraceID) != 32 || header.Get("x-gcp-local-trace-id")[0] != call.TraceID {
+	want := callSummary{Method: "/google.pubsub.v1.Publisher/GetTopic", Project: "synthetic", Location: "global", Resource: response.GetName(), TraceID: header.Get("x-gcp-local-trace-id")[0], State: Unknown}
+	if summarize(call) != want || len(call.TraceID) != 32 {
 		t.Fatalf("%+v %v", call, header)
 	}
 	_, err = client.GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/wrong/subscriptions/topic"})
@@ -288,9 +309,7 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = client.GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/synthetic/topics/denied"})
-	s := status.Convert(err)
-	info, ok := s.Details()[0].(*errdetails.ErrorInfo)
-	if s.Code() != codes.PermissionDenied || !ok || info.GetReason() != permissionDeniedReason {
+	if s := status.Convert(err); s.Code() != codes.PermissionDenied || errorInfoReason(s) != permissionDeniedReason {
 		t.Fatal(s)
 	}
 	_, err = client.ListTopics(ctx, &pb.ListTopicsRequest{Project: "projects/synthetic"})
@@ -298,72 +317,96 @@ func TestGRPCDispatchResourceContextAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// errorInfoReason returns the reason of a status's first ErrorInfo detail.
+func errorInfoReason(s *status.Status) string {
+	if details := s.Details(); len(details) > 0 {
+		if info, ok := details[0].(*errdetails.ErrorInfo); ok {
+			return info.GetReason()
+		}
+	}
+	return ""
+}
+
 func TestStreamingPullBidirectionalDeliveryAndCancellation(t *testing.T) {
 	for _, deadline := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cancel", true: "deadline"}[deadline], func(t *testing.T) {
 			r := NewRegistry()
 			received, done := make(chan struct{}), make(chan struct{})
-			if err := r.RegisterStream("/google.pubsub.v1.Subscriber/StreamingPull", func(call Call, stream Stream) error {
-				defer close(done)
-				var first pb.StreamingPullRequest
-				if err := stream.Recv(&first); err != nil {
-					return err
-				}
-				if first.GetSubscription() != streamSubscription || call.Project != "synthetic" || call.Resource != first.GetSubscription() {
-					return errMissingFirstCall
-				}
-				if err := stream.Send(&pb.StreamingPullResponse{ReceivedMessages: []*pb.ReceivedMessage{{AckId: ackID, Message: &pb.PubsubMessage{Data: []byte("payload")}}}}); err != nil {
-					return err
-				}
-				var second pb.StreamingPullRequest
-				if err := stream.Recv(&second); err != nil {
-					return err
-				}
-				if len(second.GetAckIds()) != 1 || second.GetAckIds()[0] != ackID {
-					return errMissingAck
-				}
-				close(received)
-				<-call.Context.Done()
-				return call.Context.Err()
-			}); err != nil {
+			if err := r.RegisterStream("/google.pubsub.v1.Subscriber/StreamingPull", deliverOneAndAwaitAck(received, done)); err != nil {
 				t.Fatal(err)
 			}
 			client := pb.NewSubscriberClient(grpcClient(t, New(r, nil)))
-			timeout := 3 * time.Second
+			timeout, expected := 3*time.Second, codes.Canceled
 			if deadline {
-				timeout = 150 * time.Millisecond
+				timeout, expected = 150*time.Millisecond, codes.DeadlineExceeded
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
-			stream, err := client.StreamingPull(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := stream.Send(&pb.StreamingPullRequest{Subscription: streamSubscription}); err != nil {
-				t.Fatal(err)
-			}
-			response, err := stream.Recv()
-			if err != nil || string(response.GetReceivedMessages()[0].GetMessage().GetData()) != "payload" {
-				t.Fatalf("%v %v", response, err)
-			}
-			if err := stream.Send(&pb.StreamingPullRequest{AckIds: []string{ackID}}); err != nil {
-				t.Fatal(err)
-			}
-			wait(t, received)
-			if !deadline {
-				cancel()
-			}
-			_, err = stream.Recv()
-			expected := codes.Canceled
-			if deadline {
-				expected = codes.DeadlineExceeded
-			}
-			if status.Code(err) != expected {
-				t.Fatalf("want %v, got %v", expected, err)
+			code := pullAndAck(ctx, t, client, func() {
+				wait(t, received)
+				if !deadline {
+					cancel()
+				}
+			})
+			if code != expected {
+				t.Fatalf("want %v, got %v", expected, code)
 			}
 			wait(t, done)
 		})
 	}
+}
+
+// deliverOneAndAwaitAck is a StreamingPull provider that checks the first
+// request's resource context, delivers one message, waits for its ack, then
+// holds the stream open until the client cancels or the deadline passes.
+func deliverOneAndAwaitAck(received, done chan<- struct{}) StreamHandler {
+	return func(call Call, stream Stream) error {
+		defer close(done)
+		var first pb.StreamingPullRequest
+		if err := stream.Recv(&first); err != nil {
+			return err
+		}
+		if first.GetSubscription() != streamSubscription || call.Project != "synthetic" || call.Resource != first.GetSubscription() {
+			return errMissingFirstCall
+		}
+		if err := stream.Send(&pb.StreamingPullResponse{ReceivedMessages: []*pb.ReceivedMessage{{AckId: ackID, Message: &pb.PubsubMessage{Data: []byte("payload")}}}}); err != nil {
+			return err
+		}
+		var second pb.StreamingPullRequest
+		if err := stream.Recv(&second); err != nil {
+			return err
+		}
+		if len(second.GetAckIds()) != 1 || second.GetAckIds()[0] != ackID {
+			return errMissingAck
+		}
+		close(received)
+		<-call.Context.Done()
+		return call.Context.Err()
+	}
+}
+
+// pullAndAck opens a StreamingPull, receives the delivered message, acks it,
+// runs afterAck, and returns the status code that ends the stream.
+func pullAndAck(ctx context.Context, t *testing.T, client pb.SubscriberClient, afterAck func()) codes.Code {
+	t.Helper()
+	stream, err := client.StreamingPull(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&pb.StreamingPullRequest{Subscription: streamSubscription}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := stream.Recv()
+	if err != nil || string(response.GetReceivedMessages()[0].GetMessage().GetData()) != "payload" {
+		t.Fatalf("%v %v", response, err)
+	}
+	if err := stream.Send(&pb.StreamingPullRequest{AckIds: []string{ackID}}); err != nil {
+		t.Fatal(err)
+	}
+	afterAck()
+	_, err = stream.Recv()
+	return status.Code(err)
 }
 func TestUnsupportedStreamReturnsWithoutInitialMessage(t *testing.T) {
 	client := pb.NewSubscriberClient(grpcClient(t, New(nil, nil)))

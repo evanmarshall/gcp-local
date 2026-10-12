@@ -15,6 +15,7 @@ const (
 	MethodBucketsGetIamPolicy = "storage.buckets.getIamPolicy"
 	MethodBucketsSetIamPolicy = "storage.buckets.setIamPolicy"
 	MethodFoldersCreate       = "storage.folders.create"
+	MethodFoldersInsert       = "storage.folders.insert"
 	MethodFoldersGet          = "storage.folders.get"
 	MethodFoldersList         = "storage.folders.list"
 	MethodFoldersDelete       = "storage.folders.delete"
@@ -45,4 +46,7 @@ const (
 	kindBucket            = "bucket"
 	altMedia              = "media"
 	storageClassStandard  = "STANDARD"
+	// keyName is the name key shared by query options, upload metadata, and
+	// bucket/folder documents.
+	keyName = "name"
 )

@@ -115,36 +115,53 @@ func New(config Config, now func() time.Time) (*Service, error) {
 	}
 	s := &Service{subjects: map[[32]byte]principal{}, principals: map[string]principal{}, tokens: map[[32]byte]token{}, lifetime: time.Duration(lifetime) * time.Second, now: now}
 	for _, entry := range config.Principals {
-		if (!strings.HasPrefix(entry.Subject, "user:") && !strings.HasPrefix(entry.Subject, "serviceAccount:")) || !strings.Contains(entry.Subject, "@") || strings.ContainsAny(entry.Subject, "\r\n \t") {
-			return nil, errEnrollSubject
+		if err := s.enroll(entry); err != nil {
+			return nil, err
 		}
-		if err := (state.Scope{Project: entry.Project, Location: state.Global}).Validate(); err != nil {
-			return nil, fmt.Errorf("enrolled principal scope: %w", err)
-		}
-		if len(entry.SubjectToken) < 32 || len(entry.SubjectToken) > 256 || strings.ContainsAny(entry.SubjectToken, "\r\n \t") {
-			return nil, errSubjectSecret
-		}
-		hash := sha256.Sum256([]byte(entry.SubjectToken))
-		if _, ok := s.subjects[hash]; ok {
-			return nil, errDuplicateSecret
-		}
-		if _, ok := s.principals[entry.Subject]; ok {
-			return nil, errDuplicateEnrolled
-		}
-		scopes := entry.Scopes
-		if len(scopes) == 0 {
-			scopes = DefaultScopes
-		}
-		for _, scope := range scopes {
-			if !strings.HasPrefix(scope, "https://www.googleapis.com/auth/") || strings.ContainsAny(scope, " \r\n\t") {
-				return nil, errConfiguredScope
-			}
-		}
-		p := principal{entry.Subject, entry.Project, append([]string(nil), scopes...)}
-		s.subjects[hash] = p
-		s.principals[p.subject] = p
 	}
 	return s, nil
+}
+
+// enroll validates one configured principal and indexes it by subject and by
+// the hash of its subject token, rejecting duplicates of either.
+func (s *Service) enroll(entry Enrollment) error {
+	if err := validateEnrollment(entry); err != nil {
+		return err
+	}
+	hash := sha256.Sum256([]byte(entry.SubjectToken))
+	if _, ok := s.subjects[hash]; ok {
+		return errDuplicateSecret
+	}
+	if _, ok := s.principals[entry.Subject]; ok {
+		return errDuplicateEnrolled
+	}
+	scopes := entry.Scopes
+	if len(scopes) == 0 {
+		scopes = DefaultScopes
+	}
+	for _, scope := range scopes {
+		if !strings.HasPrefix(scope, "https://www.googleapis.com/auth/") || strings.ContainsAny(scope, " \r\n\t") {
+			return errConfiguredScope
+		}
+	}
+	p := principal{entry.Subject, entry.Project, append([]string(nil), scopes...)}
+	s.subjects[hash] = p
+	s.principals[p.subject] = p
+	return nil
+}
+
+// validateEnrollment checks the subject, its project, and its token secret.
+func validateEnrollment(entry Enrollment) error {
+	if (!strings.HasPrefix(entry.Subject, "user:") && !strings.HasPrefix(entry.Subject, "serviceAccount:")) || !strings.Contains(entry.Subject, "@") || strings.ContainsAny(entry.Subject, "\r\n \t") {
+		return errEnrollSubject
+	}
+	if err := (state.Scope{Project: entry.Project, Location: state.Global}).Validate(); err != nil {
+		return fmt.Errorf("enrolled principal scope: %w", err)
+	}
+	if len(entry.SubjectToken) < 32 || len(entry.SubjectToken) > 256 || strings.ContainsAny(entry.SubjectToken, "\r\n \t") {
+		return errSubjectSecret
+	}
+	return nil
 }
 func (s *Service) Resolve(ctx context.Context, accessToken string) (gateway.Principal, error) {
 	if err := ctx.Err(); err != nil {

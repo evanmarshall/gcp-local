@@ -307,7 +307,7 @@ func (e *Engine) plannedPermissions(rule Rule, features map[string]bool, complet
 	}
 	for feature := range features {
 		if _, ok := rule.When[feature]; !ok {
-			return nil, "unsupported", "Unknown request/state feature", codes.Unimplemented, true
+			return nil, outcomeUnsupported, "Unknown request/state feature", codes.Unimplemented, true
 		}
 	}
 	names := make([]string, 0, len(rule.When))
@@ -318,7 +318,7 @@ func (e *Engine) plannedPermissions(rule Rule, features map[string]bool, complet
 	for _, name := range names {
 		enabled, present := features[name]
 		if !present {
-			return nil, "unsupported", "Required request/state feature was not resolved: " + name, codes.Unimplemented, true
+			return nil, outcomeUnsupported, "Required request/state feature was not resolved: " + name, codes.Unimplemented, true
 		}
 		if enabled {
 			permissions = append(permissions, rule.When[name]...)
@@ -597,16 +597,24 @@ func (e *Engine) pabViolation(ancestors []state.Resource, call gateway.Call) str
 		if stored.pab == nil {
 			continue
 		}
-		for _, rule := range stored.pab.Rules {
-			for _, bound := range rule.BoundCloudResources {
-				if strings.Contains(call.Resource, bound) {
-					return ""
-				}
-			}
+		if pabBounds(stored.pab, call.Resource) {
+			return ""
 		}
 		return "The request is outside every principal access boundary bound at " + ancestor.Name
 	}
 	return ""
+}
+
+// pabBounds reports whether any boundary rule covers the requested resource.
+func pabBounds(pab *PABPolicy, resource string) bool {
+	for _, rule := range pab.Rules {
+		for _, bound := range rule.BoundCloudResources {
+			if strings.Contains(resource, bound) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // MarkOrgPolicy stores one org-policy constraint on a resource. The

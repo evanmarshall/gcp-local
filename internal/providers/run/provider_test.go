@@ -556,3 +556,25 @@ func TestInvocationAcceptsBareServiceRoot(t *testing.T) {
 		t.Fatalf("bare service root was not routed: %s", recorder.Body.String())
 	}
 }
+
+// A service deleted between registration and launch fails the create with a
+// plain 500 error body rather than a successful response that wraps it.
+func TestLaunchOfVanishedServiceIsInternalError(t *testing.T) {
+	h := newHarness(t)
+	scope := state.Scope{Project: "demo-project", Location: "us-central1"}
+	response := h.provider.launchOperation(scope, "svc")
+	if response.Status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", response.Status)
+	}
+	body, err := json.Marshal(response.JSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"error":{"code":500,"message":"The created service vanished before its launch","status":"INTERNAL"}}`
+	if string(body) != want {
+		t.Fatalf("body = %s, want %s", body, want)
+	}
+	if len(h.runtime.started) != 0 {
+		t.Fatal("launched a container for a missing service")
+	}
+}

@@ -1,6 +1,7 @@
 package iam
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -31,16 +32,24 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.getIam(target)
 	case methodAccountsSetIam:
 		return p.setIam(request, target)
+	case methodKeysList, methodKeysGet, methodKeysCreate, methodKeysDelete:
+		return p.executeKey(call.Method, request, scope)
+	default:
+		return p.accountsDelete(request, scope)
+	}
+}
+
+// executeKey dispatches one authorized service account key request.
+func (p *Provider) executeKey(method string, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	switch method {
 	case methodKeysList:
 		return p.keysList(request, scope)
 	case methodKeysGet:
 		return p.keysGet(request, scope)
 	case methodKeysCreate:
 		return p.keysCreate(request, scope)
-	case methodKeysDelete:
-		return p.keysDelete(request, scope)
 	default:
-		return p.accountsDelete(request, scope)
+		return p.keysDelete(request, scope)
 	}
 }
 
@@ -72,23 +81,17 @@ func (p *Provider) accountsCreate(request *gateway.RESTRequest, scope state.Scop
 		if s.accounts[id] != nil {
 			return status.Errorf(codes.AlreadyExists, "Service account %s already exists", id)
 		}
-		displayName := body.ServiceAccount.DisplayName
-		if displayName == "" {
-			displayName = body.DisplayName
-		}
-		description := body.ServiceAccount.Description
-		if description == "" {
-			description = body.Description
-		}
 		created = &accountRecord{
-			Project: scope.Project, ID: id, DisplayName: displayName,
-			Description: description, Keys: map[string]*keyRecord{}, CreatedAt: now,
+			Project: scope.Project, ID: id,
+			DisplayName: cmp.Or(body.ServiceAccount.DisplayName, body.DisplayName),
+			Description: cmp.Or(body.ServiceAccount.Description, body.Description),
+			Keys:        map[string]*keyRecord{}, CreatedAt: now,
 		}
 		s.accounts[id] = created
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // already a wire status
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: accountResource(scope.Project, accountEmail(scope.Project, id)), Service: serviceName,

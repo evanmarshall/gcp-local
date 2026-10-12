@@ -1,9 +1,3 @@
 # Unreachable functions that are deliberate, each with the contract that requires it.
 # Delete the function instead of adding a line here whenever the contract does not hold.
-internal/backend/manager.go: Manager.Require # lifecycle hook documented in docs/state-and-backends.md; reached by providers and probes, not by cmd/gcp-local
-internal/backend/manager.go: Manager.Preload # lifecycle hook documented in docs/state-and-backends.md
-internal/backend/manager.go: Manager.Reset # lifecycle hook documented in docs/state-and-backends.md
-internal/backend/manager.go: Manager.Snapshot # persistence hook that reports ErrPersistenceUnsupported until a backend can restore
-internal/backend/manager.go: Manager.Restore # persistence hook that reports ErrPersistenceUnsupported until a backend can restore
-internal/backend/process.go: HTTPProbe # loopback readiness validator exercised directly by its unit test
-internal/runtime/server.go: New # test-only constructor; production uses WithGateway
+internal/backend/manager.go: Manager.Reset # lifecycle hook documented in docs/state-and-backends.md; provider reset tests verify AfterReset clears state only after backend reset succeeds

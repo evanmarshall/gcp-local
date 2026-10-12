@@ -27,6 +27,11 @@ var (
 	errProviderReached          = errors.New("diagnostics reached provider")
 )
 
+// newServer builds a Server with an empty gateway for listener and shutdown tests.
+func newServer(version string, shutdownTimeout time.Duration) *Server {
+	return WithGateway(version, shutdownTimeout, gateway.New(nil, nil))
+}
+
 // getWithClient issues a context-aware GET and closes nothing on the caller's
 // behalf; the returned response is always safe to read or close.
 func getWithClient(t *testing.T, client *http.Client, url string) (*http.Response, error) {
@@ -55,7 +60,15 @@ func listenTestAddress() (net.Listener, error) {
 // healthPath is the local readiness endpoint asserted across runtime tests.
 const healthPath = "/_local/health"
 
+// start serves s on fresh loopback listeners and returns its HTTP URL, the
+// cancel that begins shutdown, and Serve's result.
 func start(t *testing.T, s *Server) (string, context.CancelFunc, <-chan error) {
+	t.Helper()
+	listeners, cancel, result := serveLoopback(t, s)
+	return "http://" + listeners.HTTP.Addr().String(), cancel, result
+}
+
+func serveLoopback(t *testing.T, s *Server) (Listeners, context.CancelFunc, <-chan error) {
 	t.Helper()
 	listener, err := listenTestAddress()
 	if err != nil {
@@ -66,39 +79,42 @@ func start(t *testing.T, s *Server) (string, context.CancelFunc, <-chan error) {
 		_ = listener.Close()
 		t.Fatal(err)
 	}
+	listeners := Listeners{HTTP: listener, GRPC: grpcListener}
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
-	go func() { result <- s.Serve(ctx, Listeners{HTTP: listener, GRPC: grpcListener}) }()
+	go func() { result <- s.Serve(ctx, listeners) }()
 	t.Cleanup(cancel)
-	return "http://" + listener.Addr().String(), cancel, result
+	return listeners, cancel, result
+}
+
+// getJSON fetches url and decodes its JSON object body.
+func getJSON(t *testing.T, client *http.Client, url string) (int, map[string]any) {
+	t.Helper()
+	response, err := getWithClient(t, client, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return response.StatusCode, body
 }
 
 func TestHealthAndUnsupportedAPI(t *testing.T) {
-	s := New("test-version", time.Second)
+	s := newServer("test-version", time.Second)
 	url, cancel, result := start(t, s)
 	client := &http.Client{Timeout: time.Second}
-	for _, path := range []string{healthPath, "/_local/diagnostics", "/storage/v1/b"} {
-		response, err := getWithClient(t, client, url+path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var body map[string]any
-		err = json.NewDecoder(response.Body).Decode(&body)
-		_ = response.Body.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if path == "/storage/v1/b" {
-			detail, ok := body["error"].(map[string]any)
-			if response.StatusCode != http.StatusNotImplemented || !ok || detail["status"] != "UNIMPLEMENTED" {
-				t.Fatalf("unexpected API response: %v", body)
-			}
-		} else if response.StatusCode != http.StatusOK {
-			t.Fatalf("diagnostics status %d", response.StatusCode)
-		}
-		if path == healthPath && (body["ready"] != true || body["version"] != "test-version") {
-			t.Fatalf("unexpected health: %v", body)
-		}
+	if code, body := getJSON(t, client, url+healthPath); code != http.StatusOK || body["ready"] != true || body["version"] != "test-version" {
+		t.Fatalf("unexpected health: %d %v", code, body)
+	}
+	if code, _ := getJSON(t, client, url+"/_local/diagnostics"); code != http.StatusOK {
+		t.Fatalf("diagnostics status %d", code)
+	}
+	code, body := getJSON(t, client, url+"/storage/v1/b")
+	if detail, ok := body["error"].(map[string]any); code != http.StatusNotImplemented || !ok || detail["status"] != "UNIMPLEMENTED" {
+		t.Fatalf("unexpected API response: %v", body)
 	}
 	cancel()
 	if err := <-result; err != nil {
@@ -111,7 +127,7 @@ func TestHealthAndUnsupportedAPI(t *testing.T) {
 }
 
 func TestShutdownDrainsActiveRequest(t *testing.T) {
-	s := New("test", time.Second)
+	s := newServer("test", time.Second)
 	entered, release := make(chan struct{}), make(chan struct{})
 	s.HTTP.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(entered)
@@ -150,7 +166,7 @@ func TestShutdownDrainsActiveRequest(t *testing.T) {
 }
 
 func TestShutdownDeadlineClosesBlockedRequest(t *testing.T) {
-	s := New("test", 20*time.Millisecond)
+	s := newServer("test", 20*time.Millisecond)
 	entered := make(chan struct{})
 	s.HTTP.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done() })
 	url, cancel, result := start(t, s)
@@ -204,83 +220,105 @@ func TestShutdownDrainsOrCancelsGRPC(t *testing.T) {
 		t.Run(map[bool]string{false: "drain", true: "force"}[force], func(t *testing.T) {
 			registry := gateway.NewRegistry()
 			entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
-			if err := registry.Register("/google.pubsub.v1.Publisher/GetTopic", func(call gateway.Call, input any) (any, error) {
-				close(entered)
-				defer close(done)
-				select {
-				case <-release:
-					request, ok := input.(*pb.GetTopicRequest)
-					if !ok {
-						return nil, errUnexpectedFixtureRequest
-					}
-					return &pb.Topic{Name: request.GetTopic()}, nil
-				case <-call.Context.Done():
-					return nil, call.Context.Err()
-				}
-			}); err != nil {
+			if err := registry.Register("/google.pubsub.v1.Publisher/GetTopic", blockingGetTopic(entered, release, done)); err != nil {
 				t.Fatal(err)
 			}
 			timeout := time.Second
 			if force {
 				timeout = 30 * time.Millisecond
 			}
-			s := WithGateway("test", timeout, gateway.New(registry, nil))
-			httpListener, err := listenTestAddress()
-			if err != nil {
-				t.Fatal(err)
-			}
-			grpcListener, err := listenTestAddress()
-			if err != nil {
-				_ = httpListener.Close()
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			result := make(chan error, 1)
-			go func() { result <- s.Serve(ctx, Listeners{HTTP: httpListener, GRPC: grpcListener}) }()
-			connection, err := grpc.NewClient("passthrough:///"+grpcListener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer connection.Close()
-			response := make(chan error, 1)
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				_, err := pb.NewPublisherClient(connection).GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/synthetic/topics/topic"})
-				response <- err
-			}()
+			listeners, cancel, result := serveLoopback(t, WithGateway("test", timeout, gateway.New(registry, nil)))
+			grpcAddress := listeners.GRPC.Addr().String()
+			response := getTopic(t, grpcAddress)
 			<-entered
 			cancel()
 			if !force {
-				select {
-				case err := <-result:
-					t.Fatalf("shutdown skipped active RPC: %v", err)
-				case <-time.After(20 * time.Millisecond):
-				}
+				stillDraining(t, result)
 				close(release)
 			}
-			err = <-result
-			if force && !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("expected forced shutdown, got %v", err)
-			}
-			if !force && err != nil {
-				t.Fatal(err)
-			}
-			if err := <-response; !force && err != nil {
-				t.Fatal(err)
-			}
+			checkGRPCShutdown(t, force, <-result, <-response)
 			select {
 			case <-done:
 			case <-time.After(time.Second):
 				t.Fatal("RPC context not cancelled")
 			}
-			dialer := &net.Dialer{Timeout: time.Second}
-			if next, err := dialer.DialContext(context.Background(), "tcp", grpcListener.Addr().String()); err == nil {
-				_ = next.Close()
-				t.Fatal("gRPC listener remained open")
-			}
+			listenerClosed(t, grpcAddress)
 		})
+	}
+}
+
+// stillDraining fails if Serve returns while an RPC is still active.
+func stillDraining(t *testing.T, result <-chan error) {
+	t.Helper()
+	select {
+	case err := <-result:
+		t.Fatalf("shutdown skipped active RPC: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+// listenerClosed fails if address still accepts connections.
+func listenerClosed(t *testing.T, address string) {
+	t.Helper()
+	dialer := &net.Dialer{Timeout: time.Second}
+	if next, err := dialer.DialContext(context.Background(), "tcp", address); err == nil {
+		_ = next.Close()
+		t.Fatal("gRPC listener remained open")
+	}
+}
+
+// blockingGetTopic answers GetTopic once release closes, or returns the RPC's
+// context error when shutdown cancels it first.
+func blockingGetTopic(entered chan<- struct{}, release <-chan struct{}, done chan<- struct{}) gateway.Handler {
+	return func(call gateway.Call, input any) (any, error) {
+		close(entered)
+		defer close(done)
+		select {
+		case <-release:
+			request, ok := input.(*pb.GetTopicRequest)
+			if !ok {
+				return nil, errUnexpectedFixtureRequest
+			}
+			return &pb.Topic{Name: request.GetTopic()}, nil
+		case <-call.Context.Done():
+			return nil, call.Context.Err()
+		}
+	}
+}
+
+// getTopic issues one GetTopic RPC in the background and returns its result.
+func getTopic(t *testing.T, address string) <-chan error {
+	t.Helper()
+	connection, err := grpc.NewClient("passthrough:///"+address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	response := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, err := pb.NewPublisherClient(connection).GetTopic(ctx, &pb.GetTopicRequest{Topic: "projects/synthetic/topics/topic"})
+		response <- err
+	}()
+	return response
+}
+
+// checkGRPCShutdown requires a forced shutdown to report its deadline, and a
+// draining shutdown to finish both Serve and the RPC cleanly.
+func checkGRPCShutdown(t *testing.T, force bool, serveErr, rpcErr error) {
+	t.Helper()
+	if force {
+		if !errors.Is(serveErr, context.DeadlineExceeded) {
+			t.Fatalf("expected forced shutdown, got %v", serveErr)
+		}
+		return
+	}
+	if serveErr != nil {
+		t.Fatal(serveErr)
+	}
+	if rpcErr != nil {
+		t.Fatal(rpcErr)
 	}
 }
 
@@ -291,12 +329,13 @@ func (b *managedBackend) Ready(context.Context) error { return nil }
 func (b *managedBackend) Stop(context.Context) error  { b.stopped.Store(true); return nil }
 func (b *managedBackend) Reset(context.Context) error { return nil }
 func TestRuntimeShutdownStopsManagedBackends(t *testing.T) {
-	s := New("test", time.Second)
+	s := newServer("test", time.Second)
 	child := &managedBackend{}
 	if err := s.Backends.Register("fixture", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return child, nil }, AfterReset: func(state.Scope) error { return nil }}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Backends.Preload(context.Background(), []backend.Key{{Service: "fixture", Scope: state.Scope{Project: "project-a", Location: state.Global}}}); err != nil {
+	fixture := backend.Key{Service: "fixture", Scope: state.Scope{Project: "project-a", Location: state.Global}}
+	if err := s.Backends.Use(context.Background(), fixture, func(context.Context, backend.Backend) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	url, cancel, result := start(t, s)

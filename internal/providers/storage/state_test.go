@@ -32,6 +32,16 @@ func TestBucketProjectOwnershipAndGlobalNamespace(t *testing.T) {
 	if resource, ok := index.Get(BucketResource(bucket.Name)); !ok || resource.Scope != a {
 		t.Fatal("bucket index changed")
 	}
+}
+
+func TestCatalogResetStaysInItsProject(t *testing.T) {
+	index := state.NewIndex()
+	catalog := NewCatalog(index)
+	a, b := state.Scope{Project: testProject, Location: state.Global}, state.Scope{Project: peerProject, Location: state.Global}
+	bucket := Bucket{Name: "shared-name", Location: "us-central1"}
+	if err := catalog.PublishBucket(a, bucket); err != nil {
+		t.Fatal(err)
+	}
 	if err := catalog.PublishBucket(b, Bucket{Name: "other-name", Location: "europe-west1"}); err != nil {
 		t.Fatal(err)
 	}

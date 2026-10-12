@@ -9,14 +9,14 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
-
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -315,25 +315,55 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 			return err
 		}
 	}
-	for _, assemble := range []struct {
-		service  string
-		register func(context.Context, map[string]bool, *gateway.Registry, *core.Server, *state.Index, *iam.Engine) error
-	}{
-		{"compute", assembleCompute},
-		{"secretmanager", assembleSecretManager},
-		{"logging", assembleLogging},
-		{"cloudkms", assembleCloudKMS},
-		{"bigquery", assembleBigQuery},
-		{"bigtable", assembleBigtable},
-		{"artifactregistry", assembleArtifactRegistry},
-		{"resourcemanager", assembleResourceManager},
-		{"iam", assembleIAMAdmin},
-	} {
-		if err := assemble.register(ctx, selected, registry, server, index, engine); err != nil {
-			return err
-		}
+	if err := assembleCompute(ctx, selected, registry, server, index, engine); err != nil {
+		return err
+	}
+	if err := assembleStandard(ctx, selected, registry, server, index, engine); err != nil {
+		return err
 	}
 	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
+}
+
+// standardProvider is a provider whose constructor needs only the shared
+// registry, backend manager, index, and IAM engine.
+type standardProvider struct {
+	selection string // the --services name
+	label     string // the provider name in registration errors
+	register  func(context.Context, *gateway.Registry, *backend.Manager, *state.Index, *iam.Engine) error
+}
+
+// standardProviders registers in this order after the backend-configured ones.
+var standardProviders = []standardProvider{
+	{"secretmanager", "Secret Manager", discard(secretmanagerprovider.New)},
+	{"logging", "Logging", discard(loggingprovider.New)},
+	{"kms", "Cloud KMS", discard(cloudkmsprovider.New)},
+	{"bigquery", "BigQuery", discard(bigqueryprovider.New)},
+	{"bigtable", "Bigtable", discard(bigtableprovider.New)},
+	{"artifactregistry", "Artifact Registry", discard(artifactregistryprovider.New)},
+	{"resourcemanager", "resourcemanager", discard(resourcemanagerprovider.New)},
+	{"iam", "IAM", discard(iamadminprovider.New)},
+}
+
+// assembleStandard registers the selected standard providers.
+func assembleStandard(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	for _, service := range standardProviders {
+		if !selected[service.selection] {
+			continue
+		}
+		if err := service.register(ctx, registry, server.Backends, index, engine); err != nil {
+			return fmt.Errorf("register the %s provider: %w", service.label, err)
+		}
+	}
+	return nil
+}
+
+// discard adapts a provider constructor whose provider value the caller does
+// not keep: registration with the gateway is its only effect.
+func discard[P any](construct func(context.Context, *gateway.Registry, *backend.Manager, *state.Index, *iam.Engine) (P, error)) func(context.Context, *gateway.Registry, *backend.Manager, *state.Index, *iam.Engine) error {
+	return func(ctx context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) error {
+		_, err := construct(ctx, registry, manager, index, engine)
+		return err
+	}
 }
 
 // assembleIDTokens builds the one local ID-token key set that Pub/Sub push and
@@ -379,17 +409,6 @@ func assembleCompute(ctx context.Context, selected map[string]bool, registry *ga
 	return nil
 }
 
-// assembleSecretManager registers the Secret Manager provider.
-func assembleSecretManager(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	if !selected["secretmanager"] {
-		return nil
-	}
-	if _, err := secretmanagerprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
-		return fmt.Errorf("register the Secret Manager provider: %w", err)
-	}
-	return nil
-}
-
 // assembleCloudTasks registers the Cloud Tasks provider and its dispatcher.
 func assembleCloudTasks(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, tokens *identity.IDTokens) error {
 	if !selected["cloudtasks"] {
@@ -397,17 +416,6 @@ func assembleCloudTasks(ctx context.Context, selected map[string]bool, registry 
 	}
 	if _, err := cloudtasksprovider.New(ctx, cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Cloud Tasks provider: %w", err)
-	}
-	return nil
-}
-
-// assembleCloudKMS registers the Cloud KMS provider.
-func assembleCloudKMS(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	if !selected["kms"] {
-		return nil
-	}
-	if _, err := cloudkmsprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
-		return fmt.Errorf("register the Cloud KMS provider: %w", err)
 	}
 	return nil
 }
@@ -436,50 +444,6 @@ func assembleMemorystore(ctx context.Context, options serveOptions, selected map
 	return nil
 }
 
-// assembleBigtable registers the Bigtable admin provider.
-func assembleBigtable(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	if !selected["bigtable"] {
-		return nil
-	}
-	if _, err := bigtableprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
-		return fmt.Errorf("register the Bigtable provider: %w", err)
-	}
-	return nil
-}
-
-// assembleArtifactRegistry registers the Artifact Registry provider.
-func assembleArtifactRegistry(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	if !selected["artifactregistry"] {
-		return nil
-	}
-	if _, err := artifactregistryprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
-		return fmt.Errorf("register the Artifact Registry provider: %w", err)
-	}
-	return nil
-}
-
-// assembleResourceManager registers the project IAM provider.
-func assembleResourceManager(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	if !selected["resourcemanager"] {
-		return nil
-	}
-	if _, err := resourcemanagerprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
-		return fmt.Errorf("register the resourcemanager provider: %w", err)
-	}
-	return nil
-}
-
-// assembleIAMAdmin registers the service-account provider.
-func assembleIAMAdmin(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	if !selected["iam"] {
-		return nil
-	}
-	if _, err := iamadminprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
-		return fmt.Errorf("register the IAM provider: %w", err)
-	}
-	return nil
-}
-
 // assembleFirestore registers the Firestore provider and its emulator paths.
 func assembleFirestore(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
 	if !selected["firestore"] {
@@ -488,17 +452,6 @@ func assembleFirestore(ctx context.Context, options serveOptions, selected map[s
 	config := firestoreprovider.Config{Java: options.firestoreJava, JAR: options.firestoreJAR}
 	if _, err := firestoreprovider.New(ctx, registry, server.Backends, index, engine, config); err != nil {
 		return fmt.Errorf("register the Firestore provider: %w", err)
-	}
-	return nil
-}
-
-// assembleBigQuery registers the BigQuery provider.
-func assembleBigQuery(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	if !selected["bigquery"] {
-		return nil
-	}
-	if _, err := bigqueryprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
-		return fmt.Errorf("register the BigQuery provider: %w", err)
 	}
 	return nil
 }
@@ -627,17 +580,6 @@ func assembleVertexAI(ctx context.Context, options serveOptions, selected map[st
 	}
 	if _, err := vertexaiprovider.New(ctx, registry, index, engine, options.vertex); err != nil {
 		return fmt.Errorf("register the Vertex AI provider: %w", err)
-	}
-	return nil
-}
-
-// assembleLogging registers the Cloud Logging provider.
-func assembleLogging(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	if !selected["logging"] {
-		return nil
-	}
-	if _, err := loggingprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
-		return fmt.Errorf("register the Logging provider: %w", err)
 	}
 	return nil
 }

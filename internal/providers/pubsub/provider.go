@@ -60,46 +60,65 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 	if err := provider.RegisterPermissions(engine, permissions); err != nil {
 		return nil, fmt.Errorf("pubsub permissions: %w", err)
 	}
-	if err := manager.Register(serviceName, backend.Definition{Validate: state.GlobalScope, New: factory, AfterReset: func(scope state.Scope) error {
-		if err := p.resetPush(scope); err != nil {
-			return err
-		}
-		engine.ClearScope(serviceName, scope)
-		index.RemoveScope(serviceName, scope)
-		p.poisoned.Delete(scope)
-		return nil
-	}}); err != nil {
+	if err := manager.Register(serviceName, backend.Definition{Validate: state.GlobalScope, New: factory, AfterReset: p.afterReset}); err != nil {
 		return nil, fmt.Errorf("register the pub/sub backend: %w", err)
 	}
+	if err := p.registerMethods(registry); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// afterReset clears provider-owned state once the backend reset has succeeded.
+func (p *Provider) afterReset(scope state.Scope) error {
+	if err := p.resetPush(scope); err != nil {
+		return err
+	}
+	p.iam.ClearScope(serviceName, scope)
+	p.index.RemoveScope(serviceName, scope)
+	p.poisoned.Delete(scope)
+	return nil
+}
+
+// registerMethods binds the gRPC, REST, IAM policy, and streaming surfaces.
+func (p *Provider) registerMethods(registry *gateway.Registry) error {
 	for method := range permissions {
-		if !strings.HasPrefix(method, "/") || method == subscriber+"StreamingPull" {
-			continue
-		}
-		if strings.HasPrefix(method, policyRPC) {
-			// The IAM policy surface registers below with its own handler.
+		if !unaryMethod(method) {
 			continue
 		}
 		if err := registry.Register(method, p.handle); err != nil {
-			return nil, fmt.Errorf("register %s: %w", method, err)
+			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}
 	for method := range restTwins {
 		if err := registry.Register(method, p.handleRest); err != nil {
-			return nil, fmt.Errorf("register %s: %w", method, err)
+			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}
 	if err := p.registerRestPermissions(); err != nil {
-		return nil, err
+		return err
 	}
+	return p.registerPolicyAndStream(registry)
+}
+
+// unaryMethod reports whether a permission key is a unary gRPC method served by
+// handle. Permission-only keys, streaming pull, and the IAM policy surface are
+// registered separately.
+func unaryMethod(method string) bool {
+	return strings.HasPrefix(method, "/") && method != subscriber+"StreamingPull" && !strings.HasPrefix(method, policyRPC)
+}
+
+// registerPolicyAndStream binds the IAM policy RPCs and streaming pull.
+func (p *Provider) registerPolicyAndStream(registry *gateway.Registry) error {
 	for _, method := range []string{"GetIamPolicy", "SetIamPolicy"} {
 		if err := registry.Register(policyRPC+method, p.policy); err != nil {
-			return nil, fmt.Errorf("register policy %s: %w", method, err)
+			return fmt.Errorf("register policy %s: %w", method, err)
 		}
 	}
 	if err := registry.RegisterStream(subscriber+"StreamingPull", p.stream); err != nil {
-		return nil, fmt.Errorf("register the streaming pull method: %w", err)
+		return fmt.Errorf("register the streaming pull method: %w", err)
 	}
-	return p, nil
+	return nil
 }
 
 func scopeOf(call gateway.Call) state.Scope {
@@ -112,6 +131,8 @@ func projectMethod(method string) bool {
 	return method == publisher+"CreateTopic" || method == subscriber+"CreateSubscription" || method == publisher+"ListTopics" || method == subscriber+"ListSubscriptions"
 }
 
+// authorize runs every check that gates a Pub/Sub call, in the order that
+// decides which error a caller sees first. It never touches the backend.
 func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 	if call.Principal.State == gateway.Anonymous {
 		return status.Error(codes.Unauthenticated, "Pub/Sub requires a named local principal")
@@ -119,6 +140,37 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 	if _, failed := p.poisoned.Load(scopeOf(call)); failed {
 		return status.Error(codes.FailedPrecondition, "Pub/Sub mutation outcome is unresolved; reset this scope")
 	}
+	if err := p.authorizeCall(call); err != nil {
+		return err
+	}
+	if subscription, ok := request.(*pb.Subscription); ok {
+		if err := p.authorizeAttachment(call, subscription); err != nil {
+			return err
+		}
+	}
+	return p.checkTarget(call)
+}
+
+// checkTarget rejects pulls from push subscriptions and calls on resources the
+// index does not hold.
+func (p *Provider) checkTarget(call gateway.Call) error {
+	if call.Method == subscriber+"Pull" || call.Method == subscriber+"StreamingPull" {
+		if _, push := p.pushes.Load(canonical(call.Resource)); push {
+			return status.Error(codes.FailedPrecondition, "Cannot pull from a push subscription")
+		}
+	}
+	if projectMethod(call.Method) {
+		return nil
+	}
+	if _, found := p.index.Get(canonical(call.Resource)); !found {
+		return status.Error(codes.NotFound, "Pub/Sub resource does not exist")
+	}
+	return nil
+}
+
+// authorizeCall checks the method permission against the indexed resource, or
+// against its project for project-level methods and not-yet-indexed resources.
+func (p *Provider) authorizeCall(call gateway.Call) error {
 	project, found := p.index.Get(provider.ProjectResource(call.Project))
 	if !found || project.Service != "resourcemanager" || project.Kind != "project" {
 		return gap("configure the resource project hierarchy")
@@ -137,45 +189,37 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 	if err != nil {
 		return fmt.Errorf("authorize %s: %w", call.Method, err)
 	}
-	if subscription, ok := request.(*pb.Subscription); ok {
-		project, err := resourceName(subscription.GetTopic(), "topics")
-		if err != nil {
-			return err
-		}
-		if project != call.Project {
-			return gap("cross-project subscriptions")
-		}
-		topic, found := p.index.Get(canonical(subscription.GetTopic()))
-		if !found {
-			return status.Error(codes.NotFound, "Topic does not exist")
-		}
-		if topic.Service != serviceName || topic.Kind != "topic" || topic.Scope != scopeOf(call) {
-			return gap("topic ownership disagrees with the index")
-		}
-		attachment := call
-		attachment.Method, attachment.Resource = attach, subscription.GetTopic()
-		decision, err := p.iam.Authorize(attachment, iam.Target{Name: topic.Name}, nil)
-		_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-attachment-decision-id", decision.ID))
-		if err != nil {
-			return fmt.Errorf("authorize attachment for %s: %w", call.Method, err)
-		}
-		if subscription.GetPushConfig() != nil {
-			if err := p.authorizePush(call, subscription.GetPushConfig()); err != nil {
-				return err
-			}
-		}
-	}
-	if call.Method == subscriber+"Pull" || call.Method == subscriber+"StreamingPull" {
-		if _, push := p.pushes.Load(canonical(call.Resource)); push {
-			return status.Error(codes.FailedPrecondition, "Cannot pull from a push subscription")
-		}
-	}
-	if !projectMethod(call.Method) {
-		if _, found := p.index.Get(canonical(call.Resource)); !found {
-			return status.Error(codes.NotFound, "Pub/Sub resource does not exist")
-		}
-	}
 	return nil
+}
+
+// authorizeAttachment checks that a subscription may attach to its topic and,
+// for push subscriptions, act as the push identity.
+func (p *Provider) authorizeAttachment(call gateway.Call, subscription *pb.Subscription) error {
+	project, err := resourceName(subscription.GetTopic(), "topics")
+	if err != nil {
+		return err
+	}
+	if project != call.Project {
+		return gap("cross-project subscriptions")
+	}
+	topic, found := p.index.Get(canonical(subscription.GetTopic()))
+	if !found {
+		return status.Error(codes.NotFound, "Topic does not exist")
+	}
+	if topic.Service != serviceName || topic.Kind != "topic" || topic.Scope != scopeOf(call) {
+		return gap("topic ownership disagrees with the index")
+	}
+	attachment := call
+	attachment.Method, attachment.Resource = attach, subscription.GetTopic()
+	decision, err := p.iam.Authorize(attachment, iam.Target{Name: topic.Name}, nil)
+	_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-attachment-decision-id", decision.ID))
+	if err != nil {
+		return fmt.Errorf("authorize attachment for %s: %w", call.Method, err)
+	}
+	if subscription.GetPushConfig() == nil {
+		return nil
+	}
+	return p.authorizePush(call, subscription.GetPushConfig())
 }
 
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
@@ -186,43 +230,59 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err := p.preflight(call, request); err != nil {
 		return nil, err
 	}
-	var response proto.Message
+	// Pull blocks, so it runs as a session beside other operations.
 	use := p.manager.Use
 	if call.Method == subscriber+"Pull" {
 		use = p.manager.Session
 	}
+	var response proto.Message
 	err := use(call.Context, keyOf(call), func(session context.Context, active backend.Backend) error {
 		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
-		if err := p.authorize(call, request); err != nil {
-			return err
-		}
-		b, err := driverOf(active)
-		if err != nil {
-			return err
-		}
-		creating, deleting := mutationKind(call.Method)
-		if creating {
-			if _, found := p.index.Get(canonical(call.Resource)); found {
-				return status.Error(codes.AlreadyExists, "Pub/Sub resource already exists")
-			}
-		}
-		forwarded, push, splitErr := p.splitPushConfig(call, request)
-		if splitErr != nil {
-			return splitErr
-		}
-		response, err = invoke(session, b, call.Method, forwarded)
-		if err == nil && call.Method == subscriber+"Pull" {
-			err = p.authorize(call, request)
-		}
-		if !creating && !deleting {
-			if err == nil {
-				p.restorePush(response)
-			}
-			return err
-		}
-		return p.settleMutation(session, b, call, response, forwarded, push, creating, err)
+		var err error
+		response, err = p.execute(call, request, active)
+		return err
 	})
 	return response, err
+}
+
+// execute re-authorizes under the backend gate, forwards the call, and settles
+// any index-owned mutation it caused.
+func (p *Provider) execute(call gateway.Call, request proto.Message, active backend.Backend) (proto.Message, error) {
+	if err := p.authorize(call, request); err != nil {
+		return nil, err
+	}
+	b, err := driverOf(active)
+	if err != nil {
+		return nil, err
+	}
+	creating, deleting := mutationKind(call.Method)
+	if creating {
+		if _, found := p.index.Get(canonical(call.Resource)); found {
+			return nil, status.Error(codes.AlreadyExists, "Pub/Sub resource already exists")
+		}
+	}
+	forwarded, push, err := p.splitPushConfig(call, request)
+	if err != nil {
+		return nil, err
+	}
+	response, err := p.forward(call, b, request, forwarded)
+	if creating || deleting {
+		return response, p.settleMutation(call.Context, b, call, response, forwarded, push, creating, err)
+	}
+	if err == nil {
+		p.restorePush(response)
+	}
+	return response, err
+}
+
+// forward invokes the backend. A pull re-authorizes afterwards so a grant
+// revoked while the pull blocked does not release messages.
+func (p *Provider) forward(call gateway.Call, b driver, request, forwarded proto.Message) (proto.Message, error) {
+	response, err := invoke(call.Context, b, call.Method, forwarded)
+	if err != nil || call.Method != subscriber+"Pull" {
+		return response, err
+	}
+	return response, p.authorize(call, request)
 }
 
 // preflight applies the checks that must run before any backend session opens.

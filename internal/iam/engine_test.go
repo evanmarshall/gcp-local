@@ -125,81 +125,111 @@ func call(method, subject, project string) gateway.Call {
 func object() iam.Target {
 	return iam.Target{Name: storage.BucketResource("bucket-a") + "/objects/object.txt", Parent: storage.BucketResource("bucket-a")}
 }
+
+// grantedBy authorizes c on object() and requires the grant to come from policy.
+func grantedBy(t *testing.T, engine *iam.Engine, c gateway.Call, policy, label string) iam.Decision {
+	t.Helper()
+	decision, err := engine.Authorize(c, object(), nil)
+	if err != nil || decision.Checks[0].GrantPolicy != policy {
+		t.Fatalf("%s: %+v %v", label, decision, err)
+	}
+	return decision
+}
+
+// denied requires c on object() to fail with PermissionDenied.
+func denied(t *testing.T, engine *iam.Engine, c gateway.Call, label string) {
+	t.Helper()
+	if _, err := engine.Authorize(c, object(), nil); status.Code(err) != codes.PermissionDenied {
+		t.Fatal(label, err)
+	}
+}
+
 func TestInheritanceRevocationAndCrossProjectGrants(t *testing.T) {
 	engine, _ := setup(t)
 	read := call(testObjectGet, allowed, testProject)
-	decision, err := engine.Authorize(read, object(), nil)
-	if err != nil || decision.Outcome != "allow" || decision.Checks[0].GrantPolicy != object().Parent {
-		t.Fatalf("%+v %v", decision, err)
+	if decision := grantedBy(t, engine, read, object().Parent, "bucket grant"); decision.Outcome != "allow" {
+		t.Fatalf("%+v", decision)
 	}
 	if _, err := engine.SetPolicy(object().Parent, iam.Policy{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
-		t.Fatal(err)
-	}
-	inherited, err := engine.Authorize(call(testObjectGet, fixture, testProject), object(), nil)
-	if err != nil || inherited.Checks[0].GrantPolicy != projectA {
-		t.Fatalf("%+v %v", inherited, err)
-	}
+	denied(t, engine, read, "bucket revocation:")
+	grantedBy(t, engine, call(testObjectGet, fixture, testProject), projectA, "project inheritance")
 	foreign := call(testObjectGet, peer, projectBName)
-	if _, err := engine.Authorize(foreign, object(), nil); status.Code(err) != codes.PermissionDenied {
-		t.Fatal("caller-project role leaked into resource project:", err)
-	}
+	denied(t, engine, foreign, "caller-project role leaked into resource project:")
 	set(t, engine, object().Parent, testViewerRole, peer)
-	if result, err := engine.Authorize(foreign, object(), nil); err != nil || result.Principal.Project != projectBName || result.Checks[0].GrantPolicy != object().Parent {
-		t.Fatalf("%+v %v", result, err)
+	if result := grantedBy(t, engine, foreign, object().Parent, "cross-project grant"); result.Principal.Project != projectBName {
+		t.Fatalf("%+v", result)
 	}
 	_, _ = engine.SetPolicy(object().Parent, iam.Policy{})
-	if _, err := engine.Authorize(foreign, object(), nil); status.Code(err) != codes.PermissionDenied {
-		t.Fatal("revocation did not deny:", err)
-	}
+	denied(t, engine, foreign, "revocation did not deny:")
 	set(t, engine, folder, testViewerRole, allowed)
-	if result, err := engine.Authorize(read, object(), nil); err != nil || result.Checks[0].GrantPolicy != folder {
-		t.Fatalf("folder inheritance: %+v %v", result, err)
-	}
+	grantedBy(t, engine, read, folder, "folder inheritance")
 	_, _ = engine.SetPolicy(folder, iam.Policy{})
 	set(t, engine, org, testViewerRole, allowed)
-	if result, err := engine.Authorize(read, object(), nil); err != nil || result.Checks[0].GrantPolicy != org {
-		t.Fatalf("org inheritance: %+v %v", result, err)
+	grantedBy(t, engine, read, org, "org inheritance")
+}
+
+// mutationCounter authorizes one create call and counts the plans that would
+// have reached mutation.
+type mutationCounter struct {
+	engine *iam.Engine
+	create gateway.Call
+	writes atomic.Int32
+}
+
+func (m *mutationCounter) perform(features map[string]bool) (iam.Decision, error) {
+	decision, err := m.engine.Authorize(m.create, object(), features)
+	if err != nil {
+		return decision, fmt.Errorf("authorize: %w", err)
+	}
+	m.writes.Add(1)
+	return decision, nil
+}
+
+// requireOnlyDeleteDenied requires an overwrite plan whose create check passed
+// and whose additional delete check denied the request.
+func requireOnlyDeleteDenied(t *testing.T, decision iam.Decision, err error) {
+	t.Helper()
+	if status.Code(err) != codes.PermissionDenied || len(decision.Checks) != 2 {
+		t.Fatalf("%+v %v", decision, err)
+	}
+	if !decision.Checks[0].Allowed || decision.Checks[1].Allowed || decision.Checks[1].Permission != "storage.objects.delete" {
+		t.Fatalf("%+v", decision.Checks)
 	}
 }
+
+// requirePreflight requires an incomplete baseline plan for c on object().
+func requirePreflight(t *testing.T, engine *iam.Engine, c gateway.Call) {
+	t.Helper()
+	preflight, err := engine.Baseline(c, object())
+	if err != nil || preflight.Complete || preflight.Outcome != "preflight" {
+		t.Fatalf("%+v %v", preflight, err)
+	}
+}
+
 func TestReplacementCannotOmitBaselineOrUnresolvedState(t *testing.T) {
 	engine, _ := setup(t)
 	set(t, engine, object().Parent, "roles/storage.objectCreator", allowed)
 	create := call("storage.objects.insert", allowed, testProject)
-	preflight, err := engine.Baseline(create, object())
-	if err != nil || preflight.Complete || preflight.Outcome != "preflight" {
-		t.Fatalf("%+v %v", preflight, err)
-	}
-	var writes atomic.Int32
-	perform := func(features map[string]bool) (iam.Decision, error) {
-		decision, err := engine.Authorize(create, object(), features)
-		if err == nil {
-			writes.Add(1)
-			return decision, nil
-		}
-		return decision, fmt.Errorf("authorize: %w", err)
-	}
-	if result, err := perform(map[string]bool{conditionObjectExists: false}); err != nil || !result.Complete || len(result.Checks) != 1 {
+	requirePreflight(t, engine, create)
+	counter := &mutationCounter{engine: engine, create: create}
+	if result, err := counter.perform(map[string]bool{conditionObjectExists: false}); err != nil || !result.Complete || len(result.Checks) != 1 {
 		t.Fatalf("%+v %v", result, err)
 	}
-	denied, err := perform(map[string]bool{conditionObjectExists: true})
-	if status.Code(err) != codes.PermissionDenied || len(denied.Checks) != 2 || !denied.Checks[0].Allowed || denied.Checks[1].Allowed || denied.Checks[1].Permission != "storage.objects.delete" {
-		t.Fatalf("%+v %v", denied, err)
+	refused, err := counter.perform(map[string]bool{conditionObjectExists: true})
+	requireOnlyDeleteDenied(t, refused, err)
+	for _, features := range []map[string]bool{nil, {"unknown": true}} {
+		if _, err := counter.perform(features); status.Code(err) != codes.Unimplemented {
+			t.Fatal("unresolved state was treated as absent:", features, err)
+		}
 	}
-	if _, err := perform(nil); status.Code(err) != codes.Unimplemented {
-		t.Fatal("unresolved state was treated as absent:", err)
-	}
-	if _, err := perform(map[string]bool{"unknown": true}); status.Code(err) != codes.Unimplemented {
-		t.Fatal(err)
-	}
-	if writes.Load() != 1 {
+	if counter.writes.Load() != 1 {
 		t.Fatal("denied or incomplete plan reached mutation")
 	}
 	set(t, engine, object().Parent, testViewerRole, allowed)
-	denied, err = perform(map[string]bool{conditionObjectExists: true})
-	if status.Code(err) != codes.PermissionDenied || denied.Checks[0].Allowed {
+	refused, err = counter.perform(map[string]bool{conditionObjectExists: true})
+	if status.Code(err) != codes.PermissionDenied || refused.Checks[0].Allowed {
 		t.Fatal("additional check displaced baseline create permission")
 	}
 }
@@ -312,17 +342,13 @@ func TestPolicyETagsCopiesAndScopedCleanup(t *testing.T) {
 		t.Fatal("reset retained unsupported marker or erased project policy:", err)
 	}
 }
-func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
-	engine, _ := setup(t)
-	read := call(testObjectGet, peer, projectBName)
-	first, _ := engine.Authorize(read, object(), nil)
-	second, _ := engine.Authorize(read, object(), nil)
-	if first.ID == second.ID || first.ID == read.TraceID {
-		t.Fatal("client trace overwrote decision ID")
-	}
+
+// fetchDecision reads one decision through the diagnostics HTTP endpoint.
+func fetchDecision(t *testing.T, engine *iam.Engine, id string) iam.Decision {
+	t.Helper()
 	server := httptest.NewServer(engine)
 	defer server.Close()
-	response, err := getWithContext(server.URL + "/_local/iam/decisions/" + first.ID)
+	response, err := getWithContext(server.URL + "/_local/iam/decisions/" + id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,6 +357,18 @@ func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
+	return result
+}
+
+func TestDecisionDiagnosticsAreImmutableAndDoNotUseTraceAsID(t *testing.T) {
+	engine, _ := setup(t)
+	read := call(testObjectGet, peer, projectBName)
+	first, _ := engine.Authorize(read, object(), nil)
+	second, _ := engine.Authorize(read, object(), nil)
+	if first.ID == second.ID || first.ID == read.TraceID {
+		t.Fatal("client trace overwrote decision ID")
+	}
+	result := fetchDecision(t, engine, first.ID)
 	if result.Outcome != "deny" || result.Checks[0].Permission != testObjectGet || len(result.Checks[0].Policies) != 4 || result.Principal.Subject != peer {
 		t.Fatalf("%+v", result)
 	}

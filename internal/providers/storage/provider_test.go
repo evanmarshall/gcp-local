@@ -128,6 +128,13 @@ func TestProviderIAMMutationIsolationAndReset(t *testing.T) {
 	if f.request("admin@project-a.test", "GET", path+"?alt=media", nil, 200).Body.String() != "updated" {
 		t.Fatal("revoked caller deleted object")
 	}
+	assertResetClearsOnlyProjectA(t, f, upload)
+}
+
+// assertResetClearsOnlyProjectA resets project-a's Storage scope and checks
+// that its buckets and grants are gone while project-b's bucket survives.
+func assertResetClearsOnlyProjectA(t *testing.T, f *fixture, upload string) {
+	t.Helper()
 	scope := state.Scope{Project: testProject, Location: state.Global}
 	if err := f.p.manager.Reset(context.Background(), backend.Key{Service: "storage", Scope: scope}); err != nil {
 		t.Fatal(err)
@@ -166,6 +173,26 @@ func TestProviderFailsClosedForUnsupportedFeatures(t *testing.T) {
 
 func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 	f := setup(t)
+	if counts := createContendedBucket(f); counts[200] != 1 || counts[409] != 1 {
+		t.Fatalf("unexpected create results: %v", counts)
+	}
+	resource, ok := f.p.index.Get(BucketResource("contended-bucket"))
+	if !ok {
+		t.Fatal("missing owner")
+	}
+	for _, project := range []string{testProject, peerProject} {
+		response := f.request("admin@"+project+".test", "GET", "/storage/v1/b?project="+project, nil, 200)
+		hasBucket := strings.Contains(response.Body.String(), "contended-bucket")
+		if hasBucket != (resource.Scope.Project == project) {
+			t.Fatal("compensation left a foreign backend bucket")
+		}
+		assertNoListener(t, f, project)
+	}
+}
+
+// createContendedBucket races both projects to create one bucket name and
+// counts the response codes.
+func createContendedBucket(f *fixture) map[int]int {
 	var group sync.WaitGroup
 	codes := make(chan int, 2)
 	for _, project := range []string{testProject, peerProject} {
@@ -186,32 +213,24 @@ func TestCompetingProjectsDoNotLeaveUnindexedBuckets(t *testing.T) {
 	for code := range codes {
 		counts[code]++
 	}
-	if counts[200] != 1 || counts[409] != 1 {
-		t.Fatalf("unexpected create results: %v", counts)
-	}
-	resource, ok := f.p.index.Get(BucketResource("contended-bucket"))
-	if !ok {
-		t.Fatal("missing owner")
-	}
-	for _, project := range []string{testProject, peerProject} {
-		response := f.request("admin@"+project+".test", "GET", "/storage/v1/b?project="+project, nil, 200)
-		hasBucket := strings.Contains(response.Body.String(), "contended-bucket")
-		if hasBucket != (resource.Scope.Project == project) {
-			t.Fatal("compensation left a foreign backend bucket")
-		}
-		err := f.p.manager.Use(context.Background(), backend.Key{Service: "storage", Scope: state.Scope{Project: project, Location: state.Global}}, func(_ context.Context, driver backend.Backend) error {
-			backend, ok := driver.(*memoryBackend)
-			if !ok {
-				t.Error("unexpected backend type")
-				return nil
-			}
-			if backend.server.URL() != "" {
-				t.Error("API backend opened a listener")
-			}
+	return counts
+}
+
+// assertNoListener checks that the project's Storage backend is in-process.
+func assertNoListener(t *testing.T, f *fixture, project string) {
+	t.Helper()
+	err := f.p.manager.Use(context.Background(), backend.Key{Service: "storage", Scope: state.Scope{Project: project, Location: state.Global}}, func(_ context.Context, driver backend.Backend) error {
+		backend, ok := driver.(*memoryBackend)
+		if !ok {
+			t.Error("unexpected backend type")
 			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
 		}
+		if backend.server.URL() != "" {
+			t.Error("API backend opened a listener")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

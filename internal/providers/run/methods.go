@@ -7,7 +7,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -145,7 +144,7 @@ func (p *Provider) executeOperations(call gateway.Call, request *gateway.RESTReq
 	case methodOperationsList:
 		return p.operationsList(scope)
 	case methodOperationsDelete:
-		return p.operationDelete(request, scope)
+		return p.operationDelete()
 	default:
 		return nil, errUnimplemented
 	}
@@ -153,13 +152,8 @@ func (p *Provider) executeOperations(call gateway.Call, request *gateway.RESTReq
 
 // sortedRevisions returns the service's revisions in creation order.
 func sortedRevisions(record *serviceRecord) []*revisionRecord {
-	ids := make([]string, 0, len(record.Revisions))
-	for id := range record.Revisions {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	ordered := make([]*revisionRecord, 0, len(ids))
-	for _, id := range ids {
+	ordered := make([]*revisionRecord, 0, len(record.Revisions))
+	for _, id := range slices.Sorted(maps.Keys(record.Revisions)) {
 		ordered = append(ordered, record.Revisions[id])
 	}
 	return ordered
@@ -356,13 +350,8 @@ func workloadEnv(record *serviceRecord, revision *revisionRecord) []string {
 		"PORT":            strconv.Itoa(revision.Template.Container.Port),
 	}
 	maps.Copy(environment, revision.Template.Container.Env)
-	keys := make([]string, 0, len(environment))
-	for key := range environment {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	spec := make([]string, 0, len(keys))
-	for _, key := range keys {
+	spec := make([]string, 0, len(environment))
+	for _, key := range slices.Sorted(maps.Keys(environment)) {
 		spec = append(spec, key+"="+environment[key])
 	}
 	return spec
@@ -460,10 +449,10 @@ func parseCreate(request *gateway.RESTRequest) (string, templateShape, error) {
 // launchOperation starts the revision container and registers the pending
 // operation that the readiness worker resolves.
 func (p *Provider) launchOperation(scope state.Scope, id string) *gateway.RESTResponse {
-	operationName := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/rel-" + id
+	operationName := rolloutOperation(scope, id)
 	record, refused, err := p.serviceRecordLookUp(scope, id)
 	if err != nil || refused != nil {
-		return &gateway.RESTResponse{JSON: provider.WireError(500, "INTERNAL", "The created service vanished before its launch")}
+		return provider.WireError(500, "INTERNAL", "The created service vanished before its launch")
 	}
 	revision := latestRevision(record)
 	if startErr := p.startRevision(record, revision); startErr != nil {
@@ -484,6 +473,17 @@ func (p *Provider) launchOperation(scope state.Scope, id string) *gateway.RESTRe
 	p.startReaper(scope, id)
 	p.watch(scope, id, operationName)
 	return &gateway.RESTResponse{JSON: operationDocument(p.operation(scope, operationName))}
+}
+
+// rolloutOperation names the long-running operation of a service's latest
+// rollout; a later rollout of the same service reuses the name.
+func rolloutOperation(scope state.Scope, id string) string {
+	return operationResource(scope, "rel-"+id)
+}
+
+// operationResource is the full resource name of one operation id.
+func operationResource(scope state.Scope, id string) string {
+	return "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + id
 }
 
 // finishOperation records the terminal state of one operation.
@@ -631,7 +631,7 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 	record.Revisions[revisionID] = revision
 	record.Traffic = p.resolveTraffic(body.Traffic, revisionID)
 	// The real surface returns a long-running operation for the rollout.
-	operationName := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/rel-" + record.Name
+	operationName := rolloutOperation(scope, record.Name)
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		s.operations[operationName] = &operationRecord{Name: operationName, CreatedAt: now}
 		return nil
@@ -742,13 +742,9 @@ func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTReques
 func (p *Provider) operationsList(scope state.Scope) (*gateway.RESTResponse, error) {
 	var names []string
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		names = make([]string, 0, len(s.operations))
-		for name := range s.operations {
-			names = append(names, name)
-		}
+		names = slices.Sorted(maps.Keys(s.operations))
 		return nil
 	})
-	sort.Strings(names)
 	items := make([]any, 0, len(names))
 	for _, name := range names {
 		items = append(items, operationDocument(p.operation(scope, name)))
@@ -757,8 +753,7 @@ func (p *Provider) operationsList(scope state.Scope) (*gateway.RESTResponse, err
 }
 
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	name := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + request.Path["operation"]
-	entry := p.operation(scope, name)
+	entry := p.operation(scope, operationResource(scope, request.Path["operation"]))
 	if entry == nil {
 		return provider.WireError(404, "NOT_FOUND", "operation is not found"), nil
 	}
@@ -769,9 +764,7 @@ func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope)
 // complete synchronously from readiness, so a finished operation is already
 // terminal and the delete is an acknowledged no-op; the real surface uses
 // this route to cancel pending rollouts.
-func (p *Provider) operationDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	name := scope.Project + "/locations/" + scope.Location + "/operations/" + request.Path["operation"]
-	_ = p.operation(scope, name)
+func (p *Provider) operationDelete() (*gateway.RESTResponse, error) {
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 

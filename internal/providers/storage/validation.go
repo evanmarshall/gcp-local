@@ -45,7 +45,7 @@ var queryOptions = map[string][]string{
 	MethodBucketsList:         {queryProject, "prefix", "maxResults", "pageToken"},
 	MethodBucketsGetIamPolicy: {"optionsRequestedPolicyVersion"},
 	MethodBucketsPatch:        {queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsInsert:       {"uploadType", "name", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsInsert:       {"uploadType", keyName, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsGet:          {"generation", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsDelete:       {"generation", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsList:         {"prefix", "delimiter", "maxResults", "pageToken", "startOffset", "endOffset", "versions"},
@@ -70,7 +70,7 @@ func validateQuery(method string, r *gateway.RESTRequest) error {
 			return status.Error(codes.InvalidArgument, "Query options must not repeat")
 		}
 	}
-	if err := validateQueryValues(method, r); err != nil {
+	if err := validateQueryValues(method, r.Query); err != nil {
 		return err
 	}
 	for key := range r.Headers {
@@ -83,37 +83,45 @@ func validateQuery(method string, r *gateway.RESTRequest) error {
 }
 
 // validateQueryValues rejects option values this emulator does not implement.
-func validateQueryValues(method string, r *gateway.RESTRequest) error {
-	if alt := r.Query.Get("alt"); alt != "" && alt != "json" && (alt != altMedia || method != MethodObjectsGet) {
+func validateQueryValues(method string, query url.Values) error {
+	if alt := query.Get("alt"); alt != "" && alt != "json" && (alt != altMedia || method != MethodObjectsGet) {
 		return gap("unsupported response representation")
 	}
-	if v := r.Query.Get("optionsRequestedPolicyVersion"); v != "" && v != "1" && v != "3" {
+	return validateOptionValues(query)
+}
+
+// validateOptionValues checks the method-independent option values.
+func validateOptionValues(query url.Values) error {
+	if v := query.Get("optionsRequestedPolicyVersion"); v != "" && v != "1" && v != "3" {
 		return gap("requested IAM policy version")
 	}
-	if projection := r.Query.Get("projection"); projection != "" && projection != "noAcl" {
+	if projection := query.Get("projection"); projection != "" && projection != "noAcl" {
 		return gap("only the noAcl projection is supported")
 	}
-	if versions := r.Query.Get("versions"); versions != "" && versions != "true" && versions != "false" {
+	if versions := query.Get("versions"); versions != "" && versions != "true" && versions != "false" {
 		return provider.Invalid("versions must be a boolean")
 	}
 	return nil
 }
+
+// maxUploadMetadata bounds the multipart metadata part that accompanies an object.
+const maxUploadMetadata = 64 << 10
+
+var errUploadTooLarge = status.Error(codes.ResourceExhausted, "Uploads are limited to eight MiB")
+
 func parseUpload(r *gateway.RESTRequest) (*uploadRequest, error) {
 	if r.Media == nil {
 		return nil, gap("use a media or multipart upload")
 	}
-	payload, err := io.ReadAll(io.LimitReader(r.Media, maxObjectSize+(64<<10)+1))
+	payload, err := readUpload(r.Media)
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, "Cannot read upload")
+		return nil, err
 	}
-	if len(payload) > maxObjectSize+(64<<10) {
-		return nil, status.Error(codes.ResourceExhausted, "Uploads are limited to eight MiB")
-	}
-	u := &uploadRequest{name: r.Query.Get("name"), query: r.Query, headers: r.Headers, body: payload}
+	u := &uploadRequest{name: r.Query.Get(keyName), query: r.Query, headers: r.Headers, body: payload}
 	switch r.Query.Get("uploadType") {
 	case altMedia:
 		if len(payload) > maxObjectSize {
-			return nil, status.Error(codes.ResourceExhausted, "Uploads are limited to eight MiB")
+			return nil, errUploadTooLarge
 		}
 	case "multipart":
 		if err := parseMultipart(r, payload, u); err != nil {
@@ -122,10 +130,26 @@ func parseUpload(r *gateway.RESTRequest) (*uploadRequest, error) {
 	default:
 		return nil, gap("resumable and other upload protocols")
 	}
-	if u.name == "" || len(u.name) > 1024 || strings.ContainsAny(u.name, "\r\n") {
+	if !validObjectName(u.name) {
 		return nil, status.Error(codes.InvalidArgument, "Invalid object name")
 	}
 	return u, nil
+}
+
+// readUpload reads an upload body: at most one object plus its metadata part.
+func readUpload(media io.Reader) ([]byte, error) {
+	payload, err := io.ReadAll(io.LimitReader(media, maxObjectSize+maxUploadMetadata+1))
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "Cannot read upload")
+	}
+	if len(payload) > maxObjectSize+maxUploadMetadata {
+		return nil, errUploadTooLarge
+	}
+	return payload, nil
+}
+
+func validObjectName(name string) bool {
+	return name != "" && len(name) <= 1024 && !strings.ContainsAny(name, "\r\n")
 }
 
 // parseMultipart reads a multipart/related upload: one metadata part, then one
@@ -161,8 +185,8 @@ func multipartBoundary(contentType string) (string, error) {
 
 // readMetadataPart validates the metadata part of a multipart upload.
 func readMetadataPart(r *gateway.RESTRequest, metadata *multipart.Part, u *uploadRequest) error {
-	data, err := io.ReadAll(io.LimitReader(metadata, (64<<10)+1))
-	if err != nil || len(data) > 64<<10 {
+	data, err := io.ReadAll(io.LimitReader(metadata, maxUploadMetadata+1))
+	if err != nil || len(data) > maxUploadMetadata {
 		return status.Error(codes.InvalidArgument, "Object metadata exceeds supported size")
 	}
 	var value map[string]json.RawMessage
@@ -180,7 +204,7 @@ func readMediaPart(reader *multipart.Reader) error {
 	}
 	size, err := io.Copy(io.Discard, io.LimitReader(media, maxObjectSize+1))
 	if err != nil || size > maxObjectSize {
-		return status.Error(codes.ResourceExhausted, "Uploads are limited to eight MiB")
+		return errUploadTooLarge
 	}
 	if _, err := reader.NextPart(); err != io.EOF {
 		return status.Error(codes.InvalidArgument, "Expected exactly two upload parts")
@@ -190,7 +214,7 @@ func readMediaPart(reader *multipart.Reader) error {
 
 // supportedUploadFields lists the metadata keys a multipart upload may carry.
 var supportedUploadFields = map[string]bool{
-	"name": true, "bucket": true, "storageClass": true, "contentType": true,
+	keyName: true, "bucket": true, "storageClass": true, "contentType": true,
 	"metadata": true, "md5Hash": true, "crc32c": true, "cacheControl": true,
 	"contentDisposition": true, "contentLanguage": true,
 }
@@ -239,7 +263,7 @@ func uploadBucket(r *gateway.RESTRequest, value map[string]json.RawMessage) erro
 
 // uploadName records the metadata-supplied name, or the query parameter's.
 func uploadName(u *uploadRequest, value map[string]json.RawMessage) error {
-	raw, ok := value["name"]
+	raw, ok := value[keyName]
 	if !ok {
 		return nil
 	}
@@ -345,39 +369,12 @@ type bucketRequest struct {
 }
 
 func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	var request bucketRequest
-	decoder := json.NewDecoder(bytes.NewReader(r.JSON))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		if after, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
-			return nil, gap("unsupported bucket field " + after)
-		}
-		return nil, gap("unsupported bucket configuration")
+	request, err := decodeBucketRequest(r.JSON)
+	if err != nil {
+		return nil, err
 	}
-	if !request.IAM.Uniform.Enabled || request.IAM.Public != "enforced" {
-		return nil, gap("explicit uniform bucket-level access and enforced public access prevention are required")
-	}
-	if request.Versioning.Enabled || request.Hold || request.SoftDelete.Seconds != "0" {
-		return nil, gap("explicitly disable versioning, default holds, and soft delete")
-	}
-	if request.SoftDelete.EffectiveTime != nil {
-		return nil, gap("soft-delete effective time is server-owned")
-	}
-	if request.Lifecycle != nil && len(request.Lifecycle.Rule) > 0 {
-		return nil, gap("bucket lifecycle rules")
-	}
-	if request.StorageClass == "" {
-		request.StorageClass = storageClassStandard
-	}
-	if request.StorageClass != storageClassStandard {
-		return nil, gap("only STANDARD storage class")
-	}
-	if request.Location == "" {
-		return nil, status.Error(codes.InvalidArgument, "Explicit bucket location is required")
-	}
-	request.Location = strings.ToUpper(request.Location)
 	if _, exists := p.index.Get(BucketResource(request.Name)); exists {
-		return wireError(409, "conflict", "Bucket name is already owned"), nil
+		return bucketNameOwned(), nil
 	}
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -387,6 +384,74 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	if err != nil || response.Status != 200 {
 		return response, err
 	}
+	metadata, err := p.createdBucketMetadata(scope, request, payload)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.catalog.PublishBucket(scope, Bucket{Name: request.Name, Location: request.Location, Metadata: metadata}); err != nil {
+		return rollBackBucket(ctx, b, request.Name)
+	}
+	body, err := jsonObject(response.JSON)
+	if err != nil {
+		return nil, err
+	}
+	p.bucketMetadata(scope, body)
+	return response, nil
+}
+
+func bucketNameOwned() *gateway.RESTResponse {
+	return wireError(409, "conflict", "Bucket name is already owned")
+}
+
+// decodeBucketRequest reads a bucket create body and refuses every
+// configuration this emulator does not model, then normalizes the rest.
+func decodeBucketRequest(body []byte) (bucketRequest, error) {
+	var request bucketRequest
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+			return request, gap("unsupported bucket field " + field)
+		}
+		return request, gap("unsupported bucket configuration")
+	}
+	if err := unsupportedBucketPolicy(request); err != nil {
+		return request, err
+	}
+	if request.StorageClass == "" {
+		request.StorageClass = storageClassStandard
+	}
+	if request.StorageClass != storageClassStandard {
+		return request, gap("only STANDARD storage class")
+	}
+	if request.Location == "" {
+		return request, status.Error(codes.InvalidArgument, "Explicit bucket location is required")
+	}
+	request.Location = strings.ToUpper(request.Location)
+	return request, nil
+}
+
+// unsupportedBucketPolicy requires the access, retention, and lifecycle
+// settings the emulator implements to be stated explicitly.
+func unsupportedBucketPolicy(request bucketRequest) error {
+	if !request.IAM.Uniform.Enabled || request.IAM.Public != "enforced" {
+		return gap("explicit uniform bucket-level access and enforced public access prevention are required")
+	}
+	if request.Versioning.Enabled || request.Hold || request.SoftDelete.Seconds != "0" {
+		return gap("explicitly disable versioning, default holds, and soft delete")
+	}
+	if request.SoftDelete.EffectiveTime != nil {
+		return gap("soft-delete effective time is server-owned")
+	}
+	if request.Lifecycle != nil && len(request.Lifecycle.Rule) > 0 {
+		return gap("bucket lifecycle rules")
+	}
+	return nil
+}
+
+// createdBucketMetadata derives the provider-owned metadata of a new bucket
+// from the request body forwarded to the backend.
+func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketRequest, payload []byte) (string, error) {
 	metadata := map[string]any{}
 	_ = json.Unmarshal(payload, &metadata)
 	metadata["softDeletePolicy"] = map[string]string{"retentionDurationSeconds": string(request.SoftDelete.Seconds)}
@@ -400,28 +465,26 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	delete(metadata, "rpo")
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
-		return nil, status.Error(codes.Internal, "Unable to encode the bucket metadata")
+		return "", status.Error(codes.Internal, "Unable to encode the bucket metadata")
 	}
-	if err := p.catalog.PublishBucket(scope, Bucket{Name: request.Name, Location: request.Location, Metadata: string(encoded)}); err != nil {
-		// A competing project may have claimed the global name while this backend
-		// created its empty bucket. Roll back only this scope before returning conflict.
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		rollback, rollbackErr := b.forward(cleanupCtx, "DELETE", "/storage/v1/b/"+url.PathEscape(request.Name), nil, nil, nil)
-		if rollbackErr != nil || rollback.Status < 200 || rollback.Status >= 300 {
-			return nil, status.Error(codes.Internal, "Bucket publication failed; reset this Storage scope before retrying")
-		}
-		return wireError(409, "conflict", "Bucket name is already owned"), nil
-	}
-	body, bodyErr := jsonObject(response.JSON)
-	if bodyErr != nil {
-		return nil, bodyErr
-	}
-	p.bucketMetadata(scope, body)
-	return response, nil
+	return string(encoded), nil
 }
+
+// rollBackBucket handles a lost publication race: a competing project claimed
+// the global name while this backend created its empty bucket. Only this
+// scope's bucket is deleted before the conflict is returned.
+func rollBackBucket(ctx context.Context, b *memoryBackend, name string) (*gateway.RESTResponse, error) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	rollback, err := b.forward(cleanupCtx, "DELETE", "/storage/v1/b/"+url.PathEscape(name), nil, nil, nil)
+	if err != nil || rollback.Status < 200 || rollback.Status >= 300 {
+		return nil, status.Error(codes.Internal, "Bucket publication failed; reset this Storage scope before retrying")
+	}
+	return bucketNameOwned(), nil
+}
+
 func (p *Provider) bucketMetadata(scope state.Scope, value map[string]any) {
-	name, _ := value["name"].(string)
+	name, _ := value[keyName].(string)
 	bucket, found, err := p.catalog.Bucket(scope, name)
 	if err != nil || !found {
 		return

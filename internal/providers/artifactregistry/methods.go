@@ -1,10 +1,12 @@
 package artifactregistry
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -35,6 +37,18 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	}
 }
 
+// repositoryID reads the new repository's id from the repositoryId query
+// parameter (either spelling), falling back to the last segment of the body name.
+func repositoryID(query url.Values, bodyName string) string {
+	if id := cmp.Or(query.Get("repositoryId"), query.Get("repository_id")); id != "" {
+		return id
+	}
+	if slash := strings.LastIndexByte(bodyName, '/'); slash >= 0 && slash < len(bodyName)-1 {
+		return bodyName[slash+1:]
+	}
+	return bodyName
+}
+
 // repositoriesCreate validates and stores one repository. The real create
 // takes the repositoryId as a query parameter.
 func (p *Provider) repositoriesCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
@@ -49,30 +63,11 @@ func (p *Provider) repositoriesCreate(request *gateway.RESTRequest, scope state.
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid repository body")
 	}
-	name := request.Query.Get("repositoryId")
-	if name == "" {
-		name = request.Query.Get("repository_id")
-	}
-	if name == "" && body.Name != "" {
-		if index := len(body.Name) - 1; index >= 0 {
-			for i := len(body.Name) - 1; i >= 0; i-- {
-				if body.Name[i] == '/' {
-					name = body.Name[i+1:]
-					break
-				}
-			}
-			if name == "" {
-				name = body.Name
-			}
-		}
-	}
+	name := repositoryID(request.Query, body.Name)
 	if !uid.MatchString(name) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid repository id %q", name)
 	}
-	format := body.Format
-	if format == "" {
-		format = "DOCKER"
-	}
+	format := cmp.Or(body.Format, "DOCKER")
 	if !supportedFormats[format] {
 		return nil, status.Errorf(codes.InvalidArgument, "Unsupported repository format %q", format)
 	}
@@ -83,12 +78,8 @@ func (p *Provider) repositoriesCreate(request *gateway.RESTRequest, scope state.
 		if s.repositories[name] != nil {
 			return status.Errorf(codes.AlreadyExists, "Repository %s already exists", name)
 		}
-		mode := body.Mode
-		if mode == "" {
-			mode = "STANDARD_REPOSITORY"
-		}
 		created = &repositoryRecord{
-			Name: name, Location: location, Format: format, Mode: mode,
+			Name: name, Location: location, Format: format, Mode: cmp.Or(body.Mode, "STANDARD_REPOSITORY"),
 			Description: body.Description, CleanupPolicyDryRun: body.CleanupPolicyDryRun,
 			Labels: body.Labels, CreatedAt: now, UpdatedAt: now,
 		}
@@ -96,7 +87,7 @@ func (p *Provider) repositoriesCreate(request *gateway.RESTRequest, scope state.
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // already a wire status
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: repositoryResource(scope.Project, name), Service: serviceName,

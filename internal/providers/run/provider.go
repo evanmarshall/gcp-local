@@ -95,12 +95,10 @@ func registerMethods(registry *gateway.Registry, p *Provider) error {
 // process: the control plane is in-memory and container work is provider-owned.
 type emptyBackend struct{}
 
-func (emptyBackend) Start(context.Context) error    { return nil }
-func (emptyBackend) Ready(context.Context) error    { return nil }
-func (emptyBackend) Stop(context.Context) error     { return nil }
-func (emptyBackend) Reset(context.Context) error    { return nil }
-func (emptyBackend) Snapshot(context.Context) error { return backend.ErrPersistenceUnsupported }
-func (emptyBackend) Restore(context.Context) error  { return backend.ErrPersistenceUnsupported }
+func (emptyBackend) Start(context.Context) error { return nil }
+func (emptyBackend) Ready(context.Context) error { return nil }
+func (emptyBackend) Stop(context.Context) error  { return nil }
+func (emptyBackend) Reset(context.Context) error { return nil }
 
 // stopReapers cancels the idle reapers of one scope. Reset calls this before
 // clearing state so no reaper outlives the scope it watches.

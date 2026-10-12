@@ -8,52 +8,57 @@ import (
 // testProject is the primary fixture project for scope isolation tests.
 const testProject = "project-a"
 
+// counters is the per-scope value the isolation test stores.
+type counters = map[string]int
+
+// update applies change to scope's counters, failing the test on a store error.
+func update(t *testing.T, store *Store[counters], scope Scope, change func(counters)) {
+	t.Helper()
+	if err := store.With(scope, func(value *counters) error { change(*value); return nil }); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// read returns one counter from scope.
+func read(t *testing.T, store *Store[counters], scope Scope, key string) int {
+	t.Helper()
+	var result int
+	update(t, store, scope, func(value counters) { result = value[key] })
+	return result
+}
+
 func TestProjectAndLocationIsolationAndConcurrentAccess(t *testing.T) {
-	store := NewStore(func() map[string]int { return map[string]int{} }, nil)
+	store := NewStore(func() counters { return counters{} }, nil)
 	a := Scope{testProject, "us-central1"}
 	b := Scope{"project-b", "us-central1"}
 	c := Scope{testProject, "europe-west1"}
 	var group sync.WaitGroup
 	for range 40 {
 		group.Go(func() {
-			if err := store.With(a, func(value *map[string]int) error { (*value)["count"]++; return nil }); err != nil {
+			if err := store.With(a, func(value *counters) error { (*value)["count"]++; return nil }); err != nil {
 				t.Error(err)
 			}
 		})
 	}
 	group.Wait()
 	for scope, expected := range map[Scope]int{a: 40, b: 0, c: 0} {
-		if err := store.With(scope, func(value *map[string]int) error {
-			if (*value)["count"] != expected {
-				t.Errorf("scope %v leaked state: %v", scope, *value)
-			}
-			(*value)["retained"] = 1
-			return nil
-		}); err != nil {
-			t.Fatal(err)
+		if got := read(t, store, scope, "count"); got != expected {
+			t.Errorf("scope %v leaked state: count %d", scope, got)
 		}
+		update(t, store, scope, func(value counters) { value["retained"] = 1 })
 	}
 	if err := store.Reset(a); err != nil {
 		t.Fatal(err)
 	}
-	for _, scope := range []Scope{a, b, c} {
-		if err := store.With(scope, func(value *map[string]int) error {
-			expected := 1
-			if scope == a {
-				expected = 0
-			}
-			if (*value)["retained"] != expected {
-				t.Errorf("reset crossed scope: %v", scope)
-			}
-			return nil
-		}); err != nil {
-			t.Fatal(err)
+	for scope, expected := range map[Scope]int{a: 0, b: 1, c: 1} {
+		if read(t, store, scope, "retained") != expected {
+			t.Errorf("reset crossed scope: %v", scope)
 		}
 	}
-	if store.With(Scope{Project: testProject}, func(*map[string]int) error { return nil }) == nil {
+	if store.With(Scope{Project: testProject}, func(*counters) error { return nil }) == nil {
 		t.Fatal("accepted implicit location")
 	}
-	if store.With(Scope{Location: Global}, func(*map[string]int) error { return nil }) == nil {
+	if store.With(Scope{Location: Global}, func(*counters) error { return nil }) == nil {
 		t.Fatal("accepted implicit project")
 	}
 }

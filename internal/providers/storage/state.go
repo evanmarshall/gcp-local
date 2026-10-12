@@ -132,13 +132,16 @@ func (c *Catalog) PublishFolder(scope state.Scope, folder Folder) error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.store.With(scope, func(value *projectState) error {
+	if err := c.store.With(scope, func(value *projectState) error {
 		if _, ok := value.Buckets[folder.Bucket]; !ok {
 			return errBucketAbsent
 		}
 		value.Folders[folder.Bucket+"/"+folder.Name] = folder
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("publish folder %s/%s: %w", folder.Bucket, folder.Name, err)
+	}
+	return nil
 }
 
 func (c *Catalog) Folder(scope state.Scope, bucket, name string) (Folder, bool, error) {
@@ -150,7 +153,7 @@ func (c *Catalog) Folder(scope state.Scope, bucket, name string) (Folder, bool, 
 		found, ok = value.Folders[bucket+"/"+name]
 		return nil
 	}); err != nil {
-		return found, false, err
+		return found, false, fmt.Errorf("read folder %s/%s: %w", bucket, name, err)
 	}
 	return found, ok, nil
 }
@@ -167,7 +170,7 @@ func (c *Catalog) DeleteFolder(scope state.Scope, bucket, name string) (bool, er
 		}
 		return nil
 	}); err != nil {
-		return false, err
+		return false, fmt.Errorf("delete folder %s/%s: %w", bucket, name, err)
 	}
 	return removed, nil
 }
@@ -184,7 +187,7 @@ func (c *Catalog) Folders(scope state.Scope, bucket string) ([]Folder, error) {
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list folders of %s: %w", bucket, err)
 	}
 	return items, nil
 }

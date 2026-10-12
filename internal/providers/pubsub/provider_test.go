@@ -155,30 +155,12 @@ func TestAmbiguousCreateReconcilesOrBlocksUntilReset(t *testing.T) {
 	for _, readable := range []bool{true, false} {
 		t.Run(map[bool]string{true: "confirmed", false: "unresolved"}[readable], func(t *testing.T) {
 			p, registry, b := fixture(t)
-			b.fault = func(method string, request, response any) error {
-				if method == publisher+"CreateTopic" {
-					return status.Error(codes.DeadlineExceeded, "injected lost response")
-				}
-				if method != publisher+"GetTopic" {
-					t.Fatalf("unexpected reconciliation: %s", method)
-				}
-				if !readable {
-					return status.Error(codes.Unavailable, "injected read failure")
-				}
-				topic, ok := response.(*pb.Topic)
-				ask, askOK := request.(*pb.GetTopicRequest)
-				if !ok || !askOK {
-					return status.Error(codes.Internal, "unexpected fixture types")
-				}
-				topic.Name = ask.GetTopic()
-				return nil
-			}
+			b.fault = lostCreateResponse(t, readable)
 			_, err := registry.Invoke(call(publisher+"CreateTopic", testTopic, owner), &pb.Topic{Name: testTopic})
 			if status.Code(err) != codes.DeadlineExceeded {
 				t.Fatal("invented successful create", err)
 			}
-			_, found := p.index.Get(canonical(testTopic))
-			if found != readable {
+			if _, found := p.index.Get(canonical(testTopic)); found != readable {
 				t.Fatal("index disagrees with confirmed backend state")
 			}
 			_, err = registry.Invoke(call(publisher+"GetTopic", testTopic, owner), &pb.GetTopicRequest{Topic: testTopic})
@@ -187,14 +169,45 @@ func TestAmbiguousCreateReconcilesOrBlocksUntilReset(t *testing.T) {
 			} else if status.Code(err) != codes.FailedPrecondition || b.calls != 2 {
 				t.Fatal("unresolved mutation remained usable", err)
 			}
-			must(t, p.manager.Reset(context.Background(), keyOf(call("", testTopic, owner))))
-			if _, found := p.index.Get(canonical(testTopic)); found {
-				t.Fatal("reset retained resource")
-			}
-			if _, failed := p.poisoned.Load(scopeOf(call("", testTopic, owner))); failed {
-				t.Fatal("reset retained failure")
-			}
+			assertResetClearsTopic(t, p)
 		})
+	}
+}
+
+// lostCreateResponse fails CreateTopic ambiguously, then answers the
+// reconciliation read with the topic when readable and an outage otherwise.
+func lostCreateResponse(t *testing.T, readable bool) func(string, any, any) error {
+	t.Helper()
+	return func(method string, request, response any) error {
+		if method == publisher+"CreateTopic" {
+			return status.Error(codes.DeadlineExceeded, "injected lost response")
+		}
+		if method != publisher+"GetTopic" {
+			t.Fatalf("unexpected reconciliation: %s", method)
+		}
+		if !readable {
+			return status.Error(codes.Unavailable, "injected read failure")
+		}
+		topic, ok := response.(*pb.Topic)
+		ask, askOK := request.(*pb.GetTopicRequest)
+		if !ok || !askOK {
+			return status.Error(codes.Internal, "unexpected fixture types")
+		}
+		topic.Name = ask.GetTopic()
+		return nil
+	}
+}
+
+// assertResetClearsTopic resets the test scope and checks that neither the
+// indexed topic nor an unresolved-mutation marker survives.
+func assertResetClearsTopic(t *testing.T, p *Provider) {
+	t.Helper()
+	must(t, p.manager.Reset(context.Background(), keyOf(call("", testTopic, owner))))
+	if _, found := p.index.Get(canonical(testTopic)); found {
+		t.Fatal("reset retained resource")
+	}
+	if _, failed := p.poisoned.Load(scopeOf(call("", testTopic, owner))); failed {
+		t.Fatal("reset retained failure")
 	}
 }
 

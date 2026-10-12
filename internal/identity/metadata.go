@@ -77,7 +77,12 @@ func (m *metadataResponder) serviceAccount(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
-	switch parts[1] {
+	m.serviceAccountLeaf(w, r, parts[1], text)
+}
+
+// serviceAccountLeaf answers one leaf below a resolved service account.
+func (m *metadataResponder) serviceAccountLeaf(w http.ResponseWriter, r *http.Request, leaf string, text func(string)) {
+	switch leaf {
 	case "":
 		if r.URL.Query().Get("recursive") == "true" {
 			writeJSON(w, 200, map[string]any{"email": m.email, "aliases": []string{"default"}, fieldScopes: m.p.scopes})

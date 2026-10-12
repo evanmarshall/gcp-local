@@ -66,7 +66,10 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 	h.t.Helper()
 	var encoded []byte
 	if body != nil {
-		encoded, _ = json.Marshal(body)
+		var err error
+		if encoded, err = json.Marshal(body); err != nil {
+			h.t.Fatalf("encode the request body: %v", err)
+		}
 	}
 	request, _ := http.NewRequestWithContext(context.Background(), verb, path, bytes.NewReader(encoded))
 	if encoded != nil {
