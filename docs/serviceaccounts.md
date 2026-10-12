@@ -1,50 +1,36 @@
-# IAM service accounts (control plane)
+# IAM service accounts
 
-Modeled surface for the IAM v1 service-account API: accounts, per-account
-IAM, and synthesized key records. The endpoint lives at
-`/v1/projects/{project}/serviceAccounts` and the provider is selected with
-`--services=...,iam`.
+IAM v1 service accounts, per-account IAM policy, and synthesized keys over REST. Modeled locally. The scenario `serviceaccount-lifecycle-authorization` is recorded against GCP. For local identity and token minting, see [local identity](local-identity.md).
 
-## What is modeled
+## Use
 
-- Accounts: create (`{accountId, serviceAccount}` envelope), get, list,
-  update, delete, and `getIamPolicy`/`setIamPolicy`.
-- Keys: create returns a synthesized `privateKeyData`; list and delete by
-  key id. Key material is local only and signs nothing; token minting stays
-  with the identity service.
-- Predefined roles pinned: `roles/iam.serviceAccountAdmin`,
-  `roles/iam.serviceAccountViewer` (alongside the existing
-  `iam.serviceAccountUser` and `iam.serviceAccountTokenCreator`).
-- Terraform: the pinned `TestAccServiceAccount` case drives
-  `google_service_account` through `iam_custom_endpoint`.
+Select `-services ...,iam`. Routes are `/v1/projects/{project}/serviceAccounts` on port 4566. Accounts are addressed by email.
 
-## Recorded scenario
+## Methods
 
-`serviceaccount-lifecycle-authorization` was recorded and revalidated against
-real GCP on 2026-10-11, and the local provider matches it in comparison mode
-(`sh scripts/check_rest_recordings.sh` in Moo/Linux; CI runs it in the
-`pubsub-backend` job). The fixture identity creates one account; the allowed
-identity receives `roles/iam.serviceAccountUser` on that account only; the
-denied identity has no grant. Observed and compared:
+| Resource | Methods | Notes |
+| --- | --- | --- |
+| Accounts | `create`, `get`, `list`, `patch`, `delete` | `{accountId, serviceAccount}` create body; `patch` takes `{serviceAccount, updateMask}` and returns `name` plus masked fields |
+| Accounts | `getIamPolicy` (POST), `setIamPolicy` | |
+| Keys | `create`, `get`, `list`, `delete` | `privateKeyData` is synthesized and signs nothing |
 
-- create/get fields: `name` is `projects/PROJECT_ID/serviceAccounts/EMAIL`,
-  `uniqueId` is 21 digits and equals `oauth2ClientId`, an `etag` is present,
-  and `disabled` is omitted while false; accounts are addressed by email
-- denied read is 403; after the account-level grant propagates the allowed
-  caller can read but not update (403)
-- `getIamPolicy` is a POST; an account with no bindings returns only `etag`
-- PATCH takes `{serviceAccount, updateMask}` and returns only `name` and the
-  masked fields
-- duplicate create is 409 `ALREADY_EXISTS`; an invalid id is 400
-- delete returns 200 `{}`, then 404 `NOT_FOUND`
+## IAM
 
-The recording fixed six local divergences: ID-keyed names and paths, the
-`disabled` field, missing `etag`, PATCH ignoring the real envelope (it would
-have blanked the display name), GET-only `getIamPolicy`, and 204 deletes.
+Pinned roles: `roles/iam.serviceAccountAdmin`, `.serviceAccountViewer`, `.serviceAccountUser`, `.serviceAccountTokenCreator`. An account-level `serviceAccountUser` grant can read the account but not update it.
 
-To re-record, use an approved `.gcp-local/serviceaccounts-scope.json`
-(`LIMITS` in `gcp_validation/serviceaccounts.py`) and a temporary
-project-level `roles/iam.serviceAccountAdmin` grant on the fixture identity:
+## Verification
+
+| Recording | Date (UTC) | Observes |
+| --- | --- | --- |
+| `serviceaccount-lifecycle-authorization` | 2026-10-11 | Create and get fields (`uniqueId` equals `oauth2ClientId`), denied read 403, user grant reads but cannot update, POST `getIamPolicy`, PATCH envelope, 409 duplicate, 400 invalid ID, delete then 404 |
+
+```sh
+sh scripts/check_rest_recordings.sh
+```
+
+`TestAccServiceAccount` passes ([Terraform](terraform-compatibility.md)).
+
+To re-record, get an approved `.gcp-local/serviceaccounts-scope.json` (`LIMITS` in `gcp_validation/serviceaccounts.py`) and a temporary `roles/iam.serviceAccountAdmin` on the fixture identity:
 
 ```sh
 .venv-tools/bin/python -m pytest tests/conformance/serviceaccounts -q \
@@ -53,15 +39,9 @@ project-level `roles/iam.serviceAccountAdmin` grant on the fixture identity:
   --gcp-allow-live --gcp-artifacts .artifacts/serviceaccounts-record
 ```
 
-Interrupted runs: `.venv-tools/bin/python -m gcp_validation.serviceaccounts cleanup --profile ... --scope ... --manifest ... --allow-live`
-deletes only the account named in the owner-only manifest under
-`~/.local/state/gcp-local/PROJECT/serviceaccounts/`.
+After an interrupted run, `python -m gcp_validation.serviceaccounts cleanup --profile ... --scope ... --manifest ... --allow-live` deletes only the account in the manifest.
 
-## Explicit gaps
+## Gaps
 
-- Keys are not recorded: creating one would mint real credential material,
-  so the scenario's scope allows zero keys. Local keys are synthesized and
-  sign nothing; use the identity service for ID-token minting.
-- Undelete, disable/enable, short-lived credentials (signJwt/signBlob),
-  `projects/-` and uniqueId addressing, and workload identity federation are
-  not modeled.
+- Keys are not recorded; recording them would mint real credentials.
+- No undelete, disable or enable, `signJwt`/`signBlob`, `projects/-` or `uniqueId` addressing, or workload identity federation.

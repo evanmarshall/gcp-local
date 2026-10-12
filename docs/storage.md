@@ -1,10 +1,10 @@
-# Cloud Storage provider
+# Cloud Storage
 
-The first supported slice is private, uniform-access Storage: bucket create/list/get/delete and label PATCH, bucket get/set IAM policy, and object media/multipart upload, list, metadata/media get, and delete. It uses [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) through its existing Go library. The [source and license pin](../third_party/fake-gcs-server/manifest.json) and `go.sum` make the backend reproducible.
+Private, uniform-access buckets and objects over the JSON API, with IAM enforced on every call. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../third_party/fake-gcs-server/manifest.json)). Seven scenarios are recorded against GCP.
 
-## Run with local credentials
+## Use
 
-Build the [runtime](runtime.md), create [local ADC credentials](local-identity.md), and prepare an owner-only [IAM configuration](iam.md). Each configured Storage project needs its explicit numeric `number` as well as its project ID. Grant `roles/storage.admin` to the chosen fixture administrator on that project. Applications can instead receive bucket-level Object User/Viewer/Creator grants through the Storage API.
+Create [local ADC](local-identity.md) and an [IAM configuration](iam.md), or let the [quickstart](quickstart.md) do both. Each Storage project needs its ID and numeric `number`; grant the fixture administrator `roles/storage.admin` on it.
 
 ```sh
 bin/gcp-local -services storage \
@@ -12,48 +12,56 @@ bin/gcp-local -services storage \
   -iam-config .gcp-local/iam.json
 ```
 
-Point the SDK's `api_endpoint` at `http://127.0.0.1:4566` and use the generated local ADC file. Do not use the real-cloud sandbox profile. The service flag requires both configurations; missing credentials never become an administrator. The default invocation remains a core-only process. Use the [packaged quickstart](quickstart.md) to generate the configurations and start Docker automatically.
+Set the SDK's `api_endpoint` to `http://127.0.0.1:4566` and use the local ADC file. [`smoke_storage.py`](../scripts/smoke_storage.py) is a complete Python example.
 
-Bucket creation explicitly sets `location`, `iamConfiguration.uniformBucketLevelAccess.enabled: true`, `iamConfiguration.publicAccessPrevention: enforced`, and `softDeletePolicy.retentionDurationSeconds: "0"`. Storage class defaults to `STANDARD`; versioning and default holds remain disabled. The Python SDK's numeric zero and null effective-time field are accepted. See [the production SDK smoke](../scripts/smoke_storage.py) for a complete fixture with ordinary `google.auth.default()` credentials, bucket creation, policy updates, upload/download, replacement, revocation, and cleanup.
+Bucket create must set `location`, `iamConfiguration.uniformBucketLevelAccess.enabled: true`, `iamConfiguration.publicAccessPrevention: enforced`, and `softDeletePolicy.retentionDurationSeconds: "0"`. Storage class is `STANDARD`; versioning and default holds must stay off.
 
-## Ownership and authorization
+## Methods
 
-The provider owns bucket placement, project number, labels, uniform-access/public-access settings, and policy metadata. Label PATCH merges keys and removes null-valued keys; successful updates advance provider-owned metageneration, etag, and updated time. The backend owns bucket/object data and object generation. The shared index owns the bucket's globally unique name and resource ancestry. A failed cross-project publication rolls back the losing backend's empty bucket. Operations are serialized within each project by the existing backend manager; different projects use separate in-memory backends.
+| Resource | Methods | Notes |
+| --- | --- | --- |
+| Buckets | `insert`, `list`, `get`, `delete` | Global name uniqueness across projects |
+| Buckets | `patch` | `labels` only: merges keys, null removes a key, advances metageneration and etag |
+| Buckets | `getIamPolicy`, `setIamPolicy` | Version-3 conditions on `resource.name`; public members rejected |
+| Objects | `insert` | Media and multipart uploads, up to 8 MiB |
+| Objects | `list`, `get` (metadata and `alt=media`), `delete` | Generation, metageneration, and etag preconditions |
+| Folders | `insert`/`create`, `get`, `list`, `delete` | Modeled locally, not recorded; deleted with their bucket |
 
-Every operation performs an IAM preflight and a complete decision under the backend lifecycle gate. Uploads resolve whether an object exists before the complete decision: a new object requires create, and replacement adds delete without dropping create. Policy changes use the same gate, so a completed revocation precedes subsequent mutations. Anonymous and foreign-project principals receive only their explicit applicable grants. Public bindings are rejected because this slice enforces public access prevention. Unsupported authorization fails before mutation.
+## IAM
 
-Responses carry `X-Gcp-Local-Decision-Id`; `gcp-local why-denied ID` explains a retained decision. The provider preserves the observed Storage denial formats, including the difference between missing-create and missing-delete upload errors. It enforces generation, metageneration, and etag preconditions. The backend's content-MD5 etag does not change on identical-content replacement, so the provider derives an opaque JSON etag from backend generation/metageneration. No second object-state store is introduced. Backend-origin URLs and unsupported ACL fields are omitted; the SDK uses its configured endpoint.
+- Uploads of a new object need `storage.objects.create`; replacing an existing object also needs `storage.objects.delete`. Denials match GCP's distinct missing-create and missing-delete errors.
+- Project-level grants are inherited; bucket policies return only bucket bindings. A role in the caller's own project grants nothing on a foreign bucket; an explicit bucket binding does.
+- Anonymous callers get 401, authenticated callers without permission get 403.
+- Responses carry `X-Gcp-Local-Decision-Id`; `gcp-local why-denied ID` explains it.
 
-## Lifecycle and isolation
+## Verification
 
-`NoListener: true` uses upstream's in-process HTTP transport and opens **no backend API port**. The gateway registers only the listed provider methods, and never mounts the backend handler. Its administrative, notification, ACL, and other routes cannot bypass authorization. No notification configuration, ambient ADC, proxy, or network HTTP transport is passed to the backend. This is the library reuse pattern described in the [LocalStack comparison](localstack-comparison.md), with existing lifecycle hooks retained.
+All recorded against GCP in `us-central1` ([recordings](../tests/conformance/recordings/)):
 
-Storage starts lazily after authorization. Reset clears one project's backend data, bucket catalog/index, and resource policies only after backend reset succeeds; project policies remain. Shutdown releases the backend. All Storage state is in memory; restart loses data and bucket policies. Snapshot/restore and persistence are explicitly unsupported. There is no public reset endpoint yet. Functional race tests cover reset, foreign-project preservation, revocation, canonical escaped object names, concurrent global-name collisions, and absence of a backend listener.
+| Recording | Date (UTC) | Observes |
+| --- | --- | --- |
+| `storage-object-lifecycle` | 2026-10-05 | Create, list, read, delete, failed conditional upload, denied write |
+| `storage-authorization` | 2026-10-05 | Bucket Object User, inherited project admin, anonymous denial, grant and revoke transitions |
+| `storage-cross-project` | 2026-10-05 | Foreign caller denied, allowed by bucket Object Viewer, denied after revoke |
+| `storage-object-replacement` | 2026-10-05 | Creator can add but not replace, Object User can replace, stale generation rejected |
+| `storage-bucket-updates` | 2026-10-05 | Label merge and removal, stale and denied PATCH |
+| `storage-multipart-query-name` | 2026-10-05 | Multipart upload with name in query, generation changes |
+| `storage-python-sdk` | 2026-10-05 | Three upstream Python Storage tests, pagination, guarded cleanup |
+| `storage-iam-conditions` | 2026-10-11 | Version-3 conditional `objectViewer`; conditional binding rejected in a version-1 policy |
 
-## Evidence and limits
-
-Seven scenarios were recorded and revalidated against real GCP on **2026-10-05 UTC**, then matched by this provider without network egress:
-
-| Scenario | Verified behavior |
-| --- | --- |
-| `storage-object-lifecycle` | Create/list/read/delete, failed conditional upload, denied write, cleanup |
-| `storage-authorization` | Bucket grants, inherited project admin, anonymous denial, revoke/grant transitions, unchanged data after denial |
-| `storage-cross-project` | Foreign caller denial, explicit bucket grant, revocation, preserved data |
-| `storage-object-replacement` | Creator can add but cannot replace, Object User can replace, stale generation rejection, new etag for identical-content replacement |
-| `storage-bucket-updates` | Label merge/removal, changing metageneration/etag, stale and denied PATCH without mutation, single-region defaults |
-| `storage-multipart-query-name` | Multipart name in query, matching bucket metadata, explicit STANDARD replacement, generation changes and content preservation |
-| `storage-python-sdk` | Three pinned upstream Python Storage tests plus pagination and generation-guarded cleanup |
-
-`storage-iam-conditions` was recorded on **2026-10-11 UTC** and is matched the same way: a version-3 conditional `objectViewer` binding scoped by `resource.name`, and the rejection of a conditional binding in a version-1 policy ([IAM](iam.md)).
-
-The cloud runs used one owned us-central1 bucket at a time, at most ten objects of at most 1 MiB, with successful cleanup. See [recordings](../tests/conformance/recordings/) for immutable observations, contract hashes, source versions, and dates. Ordinary local comparison uses a build-tagged **credential fixture** that resolves the runner's synthetic tokens; the gateway, IAM, provider, and backend are production code. Those fixed tokens are rejected by the production binary, which is separately exercised with real local STS/ADC credentials. Neither credential mode contacts real GCP during local tests.
-
-Run in moo or Linux CI with namespace permission and the pinned SDK environment:
+Run in Linux or moo:
 
 ```sh
 sh scripts/check_storage.sh
 ```
 
-This builds both binaries, runs the production ADC/SDK smoke, and compares all seven recorded scenarios inside loopback-only namespaces. Reports under `.artifacts/storage-provider/` identify the implementation and backend versions separately from the cloud baseline. CI publishes the coverage and JUnit reports.
+It runs the production ADC smoke and compares every recording with no egress. Three adapted Terraform acceptance cases also pass ([Terraform](terraform-compatibility.md)).
 
-The initial upload limit is **8 MiB**. Resumable/signed/XML uploads, ACLs, versioning, retention/holds, soft delete, requester-pays, encryption keys, notifications, bucket updates other than labels, and broader methods are unsupported. Optional response-field projection and many validation/error combinations are not certified. Local reset/isolation and production ADC checks are functional evidence; they do not expand the seven cloud parity claims. Three adapted Google provider acceptance cases pass; see [Terraform compatibility](terraform-compatibility.md) for the exact limits. Other SDK languages, transports, advanced IAM policies, retries, and large-object streaming need their own recorded scenarios.
+Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PROJECT_ID`, `GCP_TEST_PEER_SERVICE_ACCOUNT`, and an absolute `GCP_TEST_PEER_CREDENTIALS_FILE` in the sandbox profile ([sandbox](gcp-sandbox.md)). The peer account needs Service Usage Consumer on the primary project and no Storage roles; the setup user needs Token Creator on it. Grant/revoke polling waits up to seven minutes. See [validation](validation.md) for the commands.
+
+## Gaps
+
+- Upload limit is 8 MiB. No resumable, signed, or XML uploads.
+- No ACLs, versioning, retention or holds, soft delete, lifecycle rules, requester pays, encryption keys, or notifications.
+- Bucket `patch` accepts only `labels`. Only the `noAcl` projection and the `STANDARD` class.
+- State is in memory and lost on restart. Reset clears one project's buckets and bucket policies.

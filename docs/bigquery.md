@@ -1,59 +1,45 @@
-# BigQuery (local slice)
+# BigQuery
 
-BigQuery v2 control plane: datasets, tables with typed schemas, insertAll row storage, and tabledata reads with per-dataset/table IAM (recorded `roles/bigquery.*` snapshots pin the baselines; dataset listing checks `bigquery.datasets.get` and insertAll checks `bigquery.tables.updateData`, as in GCP).
+BigQuery v2 datasets, tables with typed schemas, `insertAll` rows, `tabledata.list`, and a bounded SELECT, with dataset and table IAM. Modeled locally in provider state. The scenario `bigquery-dataset-rows-query` is recorded against GCP.
 
-## Local-modeled surfaces
+## Use
 
-- Datasets: create (id from `datasetReference.datasetId`), get, list, update (labels, friendly name), delete — delete is refused while the dataset still contains tables, matching the real surface.
-- Tables: create with a schema (fields required), get, list, update (labels, friendly name), delete with rows.
-- Rows: `insertAll` stores posted `json` rows keyed to the table; `tabledata.list` returns the stored rows newest-last with `totalRows`.
+Select `-services ...,bigquery`. Routes are `/bigquery/v2/projects/{project}/...` on port 4566.
 
-The Terraform acceptance case `TestAccBigQueryDatasetAndTable` drives google_bigquery_dataset + google_bigquery_table with the pinned google 8.5.0 provider and passes locally.
+## Methods
 
-## Query jobs
+| Resource | Methods | Notes |
+| --- | --- | --- |
+| Datasets | `insert`, `get`, `list`, `patch`, `delete` | `patch` changes labels and friendly name. Delete of a non-empty dataset is 400 unless `deleteContents=true` |
+| Datasets | `getIamPolicy`, `setIamPolicy` | Return 400 "This feature requires allowlisting", as recorded in GCP |
+| Tables | `insert`, `get`, `list`, `patch`, `delete` | Schema required; `patch` changes labels and friendly name |
+| Tables | `getIamPolicy`, `setIamPolicy` | Per-table grants; an empty policy returns only `etag` |
+| Rows | `tabledata.insertAll`, `tabledata.list` | JSON rows; cells returned as strings |
+| Jobs | `jobs.query`, `jobs.getQueryResults` | SELECT with column projection and equality filters on one backtick-quoted table; `dryRun` supported |
 
-`POST /bigquery/v2/projects/{project}/queries` (jobs.query) and
-`GET .../queries/{jobId}` (jobs.getQueryResults) run a bounded local SELECT
-against stored rows: column projection and equality filters, results in the
-real jobReference/schema/rows cell shape, stored per job id for result reads.
-Legacy SQL, joins, aggregations, functions, and DML/DQL beyond SELECT are
-explicit unimplemented gaps, not silent passes.
+## IAM
 
-## Recorded scenario
+Baselines come from recorded `roles/bigquery.*` snapshots (`admin`, `dataEditor`, `dataOwner`, `dataViewer`, `jobUser`, `resourceViewer`).
 
-`bigquery-dataset-rows-query` was recorded and revalidated twice against real
-GCP on 2026-10-11, and the local provider matches it in comparison mode
-(`sh scripts/check_rest_recordings.sh`). One labeled dataset in `US` with one
-table. Observed and compared:
+- Listing datasets checks `bigquery.datasets.get`. `insertAll` checks `bigquery.tables.updateData`.
+- Queries need `bigquery.jobs.create`. A table-level `roles/bigquery.dataViewer` can read rows but cannot insert or query.
 
-- dataset and table documents: `kind`, `id` as `project:dataset[.table]`,
-  `etag`, `selfLink`, `location`, `type`, the dataset `access` list, and the
-  table's storage counters (presence only)
-- insertAll returns only `kind`; tabledata.list returns string-encoded cells
-  (`"1"`, `"true"`); `totalRows` is not compared because it lags while streamed
-  rows sit in the buffer
-- jobs.query with a backtick-quoted table, projection, and equality filter:
-  result columns are all NULLABLE and `totalRows` is a string; dry runs return
-  the plan fields without rows
-- **dataset IAM methods return 400 "This feature requires allowlisting"**;
-  access is granted per table with `tables.setIamPolicy` (POST
-  `tables.getIamPolicy`, empty policy reads as only `etag`)
-- a table-level `roles/bigquery.dataViewer` lets the allowed identity read rows
-  but not insert or run queries (no `bigquery.jobs.create`); the denied
-  identity gets 403
-- deleting a non-empty dataset is 400; `deleteContents=true` deletes it
+## Verification
 
-The recording fixed many local divergences: sparse dataset/table documents,
-untyped row cells, the query response shape, missing dry-run support,
-backtick table references, the dataset IAM surface (which does not exist
-without allowlisting), GET-only table `getIamPolicy`, `deleteContents`, and a
-bug that removed a non-empty dataset from state while refusing the delete.
-Statistic values (`totalBytesProcessed`, `totalSlotMs`, counters) and the
-default `access` entries are local stand-ins; only field presence is recorded.
+| Recording | Date (UTC) | Observes |
+| --- | --- | --- |
+| `bigquery-dataset-rows-query` | 2026-10-11 | Dataset and table documents, insertAll and string-encoded reads, query and dry run shapes, dataset IAM 400, table-level grant, denied identity 403, non-empty dataset delete |
 
-## Explicit gaps
+Statistics such as `totalBytesProcessed` and the default `access` entries are stand-ins; only their presence is recorded.
 
-- Aggregations, joins, functions, legacy SQL, DML, and getQueryResults paging
-  remain explicit `UNIMPLEMENTED` gaps and are unrecorded.
-- Materialized views, partitions/clustering, streaming quotas, and the dataset
-  `access` list's update semantics are not modeled.
+```sh
+sh scripts/check_rest_recordings.sh
+```
+
+`TestAccBigQueryDatasetAndTable` passes ([Terraform](terraform-compatibility.md)).
+
+## Gaps
+
+- `UNIMPLEMENTED`: aggregations, joins, functions, legacy SQL, DML, and `getQueryResults` paging.
+- Not modeled: load and extract jobs, views, materialized views, partitioning, clustering, streaming quotas, `access` list updates.
+- State is in memory; restart discards it.

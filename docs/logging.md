@@ -1,8 +1,8 @@
 # Cloud Logging
 
-gcp-local serves Cloud Logging v2 entries write and list, logs list, and logs delete over REST and gRPC. Entries are stored in memory per project. The `logging-entries-lifecycle` scenario was recorded against GCP on 2026-10-12 and matched locally by `sh scripts/check_rest_recordings.sh`.
+Cloud Logging v2 entries write and list, logs list, and logs delete over REST and gRPC. Entries are stored in memory per project. The scenario `logging-entries-lifecycle` is recorded against GCP.
 
-## Use it
+## Use
 
 The Python client works over REST with local ADC:
 
@@ -69,7 +69,18 @@ List takes `resourceNames` of the form `projects/{project}`, `orderBy` `timestam
 
 Fields: `logName`, `severity` (name or number), `timestamp`, `receiveTimestamp`, `insertId`, `textPayload`, `trace`, `spanId`, `resource.type`, `resource.labels.KEY`, `labels.KEY`, and `jsonPayload.PATH`. Any other field returns 400.
 
-## Limits
+## Verification
+
+| Recording | Date (UTC) | Observes |
+| --- | --- | --- |
+| `logging-entries-lifecycle` | 2026-10-12 | Write, list, severity, text, and JSON filters, descending pages, logs list, denied write and list, invalid filter, delete |
+
+```sh
+sh scripts/check_rest_recordings.sh   # the recording
+sh scripts/check_logging.sh           # Python client
+```
+
+## Gaps
 
 - Only `projects/` resource names. Organization, folder, billing account, and log bucket view names return 501.
 - No `TailLogEntries`, `ListMonitoredResourceDescriptors`, sinks, buckets, views, exclusions, metrics, or `entries.copy`.
