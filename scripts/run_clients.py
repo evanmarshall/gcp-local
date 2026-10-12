@@ -29,8 +29,9 @@ HTTP = "http://127.0.0.1:4566"
 GRPC = "127.0.0.1:4567"
 SERVICES = (
     "bigquery,bigtable,cloudtasks,firestore,iam,kms,logging,pubsub,"
-    "resourcemanager,secretmanager,spanner,storage"
+    "resourcemanager,run,secretmanager,spanner,storage"
 )
+REVISION_IMAGE = "client-matrix/revision:1"
 TIMEOUT = 150
 
 
@@ -105,6 +106,8 @@ def start_core(directory: Path, log: Path) -> subprocess.Popen:
         f"-firestore-jar={os.environ['GCP_LOCAL_FIRESTORE_JAR']}",
         f"-spanner-emulator={os.environ['GCP_LOCAL_SPANNER_EMULATOR']}",
         f"-spanner-libraries={os.environ['GCP_LOCAL_SPANNER_LIBRARIES']}",
+        # Cloud Run revisions run as local processes of this one image.
+        f"-run-process={REVISION_IMAGE}={sys.executable} -I {ROOT / 'tests/clients/revision.py'}",
     ]
     core = subprocess.Popen(command, stdout=log.open("w"), stderr=subprocess.STDOUT)
     opener = build_opener(ProxyHandler({}))

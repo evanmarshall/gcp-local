@@ -12,7 +12,9 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
+	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/run/apiv2/runpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
 	"github.com/evanmarshall/gcp-local/api/generated"
@@ -36,6 +38,9 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	secretmanagerpb.RegisterSecretManagerServiceServer(server, &generated.SecretManagerServiceServer{Dispatch: g})
 	cloudtaskspb.RegisterCloudTasksServer(server, &generated.CloudTasksServer{Dispatch: g})
 	kmspb.RegisterKeyManagementServiceServer(server, &generated.KeyManagementServiceServer{Dispatch: g})
+	runpb.RegisterServicesServer(server, &generated.ServicesServer{Dispatch: g})
+	runpb.RegisterRevisionsServer(server, &generated.RevisionsServer{Dispatch: g})
+	longrunningpb.RegisterOperationsServer(server, &generated.OperationsServer{Dispatch: g})
 	return server
 }
 func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Message) (Call, error) {

@@ -135,7 +135,8 @@ func resolveEnv(value any) (map[string]string, error) {
 	env := map[string]string{}
 	for _, entry := range provider.MapList(value) {
 		name := provider.Text(entry["name"])
-		if name == "" || provider.Text(entry["valueSource"]) != "" {
+		// valueSource is an object (a Secret Manager reference); any value is refused.
+		if _, sourced := entry["valueSource"]; name == "" || sourced {
 			return nil, status.Errorf(codes.InvalidArgument, "Container environment variable %q is unsupported in this slice", name)
 		}
 		env[name] = provider.Text(entry["value"])

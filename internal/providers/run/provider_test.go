@@ -31,6 +31,7 @@ type fakeRuntime struct {
 	running  map[string]error
 	stopped  []string
 	failNext error
+	address  string // a live listener makes rollouts finish from readiness
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -48,7 +49,11 @@ func (f *fakeRuntime) Start(_ context.Context, spec StartSpec) (Started, error) 
 	f.started = append(f.started, spec)
 	id := spec.Image + "-container"
 	f.running[id] = nil
-	return Started{Address: "127.0.0.1:19000", Container: id, Peer: "127.0.0.1"}, nil
+	address := f.address
+	if address == "" {
+		address = "127.0.0.1:19000"
+	}
+	return Started{Address: address, Container: id, Peer: "127.0.0.1"}, nil
 }
 
 func (f *fakeRuntime) Ready(_ context.Context, container string) error {

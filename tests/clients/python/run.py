@@ -25,6 +25,7 @@ from google.cloud import (
     iam_admin_v1,
     kms,
     pubsub_v1,
+    run_v2,
     secretmanager,
     spanner,
     storage,
@@ -39,6 +40,7 @@ HTTP = os.environ["GCP_LOCAL_HTTP"]
 GRPC = os.environ["GCP_LOCAL_GRPC"]
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 PAYLOAD = b"hello from python"
+REVISION_IMAGE = "client-matrix/revision:1"
 
 
 def credentials(*, denied=False):
@@ -245,6 +247,26 @@ def run_cloudtasks():
     client.delete_queue(name=queue.name)
 
 
+def run_cloudrun():
+    client = generated(run_v2.ServicesClient)
+    location = f"projects/{PROJECT}/locations/us-central1"
+    # run_clients.py maps this image to a local revision process.
+    service = run_v2.Service(
+        template=run_v2.RevisionTemplate(containers=[run_v2.Container(image=REVISION_IMAGE)])
+    )
+    created = client.create_service(
+        parent=location, service=service, service_id="python-matrix"
+    ).result(timeout=60)
+    client.get_service(name=created.name)
+    assert created.name in [s.name for s in client.list_services(parent=location)], "list"
+    other = generated(run_v2.ServicesClient, denied=True)
+    expect_denied(
+        "ungranted create service",
+        lambda: other.create_service(parent=location, service=service, service_id="denied"),
+    )
+    client.delete_service(name=created.name).result(timeout=60)
+
+
 def run_iam():
     client = generated(iam_admin_v1.IAMClient)
     project = f"projects/{PROJECT}"
@@ -367,6 +389,7 @@ WORKFLOWS = {
     "iam": run_iam,
     "logging": run_logging,
     "pubsub": run_pubsub,
+    "run": run_cloudrun,
     "secretmanager": run_secretmanager,
     "spanner": run_spanner,
     "storage": run_storage,

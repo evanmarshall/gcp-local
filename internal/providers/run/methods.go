@@ -22,7 +22,6 @@ import (
 // kind identifiers used by the resource index.
 const (
 	kindService   = "service"
-	kindRevision  = "revision"
 	kindOperation = "operation"
 )
 
@@ -76,13 +75,29 @@ func (s *scopeState) reset() {
 	s.operations = map[string]*operationRecord{}
 }
 
-// operationRecord is one long-running operation of a scope.
+// operationRecord is one long-running operation of a scope. A rollout reports
+// its service's current document; a delete reports the resource as deleted.
 type operationRecord struct {
 	Name      string
 	Done      bool
 	ErrCode   int
 	ErrText   string
 	CreatedAt time.Time
+	Service   string
+	Snapshot  map[string]any
+}
+
+// Any type URLs of the resources Cloud Run v2 operations carry as metadata
+// and response.
+const (
+	typeService  = "type.googleapis.com/google.cloud.run.v2.Service"
+	typeRevision = "type.googleapis.com/google.cloud.run.v2.Revision"
+)
+
+// wireName is the relative resource name the v2 API returns, such as
+// projects/p/locations/l/services/s. IAM targets use resource instead.
+func wireName(scope state.Scope, path ...string) string {
+	return "projects/" + scope.Project + "/locations/" + scope.Location + "/" + strings.Join(path, "/")
 }
 
 // execute dispatches one authorized method to its resource family.
@@ -128,9 +143,9 @@ func (p *Provider) executeRevision(call gateway.Call, request *gateway.RESTReque
 	case methodRevisionsList:
 		return p.revisionsList(scope, record)
 	case methodRevisionsGet:
-		return p.revisionGet(request, scope)
+		return p.revisionGet(request, scope, record)
 	case methodRevisionsDelete:
-		return p.revisionDelete(call, request, scope)
+		return p.revisionDelete(call, request, scope, record)
 	default:
 		return nil, errUnimplemented
 	}
@@ -168,26 +183,26 @@ func latestRevision(record *serviceRecord) *revisionRecord {
 	return ordered[len(ordered)-1]
 }
 
-// serviceDocument renders the Cloud Run v2 service wire shape.
+// serviceDocument renders the Cloud Run v2 service wire shape. Enum values
+// and names follow google.cloud.run.v2.Service, so gRPC clients can decode it.
 func (p *Provider) serviceDocument(scope state.Scope, record *serviceRecord) map[string]any {
 	traffic := make([]any, 0, len(record.Traffic))
-	for revision, percent := range record.Traffic {
-		traffic = append(traffic, map[string]any{"revision": revision, "percent": percent, keyType: "TRAFFIC_TYPE_STABLE"})
+	for _, revision := range slices.Sorted(maps.Keys(record.Traffic)) {
+		traffic = append(traffic, map[string]any{"revision": revision, "percent": record.Traffic[revision], keyType: "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"})
 	}
-	ready, detail := "CONDITION_MET", "The service is ready"
+	ready, detail := conditionSucceeded, "The service is ready"
 	for _, revision := range record.Revisions {
 		if revision.Container == "" {
-			ready, detail = "CONDITION_FAILED", "The revision container is not running"
+			ready, detail = conditionFailed, "The revision container is not running"
 			break
 		}
 	}
-	return map[string]any{
-		keyName:                 resource(scope.Project, scope.Location, kindService, record.Name),
+	document := map[string]any{
+		keyName:                 wireName(scope, "services", record.Name),
 		"uid":                   record.UID,
 		"generation":            strconv.FormatInt(record.Generation, 10),
 		"createTime":            provider.Stamp(record.CreatedAt),
 		"updateTime":            provider.Stamp(record.UpdatedAt),
-		"ingress":               record.Ingress,
 		"template":              templateDocument(record),
 		"traffic":               traffic,
 		"uri":                   p.serviceURI(scope, record.Name),
@@ -195,7 +210,18 @@ func (p *Provider) serviceDocument(scope state.Scope, record *serviceRecord) map
 		"latestReadyRevision":   latestRevision(record).ID,
 		"conditions":            []any{map[string]any{keyType: "Ready", "state": ready, "message": detail}},
 	}
+	// An unset ingress has no wire value; the enum has no empty spelling.
+	if record.Ingress != "" {
+		document["ingress"] = record.Ingress
+	}
+	return document
 }
+
+// Condition states of google.cloud.run.v2.Condition.
+const (
+	conditionSucceeded = "CONDITION_SUCCEEDED"
+	conditionFailed    = "CONDITION_FAILED"
+)
 
 // templateDocument renders a revision template wire shape.
 func templateDocument(record *serviceRecord) map[string]any {
@@ -219,39 +245,48 @@ func templateDocument(record *serviceRecord) map[string]any {
 	return document
 }
 
-// revisionDocument renders one revision wire shape.
+// revisionDocument renders one google.cloud.run.v2.Revision wire shape.
 func (p *Provider) revisionDocument(scope state.Scope, record *serviceRecord, revision *revisionRecord) map[string]any {
-	ready, detail := "CONDITION_MET", "The revision is ready"
+	ready, detail := conditionSucceeded, "The revision is ready"
 	if revision.Container == "" {
-		ready, detail = "CONDITION_FAILED", "The revision container is not running"
+		ready, detail = conditionFailed, "The revision container is not running"
 	}
 	return map[string]any{
-		keyName:          resource(scope.Project, scope.Location, kindRevision, revision.ID),
-		"service":        resource(scope.Project, scope.Location, kindService, record.Name),
+		keyName:          wireName(scope, "services", record.Name, "revisions", revision.ID),
+		"service":        wireName(scope, "services", record.Name),
 		"uid":            revision.ID + "-uid",
 		"generation":     strconv.FormatInt(record.Generation, 10),
 		"createTime":     provider.Stamp(revision.CreatedAt),
-		"template":       templateDocument(&serviceRecord{Template: revision.Template}),
+		"containers":     templateDocument(&serviceRecord{Template: revision.Template})["containers"],
 		"serviceAccount": revision.Template.ServiceAccount,
 		"conditions":     []any{map[string]any{keyType: "ContainerReady", "state": ready, "message": detail}},
 	}
 }
 
-// operationDocument renders the long-running operation wire shape.
-func operationDocument(record *operationRecord) map[string]any {
-	entry := map[string]any{keyName: record.Name, "done": record.Done, "metadata": map[string]any{
-		"@type":  "type.googleapis.com/google.cloud.run.v2.ServiceOperationMetadata",
-		"target": "services",
-	}}
-	if !record.Done {
-		return entry
+// operationDocument renders the long-running operation wire shape. As on
+// Cloud Run v2, metadata and response are the resource the operation acts on:
+// the deleted resource's snapshot, or the service's current document.
+func (p *Provider) operationDocument(scope state.Scope, entry operationRecord, record *serviceRecord) map[string]any {
+	subject := entry.Snapshot
+	if subject == nil && record != nil {
+		subject = p.serviceDocument(scope, record)
+		subject["@type"] = typeService
 	}
-	if record.ErrCode != 0 {
-		entry[keyError] = map[string]any{keyCode: record.ErrCode, keyMessage: record.ErrText}
-		return entry
+	document := map[string]any{keyName: entry.Name, "done": entry.Done}
+	if subject != nil {
+		document["metadata"] = subject
 	}
-	entry["response"] = map[string]any{"type": "google.cloud.run.v2.Service"}
-	return entry
+	if !entry.Done {
+		return document
+	}
+	if entry.ErrCode != 0 {
+		document[keyError] = map[string]any{keyCode: entry.ErrCode, keyMessage: entry.ErrText}
+		return document
+	}
+	if subject != nil {
+		document["response"] = subject
+	}
+	return document
 }
 
 // startRevision launches the container for one revision.
@@ -426,14 +461,11 @@ func parseCreate(request *gateway.RESTRequest) (string, templateShape, error) {
 	if requestErr != nil {
 		return "", templateShape{}, requestErr
 	}
-	// The body carries the full resource name on a services.create call.
-	id := request.Path["service"]
+	// The v2 reference composes the name from parent and serviceId and ignores
+	// service.name; without serviceId, the body's full name supplies the id.
+	id := request.Query.Get("serviceId")
 	if id == "" {
 		id = provider.LastSegment(body.Name)
-	}
-	// The released google provider sends the id as the serviceId query parameter.
-	if id == "" {
-		id = request.Query.Get("serviceId")
 	}
 	if !uidPattern.MatchString(id) {
 		return "", templateShape{}, status.Errorf(codes.InvalidArgument, "Invalid service name %q", id)
@@ -463,22 +495,24 @@ func (p *Provider) launchOperation(scope state.Scope, id string) *gateway.RESTRe
 	revision := latestRevision(record)
 	if startErr := p.startRevision(record, revision); startErr != nil {
 		revision.Container = ""
-		_ = p.scopes.With(scope, func(s *scopeState) error {
-			s.operations[operationName] = &operationRecord{
-				Name: operationName, Done: true, ErrCode: 13, ErrText: startErr.Error(), CreatedAt: p.clock(),
-			}
-			return nil
-		})
-		return &gateway.RESTResponse{JSON: operationDocument(p.operation(scope, operationName))}
+		entry := operationRecord{Name: operationName, Done: true, ErrCode: 13, ErrText: startErr.Error(), CreatedAt: p.clock(), Service: id}
+		p.putOperation(scope, entry)
+		return &gateway.RESTResponse{JSON: p.operationDocument(scope, entry, record)}
 	}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		s.operations[operationName] = &operationRecord{Name: operationName, CreatedAt: p.clock()}
-		return nil
-	})
+	entry := operationRecord{Name: operationName, CreatedAt: p.clock(), Service: id}
+	p.putOperation(scope, entry)
 	p.indexHost(scope, id)
 	p.startReaper(scope, id)
 	p.watch(scope, id, operationName)
-	return &gateway.RESTResponse{JSON: operationDocument(p.operation(scope, operationName))}
+	return &gateway.RESTResponse{JSON: p.operationDocument(scope, entry, record)}
+}
+
+// putOperation stores one operation record.
+func (p *Provider) putOperation(scope state.Scope, entry operationRecord) {
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		s.operations[entry.Name] = &entry
+		return nil
+	})
 }
 
 // rolloutOperation names the long-running operation of a service's latest
@@ -499,14 +533,31 @@ func (p *Provider) finishOperation(scope state.Scope, name string, code int, mes
 	})
 }
 
-// operation reads one operation record.
-func (p *Provider) operation(scope state.Scope, name string) *operationRecord {
-	var entry *operationRecord
+// operationDocuments renders the scope's operations in name order, or only
+// the named one. Entries are copied under the scope lock because the readiness
+// worker finishes them concurrently.
+func (p *Provider) operationDocuments(scope state.Scope, name string) []any {
+	type view struct {
+		entry   operationRecord
+		service *serviceRecord
+	}
+	var views []view
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		entry = s.operations[name]
+		for _, key := range slices.Sorted(maps.Keys(s.operations)) {
+			if name == "" || key == name {
+				entry := *s.operations[key]
+				views = append(views, view{entry, s.services[entry.Service]})
+			}
+		}
 		return nil
 	})
-	return entry
+	p.recordMu.RLock()
+	defer p.recordMu.RUnlock()
+	documents := make([]any, 0, len(views))
+	for _, v := range views {
+		documents = append(documents, p.operationDocument(scope, v.entry, v.service))
+	}
+	return documents
 }
 
 // releaseMetadata stops the revision's private metadata listener, if one runs.
@@ -632,21 +683,29 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 	record.Revisions[revisionID] = revision
 	record.Traffic = p.resolveTraffic(body.Traffic, revisionID)
 	// The real surface returns a long-running operation for the rollout.
-	operationName := rolloutOperation(scope, record.Name)
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		s.operations[operationName] = &operationRecord{Name: operationName, CreatedAt: now}
-		return nil
-	})
-	p.watch(scope, record.Name, operationName)
-	return &gateway.RESTResponse{JSON: operationDocument(p.operation(scope, operationName))}, nil
+	entry := operationRecord{Name: rolloutOperation(scope, record.Name), CreatedAt: now, Service: record.Name}
+	p.putOperation(scope, entry)
+	p.watch(scope, record.Name, entry.Name)
+	return &gateway.RESTResponse{JSON: p.operationDocument(scope, entry, record)}, nil
 }
 
-// delete stops every container, removes the service, and completes immediately.
+// deleted records the finished operation of a delete. Its metadata and
+// response are the resource as it was deleted.
+func (p *Provider) deleted(scope state.Scope, id, typeURL string, snapshot map[string]any) *gateway.RESTResponse {
+	snapshot["@type"] = typeURL
+	entry := operationRecord{Name: provider.OperationName(scope, id), Done: true, CreatedAt: p.clock(), Snapshot: snapshot}
+	p.putOperation(scope, entry)
+	return &gateway.RESTResponse{JSON: p.operationDocument(scope, entry, nil)}
+}
+
+// delete stops every container, removes the service, and returns a finished
+// operation.
 func (p *Provider) delete(call gateway.Call, scope state.Scope, record *serviceRecord) (*gateway.RESTResponse, error) {
 	p.stopReapers(scope)
 	p.recordMu.Lock()
 	defer p.recordMu.Unlock()
 	name := record.Name
+	snapshot := p.serviceDocument(scope, record)
 	for _, revision := range record.Revisions {
 		_ = p.runtime.Stop(call.Context, revision.Container)
 		releaseMetadata(revision)
@@ -661,7 +720,7 @@ func (p *Provider) delete(call gateway.Call, scope state.Scope, record *serviceR
 	if err := p.index.Remove(serviceName, scope, resource(scope.Project, scope.Location, kindService, name)); err != nil {
 		return nil, fmt.Errorf("unindex the service: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
+	return p.deleted(scope, "delete-service-"+name, typeService, snapshot), nil
 }
 
 // getIam returns the stored service policy.
@@ -676,10 +735,16 @@ func (p *Provider) getIam(scope state.Scope, record *serviceRecord) (*gateway.RE
 // setIam stores one unconditional version-1 service policy.
 func (p *Provider) setIam(request *gateway.RESTRequest, scope state.Scope, record *serviceRecord) (*gateway.RESTResponse, error) {
 	var envelope struct {
-		Policy iam.Policy `json:"policy"`
+		Policy     iam.Policy `json:"policy"`
+		UpdateMask string     `json:"updateMask"`
 	}
 	if json.Unmarshal(request.JSON, &envelope) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+	}
+	// The default mask is the whole policy (bindings and etag); a partial
+	// update is not modeled.
+	if envelope.UpdateMask != "" {
+		return nil, coverageGap("setIamPolicy updateMask")
 	}
 	policy, err := p.engine.SetPolicy(resource(scope.Project, scope.Location, kindService, record.Name), envelope.Policy)
 	if err != nil {
@@ -700,13 +765,10 @@ func (p *Provider) revisionsList(scope state.Scope, record *serviceRecord) (*gat
 	return &gateway.RESTResponse{JSON: map[string]any{"revisions": items}}, nil
 }
 
-func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+// revisionGet returns one revision of the service resolve found.
+func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope, record *serviceRecord) (*gateway.RESTResponse, error) {
 	p.recordMu.RLock()
 	defer p.recordMu.RUnlock()
-	record, refused, err := p.serviceRecordLookUp(scope, request.Path["service"])
-	if err != nil || refused != nil {
-		return refused, err
-	}
 	revision := record.Revisions[request.Path["revision"]]
 	if revision == nil {
 		return provider.WireError(404, "NOT_FOUND", "revision "+request.Path["revision"]+" is not found"), nil
@@ -717,14 +779,10 @@ func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope) 
 // revisionDelete removes one revision that serves no traffic. A reaped
 // revision (container stopped) cannot be deleted through the runtime stop
 // path; deleting it now is still correct since nothing serves it.
-func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, record *serviceRecord) (*gateway.RESTResponse, error) {
 	p.recordMu.Lock()
 	defer p.recordMu.Unlock()
 	id := request.Path["revision"]
-	record, refused, err := p.serviceRecordLookUp(scope, request.Path["service"])
-	if err != nil || refused != nil {
-		return refused, err
-	}
 	revision := record.Revisions[id]
 	if revision == nil {
 		return provider.WireError(404, "NOT_FOUND", "revision "+id+" is not found"), nil
@@ -735,30 +793,22 @@ func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTReques
 	if err := p.runtime.Stop(call.Context, revision.Container); err != nil {
 		return nil, fmt.Errorf("stop the revision container: %w", err)
 	}
+	snapshot := p.revisionDocument(scope, record, revision)
 	releaseMetadata(revision)
 	delete(record.Revisions, id)
-	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
+	return p.deleted(scope, "delete-revision-"+id, typeRevision, snapshot), nil
 }
 
 func (p *Provider) operationsList(scope state.Scope) (*gateway.RESTResponse, error) {
-	var names []string
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		names = slices.Sorted(maps.Keys(s.operations))
-		return nil
-	})
-	items := make([]any, 0, len(names))
-	for _, name := range names {
-		items = append(items, operationDocument(p.operation(scope, name)))
-	}
-	return &gateway.RESTResponse{JSON: map[string]any{"operations": items}}, nil
+	return &gateway.RESTResponse{JSON: map[string]any{"operations": p.operationDocuments(scope, "")}}, nil
 }
 
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	entry := p.operation(scope, provider.OperationName(scope, request.Path["operation"]))
-	if entry == nil {
+	documents := p.operationDocuments(scope, provider.OperationName(scope, request.Path["operation"]))
+	if len(documents) == 0 {
 		return provider.WireError(404, "NOT_FOUND", "operation is not found"), nil
 	}
-	return &gateway.RESTResponse{JSON: operationDocument(entry)}, nil
+	return &gateway.RESTResponse{JSON: documents[0]}, nil
 }
 
 // operationDelete acknowledges deletion of one operation. Operations here

@@ -1,6 +1,6 @@
 # Cloud Run
 
-Cloud Run v2 services, revisions, and operations over REST, with containers run by Docker or as local processes and invocation gated by ID token and `run.invoker`. Modeled locally; nothing is recorded against GCP.
+Cloud Run v2 services, revisions, and operations over REST and gRPC, with containers run by Docker or as local processes and invocation gated by ID token and `run.invoker`. Modeled locally; nothing is recorded against GCP.
 
 ## Run your own image
 
@@ -66,7 +66,26 @@ Routes are `/v2/projects/{project}/locations/{location}/...`.
 | Services | `create`, `get`, `list`, `patch`, `delete` | `serviceId` query; one container; port from `ports[0].containerPort` (default 8080) |
 | Services | `getIamPolicy`, `setIamPolicy` | `allUsers` with `roles/run.invoker` allows anonymous calls |
 | Revisions | `get`, `list`, `delete` | Stopped after 5 minutes idle; the next call cold-starts |
-| Operations | `get`, `list`, `delete` | Create and update operations finish when the container is ready; an early exit fails them |
+| Operations | `get`, `list`, `delete` | Create and update operations finish when the container is ready; an early exit fails them. Deletes return a finished operation |
+
+The same 13 methods run over gRPC on port 4567 (`google.cloud.run.v2.Services`, `google.cloud.run.v2.Revisions`, and `google.longrunning.Operations`), with the same permissions. Operation metadata and response are the `Service` (or the deleted `Revision`), so client LRO helpers work. Point the client at the gRPC endpoint with local ADC on a plaintext local channel:
+
+```python
+import google.auth, grpc
+from google.auth.transport.grpc import secure_authorized_channel
+from google.auth.transport.requests import Request
+from google.cloud import run_v2
+from google.cloud.run_v2.services.services.transports import ServicesGrpcTransport
+
+credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+channel = secure_authorized_channel(credentials, Request(), "127.0.0.1:4567",
+                                    ssl_credentials=grpc.local_channel_credentials())
+services = run_v2.ServicesClient(transport=ServicesGrpcTransport(channel=channel))
+service = services.create_service(parent="projects/my-project/locations/us-central1",
+                                  service_id="app", service=run_v2.Service(...)).result()
+```
+
+Tested clients are listed in [coverage](coverage.md#client-compatibility).
 
 ## IAM
 
@@ -75,7 +94,8 @@ Permissions are `run.services.*`, `run.revisions.*`, `run.operations.*`, and `ru
 ## Verification
 
 ```sh
-sh scripts/go.sh test -race ./internal/providers/run ./cmd/gcp-local
+sh scripts/go.sh test -race ./internal/providers/run ./cmd/gcp-local      # includes the Go client over gRPC
+sh scripts/check_cloudrun_sdk.sh                                          # Linux: google-cloud-run over gRPC
 .venv-tools/bin/python scripts/smoke_workflow.py --packaged --cloud-run-docker   # Docker
 .venv-tools/bin/python scripts/smoke_cloudrun.py                                 # Linux with Docker
 ```
@@ -90,3 +110,6 @@ The Docker-mode smoke builds `examples/workflow` as a user image, deploys it wit
 - No jobs, volumes (including `/cloudsql`), or `valueSource` environment variables.
 - A pull happens inside `create` and can take up to 5 minutes.
 - State is in memory.
+- `TestIamPermissions`, `CancelOperation`, and `WaitOperation` return `UNIMPLEMENTED`. So do the request options `validateOnly`, `allowMissing`, `showDeleted`, `updateMask`, `etag`, `pageSize`, `pageToken`, and `filter` when set; lists return everything on one page.
+- Service fields other than the template's one container (image, port, plain `env`), `serviceAccount`, `revision`, `ingress`, and `traffic` are accepted and ignored.
+- A service's rollout operations share one name; a later rollout replaces the earlier one.

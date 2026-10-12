@@ -65,7 +65,8 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 	for _, rpc := range generated.PubSubMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
-	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods, generated.CloudKMSMethods} {
+	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods, generated.CloudKMSMethods,
+		generated.RunServicesMethods, generated.RunRevisionsMethods, generated.OperationsMethods} {
 		for _, rpc := range table {
 			g.rpcs[rpc.Method] = rpc
 		}
@@ -81,12 +82,13 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 }
 
 // addTranscoding indexes every transcoded binding by RPC and marks the
-// shared IAMPolicy mixin RPCs, which pick a binding by resource.
+// shared IAMPolicy and Operations mixin RPCs, which pick a binding by resource.
 func (g *Gateway) addTranscoding() {
-	for _, rpc := range generated.IAMMethods {
+	for _, rpc := range append(append([]generated.RPC(nil), generated.IAMMethods...), generated.OperationsMethods...) {
 		g.shared[rpc.Method] = true
 	}
-	for _, table := range [][]generated.Transcoding{generated.SecretManagerTranscoding, generated.CloudTasksTranscoding, generated.CloudKMSTranscoding} {
+	for _, table := range [][]generated.Transcoding{generated.SecretManagerTranscoding, generated.CloudTasksTranscoding, generated.CloudKMSTranscoding,
+		generated.RunServicesTranscoding, generated.RunRevisionsTranscoding} {
 		for _, binding := range table {
 			g.transcoded[binding.RPC] = append(g.transcoded[binding.RPC], binding)
 		}

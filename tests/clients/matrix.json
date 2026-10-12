@@ -241,6 +241,20 @@
       "expect": "pass"
     },
     {
+      "service": "run",
+      "client": "go",
+      "package": "cloud.google.com/go/run",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "run",
+      "client": "python",
+      "package": "google-cloud-run",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
       "service": "bigquery",
       "client": "go",
       "package": "cloud.google.com/go/bigquery",

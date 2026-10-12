@@ -38,7 +38,7 @@ Options go before the command: `--directory`, `--port`, `--data-ports FIRST-LAST
 | `env` key | Value |
 | --- | --- |
 | `GCP_LOCAL_ENDPOINT` | `http://127.0.0.1:4566` (all REST APIs) |
-| `GCP_LOCAL_GRPC_ENDPOINT` | `127.0.0.1:4567` (Pub/Sub, Bigtable, Spanner, Firestore, Cloud Logging, Secret Manager v1, Cloud Tasks v2, Cloud KMS) |
+| `GCP_LOCAL_GRPC_ENDPOINT` | `127.0.0.1:4567` (Pub/Sub, Bigtable, Spanner, Firestore, Cloud Logging, Secret Manager v1, Cloud Tasks v2, Cloud KMS, Cloud Run v2) |
 | `GCP_LOCAL_DATA_PORTS` | `4568-4583`: one port per Redis or public-IP Cloud SQL instance |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `<directory>/identity/adc.json` (default directory `.gcp-local/environment`) |
 | `GOOGLE_CLOUD_PROJECT` | `gcp-local-test` |

@@ -77,6 +77,8 @@ func NewRegistry() *Registry {
 	r.registerData("secretmanager", generated.SecretManagerMethods)
 	r.registerData("cloudtasks", generated.CloudTasksMethods)
 	r.registerData("cloudkms", generated.CloudKMSMethods)
+	r.registerData("run", generated.RunServicesMethods)
+	r.registerData("run", generated.RunRevisionsMethods)
 	return r
 }
 

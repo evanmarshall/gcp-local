@@ -14,7 +14,7 @@ Set `GOOGLE_APPLICATION_CREDENTIALS` to the local `adc.json` and `GOOGLE_CLOUD_P
 | gcloud | `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=adc.json`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE=http://127.0.0.1:4566/storage/v1/`, and `..._PUBSUB`, `..._SECRETMANAGER`, `..._CLOUDKMS` set to `http://127.0.0.1:4566/`. Authentication fails ([#53](https://github.com/evanmarshall/gcp-local/issues/53)) | None |
 | rclone | `endpoint = http://127.0.0.1:4566/storage/v1/` and `env_auth = true` | None |
 
-- gRPC is served for Pub/Sub, Firestore, Secret Manager, Cloud Tasks v2, the Spanner and Bigtable data planes, and Logging. Default gRPC clients for Cloud KMS, Spanner and Bigtable admin, and IAM admin fail; each has an issue in the coverage table.
+- gRPC is served for Pub/Sub, Firestore, Secret Manager, Cloud Tasks v2, Cloud Run v2, the Spanner and Bigtable data planes, and Logging. Default gRPC clients for Cloud KMS, Spanner and Bigtable admin, and IAM admin fail; each has an issue in the coverage table.
 - The local token service issues only `cloud-platform` and Storage's scopes, and most client libraries request others by default ([#52](https://github.com/evanmarshall/gcp-local/issues/52)). Load ADC with the `cloud-platform` scope and pass it to the client, as every runner does.
 - Turn off client metrics exporters, which would call `monitoring.googleapis.com`: Go Spanner `DisableNativeMetrics`, Go Bigtable `NoopMetricsProvider`, Python Spanner `disable_builtin_metrics`, Node Spanner `disableBuiltInMetrics`, Node Bigtable `metricsEnabled: false`.
 

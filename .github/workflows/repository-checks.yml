@@ -82,6 +82,11 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             sh scripts/check_cloudtasks.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/cloudrun-sdk ./internal/providers/run
+      - name: Verify Cloud Run with the Python SDK over gRPC without egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            sh scripts/check_cloudrun_sdk.sh
       - name: Compare local REST providers against their recorded contracts
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
@@ -116,6 +121,22 @@ jobs:
         run: python scripts/smoke_workflow.py --packaged
       - name: Install the built wheel in a fresh venv and drive its gcp-local CLI
         run: python scripts/smoke_package.py
+
+  packaged-cloudrun-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m venv .venv-tools
+      - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt
+      - run: docker compose version
+      - name: Run a user-built image on packaged Cloud Run in Docker mode, then check per-environment cleanup
+        run: .venv-tools/bin/python scripts/smoke_workflow.py --packaged --cloud-run-docker
 
   workflow-acceptance:
     runs-on: ubuntu-latest

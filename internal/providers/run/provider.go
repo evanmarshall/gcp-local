@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -81,7 +82,8 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 	return p, nil
 }
 
-// registerMethods binds every provider method to the shared REST handler.
+// registerMethods binds every provider method to the shared REST handler. The
+// gateway transcodes the gRPC methods onto these routes.
 func registerMethods(registry *gateway.Registry, p *Provider) error {
 	for _, method := range methodNames() {
 		if err := registry.Register(method, p.handle); err != nil {
@@ -167,6 +169,29 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 // errUnimplemented is the default dispatch gap for unregistered methods.
 var errUnimplemented = status.Error(codes.Unimplemented, "Cloud Run coverage gap: this method is not implemented")
 
+// coverageGap refuses one documented request feature the provider does not
+// model. Clients do not retry UNIMPLEMENTED.
+func coverageGap(feature string) error {
+	return status.Errorf(codes.Unimplemented, "Cloud Run coverage gap: %s is not implemented", feature)
+}
+
+// refusedOptions are the Admin API v2 query options (services.create, list,
+// patch, delete; revisions.list, delete; operations.list) the provider does
+// not model. A request that sets one to a non-default value is refused rather
+// than silently answered as if it were unset: validateOnly would mutate,
+// pageSize would be exceeded, and etag would not be checked.
+var refusedOptions = []string{"validateOnly", "allowMissing", "showDeleted", "updateMask", "etag", "pageSize", "pageToken", "filter"}
+
+// refuseOptions returns the gap for the first non-default refused option.
+func refuseOptions(query url.Values) error {
+	for _, name := range refusedOptions {
+		if value := query.Get(name); value != "" && value != "false" && value != "0" {
+			return coverageGap("the " + name + " option")
+		}
+	}
+	return nil
+}
+
 // denied renders the Cloud Run denial shape with the failed permission.
 func denied(call gateway.Call, target iam.Target, decision iam.Decision) *gateway.RESTResponse {
 	permission := provider.DeniedPermission(decision)
@@ -196,6 +221,9 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		}
 		return denied(call, target, decision), nil
 	}
+	if refused := refuseOptions(request.Query); refused != nil {
+		return nil, refused
+	}
 	call.Resource = target.Name
 	call.Location = scope.Location
 	response, err := p.execute(call, request, scope, record)
@@ -222,10 +250,10 @@ func (p *Provider) resolveCall(call gateway.Call, request *gateway.RESTRequest) 
 		// Operations authorize on the project ancestor like collection methods.
 		scope := state.Scope{Project: parts["project"], Location: parts["location"]}
 		return iam.Target{Name: provider.ProjectResource(scope.Project)}, scope, nil, nil
-	case methodRevisionsList:
+	case methodRevisionsList, methodRevisionsGet, methodRevisionsDelete:
+		// Revisions are not indexed IAM resources; they authorize on their
+		// service, which inherits the project's policy.
 		return p.resolve(call, parts, kindService, parts["service"])
-	case methodRevisionsGet, methodRevisionsDelete:
-		return p.resolve(call, parts, kindRevision, parts["revision"])
 	default:
 		return p.resolve(call, parts, kindService, parts["service"])
 	}

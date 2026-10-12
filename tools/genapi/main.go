@@ -87,6 +87,9 @@ func main() {
 	write("secretmanager_dispatch.go", transcodedDispatch(secretManagerRPC, true), *check)
 	write("cloudtasks_dispatch.go", transcodedDispatch(cloudTasksRPC, false), *check)
 	write("cloudkms_dispatch.go", transcodedDispatch(cloudKMSRPC, false), *check)
+	write("run_services_dispatch.go", transcodedDispatch(runServicesRPC, false), *check)
+	write("run_revisions_dispatch.go", transcodedDispatch(runRevisionsRPC, false), *check)
+	write("operations_dispatch.go", operationsDispatch(), *check)
 }
 
 // storageRoutes generates the Storage REST route table from the pinned
@@ -584,8 +587,13 @@ func write(name string, raw []byte, check bool) {
 
 // runRoutes generates the Cloud Run v2 route table from the pinned surface.
 func runRoutes() []byte {
+	return routeTable("RunRoutes", "is the Cloud Run v2 REST route table. Invocation is not an API\n// route: it rides the local runtime listener under its own contract.", runRows())
+}
+
+// runRows lists the Cloud Run v2 REST routes.
+func runRows() []route {
 	const base = "/v2/projects/{project}/locations/{location}"
-	rows := []route{
+	return []route{
 		{"run.services.create", http.MethodPost, base + "/services", true, false},
 		{"run.services.list", http.MethodGet, base + "/services", false, false},
 		{"run.services.get", http.MethodGet, base + "/services/{service}", false, false},
@@ -600,7 +608,6 @@ func runRoutes() []byte {
 		{"run.operations.list", http.MethodGet, base + "/operations", false, false},
 		{"run.operations.delete", http.MethodDelete, base + "/operations/{operation}", false, false},
 	}
-	return routeTable("RunRoutes", "is the Cloud Run v2 REST route table. Invocation is not an API\n// route: it rides the local runtime listener under its own contract.", rows)
 }
 
 // computeRoutes generates the Compute Engine v1 route table slice.

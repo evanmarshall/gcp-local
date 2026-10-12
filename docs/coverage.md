@@ -43,6 +43,7 @@ Notes on counts:
 - Secret Manager also serves 14 of its 15 methods over gRPC `google.cloud.secretmanager.v1`; locations list is REST only.
 - Cloud Tasks also serves 15 of its 16 methods over gRPC `google.cloud.tasks.v2`; locations list is REST only. REST is v2beta3.
 - Cloud KMS serves 25 of its 26 methods over gRPC as well; only the location list is REST only ([transport](cloudkms.md#transport)).
+- Cloud Run serves its 13 methods over both REST and gRPC (`google.cloud.run.v2.Services`, `google.cloud.run.v2.Revisions`, and `google.longrunning.Operations` for Cloud Run operation names).
 
 ## Client compatibility
 
@@ -67,6 +68,8 @@ A recording proves only the requests it sends. This table lists the real clients
 | secretmanager | Go `cloud.google.com/go/secretmanager` 1.22.0 | gRPC | `internal/providers/secretmanager/client_test.go` |
 | cloudtasks | Python `google-cloud-tasks` 2.26.0 (`tasks_v2`) | gRPC | `internal/providers/cloudtasks/testdata/sdk.py` |
 | cloudtasks | Go `cloud.google.com/go/cloudtasks` 1.20.0 (`apiv2`) | gRPC | `internal/providers/cloudtasks/client_test.go` |
+| run | Go `cloud.google.com/go/run/apiv2` 1.23.0 | gRPC | `internal/providers/run/grpc_test.go` |
+| run | Python `google-cloud-run` 0.16.1 | gRPC | `internal/providers/run/testdata/sdk.py` |
 | vertexai | Python `google-genai` 2.29.0 | REST | `internal/providers/vertexai/testdata/sdk.py` |
 | identity | Python `google-auth` 2.56.2 (ADC, metadata) | HTTP | `internal/identity/testdata/sdk.py` |
 | Terraform cases above | `hashicorp/google` 8.5.0 | REST | `tests/terraform/runner` |
@@ -80,6 +83,8 @@ A recording proves only the requests it sends. This table lists the real clients
 | secretmanager | Python `google-cloud-secret-manager` 2.31.0 | gRPC | `tests/clients/python` |
 | cloudtasks | Go `cloud.google.com/go/cloudtasks` 1.20.0 | gRPC | `tests/clients/go` |
 | cloudtasks | Python `google-cloud-tasks` 2.26.0 | gRPC | `tests/clients/python` |
+| run | Go `cloud.google.com/go/run` 1.23.0 | gRPC | `tests/clients/go` |
+| run | Python `google-cloud-run` 0.16.1 | gRPC | `tests/clients/python` |
 | bigquery | Go `cloud.google.com/go/bigquery` 1.85.0 | REST | `tests/clients/go` |
 | bigquery | Node `@google-cloud/bigquery` 9.2.0 | REST | `tests/clients/node` |
 | logging | Go `cloud.google.com/go/logging` 1.18.0 | gRPC | `tests/clients/go` |
@@ -114,7 +119,7 @@ These matrix pairs fail today. `sh scripts/check_clients.sh` fails if one starts
 | iam | Go `cloud.google.com/go/iam` 1.11.0 | gRPC | no gRPC listener | [#63](https://github.com/evanmarshall/gcp-local/issues/63) |
 | iam | Python `google-cloud-iam` 2.26.0 | gRPC | no gRPC listener | [#63](https://github.com/evanmarshall/gcp-local/issues/63) |
 
-Untested: Java clients, `gsutil`, and every client of Artifact Registry, Cloud SQL, Memorystore, Cloud Run, and Compute.
+Untested: Java clients, `gsutil`, the Node.js and gcloud clients of Cloud Run, and every client of Artifact Registry, Cloud SQL, Memorystore, and Compute.
 
 ## Cross-service behavior
 
