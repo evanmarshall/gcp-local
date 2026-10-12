@@ -14,6 +14,9 @@ import (
 )
 
 // localFirestoreCase drives one Firestore case through the adapter plumbing.
+// The first document request starts the emulator's JVM, which takes over two
+// seconds on hosted runners; a shorter timeout cancels a create the emulator
+// still applies, and the provider's retry then fails with 409.
 func localFirestoreCase(t *testing.T, test resource.TestCase) {
 	t.Helper()
 	for i, step := range test.Steps {
@@ -26,7 +29,7 @@ func localFirestoreCase(t *testing.T, test resource.TestCase) {
  access_token = %q
  firestore_custom_endpoint = %q
  universe_domain = "gcp-local.invalid"
- request_timeout = "2s"
+ request_timeout = "30s"
  add_terraform_attribution_label = false
 }
 `, projectID, fixtureToken, endpoint+"/v1/") + step.Config
