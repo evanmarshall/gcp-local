@@ -37,6 +37,8 @@
     {"name": "secretmanager", "tests": ["tests/conformance/security/secretmanager/test_secrets.py"],
      "option": "--gcp-secretmanager-scope", "scope": "security/secretmanager.json"},
     {"name": "serviceaccounts", "tests": ["tests/conformance/security/iam/test_accounts.py"],
-     "option": "--gcp-live-scope-file", "scope": "security/serviceaccounts.json"}
+     "option": "--gcp-live-scope-file", "scope": "security/serviceaccounts.json"},
+    {"name": "iamcredentials", "tests": ["tests/conformance/security/iam/test_credentials.py"],
+     "option": "--gcp-live-scope-file", "scope": "security/iamcredentials.json"}
   ]
 }

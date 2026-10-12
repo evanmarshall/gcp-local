@@ -36,6 +36,7 @@ var workflows = map[string]func(context.Context, *env) error{
 	"cloudtasks":     runTasks,
 	"firestore":      runFirestore,
 	"iam":            runIAM,
+	"iamcredentials": runIAMCredentials,
 	"logging":        runLogging,
 	"pubsub":         runPubSub,
 	"run":            runCloudRun,

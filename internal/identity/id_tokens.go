@@ -27,15 +27,27 @@ import (
 const IDTokenIssuer = "https://identity.gcp-local.invalid"    //nolint:gosec // a public local issuer URL, not a credential
 const generateIDToken = "iam.serviceAccounts.generateIdToken" //nolint:gosec // an RPC method name, not a credential
 
+// IDClaims are a local ID token's claims. Delivery tokens (push, tasks,
+// scheduler) always carry the email; generateIdToken carries azp and carries
+// the email only when includeEmail is set, as GCP's do (iamcredentials-impersonation).
 type IDClaims struct {
-	Issuer        string `json:"iss"`
-	Subject       string `json:"sub"`
-	Audience      string `json:"aud"`
-	Email         string `json:"email"`
-	EmailVerified bool   `json:"email_verified"`
-	IssuedAt      int64  `json:"iat"`
-	ExpiresAt     int64  `json:"exp"`
+	Issuer          string `json:"iss"`
+	Subject         string `json:"sub"`
+	Audience        string `json:"aud"`
+	AuthorizedParty string `json:"azp,omitempty"`
+	Email           string `json:"email,omitempty"`
+	EmailVerified   bool   `json:"email_verified,omitempty"`
+	IssuedAt        int64  `json:"iat"`
+	ExpiresAt       int64  `json:"exp"`
 }
+
+// Local ID-token lifetimes: delivery tokens last five minutes; generateIdToken
+// tokens last one hour, as recorded.
+const (
+	deliveryLifetime  = 300
+	generatedLifetime = 3600
+)
+
 type IDTokens struct {
 	key              *rsa.PrivateKey
 	kid, certificate string
@@ -79,11 +91,32 @@ func (s *IDTokens) Mint(call gateway.Call, account, audience string) (string, er
 		return "", err
 	}
 	now := s.now().Unix()
+	return s.sign(IDClaims{Issuer: IDTokenIssuer, Subject: resource.Number, Audience: audience, Email: email, EmailVerified: true, IssuedAt: now, ExpiresAt: now + deliveryLifetime})
+}
+
+// Issue signs a one-hour ID token for a service account (unique ID and email)
+// for IAM Credentials generateIdToken. It does not authorize: the caller must
+// first authorize iam.serviceAccounts.getOpenIdToken through the whole
+// delegation chain.
+func (s *IDTokens) Issue(uniqueID, email, audience string, includeEmail bool) (string, error) {
+	if err := validateAudience(audience); err != nil {
+		return "", err
+	}
+	now := s.now().Unix()
+	claims := IDClaims{Issuer: IDTokenIssuer, Subject: uniqueID, Audience: audience, AuthorizedParty: uniqueID, IssuedAt: now, ExpiresAt: now + generatedLifetime}
+	if includeEmail {
+		claims.Email, claims.EmailVerified = email, true
+	}
+	return s.sign(claims)
+}
+
+// sign encodes and signs one claim set with the runtime key.
+func (s *IDTokens) sign(value IDClaims) (string, error) {
 	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": s.kid})
 	if err != nil {
 		return "", fmt.Errorf("encode id token header: %w", err)
 	}
-	claims, err := json.Marshal(IDClaims{Issuer: IDTokenIssuer, Subject: resource.Number, Audience: audience, Email: email, EmailVerified: true, IssuedAt: now, ExpiresAt: now + 300})
+	claims, err := json.Marshal(value)
 	if err != nil {
 		return "", fmt.Errorf("encode id token claims: %w", err)
 	}
@@ -178,10 +211,12 @@ func (s *IDTokens) verifyEnvelope(parts []string) error {
 }
 
 // acceptable reports whether the decoded claims name a live local identity for
-// this audience. The token lifetime is fixed at five minutes.
+// this audience. The lifetime is one this issuer uses, and the email is
+// required: a generateIdToken token without includeEmail names no principal.
 func (claims IDClaims) acceptable(now int64, audience string) bool {
+	lifetime := claims.ExpiresAt - claims.IssuedAt
 	return claims.Issuer == IDTokenIssuer && claims.Audience == audience && claims.Subject != "" && claims.Email != "" && claims.EmailVerified &&
-		claims.IssuedAt <= now && claims.ExpiresAt > now && claims.ExpiresAt-claims.IssuedAt == 300
+		claims.IssuedAt <= now && claims.ExpiresAt > now && (lifetime == deliveryLifetime || lifetime == generatedLifetime)
 }
 
 // errEnvelope marks a token whose header or signature does not match this issuer.

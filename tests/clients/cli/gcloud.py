@@ -5,6 +5,7 @@ whole configuration is the environment built here.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -29,6 +30,8 @@ def environment(*, denied=False):
         "CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB": f"{HTTP}/",
         "CLOUDSDK_API_ENDPOINT_OVERRIDES_SECRETMANAGER": f"{HTTP}/",
         "CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDKMS": f"{HTTP}/",
+        "CLOUDSDK_API_ENDPOINT_OVERRIDES_IAM": f"{HTTP}/",
+        "CLOUDSDK_API_ENDPOINT_OVERRIDES_IAMCREDENTIALS": f"{HTTP}/",
     }
 
 
@@ -135,10 +138,57 @@ def run_cloudkms():
     gcloud("kms", "keys", "versions", "destroy", "1", *key)
 
 
+def run_iamcredentials():
+    """Impersonate a new account with --impersonate-service-account and act as it."""
+    target = f"gcloud-impersonated@{PROJECT}.iam.gserviceaccount.com"
+    gcloud("iam", "service-accounts", "create", "gcloud-impersonated")
+    # scripts/run/clients.py enrolls the granted identity as app@PROJECT.
+    for member, role in (
+        (
+            f"serviceAccount:app@{PROJECT}.iam.gserviceaccount.com",
+            "roles/iam.serviceAccountTokenCreator",
+        ),
+        (f"serviceAccount:{target}", "roles/iam.serviceAccountViewer"),
+    ):
+        gcloud(
+            "iam",
+            "service-accounts",
+            "add-iam-policy-binding",
+            target,
+            f"--member={member}",
+            f"--role={role}",
+        )
+    describe = [
+        "iam",
+        "service-accounts",
+        "describe",
+        target,
+        f"--impersonate-service-account={target}",
+        "--format=value(email)",
+    ]
+    assert gcloud(*describe).strip() == target, "describe as the impersonated account"
+    # The account may read only itself, so a project-wide list proves the
+    # call ran as it rather than as the granted caller.
+    listed = subprocess.run(
+        [*GCLOUD, "iam", "service-accounts", "list", f"--impersonate-service-account={target}"],
+        env=OWNER,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert listed.returncode != 0 and "have iam.serviceAccounts.list access" in listed.stderr, (
+        f"impersonated list: {listed.stderr.strip()[-400:]}"
+    )
+    expect_denied("ungranted impersonation", [*GCLOUD, *describe], DENIED)
+    gcloud("iam", "service-accounts", "delete", target)
+
+
 if __name__ == "__main__":
     main(
         {
             "cloudkms": run_cloudkms,
+            "iamcredentials": run_iamcredentials,
             "pubsub": run_pubsub,
             "secretmanager": run_secretmanager,
             "storage": run_storage,

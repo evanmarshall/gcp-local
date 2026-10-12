@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Metadata sentinels.
@@ -113,12 +114,12 @@ func (m *metadataResponder) token(w http.ResponseWriter, r *http.Request) {
 	if query != "" {
 		scopes = strings.Split(query, ",")
 	}
-	value, lifetime, err := m.s.mint(m.p, scopes)
+	value, _, err := m.s.mint(m.p, scopes, m.s.lifetime)
 	if err != nil {
 		http.Error(w, "Unsupported metadata token scope or capacity", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, 200, map[string]any{fieldAccessToken: value, "expires_in": lifetime, "token_type": tokenTypeBearer})
+	writeJSON(w, 200, map[string]any{fieldAccessToken: value, "expires_in": int(m.s.lifetime / time.Second), "token_type": tokenTypeBearer})
 }
 
 func parseMetadataQuery(r *http.Request) (string, error) {

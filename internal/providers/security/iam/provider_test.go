@@ -13,6 +13,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -31,9 +32,18 @@ type harness struct {
 	engine   *iam.Engine
 	index    *state.Index
 	provider *Provider
+	// tokens resolves the access tokens IAM Credentials mints ("gl." handles).
+	tokens   *identity.Service
+	idTokens *identity.IDTokens
 }
 
 func newHarness(t *testing.T) *harness {
+	t.Helper()
+	return buildHarness(t, true)
+}
+
+// buildHarness builds the provider with or without the credential issuers.
+func buildHarness(t *testing.T, issuers bool) *harness {
 	t.Helper()
 	registry := gateway.NewRegistry()
 	index := state.NewIndex()
@@ -56,14 +66,29 @@ func newHarness(t *testing.T) *harness {
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)
 	}
-	p, err := New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine)
+	tokens, err := identity.New(identity.Config{LifetimeExtension: []string{"extended@" + testProject + ".iam.gserviceaccount.com"}}, nil)
+	if err != nil {
+		t.Fatalf("build the identity service: %v", err)
+	}
+	idTokens, err := identity.NewIDTokens(engine, index)
+	if err != nil {
+		t.Fatalf("build the ID-token keys: %v", err)
+	}
+	credentials := Credentials{Tokens: tokens, IDTokens: idTokens}
+	if !issuers {
+		credentials = Credentials{}
+	}
+	p, err := New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine, credentials)
 	if err != nil {
 		t.Fatalf("build the provider: %v", err)
 	}
-	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
+	g := gateway.New(registry, func(ctx context.Context, token string) (gateway.Principal, error) {
+		if strings.HasPrefix(token, "gl.") {
+			return tokens.Resolve(ctx, token)
+		}
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, engine: engine, index: index, provider: p}
+	return &harness{t: t, gate: g, engine: engine, index: index, provider: p, tokens: tokens, idTokens: idTokens}
 }
 
 // expect issues one REST request and fails the test unless it returns want.
@@ -108,6 +133,8 @@ func TestAccountAndKeyLifecycle(t *testing.T) {
 		"accountId": testAccount, "displayName": "worker",
 	}, 200)
 	h.expect(http.MethodGet, testBase+"/"+testAccount, nil, 200)
+	// The projects/- wildcard names the account by email, as gcloud sends it.
+	h.expect(http.MethodGet, "/v1/projects/-/serviceAccounts/"+accountEmail(testProject, testAccount), nil, 200)
 	h.expect(http.MethodGet, testBase, nil, 200)
 	h.expect(http.MethodPatch, testBase+"/"+testAccount, map[string]any{
 		"serviceAccount": map[string]any{"displayName": "renamed", "description": "worker account"},

@@ -1,7 +1,8 @@
-// Package iam implements the IAM service-account control plane: service
-// accounts with their per-resource IAM and key records, and signBlob. Keys are
-// real local RSA keys that verify Storage signed URLs; token minting lives in
-// the identity service.
+// Package iam implements the IAM service-account control plane (service
+// accounts with their per-resource IAM and key records) and IAM Credentials
+// (generateAccessToken, generateIdToken, signBlob, signJwt with delegation).
+// Keys are real local RSA keys that verify Storage signed URLs; the identity
+// service issues and resolves the tokens.
 package iam
 
 import (
@@ -28,10 +29,21 @@ const (
 	methodKeysDelete     = "iam.serviceAccountKeys.delete"
 	methodKeysGet        = "iam.serviceAccountKeys.get"
 	methodSignBlob       = "iamcredentials.projects.serviceAccounts.signBlob"
+	methodSignJwt        = "iamcredentials.projects.serviceAccounts.signJwt"
+	methodAccessToken    = "iamcredentials.projects.serviceAccounts.generateAccessToken"
+	methodIDToken        = "iamcredentials.projects.serviceAccounts.generateIdToken"
+	// methodDelegate is the internal plan of one hop into a delegate of an
+	// IAM Credentials chain; it is never a route.
+	methodDelegate = "iamcredentials.delegation"
 )
 
+// credentialMethods are the IAM Credentials methods. They act on any indexed
+// account, including ones declared only in the IAM configuration, and take a
+// delegation chain.
+var credentialMethods = map[string]bool{methodSignBlob: true, methodSignJwt: true, methodAccessToken: true, methodIDToken: true}
+
 // permissions follows the documented access-control rows.
-var permissions = map[string]string{
+var permissions = map[string]string{ //nolint:gosec // permission names, not credentials
 	methodAccountsCreate: "iam.serviceAccounts.create",
 	methodAccountsList:   "iam.serviceAccounts.list",
 	methodAccountsGet:    "iam.serviceAccounts.get",
@@ -44,7 +56,16 @@ var permissions = map[string]string{
 	methodKeysDelete:     "iam.serviceAccountKeys.delete",
 	methodKeysGet:        "iam.serviceAccountKeys.get",
 	methodSignBlob:       "iam.serviceAccounts.signBlob",
+	methodSignJwt:        "iam.serviceAccounts.signJwt",
+	methodAccessToken:    "iam.serviceAccounts.getAccessToken",
+	methodIDToken:        "iam.serviceAccounts.getOpenIdToken",
 }
+
+// delegationPermission is checked on every delegate a chain passes through.
+// Holding only the method's own permission on a delegate is refused
+// (iamcredentials-impersonation: getOpenIdToken alone on the delegate denies
+// a delegated generateIdToken); Token Creator carries this permission.
+const delegationPermission = "iam.serviceAccounts.implicitDelegation"
 
 // uid is the shared resource-name matcher.
 var uid = regexp.MustCompile(`^[a-z][a-z0-9-]{1,28}[a-z0-9]$`)

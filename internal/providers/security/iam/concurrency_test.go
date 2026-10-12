@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider/providertest"
 )
 
@@ -25,7 +26,7 @@ func TestPatchIsAtomic(t *testing.T) {
 }
 
 // TestConcurrentAccountRequests races create, get, list, patch, delete, key
-// create/list/get/delete, and signBlob on one account; -race fails it if a
+// create/list/get/delete, and the IAM Credentials methods on one account; -race fails it if a
 // handler touches a record unlocked.
 func TestConcurrentAccountRequests(t *testing.T) {
 	h := newHarness(t)
@@ -50,6 +51,9 @@ func TestConcurrentAccountRequests(t *testing.T) {
 			{Method: http.MethodGet, Path: account + "/keys/0000000000000000000000000000000000000000", Want: []int{404}},
 			{Method: http.MethodDelete, Path: account + "/keys/0000000000000000000000000000000000000000", Want: []int{404}},
 			{Method: http.MethodPost, Path: account + ":signBlob", Body: map[string]any{"payload": "YQ=="}, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: account + ":signJwt", Body: map[string]any{"payload": `{"sub":"x"}`}, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: account + ":generateAccessToken", Body: map[string]any{"scope": []string{identity.CloudPlatform}}, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: account + ":generateIdToken", Body: map[string]any{"audience": "aud"}, Want: []int{200, 404}},
 			{Method: http.MethodPost, Path: account + ":getIamPolicy", Body: map[string]any{}, Want: []int{200, 404}},
 			{Method: http.MethodDelete, Path: account, Want: []int{200, 404}},
 		}

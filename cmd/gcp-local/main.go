@@ -273,7 +273,14 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 			return fmt.Errorf("register the Storage provider: %w", err)
 		}
 	}
-	if err := assembleDelivery(ctx, options, selected, registry, server, index, engine, identities); err != nil {
+	tokens, err := assembleIDTokens(selected, index, engine, identities)
+	if err != nil {
+		return err
+	}
+	if err := assembleDelivery(ctx, options, selected, registry, server, index, engine, identities, tokens); err != nil {
+		return err
+	}
+	if err := assembleIAMProvider(ctx, selected, registry, server, index, engine, iamadminprovider.Credentials{Tokens: identities, IDTokens: tokens}); err != nil {
 		return err
 	}
 	// Providers in front of an official or pinned backend binary, or a
@@ -295,6 +302,18 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
 }
 
+// assembleIAMProvider registers the IAM and IAM Credentials provider with the
+// identity service and ID-token keys it mints with.
+func assembleIAMProvider(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, credentials iamadminprovider.Credentials) error {
+	if !selected["iam"] {
+		return nil
+	}
+	if _, err := iamadminprovider.New(ctx, registry, server.Backends, index, engine, credentials); err != nil {
+		return fmt.Errorf("register the IAM provider: %w", err)
+	}
+	return nil
+}
+
 // standardProvider is a provider whose constructor needs only the shared
 // registry, backend manager, index, and IAM engine.
 type standardProvider struct {
@@ -312,7 +331,6 @@ var standardProviders = []standardProvider{
 	{"bigtable", "Bigtable", discard(bigtableprovider.New)},
 	{"artifactregistry", "Artifact Registry", discard(artifactregistryprovider.New)},
 	{"resourcemanager", "resourcemanager", discard(resourcemanagerprovider.New)},
-	{"iam", "IAM", discard(iamadminprovider.New)},
 }
 
 // assembleStandard registers the selected standard providers.
@@ -338,11 +356,11 @@ func discard[P any](construct func(context.Context, *gateway.Registry, *backend.
 }
 
 // assembleIDTokens builds the one local ID-token key set that Pub/Sub push,
-// Cloud Tasks, and Cloud Scheduler mint with and Cloud Run invocation verifies. The minting method
-// registers a single permission plan, so the key set is shared, not per
-// provider.
+// Cloud Tasks, Cloud Scheduler, and IAM Credentials generateIdToken mint with
+// and Cloud Run invocation verifies. The minting method registers a single
+// permission plan, so the key set is shared, not per provider.
 func assembleIDTokens(selected map[string]bool, index *state.Index, engine *iam.Engine, identities *identity.Service) (*identity.IDTokens, error) {
-	if !selected["pubsub"] && !selected["cloudtasks"] && !selected["cloudscheduler"] {
+	if !selected["pubsub"] && !selected["cloudtasks"] && !selected["cloudscheduler"] && !selected["iam"] {
 		return nil, nil //nolint:nilnil // no minting provider selected
 	}
 	tokens, err := identity.NewIDTokens(engine, index)
@@ -394,11 +412,7 @@ func assembleCloudTasks(ctx context.Context, selected map[string]bool, registry 
 // assembleDelivery registers the providers whose workers deliver as service
 // agents with the shared ID-token keys: Pub/Sub, Cloud Tasks, and Cloud
 // Scheduler, which also mints OAuth tokens through the identity service.
-func assembleDelivery(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service) error {
-	tokens, err := assembleIDTokens(selected, index, engine, identities)
-	if err != nil {
-		return err
-	}
+func assembleDelivery(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service, tokens *identity.IDTokens) error {
 	if err := assemblePubSub(options, selected, registry, server, index, engine, tokens); err != nil {
 		return err
 	}

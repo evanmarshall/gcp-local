@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 )
@@ -84,12 +85,12 @@ func (s *Service) exchange(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, 400, "invalid_grant", "Unknown local subject credential")
 		return
 	}
-	value, lifetime, err := s.mint(p, strings.Fields(r.PostForm.Get("scope")))
+	value, _, err := s.mint(p, strings.Fields(r.PostForm.Get("scope")), s.lifetime)
 	if err != nil {
 		oauthError(w, 400, "invalid_scope", err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{fieldAccessToken: value, "issued_token_type": AccessTokenType, "token_type": tokenTypeBearer, "expires_in": lifetime})
+	writeJSON(w, 200, map[string]any{fieldAccessToken: value, "issued_token_type": AccessTokenType, "token_type": tokenTypeBearer, "expires_in": int(s.lifetime / time.Second)})
 }
 
 // introspect answers RFC 7662 token introspection, which gcloud calls with its

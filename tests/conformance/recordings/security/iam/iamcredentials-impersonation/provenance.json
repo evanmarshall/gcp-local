@@ -1,0 +1,47 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T23:49:28.608510+00:00",
+  "scenario": {
+    "id": "iamcredentials-impersonation",
+    "service": "iam",
+    "transport": "rest-v1",
+    "revision": "24e11866d2c55e4bcc77011387341d899d4935fbe4172fbaf226cffa4b5a71c8",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "b1d4fb7b393007823cbbc54674227b07d0e1b4517ba0f682a6e1f34e3878cd77",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/security/iamcredentials.py": "cd8ab1b1e0192bc438c7a58eecc8c68c23c4761a444d0a30106effd7660bd696",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98"
+    },
+    "scope": {
+      "services": [
+        "iamcredentials"
+      ],
+      "location": "global",
+      "limits": {
+        "max_service_accounts": 2,
+        "max_keys": 0,
+        "max_run_seconds": 1500
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

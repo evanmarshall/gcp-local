@@ -68,7 +68,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Spanner](docs/services/databases/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions |
 | [Bigtable](docs/services/databases/bigtable.md) | Official Google emulator code | Row reads, scans, mutations over gRPC; not recorded |
 | [Artifact Registry](docs/services/artifactregistry.md) | gcp-local | Repositories only; no push or pull |
-| [IAM](docs/services/security/serviceaccounts.md) and [project IAM](docs/services/security/project-iam.md) | gcp-local | Service accounts and policies |
+| [IAM](docs/services/security/serviceaccounts.md) and [project IAM](docs/services/security/project-iam.md) | gcp-local | Service accounts and policies; impersonation (`generateAccessToken`, `generateIdToken`, `signJwt`, `signBlob`) |
 | [VPC networking](docs/services/networking.md) | gcp-local | Connectivity verdicts; no real traffic |
 
 IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage and also evaluated for Cloud SQL; on other services a condition that reads `resource.*` grants nothing. Deny rules and principal access boundaries for service accounts are enforced locally but not recorded; organization policy and VPC Service Controls are not enforced ([IAM](docs/architecture/iam.md)).

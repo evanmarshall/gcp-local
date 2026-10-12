@@ -19,7 +19,10 @@ ROLES = {
         "storage.objectCreator",
     ),
     "pubsub": ("pubsub.admin", "pubsub.publisher", "pubsub.subscriber", "pubsub.viewer"),
-    "identity": ("iam.serviceAccountUser", "iam.serviceAccountTokenCreator"),
+    "identity": (
+        "iam.serviceAccountUser", "iam.serviceAccountTokenCreator",
+        "iam.serviceAccountOpenIdTokenCreator",
+    ),
     # Candidate sets for the providers implemented without recorded role
     # snapshots; each entry must be re-recorded read-only before its
     # checksummed manifest snapshot is promoted.
@@ -77,8 +80,8 @@ ROLE_DIRS = {
     "bigquery": "databases/bigquery",
     "bigtable": "databases/bigtable",
     "cloudkms": "security/cloudkms",
-    "cloudsql": "databases/cloudsql",
     "cloudscheduler": "messaging/cloudscheduler",
+    "cloudsql": "databases/cloudsql",
     "cloudtasks": "messaging/cloudtasks",
     "compute": "compute",
     "datastore": "databases/firestore",

@@ -88,7 +88,7 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 	for _, table := range [][]contract.RPC{mixin.IAMMethods, spanner.SpannerMethods, bigtable.BigtableMethods, secretmanager.SecretManagerMethods, cloudtasks.CloudTasksMethods, cloudscheduler.CloudSchedulerMethods, cloudkms.CloudKMSMethods,
 		run.RunServicesMethods, run.RunRevisionsMethods, mixin.OperationsMethods,
 		spanner.SpannerInstanceAdminMethods, spanner.SpannerDatabaseAdminMethods,
-		bigtable.BigtableInstanceAdminMethods, bigtable.BigtableTableAdminMethods, iam.IAMAdminMethods} {
+		bigtable.BigtableInstanceAdminMethods, bigtable.BigtableTableAdminMethods, iam.IAMAdminMethods, iam.IAMCredentialsMethods} {
 		for _, rpc := range table {
 			g.rpcs[rpc.Method] = rpc
 		}
@@ -112,7 +112,7 @@ func (g *Gateway) addTranscoding() {
 	for _, table := range [][]contract.Transcoding{secretmanager.SecretManagerTranscoding, cloudtasks.CloudTasksTranscoding, cloudscheduler.CloudSchedulerTranscoding, cloudkms.CloudKMSTranscoding,
 		run.RunServicesTranscoding, run.RunRevisionsTranscoding,
 		spanner.SpannerInstanceAdminTranscoding, spanner.SpannerDatabaseAdminTranscoding,
-		bigtable.BigtableInstanceAdminTranscoding, bigtable.BigtableTableAdminTranscoding, iam.IAMAdminTranscoding} {
+		bigtable.BigtableInstanceAdminTranscoding, bigtable.BigtableTableAdminTranscoding, iam.IAMAdminTranscoding, iam.IAMCredentialsTranscoding} {
 		for _, binding := range table {
 			g.transcoded[binding.RPC] = append(g.transcoded[binding.RPC], binding)
 		}

@@ -12,6 +12,7 @@ import (
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
+	"cloud.google.com/go/iam/credentials/apiv1/credentialspb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -63,6 +64,7 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	btadminpb.RegisterBigtableInstanceAdminServer(server, &bigtable.BigtableInstanceAdminServer{Dispatch: g})
 	btadminpb.RegisterBigtableTableAdminServer(server, &bigtable.BigtableTableAdminServer{Dispatch: g})
 	iamadminpb.RegisterIAMServer(server, &iam.IAMServer{Dispatch: g})
+	credentialspb.RegisterIAMCredentialsServer(server, &iam.IAMCredentialsServer{Dispatch: g})
 	longrunningpb.RegisterOperationsServer(server, &mixin.OperationsServer{Dispatch: g})
 	return server
 }

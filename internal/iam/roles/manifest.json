@@ -4,7 +4,7 @@
     "file": "testable-permissions.json",
     "sha256": "3bcff8021676cde6e50a256036eb8ea34cd531ac1eea6670b684d753b8337a73"
   },
-  "recorded_at": "2026-10-12T23:15:44.542318+00:00",
+  "recorded_at": "2026-10-13T00:27:31.765461+00:00",
   "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudscheduler, cloudsql, cloudtasks, compute, customroles, firestore, identity, kms, logging, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions and the project's testable permissions; no resource mutation or grant",
   "roles": [
     {
@@ -176,6 +176,11 @@
       "file": "security/iam/iam.serviceAccountTokenCreator.json",
       "name": "roles/iam.serviceAccountTokenCreator",
       "sha256": "64dc45c85e756f2f0bd4f90ae12b342ca845c4a4d33b0a153e5b56c36fc284e9"
+    },
+    {
+      "file": "security/iam/iam.serviceAccountOpenIdTokenCreator.json",
+      "name": "roles/iam.serviceAccountOpenIdTokenCreator",
+      "sha256": "55b537be8a65db7607125f71c85137ace33fc306adc15edfd9a8e9c4e942a94a"
     },
     {
       "file": "security/cloudkms/cloudkms.admin.json",

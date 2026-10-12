@@ -144,6 +144,10 @@ func main() {
 		{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
 	}})
 	must(err)
+	// IAM Credentials mints production local tokens; the resolver falls back
+	// to the identity service for them, so minted tokens work everywhere.
+	identities, err := identity.New(identity.Config{}, nil)
+	must(err)
 	resolver := func(ctx context.Context, token string) (gateway.Principal, error) {
 		for _, actor := range []string{"fixture", "allowed", "denied", "peer"} {
 			if token == "gcp-local-test:"+actor {
@@ -153,6 +157,9 @@ func main() {
 				}
 				return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + actor + "@" + project + ".iam.gserviceaccount.com", Project: project, Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 			}
+		}
+		if strings.HasPrefix(token, "gl.") {
+			return identities.Resolve(ctx, token)
 		}
 		return gateway.Principal{State: gateway.Unknown}, nil
 	}
@@ -206,7 +213,7 @@ func main() {
 	must(err)
 	_, err = resourcemanagerprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
-	_, err = iamadminprovider.New(context.Background(), registry, server.Backends, index, engine)
+	_, err = iamadminprovider.New(context.Background(), registry, server.Backends, index, engine, iamadminprovider.Credentials{Tokens: identities, IDTokens: tokens})
 	must(err)
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
 	must(err)

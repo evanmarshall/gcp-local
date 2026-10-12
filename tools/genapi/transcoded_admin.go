@@ -3,6 +3,7 @@ package main
 import (
 	btadminpb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
+	"cloud.google.com/go/iam/credentials/apiv1/credentialspb"
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"google.golang.org/genproto/googleapis/api/annotations"
@@ -118,6 +119,21 @@ var iamAdminRPC = transcodedService{
 		"UpdateRole":   {"iam.projects.roles.patch"},
 		"DeleteRole":   {"iam.projects.roles.delete"},
 		"UndeleteRole": {"iam.projects.roles.undelete"},
+	},
+	routes: iamRows(),
+}
+
+// iamCredentialsRPC is the google.iam.credentials.v1.IAMCredentials surface of
+// the IAM REST provider: all four methods share the IAM Credentials routes.
+var iamCredentialsRPC = transcodedService{
+	service: credentialspb.File_google_iam_credentials_v1_iamcredentials_proto.Services().ByName("IAMCredentials"),
+	alias:   "credentialspb", importPath: "cloud.google.com/go/iam/credentials/apiv1/credentialspb",
+	variable: "IAMCredentialsMethods", bindings: "IAMCredentialsTranscoding",
+	rest: map[string]string{
+		"GenerateAccessToken": "iamcredentials.projects.serviceAccounts.generateAccessToken",
+		"GenerateIdToken":     "iamcredentials.projects.serviceAccounts.generateIdToken",
+		"SignBlob":            "iamcredentials.projects.serviceAccounts.signBlob",
+		"SignJwt":             "iamcredentials.projects.serviceAccounts.signJwt",
 	},
 	routes: iamRows(),
 }

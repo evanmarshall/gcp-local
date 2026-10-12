@@ -346,6 +346,27 @@
       "package": "google-cloud-iam",
       "transport": "gRPC",
       "expect": "pass"
+    },
+    {
+      "service": "iamcredentials",
+      "client": "go",
+      "package": "google.golang.org/api",
+      "transport": "REST",
+      "expect": "pass"
+    },
+    {
+      "service": "iamcredentials",
+      "client": "python",
+      "package": "google-auth",
+      "transport": "REST",
+      "expect": "pass"
+    },
+    {
+      "service": "iamcredentials",
+      "client": "gcloud",
+      "package": "gcloud",
+      "transport": "REST",
+      "expect": "pass"
     }
   ]
 }

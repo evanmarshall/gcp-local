@@ -98,6 +98,7 @@ func main() {
 	write("databases/bigtable/bigtable_instance_admin_dispatch.go", transcodedDispatch(bigtableInstanceAdminRPC), *check)
 	write("databases/bigtable/bigtable_table_admin_dispatch.go", transcodedDispatch(bigtableTableAdminRPC), *check)
 	write("security/iam/iam_admin_dispatch.go", transcodedDispatch(iamAdminRPC), *check)
+	write("security/iam/iam_credentials_dispatch.go", transcodedDispatch(iamCredentialsRPC), *check)
 	write("mixin/operations_dispatch.go", operationsDispatch(), *check)
 }
 
@@ -859,9 +860,12 @@ func iamRows() []route {
 		{"iam.serviceAccountKeys.list", http.MethodGet, base + "/{serviceAccount}/keys", false, false},
 		{"iam.serviceAccountKeys.get", http.MethodGet, base + "/{serviceAccount}/keys/{keyId}", false, false},
 		{"iam.serviceAccountKeys.delete", http.MethodDelete, base + "/{serviceAccount}/keys/{keyId}", false, false},
-		// IAM Service Account Credentials v1 shares the path shape; the ID is
-		// its discovery method ID.
+		// IAM Service Account Credentials v1 shares the path shape; the IDs
+		// are its discovery method IDs.
+		{"iamcredentials.projects.serviceAccounts.generateAccessToken", http.MethodPost, base + "/{serviceAccount}:generateAccessToken", true, false},
+		{"iamcredentials.projects.serviceAccounts.generateIdToken", http.MethodPost, base + "/{serviceAccount}:generateIdToken", true, false},
 		{"iamcredentials.projects.serviceAccounts.signBlob", http.MethodPost, base + "/{serviceAccount}:signBlob", true, false},
+		{"iamcredentials.projects.serviceAccounts.signJwt", http.MethodPost, base + "/{serviceAccount}:signJwt", true, false},
 		{"iam.roles.get", http.MethodGet, "/v1/roles/{role}", false, false},
 		{"iam.roles.list", http.MethodGet, "/v1/roles", false, false},
 	}, customRoleRows("projects", "{project}"), customRoleRows("organizations", "{organization}"))

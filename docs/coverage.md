@@ -26,7 +26,7 @@ What each service supports and how it is verified. Every service authenticates c
 | `cloudscheduler` | [Cloud Scheduler](services/messaging/cloudscheduler.md) | gcp-local | 8 | 16 | Yes: cron jobs in any time zone that call HTTP targets (OIDC or OAuth) or publish to Pub/Sub as the service agent, with retries; HTTP delivery and retries not recorded | cloudscheduler-job-lifecycle | TestLocalCloudSchedulerJob |
 | `logging` | [Cloud Logging](services/logging.md) | gcp-local | 4 | — | Yes: write, filter, page, and delete log entries | logging-entries-lifecycle, logging-filter-precedence | none |
 | `artifactregistry` | [Artifact Registry](services/artifactregistry.md) | gcp-local | 7 | — | No: repositories only; no image push or pull | artifactregistry-repository-lifecycle | TestLocalArtifactRegistryRepository |
-| `iam` | [IAM service accounts](services/security/serviceaccounts.md) and [roles](services/security/iam-roles.md) | gcp-local | 26 | — | Partial: accounts, policies, keys and `signBlob` that sign Storage URLs; keys mint no tokens; keys and `signBlob` not recorded; project and organization custom roles that grant in any allow policy; organization roles not recorded | serviceaccount-lifecycle-authorization, iam-custom-role-lifecycle | TestLocalServiceAccount, TestLocalProjectIamCustomRole |
+| `iam` | [IAM service accounts](services/security/serviceaccounts.md) and [roles](services/security/iam-roles.md) | gcp-local | 29 | — | Partial: accounts, policies, keys; IAM Credentials impersonation (`generateAccessToken`, `generateIdToken`, `signJwt`, `signBlob`) with delegation and lifetime limits, tokens usable at every service; keys mint no tokens; keys not recorded; project and organization custom roles that grant in any allow policy; organization roles not recorded | serviceaccount-lifecycle-authorization, iamcredentials-impersonation, iam-custom-role-lifecycle | TestLocalServiceAccount, TestLocalProjectIamCustomRole |
 | `resourcemanager` | [Project IAM](services/security/project-iam.md) | gcp-local | 2 | — | Yes: project IAM policy | project-iam-policy-binding | TestLocalProjectIamPolicy |
 | `compute` | [VPC networking and Connectivity Tests](services/networking.md) | gcp-local | 38 | — | Analysis only: verdicts, no real traffic | vpc-firewall-connectivity, vm-connectivity-nat-peering, vm-firewall-service-accounts | TestLocalComputeNetworkAndSubnetwork |
 | `run` | [Cloud Run](services/cloudrun.md) | Local processes or Docker | 13 | — | Partial: your own images with `--cloud-run-docker`, workload identity, ID-token invocation; no egress, jobs, or volumes | none | TestLocalCloudRunV2Service |
@@ -39,7 +39,7 @@ Notes on counts:
 - Bigtable: 17 admin methods (bigtableadmin v2) and 7 data methods (bigtable v2, gRPC). 16 admin methods are also served over gRPC (`google.bigtable.admin.v2`); instance update is REST only.
 - Firestore: 14 document methods (all on gRPC; all but Listen on REST) and 2 Admin field methods on REST.
 - Logging serves its 4 methods over both REST and gRPC.
-- IAM counts `signBlob` from IAM Service Account Credentials v1 with 11 IAM v1 account methods and 14 role methods (6 each for `projects.roles` and `organizations.roles`, plus `roles.get` and `roles.list`). 10 account methods and 13 role methods are also served over gRPC `google.iam.admin.v1.IAM`; key create, `signBlob`, and `ListRoles` without a parent are REST only.
+- IAM counts 11 IAM v1 account methods, 14 role methods (6 each for `projects.roles` and `organizations.roles`, plus `roles.get` and `roles.list`), and the 4 IAM Service Account Credentials v1 methods. 10 account methods and 13 role methods are also served over gRPC `google.iam.admin.v1.IAM`, and all 4 credentials methods over `google.iam.credentials.v1.IAMCredentials`; key create and `ListRoles` without a parent are REST only.
 - Secret Manager also serves 14 of its 15 methods over gRPC `google.cloud.secretmanager.v1`; locations list is REST only.
 - Cloud Tasks also serves 15 of its 16 methods over gRPC `google.cloud.tasks.v2`; locations list is REST only. REST is v2beta3.
 - Cloud Scheduler serves its 8 job methods over REST and gRPC `google.cloud.scheduler.v1.CloudScheduler`.
@@ -64,6 +64,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 | gRPC | `internal/providers/databases/bigtable/data_test.go` |
 | bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 admin clients | gRPC | `internal/providers/databases/bigtable/admin_grpc_test.go` |
 | iam | Go `cloud.google.com/go/iam` 1.11.0 (`admin/apiv1`) | gRPC | `internal/providers/security/iam/grpc_test.go` |
+| iamcredentials | Go `cloud.google.com/go/iam` 1.11.0 (`credentials/apiv1`) | gRPC | `internal/providers/security/iam/credentials_test.go` |
 | logging | Python `google-cloud-logging` 3.17.0 | REST and gRPC | `internal/providers/logging/testdata/sdk.py` |
 | cloudkms | Python `google-cloud-kms` 3.18.0 | REST and gRPC | `internal/providers/security/cloudkms/testdata/sdk.py` |
 | cloudkms | Go `cloud.google.com/go/kms` 1.35.0 | gRPC | `internal/providers/security/cloudkms/grpc_test.go` |
@@ -120,12 +121,17 @@ A recording proves only the requests it sends. This table lists the real clients
 | iam | Go `cloud.google.com/go/iam` 1.11.0 | gRPC | `tests/clients/go` |
 | iam | Node `@googleapis/iam` 42.1.0 | REST | `tests/clients/node` |
 | iam | Python `google-cloud-iam` 2.26.0 | gRPC | `tests/clients/python` |
+| iamcredentials | Go `google.golang.org/api` 0.293.0 | REST | `tests/clients/go` |
+| iamcredentials | Python `google-auth` 2.56.2 | REST | `tests/clients/python` |
+| iamcredentials | `gcloud` 588.0.0 | REST | `tests/clients/cli` |
 
 ### Known client failures
 
 No matrix pair fails today. A pair that fails is listed here as `xfail` in `tests/clients/matrix.json` with its issue; `sh scripts/check/clients.sh` fails if one starts passing or fails differently.
 
 Untested: Java clients, `gsutil`, the Node.js and gcloud clients of Cloud Run, and every client of Artifact Registry, Cloud SQL, Memorystore, and Compute.
+
+The Terraform google provider's `impersonate_service_account` doesn't reach gcp-local: provider 8.5.0 calls `https://iamcredentials.UNIVERSE_DOMAIN` and takes no endpoint for it ([IAM service accounts](services/security/serviceaccounts.md#gaps)).
 
 ## Cross-service behavior
 

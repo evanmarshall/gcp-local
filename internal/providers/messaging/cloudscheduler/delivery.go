@@ -294,9 +294,9 @@ func (p *Provider) authorization(agent gateway.Call, job *schedulerpb.Job) (stri
 	if _, err := p.engine.Authorize(agent, iam.Target{Name: account}, nil); err != nil {
 		return "", err //nolint:wrapcheck // the status becomes the attempt status
 	}
-	token, err := p.config.Identity.Impersonate("serviceAccount:"+oauth.GetServiceAccountEmail(), strings.Fields(oauth.GetScope()))
+	token, _, err := p.config.Identity.Impersonate("serviceAccount:"+oauth.GetServiceAccountEmail(), project, strings.Fields(oauth.GetScope()), 0)
 	if err != nil {
-		return "", gap("OAuth tokens need the service account enrolled in the local identity configuration")
+		return "", status.Errorf(codes.InvalidArgument, "Unable to issue the OAuth token: %v", err)
 	}
 	return "Bearer " + token, nil
 }

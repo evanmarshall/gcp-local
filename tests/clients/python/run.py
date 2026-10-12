@@ -13,12 +13,14 @@ import time
 
 import google.auth
 import google.auth.credentials
+import google.auth.exceptions
 import grpc
 import requests
 from google.api_core import exceptions
 from google.api_core.client_options import ClientOptions
+from google.auth import impersonated_credentials
 from google.auth.transport.grpc import secure_authorized_channel
-from google.auth.transport.requests import Request
+from google.auth.transport.requests import AuthorizedSession, Request
 from google.cloud import (
     bigquery,
     bigtable,
@@ -36,6 +38,7 @@ from google.cloud import (
 from google.cloud import logging as cloud_logging
 from google.cloud.bigtable import column_family, enums
 from google.cloud.firestore_v1.services.firestore import FirestoreClient
+from google.iam.v1 import policy_pb2
 
 PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
 HTTP = os.environ["GCP_LOCAL_HTTP"]
@@ -299,6 +302,69 @@ def run_iam():
     client.delete_service_account(name=name)
 
 
+CLOUD_PLATFORM = "https://www.googleapis.com/auth/cloud-platform"
+
+
+def impersonated(target, *, denied=False):
+    """google.auth impersonated credentials for target, minted at gcp-local."""
+    source = google.auth.credentials.with_scopes_if_required(
+        credentials(denied=denied), [CLOUD_PLATFORM]
+    )
+    return impersonated_credentials.Credentials(
+        source_credentials=source,
+        target_principal=target,
+        target_scopes=[CLOUD_PLATFORM],
+        lifetime=600,
+        iam_endpoint_override=(
+            f"{HTTP}/v1/projects/-/serviceAccounts/{target}:generateAccessToken"
+        ),
+    )
+
+
+def run_iamcredentials():
+    client = generated(iam_admin_v1.IAMClient)
+    project = f"projects/{PROJECT}"
+    account = client.create_service_account(
+        name=project,
+        account_id="python-impersonated",
+        service_account=iam_admin_v1.ServiceAccount(),
+    )
+    name = f"{project}/serviceAccounts/{account.email}"
+    # scripts/run/clients.py enrolls the granted identity as app@PROJECT.
+    client.set_iam_policy(
+        request={
+            "resource": name,
+            "policy": policy_pb2.Policy(
+                bindings=[
+                    policy_pb2.Binding(
+                        role="roles/iam.serviceAccountTokenCreator",
+                        members=[f"serviceAccount:app@{PROJECT}.iam.gserviceaccount.com"],
+                    ),
+                    policy_pb2.Binding(
+                        role="roles/iam.serviceAccountViewer",
+                        members=[f"serviceAccount:{account.email}"],
+                    ),
+                ]
+            ),
+        }
+    )
+    session = AuthorizedSession(impersonated(account.email))
+    session.trust_env = False
+    read = session.get(f"{HTTP}/v1/{name}")
+    assert read.status_code == 200, f"read: {read.status_code}"
+    assert read.json()["email"] == account.email, "read the impersonated account"
+    # The account may read only itself: a project-wide list runs as it, not as the caller.
+    listed = session.get(f"{HTTP}/v1/{project}/serviceAccounts")
+    assert listed.status_code == 403, f"impersonated list: {listed.status_code}"
+    refused = ""
+    try:
+        impersonated(account.email, denied=True).refresh(Request())
+    except google.auth.exceptions.RefreshError as error:
+        refused = str(error)
+    assert "PERMISSION_DENIED" in refused, f"ungranted impersonation: {refused or 'allowed'}"
+    client.delete_service_account(name=name)
+
+
 # The handwritten Spanner, Bigtable, and Logging clients take no channel and
 # open TLS, so they get the gateway's TLS address and keep their own
 # credentials; GRPC_DEFAULT_SSL_ROOTS_FILE_PATH names the environment's CA.
@@ -407,6 +473,7 @@ WORKFLOWS = {
     "cloudtasks": run_cloudtasks,
     "firestore": run_firestore,
     "iam": run_iam,
+    "iamcredentials": run_iamcredentials,
     "logging": run_logging,
     "pubsub": run_pubsub,
     "run": run_cloudrun,

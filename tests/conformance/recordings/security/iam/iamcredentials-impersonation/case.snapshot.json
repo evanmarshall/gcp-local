@@ -1,0 +1,187 @@
+{
+  "iamcredentials-impersonation": {
+    "recorded-date": "12-10-2026, 23:49:28",
+    "recorded-content": {
+      "direct-access-token": {
+        "expires_in_one_hour": true,
+        "fields": [
+          "accessToken",
+          "expireTime"
+        ],
+        "http_status": 200
+      },
+      "openid-creator-on-delegate": {
+        "fields": [
+          "token"
+        ],
+        "http_status": 200
+      },
+      "delegated-id-token-openid-hop": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "delegated-access-token-openid-hop": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "delegated-access-token": {
+        "expires_in_one_hour": true,
+        "fields": [
+          "accessToken",
+          "expireTime"
+        ],
+        "http_status": 200
+      },
+      "delegate-bare-email": {
+        "fields": [
+          "accessToken",
+          "expireTime"
+        ],
+        "http_status": 200
+      },
+      "denied-direct": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-delegated": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "missing-target": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "lifetime-600s": {
+        "expires_in_ten_minutes": true,
+        "fields": [
+          "accessToken",
+          "expireTime"
+        ],
+        "http_status": 200
+      },
+      "lifetime-3600s": {
+        "fields": [
+          "accessToken",
+          "expireTime"
+        ],
+        "http_status": 200
+      },
+      "lifetime-3601s": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "lifetime-43200s": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "lifetime-0s": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "scope-missing": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "minted-reads-target": {
+        "email": "<target>",
+        "fields": [
+          "description",
+          "displayName",
+          "email",
+          "etag",
+          "name",
+          "oauth2ClientId",
+          "projectId",
+          "uniqueId"
+        ],
+        "http_status": 200
+      },
+      "minted-reads-delegate": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "id-token-include-email-true": {
+        "audience": true,
+        "claims": [
+          "aud",
+          "azp",
+          "email",
+          "email_verified",
+          "exp",
+          "iat",
+          "iss",
+          "sub"
+        ],
+        "email": "<target>",
+        "fields": [
+          "token"
+        ],
+        "http_status": 200,
+        "lifetime": 3600
+      },
+      "id-token-include-email-false": {
+        "audience": true,
+        "claims": [
+          "aud",
+          "azp",
+          "exp",
+          "iat",
+          "iss",
+          "sub"
+        ],
+        "email": null,
+        "fields": [
+          "token"
+        ],
+        "http_status": 200,
+        "lifetime": 3600
+      },
+      "id-token-missing-audience": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "sign-jwt": {
+        "alg": "RS256",
+        "fields": [
+          "keyId",
+          "signedJwt"
+        ],
+        "header": [
+          "alg",
+          "kid",
+          "typ"
+        ],
+        "http_status": 200,
+        "kid_is_key_id": true,
+        "payload_unchanged": true,
+        "typ": "JWT"
+      },
+      "sign-jwt-exp-over-12h": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "sign-blob-delegated": {
+        "fields": [
+          "keyId",
+          "signedBlob"
+        ],
+        "http_status": 200
+      },
+      "cleanup": {
+        "accounts_absent": true
+      }
+    }
+  }
+}

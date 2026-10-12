@@ -32,6 +32,7 @@ Set each client's API endpoint to `http://127.0.0.1:4566` and keep the SDK's nor
 
 - The creator refuses an existing directory and accepts only a numeric loopback HTTP endpoint.
 - Access tokens last one hour. Set `token_lifetime_seconds` (1-3600) in `server.json` to test refresh.
+- `lifetime_extension_accounts` in `server.json` lists service-account emails whose impersonated tokens may last up to 12 hours ([impersonation](../services/security/serviceaccounts.md#impersonation)).
 - Tokens carry the requested [OAuth scopes](#oauth-scopes). An exchange with no or an empty `scope` is 400 `invalid_request`, "Scope(s) must be provided.", as real STS answers an external-credential exchange (probed 2026-10-12 with a workload identity provider; not a recorded scenario). Client libraries send their default scopes; code that loads ADC itself must pass scopes, for example `google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])`.
 - The exchange accepts OAuth client authentication: one `Authorization: Basic` header (gcloud sends its client ID this way) or `client_id` and optional `client_secret` form fields, never both. The values grant nothing; the subject token alone picks the principal. Any other `Authorization` header is 401 `invalid_client`.
 - `POST /v1/introspect` answers RFC 7662 introspection with client authentication. gcloud calls it to name the account: `username` is the enrolled subject's email. ADC files written by gcp-local set `token_info_url` to it. Real STS introspection is not recorded.
@@ -105,6 +106,6 @@ Go, Node.js, Python, and gcloud clients are verified per service in the [client 
 ## Limits
 
 - Metadata ID tokens return 501.
-- Service-account keys and `signBlob` sign ([service accounts](../services/security/serviceaccounts.md)) but mint no tokens. No impersonation, `signJwt`, or JWT/SAML federation validation.
+- Service-account keys sign but mint no tokens. Impersonation goes through IAM Credentials `generateAccessToken` and `generateIdToken` ([service accounts](../services/security/serviceaccounts.md#impersonation)). No JWT/SAML federation validation.
 - One metadata listener per core; account binding is not network isolation.
-- [Pub/Sub push](../services/messaging/pubsub.md) mints locally signed ID tokens internally. Their public certificates are at `/_local/identity/certs`; there is no public ID-token endpoint.
+- [Pub/Sub push](../services/messaging/pubsub.md) and IAM Credentials `generateIdToken` mint locally signed ID tokens. Their public certificates are at `/_local/identity/certs`.

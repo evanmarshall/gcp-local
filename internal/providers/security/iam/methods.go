@@ -43,10 +43,25 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return response, err
 	case methodKeysList, methodKeysGet, methodKeysCreate, methodKeysDelete:
 		return p.executeKey(call.Method, request, scope)
-	case methodSignBlob:
-		return p.signBlob(request, scope)
+	case methodSignBlob, methodSignJwt, methodAccessToken, methodIDToken:
+		return p.executeCredentials(call.Method, request, scope)
 	default:
 		return p.accountsDelete(request, scope)
+	}
+}
+
+// executeCredentials dispatches one authorized IAM Credentials request.
+func (p *Provider) executeCredentials(method string, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	email := accountEmail(scope.Project, request.Path["serviceAccount"])
+	switch method {
+	case methodSignBlob:
+		return p.signBlob(request, scope, email)
+	case methodSignJwt:
+		return p.signJwt(request, scope, email)
+	case methodAccessToken:
+		return p.generateAccessToken(request, scope, email)
+	default:
+		return p.generateIDToken(request, scope, email)
 	}
 }
 

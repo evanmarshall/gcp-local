@@ -38,7 +38,20 @@ type Enrollment struct {
 type Config struct {
 	TokenLifetimeSeconds int          `json:"token_lifetime_seconds"`
 	Principals           []Enrollment `json:"principals"`
+	// LifetimeExtension lists the service-account emails that may receive
+	// generateAccessToken lifetimes up to 12 hours. It stands in for the
+	// organization policy constraint
+	// constraints/iam.allowServiceAccountCredentialLifetimeExtension, which
+	// gcp-local does not model; every other account is limited to one hour.
+	LifetimeExtension []string `json:"lifetime_extension_accounts,omitempty"`
 }
+
+// Impersonated access token lifetimes (IAM Credentials generateAccessToken).
+const (
+	DefaultLifetime  = time.Hour
+	ExtendedLifetime = 12 * time.Hour
+)
+
 type principal struct {
 	subject, project string
 	// scopes are issued to a request that names none. A restricted principal
@@ -70,7 +83,8 @@ var (
 	errScopeRequired     = errors.New("at least one oauth scope is required")
 	errIssueToken        = errors.New("unable to issue token")
 	errTokenCapacity     = errors.New("local token capacity reached")
-	errImpersonated      = errors.New("access tokens are issued only for an enrolled service account")
+	errImpersonated      = errors.New("access tokens are issued only for a service account")
+	errExtensionAccount  = errors.New("lifetime_extension_accounts must list service-account emails")
 )
 
 type Service struct {
@@ -82,6 +96,7 @@ type Service struct {
 	principals map[string]principal
 	tokens     map[[32]byte]token
 	lifetime   time.Duration
+	extended   map[string]bool
 	now        func() time.Time
 }
 
@@ -121,7 +136,13 @@ func New(config Config, now func() time.Time) (*Service, error) {
 	if lifetime < 1 || lifetime > 3600 {
 		return nil, errLifetimeRange
 	}
-	s := &Service{subjects: map[[32]byte]principal{}, principals: map[string]principal{}, tokens: map[[32]byte]token{}, lifetime: time.Duration(lifetime) * time.Second, now: now}
+	s := &Service{subjects: map[[32]byte]principal{}, principals: map[string]principal{}, tokens: map[[32]byte]token{}, lifetime: time.Duration(lifetime) * time.Second, extended: map[string]bool{}, now: now}
+	for _, email := range config.LifetimeExtension {
+		if !strings.HasSuffix(email, ".gserviceaccount.com") || strings.ContainsAny(email, "\r\n \t:") {
+			return nil, errExtensionAccount
+		}
+		s.extended[email] = true
+	}
 	for _, entry := range config.Principals {
 		if err := s.enroll(entry); err != nil {
 			return nil, err
@@ -212,27 +233,42 @@ func grantedScopes(p principal, requested []string) ([]string, error) {
 	return slices.Compact(scopes), nil
 }
 
-// Impersonate issues an access token for an enrolled service account. It is
-// an internal provider operation, never an HTTP endpoint, and it does not
-// authorize: the calling provider must first authorize its service agent for
-// iam.serviceAccounts.getAccessToken on the account with the IAM engine.
-func (s *Service) Impersonate(subject string, scopes []string) (string, error) {
-	p, ok := s.principals[subject]
-	if !ok || !strings.HasPrefix(subject, "serviceAccount:") {
-		return "", errImpersonated
+// MaxLifetime is the longest generateAccessToken lifetime an account may get.
+func (s *Service) MaxLifetime(email string) time.Duration {
+	if s.extended[email] {
+		return ExtendedLifetime
 	}
-	token, _, err := s.mint(p, scopes)
-	return token, err
+	return DefaultLifetime
 }
 
-func (s *Service) mint(p principal, requested []string) (string, int, error) {
+// Impersonate issues an access token bound to a service account in project,
+// valid for lifetime (the configured token lifetime when zero). It is an
+// internal provider operation, never an HTTP endpoint, and it does not
+// authorize: the calling provider must first authorize the caller (or its
+// service agent) for iam.serviceAccounts.getAccessToken on the account. An
+// enrolled account keeps its scope restriction.
+func (s *Service) Impersonate(subject, project string, scopes []string, lifetime time.Duration) (string, time.Time, error) {
+	if !strings.HasPrefix(subject, "serviceAccount:") || !strings.Contains(subject, "@") {
+		return "", time.Time{}, errImpersonated
+	}
+	p, ok := s.principals[subject]
+	if !ok {
+		p = principal{subject: subject, project: project}
+	}
+	if lifetime == 0 {
+		lifetime = s.lifetime
+	}
+	return s.mint(p, scopes, lifetime)
+}
+
+func (s *Service) mint(p principal, requested []string, lifetime time.Duration) (string, time.Time, error) {
 	scopes, err := grantedScopes(p, requested)
 	if err != nil {
-		return "", 0, err
+		return "", time.Time{}, err
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
-		return "", 0, errIssueToken
+		return "", time.Time{}, errIssueToken
 	}
 	value := "gl." + base64.RawURLEncoding.EncodeToString(raw)
 	s.mu.Lock()
@@ -240,14 +276,15 @@ func (s *Service) mint(p principal, requested []string) (string, int, error) {
 	now := s.now()
 	// Retain recent expired handles for explicit expiry diagnostics, bounded to
 	// one hour beyond expiry. Older/pruned handles become unknown.
+	expires := now.Add(lifetime)
 	for hash, entry := range s.tokens {
 		if now.After(entry.expires.Add(time.Hour)) {
 			delete(s.tokens, hash)
 		}
 	}
 	if len(s.tokens) >= 10000 {
-		return "", 0, errTokenCapacity
+		return "", time.Time{}, errTokenCapacity
 	}
-	s.tokens[sha256.Sum256([]byte(value))] = token{principal: p, scopes: scopes, expires: now.Add(s.lifetime)}
-	return value, int(s.lifetime / time.Second), nil
+	s.tokens[sha256.Sum256([]byte(value))] = token{principal: p, scopes: scopes, expires: expires}
+	return value, expires, nil
 }

@@ -105,6 +105,7 @@ func NewRegistry() *Registry {
 	r.registerData("bigtable", bigtable.BigtableInstanceAdminMethods)
 	r.registerData("bigtable", bigtable.BigtableTableAdminMethods)
 	r.registerData("iam", iam.IAMAdminMethods)
+	r.registerData("iam", iam.IAMCredentialsMethods)
 	return r
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
@@ -18,25 +19,35 @@ import (
 
 // Provider owns the service-account control plane and account/key state.
 type Provider struct {
-	index  *state.Index
-	engine *iam.Engine
-	scopes *state.Store[scopeState]
-	roles  *roles
-	clock  func() time.Time
+	index       *state.Index
+	engine      *iam.Engine
+	scopes      *state.Store[scopeState]
+	roles       *roles
+	credentials Credentials
+	clock       func() time.Time
 }
 
-// New registers the IAM service-account provider.
-func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
+// Credentials are the issuers IAM Credentials mints with. A nil issuer leaves
+// its method a coverage gap: access tokens need the identity service
+// (-identity-config) and ID tokens the local ID-token keys.
+type Credentials struct {
+	Tokens   *identity.Service
+	IDTokens *identity.IDTokens
+}
+
+// New registers the IAM service-account and IAM Credentials provider.
+func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, credentials Credentials) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	if err := provider.RegisterPermissions(engine, permissions); err != nil {
-		return nil, fmt.Errorf("iam permissions: %w", err)
+	if err := registerPlans(engine); err != nil {
+		return nil, err
 	}
 	p := &Provider{
 		index: index, engine: engine,
-		scopes: state.NewStore(newScopeState, state.GlobalScope),
-		clock:  time.Now,
+		scopes:      state.NewStore(newScopeState, state.GlobalScope),
+		credentials: credentials,
+		clock:       time.Now,
 	}
 	roles, err := registerRoles(registry, engine, func() time.Time { return p.clock() })
 	if err != nil {
@@ -52,6 +63,17 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 		}
 	}
 	return p, nil
+}
+
+// registerPlans registers each method's permission and the delegation hop's.
+func registerPlans(engine *iam.Engine) error {
+	if err := provider.RegisterPermissions(engine, permissions); err != nil {
+		return fmt.Errorf("iam permissions: %w", err)
+	}
+	if err := engine.Register(methodDelegate, iam.Rule{Baseline: []string{delegationPermission}}); err != nil {
+		return fmt.Errorf("iam delegation permission: %w", err)
+	}
+	return nil
 }
 
 // registerBackend attaches the in-memory backend and its reset hook.
@@ -100,16 +122,24 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if credentialMethods[call.Method] {
+		// The caller and each delegate authorize the next hop; the last
+		// delegate (or the caller) acts on the target.
+		chained, refusal, err := p.delegate(call, request)
+		if err != nil {
+			return nil, err
+		}
+		if refusal != nil {
+			return refusal, nil
+		}
+		call = chained
+	}
 	decision, authorizeErr, err := p.authorize(call, scope, target, account)
 	if err != nil {
 		return nil, err
 	}
 	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-		}
-		return provider.Denied(decision, target.Name), nil
+		return refuse(call.Method, decision, authorizeErr, target.Name)
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -122,6 +152,14 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
 	return response, nil
+}
+
+// refuse renders a denial, or fails closed on any other authorization error.
+func refuse(method string, decision iam.Decision, authorizeErr error, resource string) (any, error) {
+	if provider.Unverified(authorizeErr) {
+		return nil, fmt.Errorf("authorize %s: %w", method, authorizeErr)
+	}
+	return provider.Denied(decision, resource), nil
 }
 
 // authorize evaluates call on target. For an addressed account it checks
@@ -151,9 +189,10 @@ func (p *Provider) authorize(call gateway.Call, scope state.Scope, target iam.Ta
 // account; key and list/create methods inherit via the account or project.
 func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, string, error) {
 	project := request.Path["project"]
-	if call.Method == methodSignBlob && project == "-" {
-		// IAM Credentials names accounts as projects/-/serviceAccounts/EMAIL;
-		// the email's domain carries the owning project.
+	if project == "-" && strings.Contains(request.Path["serviceAccount"], "@") {
+		// IAM Credentials names accounts as projects/-/serviceAccounts/EMAIL,
+		// and IAM accepts the wildcard too (gcloud iam service-accounts
+		// describe sends it); the email's domain carries the owning project.
 		_, domain, _ := strings.Cut(request.Path["serviceAccount"], "@")
 		project = strings.TrimSuffix(domain, ".iam.gserviceaccount.com")
 	}
@@ -174,11 +213,11 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 }
 
 // accountExists reports whether a method's account exists; it runs under the
-// scope lock. signBlob also signs for accounts declared in the IAM
+// scope lock. IAM Credentials also acts for accounts declared in the IAM
 // configuration, which only the index holds; the account methods manage only
 // accounts this provider created.
 func (p *Provider) accountExists(s *scopeState, method string, scope state.Scope, account string) bool {
-	if method == methodSignBlob {
+	if credentialMethods[method] {
 		resource, found := p.index.Get(accountResource(scope.Project, accountEmail(scope.Project, account)))
 		return found && resource.Kind == kindAccount && resource.Scope == scope
 	}

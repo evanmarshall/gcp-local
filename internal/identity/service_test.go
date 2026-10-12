@@ -470,3 +470,40 @@ func TestEnrollmentRequiresLongSecretAndEmptyConfigHasNoPrincipal(t *testing.T) 
 		t.Fatal("empty config created a principal")
 	}
 }
+
+// TestImpersonationIssuesTokensForAnyServiceAccount binds a token to an
+// unenrolled account for the requested lifetime and refuses users.
+func TestImpersonationIssuesTokensForAnyServiceAccount(t *testing.T) {
+	s, clock := service(t)
+	token, expires, err := s.Impersonate("serviceAccount:worker@peer.iam.gserviceaccount.com", "peer", []string{CloudPlatform}, 90*time.Second)
+	if err != nil || expires.Unix() != 1700000090 {
+		t.Fatalf("impersonate = %v, %v", expires, err)
+	}
+	principal, _ := s.Resolve(context.Background(), token)
+	if principal.State != gateway.Authenticated || principal.Subject != "serviceAccount:worker@peer.iam.gserviceaccount.com" || principal.Project != "peer" {
+		t.Fatalf("impersonated principal %+v", principal)
+	}
+	clock.Store(90)
+	if principal, _ := s.Resolve(context.Background(), token); principal.State != gateway.Expired {
+		t.Fatalf("expired impersonated token %+v", principal)
+	}
+	if _, _, err := s.Impersonate("user:someone@example.com", "peer", []string{CloudPlatform}, 0); !errors.Is(err, errImpersonated) {
+		t.Fatalf("user impersonation = %v", err)
+	}
+}
+
+// TestLifetimeExtensionListsServiceAccounts limits impersonated lifetimes to
+// one hour except for configured service accounts.
+func TestLifetimeExtensionListsServiceAccounts(t *testing.T) {
+	s, _ := service(t)
+	if s.MaxLifetime("worker@peer.iam.gserviceaccount.com") != DefaultLifetime {
+		t.Fatal("unlisted account may extend")
+	}
+	extended, err := New(Config{LifetimeExtension: []string{"long@peer.iam.gserviceaccount.com"}}, nil)
+	if err != nil || extended.MaxLifetime("long@peer.iam.gserviceaccount.com") != ExtendedLifetime {
+		t.Fatalf("extension = %v", err)
+	}
+	if _, err := New(Config{LifetimeExtension: []string{"user@example.com"}}, nil); !errors.Is(err, errExtensionAccount) {
+		t.Fatalf("non-account extension = %v", err)
+	}
+}
