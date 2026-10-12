@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gcp-local — A local Google Cloud emulator that enforces IAM</title>
+<meta name="description" content="Run Cloud Storage, Pub/Sub, Firestore, Spanner, BigQuery and more on your machine. Real client libraries, real Terraform, the same IAM permission errors as production — no cloud account required.">
+<style>
+:root {
+  --bg: #0b1220;
+  --bg-alt: #0f1729;
+  --panel: #111c31;
+  --border: rgba(148, 178, 224, 0.14);
+  --text: #e8eefb;
+  --muted: #9db0cf;
+  --accent: #4285f4;
+  --accent-2: #34d0a8;
+  --err: #ff8a8a;
+  --radius: 14px;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; animation: none !important; } }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.6; font-size: 16px; }
+.container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+a { color: var(--accent-2); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
+h2 { font-size: clamp(26px, 3.5vw, 36px); margin-bottom: 16px; }
+h3 { font-size: 18px; margin-bottom: 8px; }
+code, pre { font-family: var(--mono); font-size: 13.5px; }
+p code, td code { background: rgba(66,133,244,.12); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; font-size: 12.5px; }
+
+/* Nav */
+.nav { position: sticky; top: 0; z-index: 10; background: rgba(11,18,32,.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+.brand { font-family: var(--mono); font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
+.brand:hover { text-decoration: none; }
+.brand span { color: var(--accent); }
+.nav nav { display: flex; gap: 26px; align-items: center; }
+.nav nav a:not(.btn) { color: var(--muted); font-size: 14.5px; }
+.nav nav a:not(.btn):hover { color: var(--text); text-decoration: none; }
+@media (max-width: 720px) { .nav nav a:not(.btn) { display: none; } }
+
+/* Buttons */
+.btn { display: inline-block; padding: 10px 20px; border-radius: 10px; font-size: 14.5px; font-weight: 600; text-decoration: none; border: 1px solid transparent; transition: transform .15s ease, background .15s ease; }
+.btn:hover { text-decoration: none; transform: translateY(-1px); }
+.btn-primary { background: var(--accent); color: #fff; box-shadow: 0 6px 20px rgba(66,133,244,.35); }
+.btn-primary:hover { background: #5b95f6; }
+.btn-ghost { border-color: var(--border); color: var(--text); background: transparent; }
+.btn-ghost:hover { background: rgba(255,255,255,.05); }
+
+/* Hero */
+.hero { padding: 80px 0 64px; background: radial-gradient(900px 500px at 15% -10%, rgba(66,133,244,.16), transparent 60%), radial-gradient(700px 400px at 90% 0%, rgba(52,208,168,.10), transparent 60%); }
+.hero-inner { display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; }
+@media (max-width: 900px) { .hero-inner { grid-template-columns: 1fr; } }
+.eyebrow { font-family: var(--mono); font-size: 12.5px; color: var(--accent-2); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 16px; }
+h1 { font-size: clamp(32px, 5vw, 52px); }
+h1 em { font-style: normal; color: var(--accent); }
+.lede { color: var(--muted); font-size: 18px; margin: 20px 0 28px; max-width: 34em; }
+.hero-actions { display: flex; gap: 14px; flex-wrap: wrap; }
+.hero-note { color: var(--muted); font-size: 13.5px; margin-top: 14px; }
+
+/* Terminal */
+.terminal { background: #0a0f1c; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,.45); font-family: var(--mono); font-size: 13px; line-height: 1.65; }
+.terminal-bar { display: flex; align-items: center; gap: 7px; padding: 11px 16px; background: rgba(255,255,255,.04); border-bottom: 1px solid var(--border); }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: #3a4560; }
+.dot:nth-child(1) { background: #ff5f57; }
+.dot:nth-child(2) { background: #febc2e; }
+.dot:nth-child(3) { background: #28c840; }
+.terminal-title { margin-left: 8px; color: var(--muted); font-size: 12px; }
+.terminal pre { padding: 18px 20px; overflow-x: auto; }
+.c-com { color: #6d81a6; }
+.c-ok { color: var(--accent-2); }
+.c-dim { color: var(--muted); }
+.c-err { color: var(--err); }
+
+/* Stats strip */
+.strip { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg-alt); }
+.strip-inner { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; padding: 26px 0; }
+@media (max-width: 900px) { .strip-inner { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .strip-inner { grid-template-columns: 1fr; } }
+.strip-inner strong { display: block; font-size: 15px; }
+.strip-inner span { display: block; color: var(--muted); font-size: 13.5px; margin-top: 4px; }
+
+/* Sections */
+.section { padding: 72px 0; }
+.section-alt { background: var(--bg-alt); }
+.section-sub { color: var(--muted); margin-bottom: 28px; max-width: 46em; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: start; }
+@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+.two-col p { color: var(--muted); margin-bottom: 14px; }
+.two-col p strong { color: var(--text); }
+
+.stat-cards { display: grid; gap: 14px; }
+.stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 22px; }
+.stat-big { display: block; font-weight: 700; font-size: 16px; color: var(--accent-2); }
+.stat-small { display: block; color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+/* Feature grid */
+.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 32px; }
+@media (max-width: 900px) { .feature-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .feature-grid { grid-template-columns: 1fr; } }
+.feature { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; transition: border-color .2s ease, transform .2s ease; }
+.feature:hover { border-color: rgba(66,133,244,.4); transform: translateY(-2px); }
+.feature p { color: var(--muted); font-size: 14.5px; }
+
+/* Table */
+.table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+th, td { text-align: left; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+thead th { background: var(--panel); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: rgba(66,133,244,.06); }
+tbody td:first-child { font-weight: 600; white-space: nowrap; }
+tbody td:last-child { color: var(--muted); }
+
+/* Code blocks */
+.code-block { background: #0a0f1c; border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; overflow-x: auto; line-height: 1.7; }
+
+/* CTA + footer */
+.cta { padding: 72px 0; text-align: center; background: radial-gradient(600px 300px at 50% 100%, rgba(66,133,244,.14), transparent 70%); }
+.cta-inner { display: grid; justify-items: center; }
+.cta p { color: var(--muted); margin: 14px 0 26px; }
+.cta .hero-actions { justify-content: center; }
+footer { border-top: 1px solid var(--border); padding: 28px 0; color: var(--muted); font-size: 13.5px; }
+.footer-inner { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+/* Focus visibility */
+a:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="container nav-inner">
+    <a class="brand" href="#">gcp<span>-local</span></a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#services">Services</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="#why">Why IAM</a>
+      <a class="btn btn-ghost" href="https://github.com/evanmarshall/gcp-local">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="container hero-inner">
+    <div class="hero-copy">
+      <p class="eyebrow">Open source · MIT · pre-1.0</p>
+      <h1>A local Google Cloud emulator that <em>enforces IAM</em>.</h1>
+      <p class="lede">Run Cloud Storage, Pub/Sub, Firestore, Spanner, BigQuery, Cloud SQL, Cloud Run and more on your machine. Use the real client libraries and Terraform — and get the same permission errors you'd get in production, before production.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#quickstart">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/evanmarshall/gcp-local">Star on GitHub ↗</a>
+      </div>
+      <p class="hero-note">No Google Cloud account or credentials needed.</p>
+    </div>
+    <div class="hero-demo">
+      <div class="terminal">
+        <div class="terminal-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="terminal-title">developer@laptop</span></div>
+        <pre><code><span class="c-com"># Start the environment</span>
+$ git clone https://github.com/evanmarshall/gcp-local.git
+$ cd gcp-local && python3 scripts/local_env.py up
+<span class="c-ok">✔ Cloud Storage · Pub/Sub · Firestore · Spanner · BigQuery
+✔ issuing local credentials · evaluating IAM on every request</span>
+$ python3 scripts/local_env.py env
+<span class="c-dim">endpoint: http://127.0.0.1:4566   project: gcp-local-test</span>
+
+<span class="c-com"># A missing grant fails locally, exactly like production</span>
+$ gcloud secrets create api-key --data-file=- --local
+<span class="c-err">ERROR: (gcloud.secrets.create) PERMISSION_DENIED:
+The caller does not have permission "secretmanager.secrets.create".
+Grant it in the local IAM policy — before CI catches it.</span></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="strip">
+  <div class="container strip-inner">
+    <div><strong>10+ services</strong><span>Storage, Pub/Sub, Firestore, Spanner, BigQuery, Cloud SQL, Cloud Run, KMS, Secret Manager, Cloud Tasks…</span></div>
+    <div><strong>REST + gRPC</strong><span>Both transports, on real ports, with official Google emulator backends where they exist</span></div>
+    <div><strong>Terraform-ready</strong><span>Pinned provider acceptance tests run against it in CI</span></div>
+    <div><strong>Recorded fidelity</strong><span>Allow/deny decisions checked against scenarios recorded from real GCP</span></div>
+  </div>
+</section>
+
+<section id="why" class="section section-alt">
+  <div class="container two-col">
+    <div>
+      <h2>Most emulators skip auth. That's the bug.</h2>
+      <p>Local emulators without IAM let code pass locally that fails the moment it meets a real service account — missing grants surface as failed deploys, flaky staging environments, and cloud spend you didn't plan for.</p>
+      <p><strong>gcp-local issues local credentials and evaluates IAM policies on every request.</strong> Denials behave like real GCP: the same codes, the same messages, the same conditions — so you catch the gap in CI instead of in production.</p>
+    </div>
+    <div class="stat-cards">
+      <div class="stat-card"><span class="stat-big">Every request</span><span class="stat-small">is authenticated and authorized before it touches state — not a demo flag, the real policy engine</span></div>
+      <div class="stat-card"><span class="stat-big">Recorded</span><span class="stat-small">Predefined roles, status codes and response fields captured once from a real GCP sandbox and replayed in CI</span></div>
+      <div class="stat-card"><span class="stat-big">LocalStack-style</span><span class="stat-small">Single gateway routing to per-service providers, reusing real backends (PostgreSQL, MySQL, Redis, Google's own emulators)</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="features" class="section">
+  <div class="container">
+    <h2>What you get</h2>
+    <div class="feature-grid">
+      <div class="feature"><h3>Real client libraries</h3><p>Point google-cloud-python, cloud.google.com/go/storage, Node.js clients, gcloud or rclone at the local endpoint. No shims, no custom SDKs.</p></div>
+      <div class="feature"><h3>Real IAM enforcement</h3><p>Allow policies with predefined roles recorded from Google Cloud. Conditions evaluated for Storage and Cloud SQL. Deny rules and principal access boundaries enforced locally.</p></div>
+      <div class="feature"><h3>Recorded & replayed</h3><p>Scenarios are recorded once against a sandbox project and replayed against the emulator in CI — alongside pinned Terraform acceptance tests and client-library tests.</p></div>
+      <div class="feature"><h3>Real backends where they exist</h3><p>Pub/Sub, Spanner and Bigtable run Google's official emulator code. Cloud SQL runs PostgreSQL, MySQL and Redis for real. Fake-gcs-server handles objects and resumable uploads.</p></div>
+      <div class="feature"><h3>Full workflows</h3><p>Terraform-provisioned Pub/Sub → Cloud Run → Cloud Storage pipelines run end-to-end locally. Vertex AI supports generate, stream, count tokens and embed (stub or Ollama).</p></div>
+      <div class="feature"><h3>Batteries included</h3><p><code>python3 scripts/local_env.py up|env|reset|down|logs</code>. Generated developer identity with explicit grants. Nothing published to a registry, no accounts created.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="services" class="section section-alt">
+  <div class="container">
+    <h2>Supported services</h2>
+    <p class="section-sub">Each service implements part of its API — the <a href="https://github.com/evanmarshall/gcp-local/blob/main/docs/coverage.md">coverage doc</a> lists methods, recordings and Terraform tests per service.</p>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Service</th><th>Highlights</th></tr></thead>
+      <tbody>
+        <tr><td>Cloud Storage</td><td>Objects: read, write, list, delete, copy, metadata; resumable uploads; V4 signed URLs</td></tr>
+        <tr><td>Pub/Sub</td><td>Publish, pull, streaming pull, ordering, filters, dead-letter topics, exactly-once, Avro & Protobuf schemas</td></tr>
+        <tr><td>Spanner</td><td>SQL queries, DML, reads, mutations, transactions (official Google emulator)</td></tr>
+        <tr><td>BigQuery</td><td>Dataset and table lifecycle, IAM-aware operations</td></tr>
+        <tr><td>Cloud SQL</td><td>PostgreSQL / MySQL instances; IAM conditions evaluated</td></tr>
+        <tr><td>Cloud Run</td><td>Your own images; ID-token invocation; admin API over REST & gRPC</td></tr>
+        <tr><td>Secret Manager / KMS</td><td>Secret versions, symmetric & asymmetric crypto, HMAC — REST and gRPC</td></tr>
+        <tr><td>Cloud Tasks / Scheduler</td><td>HTTP dispatch with OIDC and retries; cron jobs calling HTTP or Pub/Sub</td></tr>
+        <tr><td>Cloud Logging</td><td>Write, filter, delete log entries</td></tr>
+        <tr><td>IAM</td><td>Service accounts, project policies, deny rules, principal access boundaries</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart" class="section">
+  <div class="container two-col">
+    <div>
+      <h2>Quickstart</h2>
+      <p>Docker with Compose and Python 3.11+. That's it — no Google Cloud account.</p>
+      <pre class="code-block"><code>git clone https://github.com/evanmarshall/gcp-local.git
+cd gcp-local
+python3 scripts/local_env.py up
+python3 scripts/local_env.py env</code></pre>
+      <p>HTTP on <code>127.0.0.1:4566</code>, gRPC on <code>127.0.0.1:4567</code>, project <code>gcp-local-test</code>. See the <a href="https://github.com/evanmarshall/gcp-local/blob/main/docs/clients.md">client setup guide</a> for Go, Python, Node, gcloud and rclone.</p>
+    </div>
+    <div>
+      <pre class="code-block"><code><span class="c-com"># google-cloud-python, with real IAM semantics</span>
+credentials, _ = google.auth.load_credentials_from_file(
+    ".gcp-local/environment/identity/adc.json",
+    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+)
+client = storage.Client(
+    project="gcp-local-test",
+    credentials=credentials,
+    client_options={"api_endpoint": "http://127.0.0.1:4566"},
+)
+bucket = client.bucket("my-bucket")
+bucket.iam_configuration.uniform_bucket_level_access_enabled = True
+client.create_bucket(bucket, location="us-central1")
+bucket.blob("hello.txt").upload_from_string("Hello from local GCP.")</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="container cta-inner">
+    <h2>Test your IAM locally. Ship with confidence.</h2>
+    <p>gcp-local is open source under MIT. Star it, run it, break it — and tell us what's missing.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/evanmarshall/gcp-local">github.com/evanmarshall/gcp-local</a>
+      <a class="btn btn-ghost" href="https://github.com/evanmarshall/gcp-local/issues">Open issues ↗</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container footer-inner">
+    <span>gcp-local — local Google Cloud with real IAM. MIT licensed.</span>
+    <span><a href="https://github.com/evanmarshall/gcp-local">GitHub</a> · <a href="https://github.com/evanmarshall/gcp-local/blob/main/docs/coverage.md">Coverage</a> · <a href="https://github.com/evanmarshall/gcp-local/blob/main/docs/validation.md">Validation</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
