@@ -120,6 +120,10 @@ func (s *scopeState) reset() {
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("firestore requires registry, manager, index, and iam")
 
+// streamedREST lists the REST methods whose responses are JSON arrays of
+// stream messages.
+var streamedREST = map[string]bool{methodRunQuery: true, methodRunAggregation: true, methodBatchGet: true}
+
 // wireError builds the Firestore error body.
 func wireError(code int, statusText, message string) *gateway.RESTResponse {
 	return &gateway.RESTResponse{Status: code, JSON: map[string]any{

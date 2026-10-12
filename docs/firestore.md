@@ -1,6 +1,6 @@
 # Firestore (local slice)
 
-Firestore v1 documents, subcollections, queries, aggregations, transactions, batch writes, and listeners work over REST and gRPC in the `(default)` database, with IAM checked on every request. Only document create/read/update/delete is recorded against GCP; queries, transactions, batch writes, subcollections, and listeners are modeled locally, not recorded.
+Firestore v1 documents, subcollections, queries, aggregations, transactions, batch writes, and listeners work over REST and gRPC in the `(default)` database, with IAM checked on every request. Document CRUD, queries, aggregations, subcollections, and transactions are recorded against GCP; batch writes and listeners are modeled locally, not recorded.
 
 ## Served methods
 
@@ -88,9 +88,9 @@ All emulator responses in this scenario matched the recording. Error messages di
 
 The Terraform acceptance case `TestAccFirestoreDocument` (pinned google 8.5.0 provider) passes against the emulator-backed provider.
 
-## Unrecorded scenario
+## Query and transaction recording
 
-`firestore-query-transaction` ([recorder](../gcp_validation/firestore_query.py), [scenario](../tests/conformance/firestorequery/test_firestore_query.py)) covers a filtered, ordered, limited query, a count aggregation, a subcollection query and `listCollectionIds`, a transaction read and commit, a rollback, and denied query and commit, in a run-owned collection. It has not run against GCP, so it has no baseline: in local mode pytest reports it `unverified`, and it is not in `check_rest_recordings.sh`. Recording it needs its own live scope file with the limits in the recorder.
+`firestore-query-transaction` ([recorder](../gcp_validation/firestore_query.py), [scenario](../tests/conformance/firestorequery/test_firestore_query.py)) covers a single-field filtered, limited query, a count aggregation, a subcollection query and `listCollectionIds`, a transaction read and commit, a rollback, and denied query and commit, in a run-owned collection. It was recorded against GCP on 2026-10-12 and matched locally by `sh scripts/check_rest_recordings.sh`. GCP wraps a denied `runQuery` error in a JSON array, as it does every streamed REST response; the provider does the same. GCP rejects an equality filter ordered by a second field without a composite index; the emulator does not enforce indexes, so the scenario avoids that query.
 
 ## Verification
 
@@ -106,7 +106,8 @@ Run the server with `-services firestore -firestore-java "$(command -v java)" -f
 
 ## Explicit gaps
 
-- Queries, aggregations, transactions, batch writes, subcollections, and listeners are modeled locally, not recorded.
+- Batch writes and listeners are modeled locally, not recorded.
+- Composite index requirements are not enforced.
 - Not served: the `Write` streaming RPC, `PartitionQuery` (the emulator returns `UNIMPLEMENTED`), `ExecutePipeline`, REST `:listen`, named databases, and the Admin API beyond collection-group fields (indexes, databases, backups, import/export).
 - The Python client needs the private `_firestore_api_internal` attribute to use an authenticated local channel.
 - Firestore IAM is project/database-level; no per-document grants exist to record. Security rules are bypassed; IAM is the only gate.

@@ -1,0 +1,96 @@
+{
+  "logging-entries-lifecycle": {
+    "recorded-date": "12-10-2026, 03:57:11",
+    "recorded-content": {
+      "write": {
+        "fields": [],
+        "http_status": 200
+      },
+      "list-all": {
+        "entry_fields": [
+          "insertId",
+          "labels",
+          "logName",
+          "receiveTimestamp",
+          "resource",
+          "severity",
+          "textPayload",
+          "timestamp"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>"
+        },
+        "payloads": [
+          "first",
+          "second",
+          {
+            "step": "third"
+          }
+        ],
+        "resource": {
+          "labels": {
+            "project_id": "<project>"
+          },
+          "type": "global"
+        },
+        "severity": "INFO"
+      },
+      "filter-severity": {
+        "payloads": [
+          "second",
+          {
+            "step": "third"
+          }
+        ]
+      },
+      "filter-text": {
+        "payloads": [
+          "second"
+        ]
+      },
+      "filter-json": {
+        "payloads": [
+          {
+            "step": "third"
+          }
+        ]
+      },
+      "page-desc": {
+        "has_next": true,
+        "payloads": [
+          {
+            "step": "third"
+          },
+          "second"
+        ]
+      },
+      "logs-list": {
+        "http_status": 200,
+        "owned": true
+      },
+      "denied-write": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-list": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "invalid-filter": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "delete": {
+        "fields": [],
+        "http_status": 200
+      },
+      "cleanup": {
+        "log_deleted": true
+      }
+    }
+  }
+}

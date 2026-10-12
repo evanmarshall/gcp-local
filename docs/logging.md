@@ -1,6 +1,6 @@
 # Cloud Logging
 
-gcp-local serves Cloud Logging v2 entries write and list, logs list, and logs delete over REST and gRPC. Entries are stored in memory per project. Modeled locally, not recorded.
+gcp-local serves Cloud Logging v2 entries write and list, logs list, and logs delete over REST and gRPC. Entries are stored in memory per project. The `logging-entries-lifecycle` scenario was recorded against GCP on 2026-10-12 and matched locally by `sh scripts/check_rest_recordings.sh`.
 
 ## Use it
 
@@ -76,4 +76,4 @@ Fields: `logName`, `severity` (name or number), `timestamp`, `receiveTimestamp`,
 - `protoPayload` entries are rejected unless the payload type is linked into the binary (audit logs are not).
 - 10,000 entries per project; the oldest are dropped. No retention window. No default 24-hour list window (the Python client adds its own).
 - Filter functions (`sample`, `log_id`, `ip_in_net`), `SEARCH`, numeric comparison on `httpRequest`, and private log entry permissions are not modeled.
-- No recording exists. Error messages and filter edge cases have not been compared with Google Cloud.
+- Error messages and filter edge cases beyond the recorded scenario have not been compared with Google Cloud.

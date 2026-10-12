@@ -1,0 +1,61 @@
+{
+  "vertexai-inference-authorization": {
+    "recorded-date": "12-10-2026, 03:58:29",
+    "recorded-content": {
+      "count-tokens": {
+        "fields": [
+          "promptTokensDetails",
+          "totalBillableCharacters",
+          "totalTokens"
+        ],
+        "http_status": 200,
+        "total_positive": true
+      },
+      "generate-content": {
+        "candidates": 1,
+        "fields": [
+          "candidates",
+          "createTime",
+          "modelVersion",
+          "responseId",
+          "usageMetadata"
+        ],
+        "finish_reason_present": true,
+        "has_text": true,
+        "http_status": 200,
+        "role": "model",
+        "usage_counts": [
+          "promptTokenCount",
+          "totalTokenCount"
+        ]
+      },
+      "stream-generate-content": {
+        "events_present": true,
+        "final_finish_reason_present": true,
+        "final_has_usage": true,
+        "http_status": 200
+      },
+      "denied-generate": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "embedding": {
+        "dimensions": 8,
+        "fields": [
+          "metadata",
+          "predictions"
+        ],
+        "http_status": 200,
+        "prediction_fields": [
+          "embeddings"
+        ]
+      },
+      "denied-embedding": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      }
+    }
+  }
+}

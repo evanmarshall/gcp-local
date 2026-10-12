@@ -1,0 +1,96 @@
+{
+  "spanner-data-plane-rest": {
+    "recorded-date": "12-10-2026, 03:55:03",
+    "recorded-content": {
+      "database-ready": {
+        "done": true,
+        "http_status": 200
+      },
+      "session-created": {
+        "fields": [
+          "approximateLastUseTime",
+          "createTime",
+          "name"
+        ],
+        "http_status": 200
+      },
+      "denied-session": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-query": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "mutations-committed": {
+        "fields": [
+          "commitTimestamp"
+        ],
+        "http_status": 200
+      },
+      "read-rows": {
+        "columns": [
+          "Id",
+          "Name"
+        ],
+        "http_status": 200,
+        "rows": [
+          [
+            "a",
+            "alpha"
+          ],
+          [
+            "b",
+            "beta"
+          ]
+        ]
+      },
+      "transaction-begun": {
+        "fields": [
+          "id"
+        ],
+        "http_status": 200
+      },
+      "dml-count": {
+        "http_status": 200,
+        "rowCountExact": "1"
+      },
+      "dml-committed": {
+        "fields": [
+          "commitTimestamp"
+        ],
+        "http_status": 200
+      },
+      "query-rows": {
+        "columns": [
+          "Id",
+          "Name"
+        ],
+        "http_status": 200,
+        "rows": [
+          [
+            "a",
+            "ALPHA"
+          ],
+          [
+            "b",
+            "beta"
+          ]
+        ]
+      },
+      "session-deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "database-dropped": {
+        "body": {},
+        "http_status": 200
+      },
+      "cleanup": {
+        "instance_absent": true
+      }
+    }
+  }
+}

@@ -21,7 +21,9 @@ MODEL = 'gemini-2.5-flash'
 EMBEDDING = 'text-embedding-005'
 PROMPT = {'contents': [{'role': 'user', 'parts': [{'text': 'Reply with one word: ready'}]}]}
 GENERATE = {**PROMPT,
-            'generationConfig': {'maxOutputTokens': LIMITS['max_output_tokens'], 'temperature': 0}}
+            'generationConfig': {'maxOutputTokens': LIMITS['max_output_tokens'], 'temperature': 0,
+                                 # Without this, 2.5 models spend the token cap on thinking.
+                                 'thinkingConfig': {'thinkingBudget': 0}}}
 USAGE_COUNTS = frozenset({'promptTokenCount', 'totalTokenCount'})
 
 

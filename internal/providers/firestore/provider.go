@@ -145,7 +145,12 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
 			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
 		}
-		return p.denied(decision, databaseResource(project)), nil
+		denied := p.denied(decision, databaseResource(project))
+		if streamedREST[call.Method] {
+			// Streamed REST methods answer with a JSON array, errors included.
+			denied.JSON = []any{denied.JSON}
+		}
+		return denied, nil
 	}
 	call.Resource = databaseResource(project)
 	call.Location = scope.Location

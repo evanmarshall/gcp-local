@@ -1,0 +1,85 @@
+{
+  "firestore-query-transaction": {
+    "recorded-date": "12-10-2026, 03:58:25",
+    "recorded-content": {
+      "created": {
+        "http_status": 200,
+        "write_results": 4
+      },
+      "query": {
+        "http_status": 200,
+        "names": [
+          "projects/<project>/databases/(default)/documents/<collection>/la",
+          "projects/<project>/databases/(default)/documents/<collection>/sf"
+        ]
+      },
+      "count": {
+        "counts": [
+          {
+            "integerValue": "3"
+          }
+        ],
+        "http_status": 200
+      },
+      "nested-query": {
+        "http_status": 200,
+        "names": [
+          "projects/<project>/databases/(default)/documents/<collection>/sf/landmarks/ggb"
+        ]
+      },
+      "collection-ids": {
+        "collectionIds": [
+          "landmarks"
+        ],
+        "fields": [
+          "collectionIds"
+        ],
+        "http_status": 200
+      },
+      "begin": {
+        "fields": [
+          "transaction"
+        ],
+        "http_status": 200
+      },
+      "transaction-read": {
+        "http_status": 200,
+        "names": [
+          "projects/<project>/databases/(default)/documents/<collection>/sf"
+        ]
+      },
+      "transaction-commit": {
+        "fields": [
+          "commitTime",
+          "writeResults"
+        ],
+        "http_status": 200,
+        "write_results": 1
+      },
+      "after-commit": {
+        "http_status": 200,
+        "population": {
+          "integerValue": "1"
+        }
+      },
+      "rollback": {
+        "body": {},
+        "http_status": 200
+      },
+      "denied-query": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED",
+        "streamed": true
+      },
+      "denied-commit": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "cleanup": {
+        "documents_deleted": true
+      }
+    }
+  }
+}

@@ -75,6 +75,13 @@ func (p *Provider) prepareEntry(index int, source *loggingpb.LogEntry, request *
 	if entry.GetResource().GetType() == "" {
 		return pending{}, status.Errorf(codes.InvalidArgument, "Log entry %d has no monitored resource type", index)
 	}
+	// Cloud Logging fills in the project of a "global" resource that omits it.
+	if entry.GetResource().GetType() == "global" && entry.GetResource().GetLabels()["project_id"] == "" {
+		if entry.Resource.Labels == nil {
+			entry.Resource.Labels = map[string]string{}
+		}
+		entry.Resource.Labels["project_id"] = project
+	}
 	if len(request.GetLabels()) > 0 {
 		labels := maps.Clone(request.GetLabels())
 		maps.Copy(labels, entry.GetLabels())

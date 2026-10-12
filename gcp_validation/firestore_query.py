@@ -1,8 +1,10 @@
 """Bounded Firestore query and transaction flow in a run-owned collection."""
 
 import argparse
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from .config import Target
 from .evidence import Inconclusive, SnapshotCase, now
@@ -14,6 +16,17 @@ LIMITS = {"max_documents": 4, "max_collections": 2, "max_queries": 6, "max_run_s
 LIVE_ENDPOINT = "https://firestore.googleapis.com"
 CITIES = {"sf": ("CA", 870000), "la": ("CA", 3900000), "nyc": ("NY", 8300000)}
 NESTED = "sf/landmarks/ggb"
+
+
+def stream_error(observe: Observations, response: Response) -> dict[str, Any]:
+    """Observe an error from a streamed REST method, which Firestore wraps in a JSON array."""
+    value = response.json()
+    streamed = isinstance(value, list)
+    if streamed:
+        value = value[0] if value else {}
+    selected = observe.error(Response(response.status, json.dumps(value).encode()))
+    selected["streamed"] = streamed
+    return selected
 
 
 def load_scope(filename: str, sandbox: Sandbox) -> LiveScope:
@@ -123,7 +136,12 @@ def names(observe: Observations, response: Response, key: str) -> dict:
 
 
 def check_queries(fixture: QueryFixture, snapshot: SnapshotCase, observe: Observations) -> dict:
-    """Observe a filtered query, a count, a subcollection query, and collection IDs."""
+    """Observe a filtered query, a count, a subcollection query, and collection IDs.
+
+    The query filters on one field only: an equality filter ordered by another
+    field needs a composite index in Firestore, which the emulator does not
+    enforce.
+    """
     query = {
         "structuredQuery": {
             "from": [{"collectionId": fixture.collection}],
@@ -134,8 +152,7 @@ def check_queries(fixture: QueryFixture, snapshot: SnapshotCase, observe: Observ
                     "value": {"stringValue": "CA"},
                 }
             },
-            "orderBy": [{"field": {"fieldPath": "population"}, "direction": "DESCENDING"}],
-            "limit": 1,
+            "limit": 2,
         }
     }
     snapshot.match(
@@ -226,7 +243,7 @@ def run_scenario(fixture: QueryFixture, snapshot: SnapshotCase, created: Respons
     query = check_queries(fixture, snapshot, observe)
     check_transactions(fixture, snapshot, observe)
     denied = fixture.call("POST", ":runQuery", actor="denied", body=query)
-    snapshot.match("denied-query", observe.error(denied))
+    snapshot.match("denied-query", stream_error(observe, denied))
     denied = fixture.call(
         "POST", ":commit", actor="denied", body={"writes": [{"delete": fixture.name("nyc")}]}
     )

@@ -38,7 +38,7 @@ Not exposed: backups/restores, instance partitions, database roles, operation li
 
 ## Data plane
 
-Applications can read and write rows with the official client libraries over gRPC (port 4567 locally) using local ADC credentials. Modeled locally, not recorded.
+Applications can read and write rows with the official client libraries over gRPC (port 4567 locally) using local ADC credentials. The REST data plane is recorded (`spanner-data-plane-rest`); gRPC uses the same provider code.
 
 | gRPC method | REST route (unary only) | Permission on the session's database |
 | --- | --- | --- |
@@ -74,7 +74,7 @@ Limits:
 - Partitioned DML, Data Boost, fine-grained access control (`creator_role`), single-use read-write `ExecuteSql`/`Read`, and `BatchWrite` return `UNIMPLEMENTED`.
 - Request messages are limited to 2 MiB.
 - Query, transaction, and lock behavior is the emulator's, including its one-read-write-transaction-at-a-time limit.
-- The `spanner-data-plane-rest` scenario (`tests/conformance/spannerdata`) is not recorded; local runs report it unverified.
+- The `spanner-data-plane-rest` scenario was recorded against GCP on 2026-10-12 and matched locally by `sh scripts/check_rest_recordings.sh`.
 
 ## Platforms and installation
 

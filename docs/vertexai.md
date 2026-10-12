@@ -1,6 +1,6 @@
 # Vertex AI
 
-gcp-local serves the Vertex AI generative endpoints for Google publisher models (`gemini-*`, `text-embedding-*`, `gemini-embedding-*`). **Answers come from a local stub or a local Ollama model, never from Gemini.** Nothing calls Google. Modeled locally, not recorded.
+gcp-local serves the Vertex AI generative endpoints for Google publisher models (`gemini-*`, `text-embedding-*`, `gemini-embedding-*`). **Answers come from a local stub or a local Ollama model, never from Gemini.** Nothing calls Google. The `vertexai-inference-authorization` scenario was recorded against GCP on 2026-10-12 and matched locally by `sh scripts/check_rest_recordings.sh`: response shapes, streaming, token counts, embeddings, and 403s for an ungranted caller. It does not compare answer text.
 
 ## Use it
 
@@ -77,4 +77,4 @@ Ollama:
 - `countTokens` and the stub's `usageMetadata` approximate tokens as one per started four characters of each word. This is not Gemini's tokenizer. Ollama answers report Ollama's own counts.
 - Not implemented: `fileData` parts, `cachedContent`, `candidateCount` above 1, tools other than function declarations (Google Search, retrieval, code execution), safety ratings, `computeTokens`, `rawPredict`, tuned models, endpoints, and gRPC `PredictionService`.
 - The packaged environment runs the stub. Its backend network has no route to an Ollama server.
-- No recording exists. Response shapes follow Google's API reference; error messages have not been compared with Google Cloud.
+- Error messages have not been compared with Google Cloud.

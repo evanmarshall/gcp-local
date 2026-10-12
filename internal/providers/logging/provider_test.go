@@ -269,7 +269,7 @@ func TestWriteDefaults(t *testing.T) {
 	if len(entries) != 3 || entries[0]["receiveTimestamp"] != "2026-10-11T12:00:00Z" || entries[0]["insertId"] == "" {
 		t.Fatalf("entries = %v", entries)
 	}
-	if !reflect.DeepEqual(entries[0][keyLabels], map[string]any{labelEnv: "test"}) || !reflect.DeepEqual(entries[0][keyResource], global()) {
+	if !reflect.DeepEqual(entries[0][keyLabels], map[string]any{labelEnv: "test"}) || !reflect.DeepEqual(entries[0][keyResource], map[string]any{keyType: typeGlobal, keyLabels: map[string]any{"project_id": projectA}}) {
 		t.Fatalf("defaults = %v", entries[0])
 	}
 	if code := h.write(actorWriter, map[string]any{keyEntries: []any{appEntry(severityInfo, "x", "")}}); code != http.StatusBadRequest {

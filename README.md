@@ -63,7 +63,7 @@ Full, runnable examples are in [`examples/`](examples/), including Pub/Sub over 
 | [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | PostgreSQL clients on `127.0.0.1` with a user password |
 | [Memorystore for Redis](docs/memorystore.md) | Real Redis | Redis clients on the reported host and port, with AUTH |
 | [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Invocation; packaged environment runs the bundled worker only |
-| [Spanner](docs/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions (gRPC; not recorded) |
+| [Spanner](docs/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions |
 | [Bigtable](docs/bigtable.md) | Official Google emulator code | Row reads, scans, mutations (gRPC; not recorded) |
 | [Artifact Registry](docs/artifactregistry.md) | gcp-local | Repositories only; no push or pull |
 | [IAM](docs/serviceaccounts.md) and [project IAM](docs/project-iam.md) | gcp-local | Service accounts and policies |
