@@ -7,7 +7,7 @@ Reference: [localstack/localstack](https://github.com/localstack/localstack) at 
 | Area | LocalStack source | gcp-local equivalent |
 | --- | --- | --- |
 | Gateway | `LocalstackAwsGateway` builds handler chains around a request context and dispatches to services. [Gateway][gateway] | `internal/gateway`: REST and gRPC entry points with method, principal, project, location, and trace context |
-| Generated API | ASF generates service API stubs; parsing and serialization are separate from providers. [ASF][asf] | `tools/genapi` generates `api/generated/` from discovery documents and protobuf descriptors |
+| Generated API | ASF generates service API stubs; parsing and serialization are separate from providers. [ASF][asf] | `tools/genapi` generates `api/generated/` from pinned discovery documents, protobuf descriptors, and hand-written route tables ([api/README.md](../../api/README.md)) |
 | Backend reuse | Providers fall back to Moto or forward HTTP; Kinesis forwards to its backend and adds policy handlers. [Providers][providers], [Kinesis][kinesis] | Providers wrap official emulators, fake-gcs-server, bttest, PostgreSQL, MySQL, and Redis, and add only missing behavior |
 | Scoped state | `BaseStore` and `AccountRegionBundle` scope state per account and region; the state API visits stores and asset directories. [Stores][stores], [State][state] | `internal/state` stores scoped by project and location, plus a shared resource index |
 | Lifecycle | `ServiceLoader` loads services on demand; Kinesis stops its backend before reset and starts it lazily. [Loader][loader], [Kinesis][kinesis] | `internal/backend` manager: lazy start, readiness, reset, shutdown |

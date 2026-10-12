@@ -58,7 +58,7 @@ func cloudSchedulerRows() []route {
 
 // cloudSchedulerRoutes generates the Cloud Scheduler v1 route table slice.
 func cloudSchedulerRoutes() []byte {
-	return routeTable("CloudSchedulerRoutes", "is the Cloud Scheduler v1 job route table slice.", cloudSchedulerRows())
+	return routeTable("CloudSchedulerRoutes", "is the Cloud Scheduler v1 job route table slice.", "api/discovery/cloudscheduler-v1.json", cloudSchedulerRows())
 }
 
 // cloudSchedulerRPC is the google.cloud.scheduler.v1.CloudScheduler surface

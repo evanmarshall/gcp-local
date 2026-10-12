@@ -1,8 +1,8 @@
 # gcp-local
 
-**A local Google Cloud emulator that enforces IAM.** It runs Cloud Storage, Pub/Sub, Firestore, Spanner, BigQuery, Cloud SQL, Cloud Run, Cloud Logging, Vertex AI, and more on your machine. Use the real client libraries and Terraform, and get the same permission errors as production.
+**A local Google Cloud emulator that enforces IAM.** It runs Cloud Storage, Pub/Sub, Firestore, Spanner, BigQuery, Cloud SQL, Cloud Run, Cloud Logging, Vertex AI, and more on your machine. Use the real client libraries and Terraform, and catch missing IAM grants before you deploy: a call your identity isn't granted is denied locally, with the status code real GCP returned in the recorded scenarios.
 
-gcp-local issues local credentials and evaluates IAM policies on every request. Selected parts of each service's behavior (status codes, allow/deny decisions, and chosen response fields) are checked against scenarios recorded from real Google Cloud; [what that proves and doesn't](docs/contributing/validation.md#what-a-recording-proves).
+gcp-local issues local credentials and evaluates IAM policies on every request. For every service except Cloud Run, selected parts of its behavior (status codes, allow/deny decisions, and chosen response fields) are checked against scenarios recorded from real Google Cloud; [what that proves and doesn't](docs/contributing/validation.md#what-a-recording-proves).
 
 > **Status: pre-1.0.** Nothing is published to PyPI or a container registry yet; run it from source. Each service implements part of its API ([coverage](docs/coverage.md)).
 
@@ -75,7 +75,7 @@ IAM allow policies use predefined roles recorded from Google Cloud. IAM conditio
 
 ## How it works
 
-A single gateway routes requests to per-service providers, following [LocalStack](https://github.com/localstack/localstack)'s architecture. Providers authenticate and authorize before touching state, and reuse real backends (Google's emulators, PostgreSQL, MySQL, Redis) where they exist. API routes are generated from Google's published API definitions ([design](docs/design.md), [LocalStack comparison](docs/architecture/localstack-comparison.md)).
+A single gateway routes requests to per-service providers, following [LocalStack](https://github.com/localstack/localstack)'s architecture. Providers authenticate and authorize before touching state, and reuse real backends (Google's emulators, PostgreSQL, MySQL, Redis) where they exist. gRPC stubs are generated from Google's published protobuf descriptors. REST routes are generated from Google's discovery documents for the Storage JSON API, Memorystore for Redis, Cloud SQL, and Cloud Scheduler, and from route tables written by hand for the other services ([api/README.md](api/README.md), [design](docs/design.md), [LocalStack comparison](docs/architecture/localstack-comparison.md)).
 
 Scenarios are recorded once against a sandbox Google Cloud project and replayed against the emulator in CI, alongside Terraform acceptance cases run with the pinned google provider (3 extracted from the provider's upstream tests, the rest written locally; [Terraform](docs/contributing/terraform-compatibility.md)) and client-library tests ([validation](docs/contributing/validation.md)).
 

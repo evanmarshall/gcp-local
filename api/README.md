@@ -1,5 +1,15 @@
 # Transport contracts
 
+`tools/genapi` writes `api/generated/` from three inputs. The first line of each generated route file names its input.
+
+| Input | Generated output |
+| --- | --- |
+| Google discovery documents pinned in `discovery/` | REST routes for Storage (plus query parameters), Memorystore for Redis, Cloud SQL, and Cloud Scheduler |
+| Protobuf descriptors of Google's Go client modules, pinned in `go.mod` | Every gRPC stub, selector, and transcoding table |
+| Route tables written by hand in `tools/genapi/main.go` and `tools/genapi/inference.go` | REST routes for Artifact Registry, BigQuery, Bigtable admin, Cloud KMS, Cloud Logging, Cloud Run, Cloud Tasks, Compute and Network Management, Firestore, IAM, Pub/Sub, Resource Manager, Secret Manager, Spanner, Storage XML, and Vertex AI |
+
+Hand-written REST paths are not checked against Google's API. When a hand-written route is paired with a gRPC method for transcoding, generation checks only that the route exists with the HTTP verb of the proto's `google.api.http` binding.
+
 Storage input: the complete v1 discovery document from Google's [discovery artifact repository](https://github.com/googleapis/discovery-artifact-manager), with commit, revision, and SHA-256 in `discovery/manifest.json` and its Apache-2.0 license alongside it. It is data for generation, never a list of supported operations.
 
 Memorystore for Redis input: the complete Redis v1 discovery document from the same repository commit, with its own source, revision, and SHA-256 in `discovery/redis-v1.manifest.json` (same Apache-2.0 license). `tools/genapi` verifies the checksum and generates routes only for an explicit method allowlist (instances create/get/list/patch/delete/getAuthString, operations get/list); see [Memorystore](../docs/services/databases/memorystore.md).

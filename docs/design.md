@@ -38,7 +38,7 @@ flowchart TD
 
 ## Generated API contracts
 
-`tools/genapi` generates `api/generated/` from pinned discovery documents in `api/discovery/` and from Google's published protobuf descriptors in `go.mod`. Generated routes and stubs are transport contracts only: a route does not mean a provider serves it. Fix wrong output in the generator or its inputs, never by hand. `sh scripts/go.sh run ./tools/genapi -check` fails when committed output differs. [api/README.md](../api/README.md) lists every input and the handwritten exceptions.
+`tools/genapi` generates `api/generated/` from three kinds of input: Google's discovery documents pinned in `api/discovery/` (REST routes for the Storage JSON API, Memorystore for Redis, Cloud SQL, and Cloud Scheduler), Google's published protobuf descriptors pinned in `go.mod` (every gRPC stub), and route tables typed by hand in `tools/genapi` (REST routes for every other service). Each generated route file's header names its input. A hand-written REST route paired with a gRPC method is checked only for its HTTP verb against the proto binding; its path is not checked against Google's API. Generated routes and stubs are transport contracts only: a route does not mean a provider serves it. Fix wrong output in the generator or its inputs, never by hand. `sh scripts/go.sh run ./tools/genapi -check` fails when committed output differs. [api/README.md](../api/README.md) lists every input and the handwritten exceptions.
 
 ## Providers and backends
 
