@@ -1,149 +1,80 @@
-# The workflow: Terraform -> Pub/Sub push -> Cloud Run worker -> Storage
+# Workflow: Terraform → Pub/Sub push → Cloud Run → Storage
 
-The acceptance test is `scripts/smoke_workflow.py` (CI job `workflow-acceptance`).
-The example sources live in `examples/workflow/`. Terraform provisions every
-resource with the released google 8.5.0 provider against a private local core;
-nothing in the chain is created through the SDKs.
-
-## Run it
-
-From a fresh checkout on Linux or in moo (Java 17 and `requirements-pubsub.txt`
-installed; Docker is not needed):
-
-```sh
-GCP_LOCAL_JAVA=$(readlink -f "$(command -v java)") .venv-tools/bin/python scripts/smoke_workflow.py
-```
-
-The script installs the pinned Go toolchain, Pub/Sub emulator jar, Terraform
-1.16.5 and the google 8.5.0 plugin (`scripts/install_terraform.py`; Terraform
-reads it from a filesystem-only mirror), builds the core, and starts it on
-`127.0.0.1:9298` with Storage, Pub/Sub, Cloud Run, and IAM. Revisions run
-through the process runtime (`--run-process`), so the worker is
-`examples/workflow/worker.py` running as a local process. Container execution
-of revisions is covered separately by `scripts/smoke_cloudrun.py`.
-
-Once the tools are installed, the whole run needs no network egress; in moo
-it also passes inside the loopback-only namespace:
-
-```sh
-GCP_LOCAL_JAVA=$(readlink -f "$(command -v java)") python3 scripts/run_isolated.py --timeout 900 -- \
-  .venv-tools/bin/python scripts/smoke_workflow.py
-```
+Terraform (google provider 8.5.0) provisions a Pub/Sub push subscription that invokes a Cloud Run worker, which writes each message to a Storage bucket. Everything runs locally under IAM. Sources are in [`examples/workflow/`](../examples/workflow/); `scripts/smoke_workflow.py` runs it end to end.
 
 ## Run it in the packaged environment
 
-The same workflow runs against the [packaged environment](quickstart.md) on
-host Docker (Linux or macOS; Python requirements and Terraform as above, no
-Java or Go on the host):
+On Linux or macOS with Docker, after installing `requirements-pubsub.txt` and `python3 scripts/install_terraform.py`:
 
 ```sh
 .venv-tools/bin/python scripts/smoke_workflow.py --packaged
 ```
 
-It starts a private environment with the documented
-`scripts/local_env.py up --project demo-run --workload worker`, reads `env` for
-the endpoints, project number, and Terraform credential file, and runs the
-apply, delivery, both denial boundaries, and the empty second plan below. The
-worker runs as a process inside the core container: the packaged process
-runtime maps `gcp-local/workflow:latest` to the bundled worker, and the core
-listens on the published port so the service URI is the same on the host and
-inside the container. Instead of `terraform destroy`, it runs `reset` and
-requires the local APIs to list no buckets, topics, subscriptions, Cloud Run
-services, or service accounts and the container to run no worker process; then
-`down` must leave no container.
+It runs `scripts/local_env.py up --project demo-run --workload worker`, reads `env`, applies the Terraform, checks delivery and both denial boundaries, then runs `reset` and `down` and requires no resources, worker processes, or containers to remain.
+
+## Run it without Docker
+
+On Linux with Java 17 and `requirements-pubsub.txt`:
+
+```sh
+GCP_LOCAL_JAVA=$(readlink -f "$(command -v java)") .venv-tools/bin/python scripts/smoke_workflow.py
+```
+
+The script installs Go, the Pub/Sub emulator, Terraform 1.16.5, and the google 8.5.0 plugin, then starts the core on `127.0.0.1:9298` with Storage, Pub/Sub, Cloud Run, and IAM. The worker runs as a local process (`--run-process`). After installation it needs no network; to prove that, wrap it in `python3 scripts/run_isolated.py --timeout 900 --`.
 
 ## What Terraform creates
 
-`examples/workflow/main.tf`: the worker and push service accounts, the bucket,
-the worker's `roles/storage.objectUser` bucket grant, the topic, the Cloud Run
-v2 worker (`google_cloud_run_v2_service`, running as the worker account), the
-push account's `roles/run.invoker` grant on the service, the Pub/Sub service
-agent's `roles/iam.serviceAccountTokenCreator` grant on the push account, and
-the push subscription (OIDC token for the push account, audience the service's
-`https://worker-PROJECT.REGION.run.app` host).
+[`main.tf`](../examples/workflow/main.tf) creates:
 
-The developer identity holds only project-level Storage Admin, Pub/Sub Admin,
-Cloud Run Admin, Service Account Admin, and Service Account User. There is no
-`allUsers` grant. The worker's workload metadata enrollment stays in the
-private identity configuration; Terraform creates the account record that the
-grants and push ID tokens resolve.
+- worker and push service accounts
+- a bucket, with `roles/storage.objectUser` for the worker
+- a topic
+- a Cloud Run v2 service running as the worker account
+- `roles/run.invoker` on the service for the push account
+- `roles/iam.serviceAccountTokenCreator` on the push account for the Pub/Sub service agent
+- a push subscription with an OIDC token for the push account
 
-## Keeping Terraform local
-
-- `var.endpoint` must be a numeric loopback `http://` URL with a port.
-- Storage, Pub/Sub, Cloud Run v2 (`cloud_run_v2_custom_endpoint`; the v1
-  `cloud_run_custom_endpoint` does not redirect v2 resources), and IAM have
-  explicit endpoint overrides; `universe_domain = "gcp-local.invalid"` sends any
-  other API to a reserved domain instead of googleapis.com.
-- `var.credentials_file` must be an `external_account` file whose `token_url`
-  is a loopback `/v1/token` and whose `universe_domain` is `gcp-local.invalid`.
-- The smoke runs Terraform with a minimal environment (no ambient ADC or gcloud
-  configuration) and a dead `HTTPS_PROXY`/`HTTP_PROXY`, so any non-loopback
-  request fails. It also checks that variable validation refuses
-  `https://storage.googleapis.com` and the ADC file without the local universe.
+The developer identity has only project-level Storage Admin, Pub/Sub Admin, Cloud Run Admin, Service Account Admin, and Service Account User. There is no `allUsers` grant.
 
 ## Terraform authentication
 
-The provider authenticates with local external-account ADC: it exchanges the
-private subject token at the local STS endpoint and refreshes it itself. Two
-adjustments to the SDK ADC file are required, and both are proven only by this
-workflow:
+Use the `GCP_LOCAL_TERRAFORM_CREDENTIALS` file from `env` (`terraform-adc.json`). It is the local external-account ADC with `"universe_domain": "gcp-local.invalid"` added, which the provider requires when its `universe_domain` is overridden. The local token issuer grants only `cloud-platform`, so set `scopes`.
 
-- The provider refuses `universe_domain = "gcp-local.invalid"` unless the
-  credential names the same universe, so Terraform reads a copy of the ADC file
-  with `"universe_domain": "gcp-local.invalid"` added. The Python SDKs keep the
-  unmarked file.
-- The provider requests `cloud-platform` and `userinfo.email` by default; the
-  local issuer grants `cloud-platform` only, so the example sets
-  `scopes = ["https://www.googleapis.com/auth/cloud-platform"]`.
+```hcl
+provider "google" {
+  project                         = var.project
+  credentials                     = file(var.credentials_file)
+  scopes                          = ["https://www.googleapis.com/auth/cloud-platform"]
+  universe_domain                 = "gcp-local.invalid"
+  storage_custom_endpoint         = "${var.endpoint}/storage/v1/"
+  pubsub_custom_endpoint          = "${var.endpoint}/v1/"
+  cloud_run_v2_custom_endpoint    = "${var.endpoint}/v2/"
+  iam_custom_endpoint             = "${var.endpoint}/v1/"
+  iam_beta_custom_endpoint        = "${var.endpoint}/v1/"
+  add_terraform_attribution_label = false
+}
+```
 
-`scripts/create_local_identity.py` and the packaged environment write this
-variant as `terraform-adc.json` beside `adc.json`; the packaged `env` command
-names it `GCP_LOCAL_TERRAFORM_CREDENTIALS`.
+- Give every API you use a custom endpoint. `universe_domain` sends any API without one to a reserved `.invalid` domain instead of googleapis.com.
+- Cloud Run v2 resources need `cloud_run_v2_custom_endpoint`; `cloud_run_custom_endpoint` does not apply to them.
+- The example's variable validation refuses a non-loopback endpoint and any credential file that isn't a local external-account file.
 
-## Acceptance sequence
+This workflow is the only test of Terraform with local ADC.
 
-1. `terraform init`, then the guard checks above, then `terraform apply`.
-2. Publishing a message (Pub/Sub SDK over the local gRPC gateway) makes the
-   push agent mint an ID token for the push account, invocation verify the
-   audience and `run.invoker`, and the worker store `<messageId>.txt` with its
-   own metadata token. The smoke reads the object back.
-3. Storage boundary: `terraform apply -var grant_worker_storage=false` removes
-   the worker's bucket grant. A published message is not stored for the whole
-   8-second window (the worker's write is refused and the push is nacked).
-   Re-applying with the grant stores the redelivered message and a new one.
-4. Invocation boundary: `terraform apply -var grant_push_invoker=false` removes
-   the push account's invoker grant. With the worker's Storage grant intact, a
-   message is not stored for 8 seconds; re-applying the grant delivers it. The
-   smoke infers the boundary from that state: only the invoker grant changed,
-   and a delivery that reached the worker would have been stored. It does not
-   observe the invocation response directly.
-5. A second `terraform plan -detailed-exitcode` reports no changes.
-6. `terraform destroy`, then listing buckets, topics, subscriptions, Cloud Run
-   services, and service accounts through the local API returns none, and no
-   worker process remains.
+## What the test checks
 
-## Recorded coverage and approximations
+1. `terraform apply` succeeds.
+2. A published message is stored as `<messageId>.txt` by the worker.
+3. Removing the worker's bucket grant stops storage for 8 seconds; restoring it stores the redelivered message.
+4. Removing the push account's invoker grant stops delivery for 8 seconds; restoring it delivers the message.
+5. A second `terraform plan` shows no changes.
+6. `terraform destroy` (or `reset` in packaged mode) leaves no buckets, topics, subscriptions, services, service accounts, or worker processes.
 
-- Storage bucket/object semantics: cloud-recorded
-  ([storage recordings](../tests/conformance/recordings/), e.g.
-  `storage-authorization`, `storage-object-lifecycle`; see [storage.md](storage.md)).
-- Pub/Sub pull authorization: cloud-recorded
-  ([pubsub-pull-authorization](../tests/conformance/recordings/pubsub-pull-authorization);
-  see [pubsub-validation.md](pubsub-validation.md)).
-- Service accounts: cloud-recorded
-  ([serviceaccount-lifecycle-authorization](../tests/conformance/recordings/serviceaccount-lifecycle-authorization)).
-- **Push delivery has no real-GCP recording.** The push agent, its ID-token
-  minting, the service agent token-creator requirement, and redelivery timing
-  are local-modeled.
-- **Cloud Run has no real-GCP recording** (#13): services, revisions,
-  operations, invocation, and the invoker check are local-modeled.
-- The Terraform cases in `tests/terraform` and this workflow show that the
-  released provider accepts the local responses; they are not recorded provider
-  call sequences from GCP.
-- Locally the service `uri` is the loopback invocation URL
-  (`http://127.0.0.1:PORT/_run/HOST`) and the push audience is
-  `https://HOST`. On GCP both are the service URL; the example derives the
-  audience from the local `uri` shape.
-- The process runtime does not stop revision processes when the core exits
-  abnormally; the smoke kills leftover workers after a failed run.
+## Limits
+
+- Push delivery, push ID tokens, and redelivery timing are modeled locally, not recorded.
+- Cloud Run is modeled locally, not recorded.
+- Storage, Pub/Sub pull authorization, and service accounts are recorded ([Storage](storage.md), [Pub/Sub](pubsub.md), [service accounts](serviceaccounts.md)).
+- Step 4 infers the invoker denial from no object being stored; it doesn't observe the invocation response.
+- The local service `uri` is `http://127.0.0.1:PORT/_run/HOST` and the push audience is `https://HOST`. On GCP both are the service URL.
+- If the core exits abnormally, revision processes keep running.

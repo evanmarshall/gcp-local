@@ -1,14 +1,14 @@
 # gcp-local
 
-**A local emulator for Google Cloud that enforces IAM.** Run Cloud Storage, Pub/Sub, Cloud Run, Firestore, Spanner, BigQuery, Cloud SQL, Cloud Logging, Vertex AI, and more on your machine, with the real client libraries and Terraform, and get the same permission errors you would get in production.
+**A local Google Cloud emulator that enforces IAM.** It runs Cloud Storage, Pub/Sub, Firestore, Spanner, BigQuery, Cloud SQL, Cloud Run, Cloud Logging, Vertex AI, and more on your machine. Use the real client libraries and Terraform, and get the same permission errors as production.
 
-Most cloud emulators skip authentication entirely, so code that works locally can still fail in production on a missing grant. gcp-local issues local credentials, evaluates IAM policies on every request, and denies calls the way Google Cloud does. Each service's behavior is checked against recordings captured from real Google Cloud.
+gcp-local issues local credentials and evaluates IAM policies on every request. Each service's behavior is checked against recordings from real Google Cloud.
 
-> **Status: early.** gcp-local is pre-1.0 and not yet published to PyPI or a container registry; run it from source today (see below). Coverage is a curated slice of each API, listed in [Supported services](#supported-services).
+> **Status: pre-1.0.** Nothing is published to PyPI or a container registry yet; run it from source. Each service implements part of its API ([coverage](docs/coverage.md)).
 
 ## Quick start
 
-You need Docker (with Compose) and Python 3.11+. No Google Cloud account or credentials are used.
+You need Docker with Compose and Python 3.11+. No Google Cloud account or credentials are used.
 
 ```sh
 git clone https://github.com/evanmarshall/gcp-local.git
@@ -17,7 +17,7 @@ python3 scripts/local_env.py up      # builds and starts the environment
 python3 scripts/local_env.py env     # prints the endpoint, project, and credential file
 ```
 
-This starts every service on `http://127.0.0.1:4566` (HTTP) and `127.0.0.1:4567` (gRPC), with a local project `gcp-local-test` and a generated developer identity that holds explicit IAM grants. `reset` wipes all data, `down` stops everything, and `logs` shows recent output.
+HTTP is on `http://127.0.0.1:4566` and gRPC on `127.0.0.1:4567`. The project is `gcp-local-test`, and a generated developer identity holds explicit IAM grants. `reset` wipes all data, `down` stops everything, and `logs` shows recent output.
 
 Point a client library at it with the generated credential file:
 
@@ -43,11 +43,11 @@ client.create_bucket(bucket, location="us-central1")
 bucket.blob("hello.txt").upload_from_string("Hello from local GCP.")
 ```
 
-Full, runnable examples are in [`examples/`](examples/), including Pub/Sub over gRPC and a Terraform-provisioned Pub/Sub → Cloud Run → Cloud Storage [workflow](docs/workflow.md). The [quickstart guide](docs/quickstart.md) covers configuration, Terraform credentials, multiple environments, and the upcoming `pip install gcp-local` and `docker run` options.
+More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terraform-provisioned Pub/Sub → Cloud Run → Cloud Storage [workflow](docs/workflow.md). The [quickstart](docs/quickstart.md) covers Terraform credentials, multiple environments, and configuration.
 
 ## Supported services
 
-[Service coverage](docs/coverage.md) is the full matrix: methods served versus the whole API, what an application can actually do with each resource, and which recordings and Terraform tests verify it.
+[Service coverage](docs/coverage.md) lists methods served, data-plane support, recordings, and Terraform tests per service.
 
 | Service | Backend | Application use |
 | --- | --- | --- |
@@ -58,39 +58,39 @@ Full, runnable examples are in [`examples/`](examples/), including Pub/Sub over 
 | [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries |
 | [Cloud Logging](docs/logging.md) | gcp-local | Write, filter, and delete log entries over REST and gRPC |
 | [Vertex AI](docs/vertexai.md) | Deterministic stub or Ollama | Generate, stream, count tokens, embed; answers are not from Gemini |
-| [Firestore](docs/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners (Python client over gRPC) |
+| [Firestore](docs/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners |
 | [BigQuery](docs/bigquery.md) | gcp-local | Streaming inserts, simple SELECT |
 | [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | PostgreSQL clients on `127.0.0.1` with a user password |
-| [Memorystore for Redis](docs/memorystore.md) | Real Redis | Redis clients on the reported host and port, with AUTH |
-| [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Invocation; packaged environment runs the bundled worker only |
+| [Memorystore for Redis](docs/memorystore.md) | Real Redis | Redis clients on the reported port, with AUTH |
+| [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Invocation; the packaged environment runs only the bundled worker |
 | [Spanner](docs/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions |
-| [Bigtable](docs/bigtable.md) | Official Google emulator code | Row reads, scans, mutations (gRPC; not recorded) |
+| [Bigtable](docs/bigtable.md) | Official Google emulator code | Row reads, scans, mutations over gRPC; not recorded |
 | [Artifact Registry](docs/artifactregistry.md) | gcp-local | Repositories only; no push or pull |
 | [IAM](docs/serviceaccounts.md) and [project IAM](docs/project-iam.md) | gcp-local | Service accounts and policies |
-| [VPC networking](docs/networking.md) | gcp-local | Connectivity verdicts, no real traffic |
+| [VPC networking](docs/networking.md) | gcp-local | Connectivity verdicts; no real traffic |
 
-Every service evaluates IAM on each request with predefined roles recorded from Google Cloud. IAM conditions work; deny policies, principal access boundaries, organization policy, and VPC Service Controls do not yet ([IAM details](docs/iam.md)).
+IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage; on other services a conditional binding grants nothing. Deny policies and principal access boundaries are modeled locally but not recorded; organization policy and VPC Service Controls are not enforced ([IAM](docs/iam.md)).
 
 ## How it works
 
-gcp-local follows the architecture of the archived open-source [LocalStack](https://github.com/localstack/localstack): a single gateway routes requests to per-service providers, providers authenticate and authorize before touching state, and real backends (Google's own emulators, PostgreSQL, Redis) are reused wherever they exist. API routes are generated from Google's published API definitions. See the [design](docs/design.md) and the [comparison with LocalStack](docs/localstack-comparison.md).
+A single gateway routes requests to per-service providers, following [LocalStack](https://github.com/localstack/localstack)'s architecture. Providers authenticate and authorize before touching state, and reuse real backends (Google's emulators, PostgreSQL, Redis) where they exist. API routes are generated from Google's published API definitions ([design](docs/design.md), [LocalStack comparison](docs/localstack-comparison.md)).
 
-Fidelity is tested, not assumed: scenarios are recorded once against a dedicated Google Cloud project, reviewed, and then replayed against the emulator in CI, alongside pinned Terraform provider acceptance tests and client-library tests ([validation](docs/validation.md)).
+Scenarios are recorded once against a sandbox Google Cloud project and replayed against the emulator in CI, alongside pinned Terraform provider acceptance tests and client-library tests ([validation](docs/validation.md)).
 
 ## Limitations
 
-- Each service implements a slice of its API. Unsupported methods and options return an explicit `UNIMPLEMENTED` error instead of silently succeeding.
-- State lives in memory; `reset` and `down` discard it.
-- Cloud Storage buckets must use uniform bucket-level access, enforced public access prevention, and no soft-delete retention.
-- Cloud Run in the packaged environment runs only the bundled example worker; running your own images requires the Docker runtime ([details](docs/cloudrun.md)).
-- Redis and Cloud SQL instances listen on `127.0.0.1` ports from a 16-port range (4568-4583 by default), not on 6379 or 5432; read the port from the API. Neither accepts TLS ([Cloud SQL](docs/cloudsql.md#connect-from-the-host), [Memorystore](docs/memorystore.md#endpoint-and-auth-semantics)).
+- Unsupported methods and options return `UNIMPLEMENTED`.
+- State is in memory; `reset` and `down` discard it.
+- Storage buckets need uniform bucket-level access, enforced public access prevention, and no soft-delete retention.
+- Packaged Cloud Run runs only the bundled example worker; your own images need the Docker runtime ([Cloud Run](docs/cloudrun.md)).
+- Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379 or 5432; read the port from the API. Neither accepts TLS.
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.
-- Networking verdicts are analytical (like Connectivity Tests), not real packet routing.
-- Vertex AI answers come from a deterministic stub or a local Ollama model, not Gemini.
+- Networking verdicts are analytical, not packet routing.
+- Vertex AI answers come from a stub or local Ollama, not Gemini.
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks, and the recording workflow, and the [issue tracker](https://github.com/evanmarshall/gcp-local/issues) for planned work.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [issue tracker](https://github.com/evanmarshall/gcp-local/issues).
 
 ## License
 
