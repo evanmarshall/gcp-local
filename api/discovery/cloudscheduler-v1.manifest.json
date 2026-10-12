@@ -1,0 +1,9 @@
+{
+  "source": "https://raw.githubusercontent.com/googleapis/discovery-artifact-manager/216801337c83bb5a81d5e31ec2e62850910c8fd5/discoveries/cloudscheduler.v1.json",
+  "revision": "20260922",
+  "retrieved_at": "2026-10-12",
+  "sha256": "cabea9d271b528e7d4545c26edf8fcc74e669be6d225bc8e4670a750ca29ef49",
+  "license": "Apache-2.0",
+  "scope": "Cloud Scheduler v1 REST route descriptors for an allowlisted job method slice; no claim of provider support",
+  "commit": "216801337c83bb5a81d5e31ec2e62850910c8fd5"
+}

@@ -14,6 +14,7 @@
     "TestAccKMSKeyRingCryptoKey",
     "TestAccSecretManagerSecretAndVersion",
     "TestAccCloudTasksQueueLifecycle",
+    "TestAccCloudSchedulerJob",
     "TestAccFirestoreDocument",
     "TestAccBigQueryDatasetAndTable",
     "TestAccSpannerInstanceAndDatabase",

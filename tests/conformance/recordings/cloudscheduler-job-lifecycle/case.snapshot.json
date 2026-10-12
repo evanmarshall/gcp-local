@@ -1,0 +1,299 @@
+{
+  "cloudscheduler-job-lifecycle": {
+    "recorded-date": "12-10-2026, 07:28:50",
+    "recorded-content": {
+      "job-created": {
+        "attemptDeadline": null,
+        "description": "gcp-local recording",
+        "fields": [
+          "description",
+          "name",
+          "pubsubTarget",
+          "retryConfig",
+          "schedule",
+          "scheduleTime",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/locations/us-central1/jobs/<topic>-pubsub",
+        "pubsubTarget": {
+          "attributes": {
+            "origin": "gcp-local"
+          },
+          "data": "Z2NwLWxvY2Fs",
+          "topicName": "projects/<project>/topics/<topic>"
+        },
+        "retryConfig": {
+          "maxBackoffDuration": "10s",
+          "maxDoublings": 2,
+          "maxRetryDuration": "0s",
+          "minBackoffDuration": "5s",
+          "retryCount": 1
+        },
+        "schedule": "0 0 1 1 *",
+        "schedule_time_is_next": true,
+        "state": "ENABLED",
+        "status": {
+          "code": -1
+        },
+        "timeZone": "America/New_York",
+        "user_update_time_set": true
+      },
+      "denied-get": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-create": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-run": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "fetched": {
+        "attemptDeadline": null,
+        "description": "gcp-local recording",
+        "fields": [
+          "description",
+          "name",
+          "pubsubTarget",
+          "retryConfig",
+          "schedule",
+          "scheduleTime",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/locations/us-central1/jobs/<topic>-pubsub",
+        "pubsubTarget": {
+          "attributes": {
+            "origin": "gcp-local"
+          },
+          "data": "Z2NwLWxvY2Fs",
+          "topicName": "projects/<project>/topics/<topic>"
+        },
+        "retryConfig": {
+          "maxBackoffDuration": "10s",
+          "maxDoublings": 2,
+          "maxRetryDuration": "0s",
+          "minBackoffDuration": "5s",
+          "retryCount": 1
+        },
+        "schedule": "0 0 1 1 *",
+        "state": "ENABLED",
+        "status": {
+          "code": -1
+        },
+        "timeZone": "America/New_York"
+      },
+      "listed": {
+        "contains_job": true,
+        "fields": [
+          "jobs"
+        ],
+        "http_status": 200
+      },
+      "paused": {
+        "fields": [
+          "description",
+          "name",
+          "pubsubTarget",
+          "retryConfig",
+          "schedule",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "has_schedule_time": false,
+        "http_status": 200,
+        "state": "PAUSED"
+      },
+      "pause-twice": {
+        "fields": [
+          "description",
+          "name",
+          "pubsubTarget",
+          "retryConfig",
+          "schedule",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "http_status": 200,
+        "state": "PAUSED"
+      },
+      "resumed": {
+        "fields": [
+          "description",
+          "name",
+          "pubsubTarget",
+          "retryConfig",
+          "schedule",
+          "scheduleTime",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "http_status": 200,
+        "schedule_time_is_next": true,
+        "state": "ENABLED"
+      },
+      "patched": {
+        "attemptDeadline": null,
+        "description": "updated",
+        "fields": [
+          "description",
+          "name",
+          "pubsubTarget",
+          "retryConfig",
+          "schedule",
+          "scheduleTime",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/locations/us-central1/jobs/<topic>-pubsub",
+        "pubsubTarget": {
+          "attributes": {
+            "origin": "gcp-local"
+          },
+          "data": "Z2NwLWxvY2Fs",
+          "topicName": "projects/<project>/topics/<topic>"
+        },
+        "retryConfig": {
+          "maxBackoffDuration": "10s",
+          "maxDoublings": 2,
+          "maxRetryDuration": "0s",
+          "minBackoffDuration": "5s",
+          "retryCount": 1
+        },
+        "schedule": "30 2 1 1 *",
+        "schedule_time_is_next": true,
+        "state": "ENABLED",
+        "status": {
+          "code": -1
+        },
+        "timeZone": "America/New_York"
+      },
+      "run": {
+        "fields": [
+          "description",
+          "name",
+          "pubsubTarget",
+          "retryConfig",
+          "schedule",
+          "scheduleTime",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "http_status": 200,
+        "state": "ENABLED",
+        "status": {
+          "code": -1
+        }
+      },
+      "attempted": {
+        "fields": [
+          "description",
+          "lastAttemptTime",
+          "name",
+          "pubsubTarget",
+          "retryConfig",
+          "schedule",
+          "scheduleTime",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "state": "ENABLED",
+        "status": {}
+      },
+      "http-oidc-created": {
+        "attemptDeadline": "30s",
+        "fields": [
+          "attemptDeadline",
+          "httpTarget",
+          "name",
+          "schedule",
+          "scheduleTime",
+          "state",
+          "status",
+          "timeZone",
+          "userUpdateTime"
+        ],
+        "httpTarget": {
+          "body": "Z2NwLWxvY2Fs",
+          "headers": {
+            "Content-Type": "application/octet-stream",
+            "User-Agent": "Google-Cloud-Scheduler",
+            "X-Gcp-Local": "recording"
+          },
+          "httpMethod": "POST",
+          "oidcToken": {
+            "audience": "https://10.255.255.1/gcp-local",
+            "serviceAccountEmail": "<allowed>"
+          },
+          "uri": "https://10.255.255.1/gcp-local"
+        },
+        "http_status": 200,
+        "retryConfig": null,
+        "state": "ENABLED",
+        "timeZone": "UTC"
+      },
+      "oidc-without-act-as": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "oauth-without-act-as": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "invalid-schedule": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "invalid-time-zone": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "deleted-pubsub": {
+        "body": {},
+        "http_status": 200
+      },
+      "deleted-http": {
+        "body": {},
+        "http_status": 200
+      },
+      "absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "jobs_absent": true,
+        "topic_absent": true
+      }
+    }
+  }
+}

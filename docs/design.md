@@ -54,7 +54,7 @@ Each service is a package under `internal/providers/`. A provider implements GCP
 Rules:
 
 - Clients never reach an API backend directly. Backend ports stay private. Cloud SQL and Redis expose their wire protocols on an explicit `-data-ports` range; those listeners forward bytes and the server enforces its own auth.
-- Providers own background work: Pub/Sub push, Cloud Tasks dispatch, operation completion, Cloud Run revisions. A worker calls other services as its service agent, through the same IAM checks. It never gets an implicit administrator identity.
+- Providers own background work: Pub/Sub push, Cloud Tasks dispatch, Cloud Scheduler jobs, operation completion, Cloud Run revisions. A worker calls other services as its service agent, through the same IAM checks. It never gets an implicit administrator identity.
 - Shared helpers go in `internal/providers/provider` only when every caller renders byte-identical output.
 - `internal/providers/compute` answers reachability analytically from the configured network graph ([networking](networking.md)). A local socket connection is not evidence of GCP reachability.
 

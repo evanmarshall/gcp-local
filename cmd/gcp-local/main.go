@@ -28,6 +28,7 @@ import (
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
 	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
 	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
+	cloudschedulerprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudscheduler"
 	cloudsqlprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudsql"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
@@ -140,7 +141,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcTLSDir, "grpc-tls-dir", "", "owner-only directory holding the gRPC TLS CA and server key; created with new material when missing")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager,iam,logging,vertexai")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager,iam,logging,vertexai,cloudtasks,cloudscheduler")
 	flags.StringVar(&options.vertex.Backend, "vertex-backend", "stub", "Vertex AI model backend: stub (deterministic, default) or ollama")
 	flags.StringVar(&options.vertex.OllamaURL, "vertex-ollama-url", "", "Ollama server URL for -vertex-backend=ollama, e.g. http://127.0.0.1:11434")
 	flags.Var(modelMap{&options.vertex.Models}, "vertex-model", "Vertex AI model ID=Ollama model, e.g. gemini-2.5-flash=llama3.2; * matches any ID; repeatable")
@@ -271,14 +272,7 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 			return fmt.Errorf("register the Storage provider: %w", err)
 		}
 	}
-	tokens, err := assembleIDTokens(selected, index, engine, identities)
-	if err != nil {
-		return err
-	}
-	if err := assemblePubSub(options, selected, registry, server, index, engine, tokens); err != nil {
-		return err
-	}
-	if err := assembleCloudTasks(ctx, selected, registry, server, index, engine, tokens); err != nil {
+	if err := assembleDelivery(ctx, options, selected, registry, server, index, engine, identities); err != nil {
 		return err
 	}
 	// Providers in front of an official or pinned backend binary, or a
@@ -342,12 +336,12 @@ func discard[P any](construct func(context.Context, *gateway.Registry, *backend.
 	}
 }
 
-// assembleIDTokens builds the one local ID-token key set that Pub/Sub push and
-// Cloud Tasks mint with and Cloud Run invocation verifies. The minting method
+// assembleIDTokens builds the one local ID-token key set that Pub/Sub push,
+// Cloud Tasks, and Cloud Scheduler mint with and Cloud Run invocation verifies. The minting method
 // registers a single permission plan, so the key set is shared, not per
 // provider.
 func assembleIDTokens(selected map[string]bool, index *state.Index, engine *iam.Engine, identities *identity.Service) (*identity.IDTokens, error) {
-	if !selected["pubsub"] && !selected["cloudtasks"] {
+	if !selected["pubsub"] && !selected["cloudtasks"] && !selected["cloudscheduler"] {
 		return nil, nil //nolint:nilnil // no minting provider selected
 	}
 	tokens, err := identity.NewIDTokens(engine, index)
@@ -392,6 +386,30 @@ func assembleCloudTasks(ctx context.Context, selected map[string]bool, registry 
 	}
 	if _, err := cloudtasksprovider.New(ctx, cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Cloud Tasks provider: %w", err)
+	}
+	return nil
+}
+
+// assembleDelivery registers the providers whose workers deliver as service
+// agents with the shared ID-token keys: Pub/Sub, Cloud Tasks, and Cloud
+// Scheduler, which also mints OAuth tokens through the identity service.
+func assembleDelivery(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service) error {
+	tokens, err := assembleIDTokens(selected, index, engine, identities)
+	if err != nil {
+		return err
+	}
+	if err := assemblePubSub(options, selected, registry, server, index, engine, tokens); err != nil {
+		return err
+	}
+	if err := assembleCloudTasks(ctx, selected, registry, server, index, engine, tokens); err != nil {
+		return err
+	}
+	if !selected["cloudscheduler"] {
+		return nil
+	}
+	config := cloudschedulerprovider.Config{IDTokens: tokens, Identity: identities}
+	if _, err := cloudschedulerprovider.New(ctx, config, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Cloud Scheduler provider: %w", err)
 	}
 	return nil
 }

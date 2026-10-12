@@ -32,6 +32,7 @@ import (
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
 	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
 	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
+	cloudschedulerprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudscheduler"
 	cloudsqlprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudsql"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
@@ -75,6 +76,10 @@ func main() {
 			{Role: "roles/cloudkms.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/secretmanager.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/cloudtasks.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/cloudscheduler.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			// GCP grants each project's Cloud Scheduler service agent this
+			// role when the API is enabled; job deliveries act as it.
+			{Role: "roles/cloudscheduler.serviceAgent", Members: []string{"serviceAccount:service-" + number + "@gcp-sa-cloudscheduler.iam.gserviceaccount.com"}},
 			{Role: "roles/datastore.user", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/datastore.indexAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/bigquery.dataOwner", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
@@ -107,9 +112,12 @@ func main() {
 	}
 	// The resumable and signed URL scenario signs as the allowed identity with
 	// signBlob, which needs Token Creator on the account itself, as in GCP.
+	// The Cloud Scheduler scenario creates an OIDC job as the fixture for the
+	// allowed account, which needs Service Account User on it.
 	allowed := "allowed@gcp-local-test.iam.gserviceaccount.com"
 	_, err = engine.SetPolicy(iam.AccountResource("gcp-local-test", allowed), iam.Policy{Bindings: []iam.Binding{
 		{Role: "roles/iam.serviceAccountTokenCreator", Members: []string{"serviceAccount:" + allowed}},
+		{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
 	}})
 	must(err)
 	resolver := func(ctx context.Context, token string) (gateway.Principal, error) {
@@ -179,6 +187,8 @@ func main() {
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
 	must(err)
 	_, err = loggingprovider.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
+	_, err = cloudschedulerprovider.New(context.Background(), cloudschedulerprovider.Config{IDTokens: tokens}, registry, server.Backends, index, engine)
 	must(err)
 	// Vertex AI answers from the deterministic stub; nothing calls Google.
 	_, err = vertexaiprovider.New(context.Background(), registry, index, engine, vertexaiprovider.Config{})

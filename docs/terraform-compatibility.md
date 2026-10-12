@@ -1,6 +1,6 @@
 # Terraform compatibility
 
-15 upstream google provider acceptance cases, adapted to gcp-local, pass across 13 services. They use the released google provider 8.5.0, Terraform 1.16.5, and terraform-plugin-testing 1.15.0. The [selection manifest](../tests/terraform/selection.json) pins the test IDs and source hashes; the [adapter audit](../tests/terraform/audit.md) lists every change from upstream.
+16 upstream google provider acceptance cases, adapted to gcp-local, pass across 14 services. They use the released google provider 8.5.0, Terraform 1.16.5, and terraform-plugin-testing 1.15.0. The [selection manifest](../tests/terraform/selection.json) pins the test IDs and source hashes; the [adapter audit](../tests/terraform/audit.md) lists every change from upstream.
 
 | Upstream test ID | What passes locally |
 | --- | --- |
@@ -10,6 +10,7 @@
 | `TestAccKMSKeyRingCryptoKey` | Key ring; crypto key with rotation period and primary version; versions destroyed with the key |
 | `TestAccSecretManagerSecretAndVersion` | Secret with replication policy, version with payload, enable/destroy, 404 after destroy |
 | `TestAccCloudTasksQueueLifecycle` | Queue with rate limits, PATCH update, delete, 404 after destroy |
+| `TestAccCloudSchedulerJob` | Pub/Sub target job with a time zone and retry config, PATCH of description and schedule, pause, empty plan, 404 after destroy |
 | `TestAccFirestoreDocument` | Document create, refresh, empty plan, 404 after destroy |
 | `TestAccBigQueryDatasetAndTable` | Dataset and table with a schema, destroy |
 | `TestAccSpannerInstanceAndDatabase` | Instance with processing units, database with DDL, empty plan, 404 after destroy |

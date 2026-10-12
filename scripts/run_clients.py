@@ -29,7 +29,7 @@ HTTP = "http://127.0.0.1:4566"
 GRPC = "127.0.0.1:4567"
 GRPC_TLS = "127.0.0.1:4584"
 SERVICES = (
-    "bigquery,bigtable,cloudtasks,firestore,iam,kms,logging,pubsub,"
+    "bigquery,bigtable,cloudscheduler,cloudtasks,firestore,iam,kms,logging,pubsub,"
     "resourcemanager,run,secretmanager,spanner,storage"
 )
 REVISION_IMAGE = "client-matrix/revision:1"

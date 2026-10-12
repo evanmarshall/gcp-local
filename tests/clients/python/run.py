@@ -27,6 +27,7 @@ from google.cloud import (
     kms,
     pubsub_v1,
     run_v2,
+    scheduler_v1,
     secretmanager,
     spanner,
     storage,
@@ -240,6 +241,25 @@ def run_cloudtasks():
     client.delete_queue(name=queue.name)
 
 
+def run_cloudscheduler():
+    # A yearly HTTP job: it never runs, so its unreachable target is never called.
+    client = generated(scheduler_v1.CloudSchedulerClient)
+    location = f"projects/{PROJECT}/locations/us-central1"
+    job = client.create_job(parent=location, job={
+        "name": f"{location}/jobs/python-matrix",
+        "schedule": "0 0 1 1 *",
+        "time_zone": "America/New_York",
+        "http_target": {"uri": "http://127.0.0.1:9/job", "http_method": "POST", "body": PAYLOAD},
+    })
+    assert client.get_job(name=job.name).state == scheduler_v1.Job.State.ENABLED, "get job"
+    assert job.name in [j.name for j in client.list_jobs(parent=location)], "list jobs"
+    assert client.pause_job(name=job.name).state == scheduler_v1.Job.State.PAUSED, "pause job"
+    client.resume_job(name=job.name)
+    other = generated(scheduler_v1.CloudSchedulerClient, denied=True)
+    expect_denied("ungranted run job", lambda: other.run_job(name=job.name))
+    client.delete_job(name=job.name)
+
+
 def run_cloudrun():
     client = generated(run_v2.ServicesClient)
     location = f"projects/{PROJECT}/locations/us-central1"
@@ -380,6 +400,7 @@ WORKFLOWS = {
     "bigquery": run_bigquery,
     "bigtable": run_bigtable,
     "cloudkms": run_cloudkms,
+    "cloudscheduler": run_cloudscheduler,
     "cloudtasks": run_cloudtasks,
     "firestore": run_firestore,
     "iam": run_iam,

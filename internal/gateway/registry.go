@@ -76,6 +76,7 @@ func NewRegistry() *Registry {
 	// contracts name the service for its untranscoded methods' gaps.
 	r.registerData("secretmanager", generated.SecretManagerMethods)
 	r.registerData("cloudtasks", generated.CloudTasksMethods)
+	r.registerData("cloudscheduler", generated.CloudSchedulerMethods)
 	r.registerData("cloudkms", generated.CloudKMSMethods)
 	r.registerData("run", generated.RunServicesMethods)
 	r.registerData("run", generated.RunRevisionsMethods)
@@ -107,6 +108,7 @@ func (r *Registry) registerRoutes() {
 		{generated.ResourceManagerRoutes, "resourcemanager"},
 		{generated.IAMRoutes, "iam"},
 		{generated.CloudTasksRoutes, "cloudtasks"},
+		{generated.CloudSchedulerRoutes, "cloudscheduler"},
 		{generated.CloudSQLRoutes, "cloudsql"},
 		{generated.PubSubRestRoutes, servicePubsub},
 		{generated.PubSubSchemaRestRoutes, servicePubsub},

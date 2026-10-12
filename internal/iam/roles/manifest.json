@@ -1,7 +1,7 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
-  "recorded_at": "2026-10-12T05:11:04.660039+00:00",
-  "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudsql, cloudtasks, compute, firestore, identity, kms, logging, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
+  "recorded_at": "2026-10-12T07:13:52.668566+00:00",
+  "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudscheduler, cloudsql, cloudtasks, compute, firestore, identity, kms, logging, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
   "roles": [
     {
       "file": "aiplatform.user.json",
@@ -72,6 +72,26 @@
       "file": "bigtable.viewer.json",
       "name": "roles/bigtable.viewer",
       "sha256": "9895added05b9280d0cdbafb565b8d7f4b60de587777a0c3d022cdccc4664812"
+    },
+    {
+      "file": "cloudscheduler.admin.json",
+      "name": "roles/cloudscheduler.admin",
+      "sha256": "7bba55fa8be8bfdc5289376cfc9379ecd9cc26e2fe6f146558363cd3062506bf"
+    },
+    {
+      "file": "cloudscheduler.jobRunner.json",
+      "name": "roles/cloudscheduler.jobRunner",
+      "sha256": "7ff9c3bcc49107e6a07c5a58cfe55a674f2cf69e67ffb7ac6a4993491fc68cb7"
+    },
+    {
+      "file": "cloudscheduler.viewer.json",
+      "name": "roles/cloudscheduler.viewer",
+      "sha256": "bcebf9a3c721b97cfd57943a0dc8be4fa2b3db0a9b060c5660a05d565264d755"
+    },
+    {
+      "file": "cloudscheduler.serviceAgent.json",
+      "name": "roles/cloudscheduler.serviceAgent",
+      "sha256": "03ed1cc5c4e6db3c1b7a667eeb289a9d8c270c86303836778fa6e0db50e4eef2"
     },
     {
       "file": "cloudsql.admin.json",

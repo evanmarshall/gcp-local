@@ -29,18 +29,19 @@ import (
 const cloudPlatform = "https://www.googleapis.com/auth/cloud-platform"
 
 var workflows = map[string]func(context.Context, *env) error{
-	"bigquery":      runBigQuery,
-	"bigtable":      runBigtable,
-	"cloudkms":      runKMS,
-	"cloudtasks":    runTasks,
-	"firestore":     runFirestore,
-	"iam":           runIAM,
-	"logging":       runLogging,
-	"pubsub":        runPubSub,
-	"run":           runCloudRun,
-	"secretmanager": runSecretManager,
-	"spanner":       runSpanner,
-	"storage":       runStorage,
+	"bigquery":       runBigQuery,
+	"bigtable":       runBigtable,
+	"cloudkms":       runKMS,
+	"cloudscheduler": runScheduler,
+	"cloudtasks":     runTasks,
+	"firestore":      runFirestore,
+	"iam":            runIAM,
+	"logging":        runLogging,
+	"pubsub":         runPubSub,
+	"run":            runCloudRun,
+	"secretmanager":  runSecretManager,
+	"spanner":        runSpanner,
+	"storage":        runStorage,
 }
 
 func main() {

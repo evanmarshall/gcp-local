@@ -23,6 +23,7 @@ What each service supports and how it is verified. Every service authenticates c
 | `secretmanager` | [Secret Manager](secretmanager.md) | gcp-local | 15 | 36 | Yes: secret versions and payload access over REST and gRPC; gRPC not recorded | secretmanager-access-lifecycle | TestAccSecretManagerSecretAndVersion |
 | `cloudkms` | [Cloud KMS](cloudkms.md) | gcp-local | 26 | 87 | Yes: symmetric encrypt and decrypt; asymmetric sign, HMAC, and (modeled locally) asymmetric decrypt | cloudkms-symmetric-key-lifecycle, cloudkms-asymmetric-mac-keys | TestAccKMSKeyRingCryptoKey |
 | `cloudtasks` | [Cloud Tasks](cloudtasks.md) | gcp-local | 16 | 24 | Yes: HTTP-target dispatch with OIDC and retries; tasks created over REST (v2beta3) or gRPC (v2); gRPC not recorded | cloudtasks-dispatch-retry | TestAccCloudTasksQueueLifecycle |
+| `cloudscheduler` | [Cloud Scheduler](scheduler.md) | gcp-local | 8 | 16 | Yes: cron jobs in any time zone that call HTTP targets (OIDC or OAuth) or publish to Pub/Sub as the service agent, with retries; HTTP delivery and retries not recorded | cloudscheduler-job-lifecycle | TestAccCloudSchedulerJob |
 | `logging` | [Cloud Logging](logging.md) | gcp-local | 4 | 254 | Yes: write, filter, page, and delete log entries | logging-entries-lifecycle | none |
 | `artifactregistry` | [Artifact Registry](artifactregistry.md) | gcp-local | 7 | 69 | No: repositories only; no image push or pull | artifactregistry-repository-lifecycle | TestAccArtifactRegistryRepository |
 | `iam` | [IAM service accounts](serviceaccounts.md) | gcp-local | 12 | 137 | Partial: accounts, policies, keys and `signBlob` that sign Storage URLs; keys mint no tokens; keys and `signBlob` not recorded | serviceaccount-lifecycle-authorization | TestAccServiceAccount |
@@ -33,7 +34,7 @@ What each service supports and how it is verified. Every service authenticates c
 
 Notes on counts:
 
-- API totals use these discovery documents: storage v1, pubsub v1, firestore v1, spanner v1, bigtableadmin v2 plus bigtable v2, sqladmin v1beta4, redis v1, bigquery v2, secretmanager v1, cloudkms v1, cloudtasks v2beta3, artifactregistry v1, iam v1, cloudresourcemanager v1, compute v1 plus networkmanagement v1, run v2, logging v2, aiplatform v1.
+- API totals use these discovery documents: storage v1, pubsub v1, firestore v1, spanner v1, bigtableadmin v2 plus bigtable v2, sqladmin v1beta4, redis v1, bigquery v2, secretmanager v1, cloudkms v1, cloudtasks v2beta3, cloudscheduler v1, artifactregistry v1, iam v1, cloudresourcemanager v1, compute v1 plus networkmanagement v1, run v2, logging v2, aiplatform v1.
 - Pub/Sub counts gRPC methods. 28 REST routes serve topic and subscription create, get, list, delete, and IAM policy, publish, pull, acknowledge, and modifyAckDeadline, and all 12 `projects.schemas` methods; StreamingPull, snapshots, and seek are gRPC only.
 - Spanner: 21 admin and 15 data-plane session methods. All 21 admin methods are also served over gRPC (`google.spanner.admin.instance.v1.InstanceAdmin`, `google.spanner.admin.database.v1.DatabaseAdmin`, and `google.longrunning.Operations` GetOperation for Spanner operation names).
 - Bigtable: 17 admin methods (bigtableadmin v2) and 7 data methods (bigtable v2, gRPC). 16 admin methods are also served over gRPC (`google.bigtable.admin.v2`); instance update is REST only.
@@ -42,6 +43,7 @@ Notes on counts:
 - IAM counts `signBlob` from IAM Service Account Credentials v1 with the 11 IAM v1 methods. 10 of the IAM v1 methods are also served over gRPC `google.iam.admin.v1.IAM`; key create and `signBlob` are REST only.
 - Secret Manager also serves 14 of its 15 methods over gRPC `google.cloud.secretmanager.v1`; locations list is REST only.
 - Cloud Tasks also serves 15 of its 16 methods over gRPC `google.cloud.tasks.v2`; locations list is REST only. REST is v2beta3.
+- Cloud Scheduler serves its 8 job methods over REST and gRPC `google.cloud.scheduler.v1.CloudScheduler`.
 - Cloud KMS serves 25 of its 26 methods over gRPC as well; only the location list is REST only ([transport](cloudkms.md#transport)).
 - Cloud Run serves its 13 methods over both REST and gRPC (`google.cloud.run.v2.Services`, `google.cloud.run.v2.Revisions`, and `google.longrunning.Operations` for Cloud Run operation names).
 
@@ -74,6 +76,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | secretmanager | Go `cloud.google.com/go/secretmanager` 1.22.0 | gRPC | `internal/providers/secretmanager/client_test.go` |
 | cloudtasks | Python `google-cloud-tasks` 2.26.0 (`tasks_v2`) | gRPC | `internal/providers/cloudtasks/testdata/sdk.py` |
 | cloudtasks | Go `cloud.google.com/go/cloudtasks` 1.20.0 (`apiv2`) | gRPC | `internal/providers/cloudtasks/client_test.go` |
+| cloudscheduler | Go `cloud.google.com/go/scheduler` 1.17.0 (`apiv1`) | gRPC | `internal/providers/cloudscheduler/client_test.go` |
 | run | Go `cloud.google.com/go/run/apiv2` 1.23.0 | gRPC | `internal/providers/run/grpc_test.go` |
 | run | Python `google-cloud-run` 0.16.1 | gRPC | `internal/providers/run/testdata/sdk.py` |
 | vertexai | Python `google-genai` 2.29.0 | REST | `internal/providers/vertexai/testdata/sdk.py` |
@@ -96,6 +99,9 @@ A recording proves only the requests it sends. This table lists the real clients
 | cloudtasks | Go `cloud.google.com/go/cloudtasks` 1.20.0 | gRPC | `tests/clients/go` |
 | cloudtasks | Python `google-cloud-tasks` 2.26.0 | gRPC | `tests/clients/python` |
 | cloudtasks | Node `@google-cloud/tasks` 7.2.1 | gRPC | `tests/clients/node` |
+| cloudscheduler | Go `cloud.google.com/go/scheduler` 1.17.0 | gRPC | `tests/clients/go` |
+| cloudscheduler | Python `google-cloud-scheduler` 2.20.0 | gRPC | `tests/clients/python` |
+| cloudscheduler | Node `@google-cloud/scheduler` 6.1.0 | gRPC | `tests/clients/node` |
 | run | Go `cloud.google.com/go/run` 1.23.0 | gRPC | `tests/clients/go` |
 | run | Python `google-cloud-run` 0.16.1 | gRPC | `tests/clients/python` |
 | bigquery | Go `cloud.google.com/go/bigquery` 1.85.0 | REST | `tests/clients/go` |
@@ -140,4 +146,4 @@ Untested: Java clients, `gsutil`, the Node.js and gcloud clients of Cloud Run, a
 
 ## Not integrated
 
-Cloud Functions, GKE, Dataflow, Workflows, Eventarc, Cloud Scheduler, Monitoring, and Datastore mode have no provider. Requests to them get no route.
+Cloud Functions, GKE, Dataflow, Workflows, Eventarc, Monitoring, and Datastore mode have no provider. Requests to them get no route.

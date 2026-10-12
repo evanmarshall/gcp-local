@@ -10,16 +10,19 @@ require (
 	cloud.google.com/go/cloudtasks v1.20.0
 	cloud.google.com/go/firestore v1.22.0
 	cloud.google.com/go/iam v1.11.0
+	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.18.0
 	cloud.google.com/go/longrunning v1.2.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/run v1.23.0
+	cloud.google.com/go/scheduler v1.17.0
 	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/spanner v1.95.1
 	cloud.google.com/go/storage v1.65.0
 	github.com/bufbuild/protocompile v0.14.1
 	github.com/fsouza/fake-gcs-server v1.56.1
 	github.com/google/cel-go v0.26.1
+	github.com/robfig/cron/v3 v3.0.1
 	google.golang.org/api v0.293.0
 	google.golang.org/genproto v0.0.0-20260519071638-aa98bba5eb94
 	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800
@@ -33,7 +36,6 @@ require (
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
-	cloud.google.com/go/kms v1.35.0 // indirect
 	cloud.google.com/go/monitoring v1.29.0 // indirect
 	github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.34.0 // indirect

@@ -65,7 +65,7 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 	for _, rpc := range generated.PubSubMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
-	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods, generated.CloudKMSMethods,
+	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods, generated.CloudSchedulerMethods, generated.CloudKMSMethods,
 		generated.RunServicesMethods, generated.RunRevisionsMethods, generated.OperationsMethods,
 		generated.SpannerInstanceAdminMethods, generated.SpannerDatabaseAdminMethods,
 		generated.BigtableInstanceAdminMethods, generated.BigtableTableAdminMethods, generated.IAMAdminMethods} {
@@ -89,7 +89,7 @@ func (g *Gateway) addTranscoding() {
 	for _, rpc := range append(append([]generated.RPC(nil), generated.IAMMethods...), generated.OperationsMethods...) {
 		g.shared[rpc.Method] = true
 	}
-	for _, table := range [][]generated.Transcoding{generated.SecretManagerTranscoding, generated.CloudTasksTranscoding, generated.CloudKMSTranscoding,
+	for _, table := range [][]generated.Transcoding{generated.SecretManagerTranscoding, generated.CloudTasksTranscoding, generated.CloudSchedulerTranscoding, generated.CloudKMSTranscoding,
 		generated.RunServicesTranscoding, generated.RunRevisionsTranscoding,
 		generated.SpannerInstanceAdminTranscoding, generated.SpannerDatabaseAdminTranscoding,
 		generated.BigtableInstanceAdminTranscoding, generated.BigtableTableAdminTranscoding, generated.IAMAdminTranscoding} {
@@ -134,6 +134,7 @@ func contracts() []generated.Route {
 	routes = append(routes, generated.ResourceManagerRoutes...)
 	routes = append(routes, generated.IAMRoutes...)
 	routes = append(routes, generated.CloudTasksRoutes...)
+	routes = append(routes, generated.CloudSchedulerRoutes...)
 	routes = append(routes, generated.CloudSQLRoutes...)
 	routes = append(routes, generated.PubSubRestRoutes...)
 	routes = append(routes, generated.PubSubSchemaRestRoutes...)

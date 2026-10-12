@@ -64,7 +64,7 @@ IAM checks the token's scopes before policy, as GCP does: when no scope covers e
 | `bigtable.data.readonly`, `cloud-bigtable.data.readonly` | Bigtable row reads and sample keys |
 | `openid`, `email`, `userinfo.email`, `userinfo.profile`, `sqlservice.login` | Nothing (identity and Cloud SQL database login) |
 
-The read-only scopes are approximated by permission verb, so a read the API accepts under them but whose permission is not `get` or `list` (a BigQuery query, for example) is refused. Secret Manager, Cloud Tasks, Cloud Run, Artifact Registry, Memorystore, Vertex AI, and Resource Manager accept only `cloud-platform` (and, for reads, `cloud-platform.read-only`).
+The read-only scopes are approximated by permission verb, so a read the API accepts under them but whose permission is not `get` or `list` (a BigQuery query, for example) is refused. Secret Manager, Cloud Tasks, Cloud Scheduler, Cloud Run, Artifact Registry, Memorystore, Vertex AI, and Resource Manager accept only `cloud-platform` (and, for reads, `cloud-platform.read-only`).
 
 ## Workload metadata
 

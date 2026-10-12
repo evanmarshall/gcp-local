@@ -55,6 +55,7 @@ SERVICE_PROBES = [
     ("cloudkms", "GET", "/v1/projects/{project}/locations/us-central1/keyRings"),
     ("secretmanager", "GET", "/v1/projects/{project}/secrets"),
     ("cloudtasks", "GET", "/v2beta3/projects/{project}/locations/us-central1/queues"),
+    ("cloudscheduler", "GET", "/v1/projects/{project}/locations/us-central1/jobs"),
     ("artifactregistry", "GET", "/v1/projects/{project}/locations/us-central1/repositories"),
     ("iam", "GET", "/v1/projects/{project}/serviceAccounts"),
     ("resourcemanager", "POST", "/v1/projects/{project}:getIamPolicy"),

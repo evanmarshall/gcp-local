@@ -70,6 +70,7 @@ var (
 	errScopeRequired     = errors.New("at least one oauth scope is required")
 	errIssueToken        = errors.New("unable to issue token")
 	errTokenCapacity     = errors.New("local token capacity reached")
+	errImpersonated      = errors.New("access tokens are issued only for an enrolled service account")
 )
 
 type Service struct {
@@ -209,6 +210,19 @@ func grantedScopes(p principal, requested []string) ([]string, error) {
 	scopes := slices.Clone(requested)
 	slices.Sort(scopes)
 	return slices.Compact(scopes), nil
+}
+
+// Impersonate issues an access token for an enrolled service account. It is
+// an internal provider operation, never an HTTP endpoint, and it does not
+// authorize: the calling provider must first authorize its service agent for
+// iam.serviceAccounts.getAccessToken on the account with the IAM engine.
+func (s *Service) Impersonate(subject string, scopes []string) (string, error) {
+	p, ok := s.principals[subject]
+	if !ok || !strings.HasPrefix(subject, "serviceAccount:") {
+		return "", errImpersonated
+	}
+	token, _, err := s.mint(p, scopes)
+	return token, err
 }
 
 func (s *Service) mint(p principal, requested []string) (string, int, error) {

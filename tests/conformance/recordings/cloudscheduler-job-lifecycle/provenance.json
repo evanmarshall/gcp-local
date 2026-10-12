@@ -1,0 +1,49 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T07:28:50.780123+00:00",
+  "scenario": {
+    "id": "cloudscheduler-job-lifecycle",
+    "service": "cloudscheduler",
+    "transport": "rest-v1",
+    "revision": "3d5960673e8afbf4cc7b35f0e67a7353f32ef9c134936ba403bc502dd0482872",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "5b2bd87da37c99dfa59e8c8e1bf36e4aae4ce62b3c6195c64831a949f651dd88",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/cloudscheduler.py": "730ec2f4e43378dbc96376a98a3db9f48c04522b8a01ca4894b70fe1900fe5c8",
+      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
+      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "tests/conformance/cloudscheduler/conftest.py": "84e4e581b409962db54a0ceb3910f05b79a510f569db33395d4d5f11294f6665"
+    },
+    "scope": {
+      "services": [
+        "cloudscheduler"
+      ],
+      "location": "global",
+      "limits": {
+        "max_jobs": 8,
+        "max_topics": 1,
+        "max_runs": 2,
+        "max_run_seconds": 900
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

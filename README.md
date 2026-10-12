@@ -56,6 +56,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Secret Manager](docs/secretmanager.md) | gcp-local | Secret versions and access over REST and gRPC |
 | [Cloud KMS](docs/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt, asymmetric sign and decrypt, HMAC over REST and gRPC |
 | [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries over REST and gRPC |
+| [Cloud Scheduler](docs/scheduler.md) | gcp-local | Cron jobs that call HTTP targets or publish to Pub/Sub, over REST and gRPC |
 | [Cloud Logging](docs/logging.md) | gcp-local | Write, filter, and delete log entries over REST and gRPC |
 | [Vertex AI](docs/vertexai.md) | Deterministic stub or Ollama | Generate, stream, count tokens, embed; answers are not from Gemini |
 | [Firestore](docs/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners |

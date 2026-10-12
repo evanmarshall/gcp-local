@@ -12,6 +12,7 @@ import {Logging} from '@google-cloud/logging';
 import {PubSub} from '@google-cloud/pubsub';
 import {SecretManagerServiceClient} from '@google-cloud/secret-manager';
 import {Spanner} from '@google-cloud/spanner';
+import {CloudSchedulerClient} from '@google-cloud/scheduler';
 import {Storage} from '@google-cloud/storage';
 import {CloudTasksClient} from '@google-cloud/tasks';
 import {iam} from '@googleapis/iam';
@@ -191,6 +192,26 @@ async function cloudtasks() {
   await client.deleteQueue({name: queue.name});
 }
 
+// A yearly HTTP job: it never runs, so its unreachable target is never called.
+async function cloudscheduler() {
+  const client = new CloudSchedulerClient(grpcOptions(owner));
+  const location = `projects/${project}/locations/us-central1`;
+  const [job] = await client.createJob({parent: location, job: {
+    name: `${location}/jobs/node-matrix`, schedule: '0 0 1 1 *', timeZone: 'America/New_York',
+    httpTarget: {uri: 'http://127.0.0.1:9/job', httpMethod: 'POST', body: Buffer.from('hello from node')},
+  }});
+  const [got] = await client.getJob({name: job.name});
+  assert.equal(got.state, 'ENABLED', 'get job');
+  const [jobs] = await client.listJobs({parent: location});
+  assert.ok(jobs.some(j => j.name === job.name), 'list jobs');
+  const [paused] = await client.pauseJob({name: job.name});
+  assert.equal(paused.state, 'PAUSED', 'pause job');
+  await client.resumeJob({name: job.name});
+  const other = new CloudSchedulerClient(grpcOptions(denied));
+  await expectDenied('ungranted run job', () => other.runJob({name: job.name}));
+  await client.deleteJob({name: job.name});
+}
+
 async function spanner() {
   // Built-in metrics would export to monitoring.googleapis.com; nothing may leave loopback.
   const client = new Spanner({...grpcOptions(owner), disableBuiltInMetrics: true});
@@ -266,7 +287,7 @@ async function iamService() {
   await client.projects.serviceAccounts.delete({name: resource});
 }
 
-const workflows = {bigquery, bigtable, cloudkms, cloudtasks, firestore, iam: iamService, logging, pubsub, secretmanager, spanner, storage};
+const workflows = {bigquery, bigtable, cloudkms, cloudscheduler, cloudtasks, firestore, iam: iamService, logging, pubsub, secretmanager, spanner, storage};
 const service = process.argv[2];
 if (!workflows[service]) {
   console.error(`usage: node run.mjs SERVICE; services: ${Object.keys(workflows).join(', ')}`);

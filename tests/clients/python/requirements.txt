@@ -4,6 +4,7 @@ google-cloud-bigquery==3.46.1
 google-cloud-bigtable==2.50.0
 google-cloud-iam==2.26.0
 google-cloud-monitoring==2.32.0
+google-cloud-scheduler==2.20.0
 google-cloud-spanner==3.71.0
 grpc-interceptor==0.15.4
 mmh3==5.3.1

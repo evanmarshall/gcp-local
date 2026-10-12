@@ -193,6 +193,27 @@
       "expect": "pass"
     },
     {
+      "service": "cloudscheduler",
+      "client": "go",
+      "package": "cloud.google.com/go/scheduler",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "cloudscheduler",
+      "client": "node",
+      "package": "@google-cloud/scheduler",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "cloudscheduler",
+      "client": "python",
+      "package": "google-cloud-scheduler",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
       "service": "cloudtasks",
       "client": "go",
       "package": "cloud.google.com/go/cloudtasks",

@@ -17,6 +17,7 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/run/apiv2/runpb"
+	"cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
@@ -42,6 +43,7 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	loggingpb.RegisterLoggingServiceV2Server(server, &generated.LoggingServiceV2Server{Dispatch: g})
 	secretmanagerpb.RegisterSecretManagerServiceServer(server, &generated.SecretManagerServiceServer{Dispatch: g})
 	cloudtaskspb.RegisterCloudTasksServer(server, &generated.CloudTasksServer{Dispatch: g})
+	schedulerpb.RegisterCloudSchedulerServer(server, &generated.CloudSchedulerServer{Dispatch: g})
 	kmspb.RegisterKeyManagementServiceServer(server, &generated.KeyManagementServiceServer{Dispatch: g})
 	runpb.RegisterServicesServer(server, &generated.ServicesServer{Dispatch: g})
 	runpb.RegisterRevisionsServer(server, &generated.RevisionsServer{Dispatch: g})

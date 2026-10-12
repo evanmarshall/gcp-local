@@ -42,10 +42,14 @@ def test_generated_state_grants_every_service_and_terraform_adc(initialized):
     assert value["project_number"] == bootstrap.project_number("synthetic-project")
     iam = json.loads((directory / "iam.json").read_text())
     assert iam["resources"][0]["number"] == value["project_number"]
-    bindings = next(iter(iam["policies"].values()))["bindings"]
+    *bindings, agent = next(iter(iam["policies"].values()))["bindings"]
     assert [binding["role"] for binding in bindings] == bootstrap.DEVELOPER_ROLES
     developer = "serviceAccount:developer@synthetic-project.iam.gserviceaccount.com"
     assert all(binding["members"] == [developer] for binding in bindings)
+    # GCP grants the Cloud Scheduler service agent its role when the API is enabled.
+    number = value["project_number"]
+    scheduler = f"serviceAccount:service-{number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+    assert agent == {"role": "roles/cloudscheduler.serviceAgent", "members": [scheduler]}
     server = json.loads((directory / "identity/server.json").read_text())
     assert [p["subject"] for p in server["principals"]] == [
         developer,

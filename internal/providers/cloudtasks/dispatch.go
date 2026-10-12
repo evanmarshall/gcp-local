@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 )
@@ -213,7 +214,7 @@ func (p *Provider) send(ctx context.Context, scope state.Scope, record taskRecor
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		return codes.OK, "", true
 	}
-	return httpCode(response.StatusCode), http.StatusText(response.StatusCode), true
+	return provider.HTTPCode(response.StatusCode), http.StatusText(response.StatusCode), true
 }
 
 // dispatchHeaders builds the delivered headers, minting the OIDC token as
@@ -235,22 +236,4 @@ func (p *Provider) dispatchHeaders(ctx context.Context, scope state.Scope, recor
 		}
 	}
 	return headers
-}
-
-// httpStatusCodes is the documented HTTP-to-RPC mapping of target responses.
-var httpStatusCodes = map[int]codes.Code{
-	400: codes.InvalidArgument, 401: codes.Unauthenticated, 403: codes.PermissionDenied,
-	404: codes.NotFound, 409: codes.Aborted, 416: codes.OutOfRange, 429: codes.ResourceExhausted,
-	499: codes.Canceled, 501: codes.Unimplemented, 503: codes.Unavailable, 504: codes.DeadlineExceeded,
-}
-
-// httpCode maps a non-2xx target status to its RPC code.
-func httpCode(statusCode int) codes.Code {
-	if code, ok := httpStatusCodes[statusCode]; ok {
-		return code
-	}
-	if statusCode >= 400 && statusCode < 500 {
-		return codes.FailedPrecondition
-	}
-	return codes.Internal
 }

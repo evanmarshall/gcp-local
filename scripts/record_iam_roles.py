@@ -62,6 +62,10 @@ ROLES = {
     "cloudsql": ("cloudsql.admin", "cloudsql.editor", "cloudsql.viewer", "cloudsql.client"),
     "aiplatform": ("aiplatform.user", "aiplatform.viewer"),
     "logging": ("logging.admin", "logging.logWriter", "logging.viewer"),
+    "cloudscheduler": (
+        "cloudscheduler.admin", "cloudscheduler.jobRunner", "cloudscheduler.viewer",
+        "cloudscheduler.serviceAgent",
+    ),
 }
 
 

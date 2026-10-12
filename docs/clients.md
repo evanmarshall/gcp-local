@@ -15,7 +15,7 @@ Set `GOOGLE_APPLICATION_CREDENTIALS` to the local `adc.json` and `GOOGLE_CLOUD_P
 | rclone | `endpoint = http://127.0.0.1:4566/storage/v1/` and `env_auth = true` | None |
 
 - gcloud drives Pub/Sub over REST: topic and subscription create, list, describe, delete, IAM policy, `topics publish`, `subscriptions pull` (with `--auto-ack`), and `subscriptions modify-message-ack-deadline` work. Snapshots and seek are gRPC only ([Pub/Sub](pubsub.md#methods)).
-- gRPC is served for Pub/Sub, Firestore, Secret Manager, Cloud Tasks v2, Cloud KMS, Cloud Run v2, Spanner and Bigtable (data and admin), IAM service accounts (`google.iam.admin.v1`), and Logging.
+- gRPC is served for Pub/Sub, Firestore, Secret Manager, Cloud Tasks v2, Cloud Scheduler v1, Cloud KMS, Cloud Run v2, Spanner and Bigtable (data and admin), IAM service accounts (`google.iam.admin.v1`), and Logging.
 - Keep the client's default credential loading and scopes: the token service issues Google's published service scopes, and IAM refuses a call no scope covers ([OAuth scopes](local-identity.md#oauth-scopes)). The REST runners and the handwritten Python gRPC clients load ADC this way. Prebuilt gRPC channel credentials bypass the client's credential loading, so the Go and Node.js runners request `cloud-platform` for them and the Python generated clients the transport's default scopes.
 - Turn off client metrics exporters, which would call `monitoring.googleapis.com`: Go Spanner `DisableNativeMetrics`, Go Bigtable `NoopMetricsProvider`, Python Spanner `disable_builtin_metrics`, Node Spanner `disableBuiltInMetrics`, Node Bigtable `metricsEnabled: false`.
 

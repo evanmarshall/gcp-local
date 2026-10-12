@@ -1,0 +1,32 @@
+{
+  "description": "Full access to jobs and executions.",
+  "etag": "AA==",
+  "includedPermissions": [
+    "appengine.applications.get",
+    "cloudscheduler.jobs.create",
+    "cloudscheduler.jobs.delete",
+    "cloudscheduler.jobs.enable",
+    "cloudscheduler.jobs.fullView",
+    "cloudscheduler.jobs.get",
+    "cloudscheduler.jobs.list",
+    "cloudscheduler.jobs.pause",
+    "cloudscheduler.jobs.run",
+    "cloudscheduler.jobs.update",
+    "cloudscheduler.locations.get",
+    "cloudscheduler.locations.list",
+    "resourcemanager.projects.get",
+    "resourcemanager.projects.list",
+    "serviceusage.consumerpolicy.analyze",
+    "serviceusage.consumerpolicy.get",
+    "serviceusage.effectivepolicy.get",
+    "serviceusage.groups.list",
+    "serviceusage.groups.listExpandedMembers",
+    "serviceusage.groups.listMembers",
+    "serviceusage.services.get",
+    "serviceusage.services.list",
+    "serviceusage.values.test"
+  ],
+  "name": "roles/cloudscheduler.admin",
+  "stage": "GA",
+  "title": "Cloud Scheduler Admin"
+}

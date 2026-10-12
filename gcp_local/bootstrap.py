@@ -30,6 +30,7 @@ SERVICES = [
     "bigquery",
     "bigtable",
     "cloudkms",
+    "cloudscheduler",
     "cloudsql",
     "cloudtasks",
     "compute",
@@ -59,6 +60,7 @@ DEVELOPER_ROLES = [
     "roles/bigquery.jobUser",
     "roles/bigtable.admin",
     "roles/cloudkms.admin",
+    "roles/cloudscheduler.admin",
     "roles/cloudsql.admin",
     "roles/cloudkms.cryptoKeyEncrypterDecrypter",
     "roles/cloudtasks.admin",
@@ -235,8 +237,13 @@ def write_identity(
 
 
 def write_iam(path: Path, project: str, number: str, principal: str) -> None:
-    """Write the bootstrap project resource and the developer's explicit grants."""
+    """Write the bootstrap project resource and the developer's explicit grants.
+
+    The project's Cloud Scheduler service agent also gets the role GCP grants
+    it when the API is enabled; job deliveries publish and mint tokens as it.
+    """
     resource = "//cloudresourcemanager.googleapis.com/projects/" + project
+    agent = f"serviceAccount:service-{number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
     private_json(
         path,
         {
@@ -251,7 +258,10 @@ def write_iam(path: Path, project: str, number: str, principal: str) -> None:
             ],
             "policies": {
                 resource: {
-                    "bindings": [{"role": role, "members": [principal]} for role in DEVELOPER_ROLES]
+                    "bindings": [
+                        *({"role": role, "members": [principal]} for role in DEVELOPER_ROLES),
+                        {"role": "roles/cloudscheduler.serviceAgent", "members": [agent]},
+                    ]
                 }
             },
         },

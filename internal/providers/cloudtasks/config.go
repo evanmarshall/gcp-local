@@ -112,19 +112,7 @@ func (r retryPolicy) exhausted(dispatches int) bool {
 }
 
 // backoff is the documented retry interval after the given number of failed
-// attempts: minBackoff doubles maxDoublings times, then grows linearly, capped
-// at maxBackoff.
+// attempts.
 func (r retryPolicy) backoff(failures int) time.Duration {
-	interval := r.MinBackoff
-	step := failures - 1
-	for i := 0; i < step && i < r.MaxDoublings && interval < r.MaxBackoff; i++ {
-		interval *= 2
-	}
-	if linear := step - r.MaxDoublings; linear > 0 && interval > 0 && interval < r.MaxBackoff {
-		if int64(linear) >= int64(r.MaxBackoff/interval) {
-			return r.MaxBackoff
-		}
-		interval += interval * time.Duration(linear)
-	}
-	return min(interval, r.MaxBackoff)
+	return provider.Backoff(r.MinBackoff, r.MaxBackoff, r.MaxDoublings, failures)
 }
