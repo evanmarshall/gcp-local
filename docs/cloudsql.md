@@ -72,7 +72,7 @@ A connector is a loopback TCP listener bound at startup to one connection name a
 
 ## Roles
 
-The permission plans need `roles/cloudsql.admin`, `roles/cloudsql.editor`, `roles/cloudsql.viewer`, and `roles/cloudsql.client`. They are listed in `scripts/record_iam_roles.py` (`--service cloudsql`) but **not yet recorded**; snapshots are never hand-written. Until they are recorded into `internal/iam/roles`, `cloudsql.New` refuses with `ErrRolesUnrecorded` (so `-services cloudsql` fails at startup), and the provider's unit and integration tests skip. The implementation was exercised locally with temporary, uncommitted candidate role files; that run is not evidence of the real roles' contents. After recording, rerun the checks below.
+The permission plans use `roles/cloudsql.admin`, `roles/cloudsql.editor`, `roles/cloudsql.viewer`, and `roles/cloudsql.client`, recorded from Google Cloud into `internal/iam/roles` with `scripts/record_iam_roles.py --service cloudsql`.
 
 ## Platforms and installation
 
@@ -87,7 +87,7 @@ The installer ignores ambient proxies, verifies each artifact's size and SHA-256
 ## Verification
 
 ```sh
-sh scripts/check_cloudsql.sh   # real PostgreSQL, loopback-only runner; skips until roles are recorded
+sh scripts/check_cloudsql.sh   # real PostgreSQL, loopback-only runner
 ```
 
 `check_cloudsql.sh` drives real servers: a denied insert starts no backend, real databases/roles, SQL through the authorized connector as a created user, `28P01` for a wrong password, refusal of a principal without `cloudsql.instances.connect`, the same SQL, `28P01`, and `cloudsqladmin` refusal on the published public-IP port, project isolation with a POSTGRES_15 peer instance, reset closing an open session, the published port, and the server's data, and delete closing a public-IP session and port. Unit tests cover port allocation, exhaustion (429), and reuse, authorization before backend start, patch/settings-version/deletion-protection behavior, operations, isolation, reset, connector refusal paths, and the SCRAM client against the RFC 7677 vector.

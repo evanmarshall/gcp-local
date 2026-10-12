@@ -2,7 +2,7 @@
 
 The Memorystore provider serves a slice of the Redis v1 REST control plane at `/v1/projects/{project}/locations/{region}/...` (select it with `-services=...,redis`). Each instance is backed by its own real **Redis 7.2.16** server, built from the official source release pinned in [toolchains/redis.json](../toolchains/redis.json). The provider authenticates and authorizes every call with the shared IAM engine before any backend start, probe, or change.
 
-**Status: locally modeled, not cloud-recorded, and not yet runnable with the production IAM engine.** The predefined `roles/redis.admin`, `roles/redis.editor`, and `roles/redis.viewer` snapshots have not been recorded from GCP. Until they are, `gcp-local -services redis` fails at startup (`memorystore permission plans need the recorded roles/redis.* snapshots`) rather than serving requests without authorization. Unit and integration tests use a test authorizer with the documented role permissions; they do not establish IAM fidelity.
+**Status:** the control plane is cloud-recorded (`memorystore-redis-instance-admin`, below). The IAM engine uses `roles/redis.admin`, `roles/redis.editor`, and `roles/redis.viewer` recorded from Google Cloud.
 
 ## Surface
 
@@ -82,17 +82,15 @@ sh scripts/go.sh test -race ./internal/providers/memorystore   # fake driver and
 sh scripts/check_redis.sh                                       # real redis-server, loopback-only runner
 ```
 
-Unit tests cover authorization before any backend start (denied, viewer, and anonymous callers start nothing), the create/get/list/patch/delete/getAuthString/operations lifecycle and wire shapes, validation and explicit gaps, project and region isolation, reset clearing only its scope, compensation when publication or launch fails, pagination, and the production dependency on recorded roles. `TestProductionPlansNeedRecordedRoles` asserts that, without the snapshots, registration with the real IAM engine fails closed. After the snapshots are committed, it instead requires registration to succeed.
+Unit tests cover authorization before any backend start (denied, viewer, and anonymous callers start nothing), the create/get/list/patch/delete/getAuthString/operations lifecycle and wire shapes, validation and explicit gaps, project and region isolation, reset clearing only its scope, compensation when publication or launch fails, pagination, and the production dependency on recorded roles. `TestProductionPlansNeedRecordedRoles` requires registration with the real IAM engine and the recorded roles to succeed.
 
 `check_redis.sh` runs `TestRealRedisLifecycle` and `TestRealRedisPublishedPort` against the real server with network access limited to loopback. A denied create starts no backend. On the AUTH-enabled instance, `NOAUTH` and `WRONGPASS` are enforced, and `SET`/`GET` succeed after `AUTH` with the string from `getAuthString`. `CONFIG`, `SHUTDOWN`, `ACL`, `CLIENT`, and `BGSAVE` return `NOPERM`. An AUTH-disabled instance answers without credentials. A memory patch changes the server's `maxmemory` and keeps the data. Delete closes the port. Reset closes the selected scope's ports while another project's server keeps answering. Through a published range, the API reports the range's first port, AUTH is enforced the same way, a full range returns 429 without creating the instance, delete ends an open session and closes the port, and reset closes the rest.
 
-The `memorystore-redis-instance-admin` scenario ([gcp_validation/memorystore.py](../gcp_validation/memorystore.py)) is written for a later authorized recording. It creates one labeled Basic Tier 1 GB `REDIS_7_2` instance in `us-central1` with AUTH enabled, and enforces limits of one instance, 1 GB, and 2,400 s. The run writes an owner-only manifest before creating the instance, and cleanup deletes only that labeled instance and waits for a 404. The scenario records shapes only: never the AUTH string, private host, or port. It has **not** been run against GCP. Without a committed recording it reports `unverified`, so it is not yet part of `check_rest_recordings.sh`.
+The `memorystore-redis-instance-admin` scenario ([gcp_validation/memorystore.py](../gcp_validation/memorystore.py)) is written for a later authorized recording. It creates one labeled Basic Tier 1 GB `REDIS_7_2` instance in `us-central1` with AUTH enabled, and enforces limits of one instance, 1 GB, and 2,400 s. The run writes an owner-only manifest before creating the instance, and cleanup deletes only that labeled instance and waits for a 404. The scenario records shapes only: never the AUTH string, private host, or port. The recording is described below.
 
-## Before claiming parity
+## Gaps
 
-1. Record `roles/redis.admin`, `roles/redis.editor`, and `roles/redis.viewer` with `scripts/record_iam_roles.py --service redis` (the owner's authorized, read-only step) and merge them into `internal/iam/roles/manifest.json`.
-2. Grant `roles/redis.admin` to the fixture identity in `tools/storage-conformance`, record the scenario under an approved live scope, and add `tests/conformance/memorystore` to `check_rest_recordings.sh`.
-3. Add a pinned `google_redis_instance` Terraform acceptance case.
+- No pinned `google_redis_instance` Terraform acceptance case.
 
 ## Recorded scenario
 
