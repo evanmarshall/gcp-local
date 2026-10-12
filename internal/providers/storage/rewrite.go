@@ -20,7 +20,7 @@ import (
 
 // copiedFields are the source object fields a rewrite carries to its
 // destination unless the request body replaces them.
-var copiedFields = []string{keyContentType, "metadata", keyCacheControl, keyDisposition, keyLanguage}
+var copiedFields = []string{keyContentType, keyMetadata, keyCacheControl, keyDisposition, keyLanguage}
 
 // rewriteRequest is one validated objects.rewrite call.
 type rewriteRequest struct {

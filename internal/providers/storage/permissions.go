@@ -25,6 +25,7 @@ func RegisterPermissions(engine *iam.Engine) error {
 		MethodObjectsList:         {Baseline: []string{MethodObjectsList}},
 		MethodObjectsGet:          {Baseline: []string{MethodObjectsGet}},
 		MethodObjectsDelete:       {Baseline: []string{MethodObjectsDelete}},
+		MethodObjectsPatch:        {Baseline: []string{permissionObjectsUpdate}},
 		MethodObjectsInsert:       {Baseline: []string{"storage.objects.create"}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
 	}
 	for method, rule := range rules {

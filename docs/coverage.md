@@ -12,7 +12,7 @@ What each service supports and how it is verified. Every service authenticates c
 
 | Key | Service | Backend | Methods served | API total | Data plane for applications | Recordings | Terraform |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 16 | 88 | Yes: object read, write, list, delete, resumable uploads, V4 signed URLs, rewrite; resumable, signed URLs, rewrite, and XML paths not recorded | storage-authorization, storage-bucket-updates, storage-cross-project, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
+| `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 17 | 88 | Yes: object read, write, list, delete, metadata patch, resumable uploads, V4 signed URLs, rewrite; rewrite and XML paths other than signed URLs not recorded | storage-authorization, storage-bucket-updates, storage-cross-project, storage-go-client-projection, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk, storage-resumable-signed-url | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
 | `pubsub` | [Pub/Sub](pubsub.md) | Official emulator | 18 | 46 | Yes: publish, pull, streaming pull, push; ordering, filters, dead-letter topics, retry backoff, exactly-once, snapshots and seek modeled locally, not recorded | pubsub-pull-authorization | TestAccPubSubTopicAndSubscription |
 | `firestore` | [Firestore](firestore.md) | Official emulator | 16 | 60 | Yes: documents, subcollections, queries, aggregations, transactions, batch writes, listeners over REST and gRPC; batch writes and listeners not recorded | firestore-document-lifecycle, firestore-query-transaction | TestAccFirestoreDocument |
 | `spanner` | [Spanner](spanner.md) | Official emulator | 36 | 99 | Yes: sessions, SQL queries, DML, reads, mutations, transactions over gRPC (unary methods also over REST) | spanner-instance-database-admin, spanner-data-plane-rest | TestAccSpannerInstanceAndDatabase |
@@ -52,7 +52,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | --- | --- | --- | --- |
 | storage | Python `google-cloud-storage` 3.10.1 | JSON REST | `tests/conformance/test_storage_sdk.py` |
 | storage | Python `google-cloud-storage` 3.10.1: resumable upload, V4 signed URLs | JSON REST, XML | `scripts/smoke_storage.py` |
-| storage | Go `cloud.google.com/go/storage` 1.65.0, default settings: bucket and object CRUD, resumable upload, XML reads, copy, signed URLs | JSON REST, XML | `internal/providers/storage/sdk_test.go` |
+| storage | Go `cloud.google.com/go/storage` 1.65.0, default settings: bucket and object CRUD, object metadata `Update`, resumable upload, XML reads, copy, signed URLs | JSON REST, XML | `internal/providers/storage/sdk_test.go` |
 | pubsub | Python `google-cloud-pubsub` 2.42.0 | gRPC | `internal/providers/pubsub/testdata/sdk.py` |
 | pubsub (ordering, `resume_publish`, dead-letter, filters, exactly-once) | Python `google-cloud-pubsub` 2.42.0 | gRPC | `internal/providers/pubsub/testdata/sdk_delivery.py` |
 | firestore | Python `google-cloud-firestore` 2.34.1 | gRPC | `internal/providers/firestore/testdata/sdk.py` |

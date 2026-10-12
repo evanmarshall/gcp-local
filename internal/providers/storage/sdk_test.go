@@ -18,6 +18,7 @@ import (
 
 	gcs "cloud.google.com/go/storage"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -92,6 +93,7 @@ func goObjectLifecycle(t *testing.T, bucket *gcs.BucketHandle) {
 		t.Fatal(err)
 	}
 	goObjectReads(t, bucket, handle)
+	goObjectUpdate(t, handle)
 	if got := readAll(t, handle); string(got) != "small object" {
 		t.Fatalf("read = %q", got)
 	}
@@ -113,6 +115,23 @@ func goObjectReads(t *testing.T, bucket *gcs.BucketHandle, handle *gcs.ObjectHan
 	}
 	if listed, err := bucket.Objects(ctx, nil).Next(); err != nil || listed.Name != "dir/small.txt" {
 		t.Fatalf("object list = %+v, %v", listed, err)
+	}
+}
+
+// goObjectUpdate patches the object's metadata with ObjectHandle.Update under
+// a metageneration condition, which then no longer holds.
+func goObjectUpdate(t *testing.T, handle *gcs.ObjectHandle) {
+	t.Helper()
+	ctx := context.Background()
+	conditional := handle.If(gcs.Conditions{MetagenerationMatch: 1})
+	update := gcs.ObjectAttrsToUpdate{ContentType: "text/markdown", CacheControl: "no-cache", Metadata: map[string]string{"k": "v"}}
+	updated, err := conditional.Update(ctx, update)
+	if err != nil || updated.ContentType != "text/markdown" || updated.CacheControl != "no-cache" || updated.Metadata["k"] != "v" || updated.Metageneration != 2 {
+		t.Fatalf("update = %+v, %v", updated, err)
+	}
+	var failed *googleapi.Error
+	if _, err := conditional.Update(ctx, update); !errors.As(err, &failed) || failed.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale update: %v", err)
 	}
 }
 

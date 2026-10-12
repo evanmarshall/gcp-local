@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/api/generated"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -58,6 +59,7 @@ var queryOptions = map[string][]string{
 	MethodObjectsInsert:       {queryUploadType, keyName, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsGet:          {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsDelete:       {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsPatch:        {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	// Rewrite preconditions apply to the destination. maxBytesRewrittenPerCall
 	// is accepted and not enforced: every rewrite here finishes in one call.
 	MethodObjectsRewrite: {"sourceGeneration", "maxBytesRewrittenPerCall", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
@@ -76,8 +78,17 @@ var defaultOnlyOptions = map[string]map[string]string{
 // universalQueryOptions apply to every method.
 var universalQueryOptions = []string{"prettyPrint", "fields", queryAlt, "projection"}
 
+// validateQuery checks a request's options and headers. An option Google's
+// API does not define for the method is dropped, as GCP ignores it (recorded:
+// storage-go-client-projection "unknown-option"), so it never reaches the
+// backend. A defined option this emulator does not serve, such as
+// userProject, stays an explicit gap.
 func validateQuery(method string, r *gateway.RESTRequest) error {
 	for key, values := range r.Query {
+		if !definedOption(method, key) {
+			r.Query.Del(key)
+			continue
+		}
 		if err := validateOption(method, key, values); err != nil {
 			return err
 		}
@@ -110,6 +121,21 @@ func validateOption(method, key string, values []string) error {
 		return gap("unsupported query option " + key)
 	}
 	return nil
+}
+
+// credentialOptions are system parameters GCP honors on every method though
+// discovery does not list them. access_token carries a credential, so it is
+// refused rather than ignored: ignoring it would answer as a different caller
+// than GCP does.
+var credentialOptions = []string{"access_token"}
+
+// definedOption reports whether the Storage discovery document defines key
+// for method, or this provider serves it.
+func definedOption(method, key string) bool {
+	return slices.Contains(generated.StorageQueryParameters[method], key) ||
+		slices.Contains(generated.StorageGlobalParameters, key) ||
+		slices.Contains(credentialOptions, key) ||
+		slices.Contains(universalQueryOptions, key) || slices.Contains(queryOptions[method], key)
 }
 
 // validateQueryValues rejects option values this emulator does not implement.
@@ -292,7 +318,7 @@ func readMediaPart(reader *multipart.Reader) error {
 // supportedUploadFields lists the metadata keys a multipart upload may carry.
 var supportedUploadFields = map[string]bool{
 	keyName: true, keyBucket: true, "storageClass": true, keyContentType: true,
-	"metadata": true, "md5Hash": true, "crc32c": true, keyCacheControl: true,
+	keyMetadata: true, "md5Hash": true, "crc32c": true, keyCacheControl: true,
 	keyDisposition: true, keyLanguage: true,
 }
 

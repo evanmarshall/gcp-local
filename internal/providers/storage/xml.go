@@ -137,7 +137,7 @@ func xmlUpload(r *gateway.RESTRequest, name string) (*uploadRequest, *gateway.RE
 		if err != nil {
 			return nil, nil, status.Error(codes.InvalidArgument, "Invalid x-goog-meta- headers")
 		}
-		metadata["metadata"] = encoded
+		metadata[keyMetadata] = encoded
 	}
 	upload, err := multipartUpload(name, metadata, data)
 	return upload, nil, err

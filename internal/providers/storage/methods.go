@@ -24,6 +24,7 @@ const (
 	MethodObjectsGet          = "storage.objects.get"
 	MethodObjectsDelete       = "storage.objects.delete"
 	MethodObjectsRewrite      = "storage.objects.rewrite"
+	MethodObjectsPatch        = "storage.objects.patch"
 	// MethodXMLGet and MethodXMLPut are the XML API object methods; they
 	// authorize as objects.get and objects.insert.
 	MethodXMLGet = "storage.xml.objects.get"
@@ -43,6 +44,7 @@ const (
 	permissionObjectsDelete       = "storage.objects.delete"
 	permissionObjectsGet          = "storage.objects.get"
 	permissionObjectsList         = "storage.objects.list"
+	permissionObjectsUpdate       = "storage.objects.update"
 )
 
 // Query and payload literals that repeat across validation and dispatch.
@@ -57,6 +59,7 @@ const (
 	keyDisposition        = "contentDisposition"
 	keyContentType        = "contentType"
 	keyLanguage           = "contentLanguage"
+	keyMetadata           = "metadata"
 	queryAlt              = "alt"
 	queryUploadType       = "uploadType"
 	valueFalse            = "false"

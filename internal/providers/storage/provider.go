@@ -41,7 +41,7 @@ var registeredMethods = []string{
 	MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy,
 	MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete,
 	MethodFoldersInsert, MethodFoldersGet, MethodFoldersList, MethodFoldersDelete,
-	MethodXMLGet, MethodXMLPut, MethodObjectsRewrite,
+	MethodXMLGet, MethodXMLPut, MethodObjectsRewrite, MethodObjectsPatch,
 }
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
@@ -430,7 +430,7 @@ func objectPath(bucket, object string) string {
 
 // decodeBackendJSON re-materializes an upstream JSON payload as the response
 // body, stripping the upstream's pagination links and quoting its etag.
-func decodeBackendJSON(payload []byte, response *gateway.RESTResponse) {
+func (b *memoryBackend) decodeBackendJSON(payload []byte, response *gateway.RESTResponse) {
 	var value map[string]any
 	if len(payload) > 0 && json.Unmarshal(payload, &value) != nil {
 		response.JSON = map[string]any{}
@@ -442,7 +442,7 @@ func decodeBackendJSON(payload []byte, response *gateway.RESTResponse) {
 		return
 	}
 	response.JSON = value
-	removeBackendLinks(value)
+	b.removeBackendLinks(value)
 	// Real GCS reports rpo only for multi-region and dual-region buckets;
 	// the recorded single-region snapshot carries rpo null. The fake backend
 	// echoes the create body, so null the field here: the Terraform provider
@@ -482,17 +482,29 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 	response := &gateway.RESTResponse{Status: result.StatusCode, Headers: result.Header.Clone()}
 	response.Headers.Del("Content-Length")
 	if strings.Contains(result.Header.Get(headerContentType), "application/json") && (result.StatusCode >= 300 || query.Get(queryAlt) != altMedia) {
-		decodeBackendJSON(payload, response)
+		b.decodeBackendJSON(payload, response)
 		return response, nil
 	}
 	response.Body = bytes.NewReader(payload)
 	// Media is read whole, so its length is known; the Go client checks it.
 	response.Headers.Set("Content-Length", strconv.Itoa(len(payload)))
 	if generation := response.Headers.Get("X-Goog-Generation"); generation != "" {
-		response.Headers.Set("ETag", `"`+objectETag(generation, "1")+`"`)
-		response.Headers.Set("X-Goog-Metageneration", "1")
+		bucket, name := objectOfPath(path)
+		metageneration := b.metageneration(bucket, name, generation)
+		response.Headers.Set("ETag", `"`+objectETag(generation, metageneration)+`"`)
+		response.Headers.Set("X-Goog-Metageneration", metageneration)
 	}
 	return response, nil
+}
+
+// objectOfPath reads the bucket and object of a backend object path built by
+// objectPath.
+func objectOfPath(path string) (string, string) {
+	rest, _ := strings.CutPrefix(path, "/storage/v1/b/")
+	bucket, object, _ := strings.Cut(rest, "/o/")
+	bucket, _ = url.PathUnescape(bucket)
+	object, _ = url.PathUnescape(object)
+	return bucket, object
 }
 
 // readBackendPayload reads a backend body, refusing one over maxBackendPayload.
@@ -509,19 +521,24 @@ func readBackendPayload(body io.Reader) ([]byte, error) {
 
 // Upstream links use its private origin; serve republishes them at the
 // emulator's origin with publishLinks.
-func removeBackendLinks(value map[string]any) {
+func (b *memoryBackend) removeBackendLinks(value map[string]any) {
 	delete(value, "mediaLink")
 	delete(value, "selfLink")
 	delete(value, "acl")
 	delete(value, "defaultObjectAcl")
 	if generation, ok := value[keyGeneration].(string); ok {
+		if value["kind"] == "storage#object" {
+			bucket, _ := value[keyBucket].(string)
+			name, _ := value[keyName].(string)
+			value["metageneration"] = b.metageneration(bucket, name, generation)
+		}
 		metageneration, _ := value["metageneration"].(string)
 		value["etag"] = objectETag(generation, metageneration)
 	}
 	if items, ok := value["items"].([]any); ok {
 		for _, item := range items {
 			if object, ok := item.(map[string]any); ok {
-				removeBackendLinks(object)
+				b.removeBackendLinks(object)
 			}
 		}
 	}
@@ -542,6 +559,8 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, c
 	switch req.call.Method {
 	case MethodBucketsInsert:
 		return p.createBucket(ctx, b, req.rest, req.scope)
+	case MethodObjectsPatch:
+		return patchObject(ctx, b, req)
 	case MethodBucketsPatch:
 		return p.patchBucket(ctx, b, req.rest, req.scope, req.bucket)
 	case MethodBucketsGetIamPolicy:

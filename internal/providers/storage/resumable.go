@@ -41,6 +41,9 @@ type uploadSession struct {
 	// result is the committed object, returned again to a repeated final request.
 	result any
 	closed bool
+	// cancelled marks a session ended by DELETE. It stays in the catalog so
+	// later requests get GCP's 499, not the 404 of an unknown session.
+	cancelled bool
 }
 
 const uploadIDHeader = "X-GUploader-UploadID"
@@ -88,6 +91,10 @@ func (p *Provider) continueUpload(call gateway.Call, r *gateway.RESTRequest) (*g
 		}
 		session.mu.Lock()
 		defer session.mu.Unlock()
+		if session.cancelled {
+			response = uploadCancelled()
+			return nil
+		}
 		if session.closed {
 			response = uploadMissing()
 			return nil
@@ -103,9 +110,14 @@ func (p *Provider) continueUpload(call gateway.Call, r *gateway.RESTRequest) (*g
 	return response, nil
 }
 
-// validateSessionQuery accepts only a session URI's own options.
+// validateSessionQuery accepts only a session URI's own options. As on every
+// JSON API method, an option discovery does not define for objects.insert is
+// ignored.
 func validateSessionQuery(query url.Values) error {
 	for key, values := range query {
+		if !sessionQuery[key] && !definedOption(MethodObjectsInsert, key) {
+			continue
+		}
 		if !sessionQuery[key] && !slices.Contains(universalQueryOptions, key) {
 			return gap("unsupported query option " + key)
 		}
@@ -123,12 +135,18 @@ func uploadMissing() *gateway.RESTResponse {
 	return wireError(404, "notFound", "No such upload session")
 }
 
+// uploadCancelled answers a cancel and every later request to that session
+// with GCP's 499 Client Closed Request (recorded: storage-resumable-signed-url
+// "cancel" and "after-cancel").
+func uploadCancelled() *gateway.RESTResponse {
+	return &gateway.RESTResponse{Status: 499}
+}
+
 // applyUpload cancels, reports, extends, or commits one session.
 func (p *Provider) applyUpload(call gateway.Call, driver backend.Backend, r *gateway.RESTRequest, scope state.Scope, id string, session *uploadSession) (*gateway.RESTResponse, error) {
 	if r.Verb == http.MethodDelete {
-		p.closeUpload(scope, id, session)
-		// GCP answers a cancelled session with 499 Client Closed Request.
-		return &gateway.RESTResponse{Status: 499}, nil
+		session.closed, session.cancelled, session.data = true, true, nil
+		return uploadCancelled(), nil
 	}
 	if session.result != nil {
 		return &gateway.RESTResponse{JSON: session.result}, nil

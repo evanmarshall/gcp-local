@@ -118,10 +118,12 @@ func TestResumableSingleRequestAndCancel(t *testing.T) {
 	f := setup(t)
 	f.bucket(testProject, "big-bucket", 200)
 	single := f.startSession(admin, "big-bucket", "&name=single.txt", "", nil, 200)
-	f.session("", "PUT", single, nil, []byte("one shot"), 200)
+	// A session URI ignores an option discovery does not define, as GCP does.
+	f.session("", "PUT", single+"&unsupportedOption=true", nil, []byte("one shot"), 200)
 	cancelled := f.startSession(admin, "big-bucket", "&name=cancelled.txt", "", nil, 200)
 	f.session("", "DELETE", cancelled, nil, nil, 499)
-	f.session("", "PUT", cancelled, nil, []byte("late"), 404)
+	f.session("", "PUT", cancelled, nil, []byte("late"), 499)
+	f.session("", "DELETE", cancelled, nil, nil, 499)
 	f.request(admin, "GET", "/storage/v1/b/big-bucket/o/cancelled.txt", nil, 404)
 }
 
