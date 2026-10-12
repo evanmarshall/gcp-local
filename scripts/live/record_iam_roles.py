@@ -57,6 +57,7 @@ ROLES = {
     "serviceaccounts": (
         "iam.serviceAccountAdmin", "iam.serviceAccountKeyAdmin", "iam.serviceAccountViewer",
     ),
+    "customroles": ("iam.roleAdmin", "iam.roleViewer"),
     "resourcemanager": ("resourcemanager.projectIamAdmin",),
     "redis": ("redis.admin", "redis.editor", "redis.viewer"),
     "cloudsql": ("cloudsql.admin", "cloudsql.editor", "cloudsql.viewer", "cloudsql.client"),
@@ -77,6 +78,7 @@ ROLE_DIRS = {
     "bigtable": "databases/bigtable",
     "cloudkms": "security/cloudkms",
     "cloudsql": "databases/cloudsql",
+    "cloudscheduler": "messaging/cloudscheduler",
     "cloudtasks": "messaging/cloudtasks",
     "compute": "compute",
     "datastore": "databases/firestore",
@@ -91,6 +93,39 @@ ROLE_DIRS = {
     "spanner": "databases/spanner",
     "storage": "storage",
 }
+
+
+# Custom-role permission validity: every permission testable on the sandbox
+# project, grouped by customRolesSupportLevel (absent means SUPPORTED).
+PERMISSIONS_FILE = "testable-permissions.json"
+
+
+def testable_permissions(args: argparse.Namespace) -> dict:
+    """Record the project's testable permissions and return their manifest entry."""
+    raw = subprocess.check_output(
+        [
+            GCLOUD,
+            "iam",
+            "list-testable-permissions",
+            "//cloudresourcemanager.googleapis.com/projects/" + args.quota_project,
+            "--account=" + args.account,
+            "--billing-project=" + args.quota_project,
+            "--format=json",
+        ]
+    )
+    levels: dict[str, list[str]] = {"SUPPORTED": [], "TESTING": [], "NOT_SUPPORTED": []}
+    for permission in json.loads(raw):
+        levels[permission.get("customRolesSupportLevel", "SUPPORTED")].append(permission["name"])
+    if not levels["SUPPORTED"]:
+        raise SystemExit("Unexpected testable-permissions response; candidate is incomplete")
+    value = {
+        "source": "https://iam.googleapis.com/v1/permissions:queryTestablePermissions",
+        "resource": "//cloudresourcemanager.googleapis.com/projects/{project}",
+        "customRolesSupportLevel": {level: sorted(names) for level, names in levels.items()},
+    }
+    encoded = (json.dumps(value, indent=0) + "\n").encode()
+    (args.output / PERMISSIONS_FILE).write_bytes(encoded)
+    return {"file": PERMISSIONS_FILE, "sha256": hashlib.sha256(encoded).hexdigest()}
 
 
 def main() -> None:
@@ -132,10 +167,11 @@ def main() -> None:
         )
     manifest = {
         "source": "https://iam.googleapis.com/v1/roles/{role}",
+        "permissions": testable_permissions(args),
         "recorded_at": datetime.now(UTC).isoformat(),
         "scope": "Read-only predefined "
         + ", ".join(services)
-        + " role definitions; no resource mutation or grant",
+        + " role definitions and the project's testable permissions; no resource mutation or grant",
         "roles": files,
     }
     (args.output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

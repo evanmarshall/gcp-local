@@ -1,7 +1,11 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
-  "recorded_at": "2026-10-12T07:13:52.668566+00:00",
-  "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudscheduler, cloudsql, cloudtasks, compute, firestore, identity, kms, logging, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
+  "permissions": {
+    "file": "testable-permissions.json",
+    "sha256": "3bcff8021676cde6e50a256036eb8ea34cd531ac1eea6670b684d753b8337a73"
+  },
+  "recorded_at": "2026-10-12T23:15:44.542318+00:00",
+  "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudscheduler, cloudsql, cloudtasks, compute, customroles, firestore, identity, kms, logging, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions and the project's testable permissions; no resource mutation or grant",
   "roles": [
     {
       "file": "vertexai/aiplatform.user.json",
@@ -137,6 +141,16 @@
       "file": "compute/compute.viewer.json",
       "name": "roles/compute.viewer",
       "sha256": "9c4cc90423e20f8bebd6a89c26ac002bb983aeb5880f352d1f2a41dc9e6dd449"
+    },
+    {
+      "file": "security/iam/iam.roleAdmin.json",
+      "name": "roles/iam.roleAdmin",
+      "sha256": "71958ecf8e65d2a5180ea077a2e4f39a9ab3031d6e6a5dd0e3179e801c7bec12"
+    },
+    {
+      "file": "security/iam/iam.roleViewer.json",
+      "name": "roles/iam.roleViewer",
+      "sha256": "dbcf5ec94dc8092be1e3863ab98859926f209a753363ba15f5e0407147882a21"
     },
     {
       "file": "databases/firestore/datastore.indexAdmin.json",

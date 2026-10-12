@@ -21,6 +21,7 @@ type Provider struct {
 	index  *state.Index
 	engine *iam.Engine
 	scopes *state.Store[scopeState]
+	roles  *roles
 	clock  func() time.Time
 }
 
@@ -37,6 +38,11 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
+	roles, err := registerRoles(registry, engine, func() time.Time { return p.clock() })
+	if err != nil {
+		return nil, err
+	}
+	p.roles = roles
 	if err := p.registerBackend(manager, engine, index); err != nil {
 		return nil, err
 	}
@@ -55,6 +61,9 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 		New:      provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
+				return err
+			}
+			if err := p.roles.reset(scope); err != nil {
 				return err
 			}
 			engine.ClearScope(serviceName, scope)

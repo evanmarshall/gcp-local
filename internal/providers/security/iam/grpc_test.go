@@ -154,12 +154,57 @@ func TestGapsOverGRPC(t *testing.T) {
 	signBlob := conn.Invoke(ctx, "/google.iam.admin.v1.IAM/SignBlob", &adminpb.GetServiceAccountRequest{Name: name}, &adminpb.SignBlobResponse{})
 	_, update := client.UpdateServiceAccount(ctx, &adminpb.ServiceAccount{Name: name})
 	_, testPermissions := client.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: name})
-	// ListRoles has no resource variable on its primary binding.
+	// ListRoles of predefined roles has no resource variable on its binding.
 	_, listRoles := client.ListRoles(ctx, &adminpb.ListRolesRequest{})
 	for method, err := range map[string]error{
 		"CreateServiceAccountKey": createKey, "SignBlob": signBlob, "UpdateServiceAccount": update,
 		"TestIamPermissions": testPermissions, "ListRoles": listRoles,
 	} {
 		refused(t, method, err, codes.Unimplemented, "No provider implements /google.iam.admin.v1.IAM/"+method)
+	}
+}
+
+// TestRolesOverGRPC drives the custom-role RPCs through their project
+// bindings and GetRole through the predefined binding.
+func TestRolesOverGRPC(t *testing.T) {
+	h, _ := roleHarness(t)
+	client := adminpb.NewIAMClient(h.serveGRPC(testToken)[0])
+	ctx := context.Background()
+	parent := "projects/" + testProject
+	created, err := client.CreateRole(ctx, &adminpb.CreateRoleRequest{Parent: parent, RoleId: testRoleID,
+		Role: &adminpb.Role{Title: "App reader", IncludedPermissions: []string{accountGet}, Stage: adminpb.Role_GA}})
+	if err != nil || created.GetName() != testRoleName || created.GetStage() != adminpb.Role_GA {
+		t.Fatalf("create = %v, %v", created, err)
+	}
+	listed, err := client.ListRoles(ctx, &adminpb.ListRolesRequest{Parent: parent, View: adminpb.RoleView_FULL})
+	if err != nil || len(listed.GetRoles()) != 1 || len(listed.GetRoles()[0].GetIncludedPermissions()) != 1 {
+		t.Fatalf("list = %v, %v", listed, err)
+	}
+	updated, err := client.UpdateRole(ctx, &adminpb.UpdateRoleRequest{Name: testRoleName, Role: &adminpb.Role{Title: "renamed"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"title"}}})
+	if err != nil || updated.GetTitle() != "renamed" || len(updated.GetIncludedPermissions()) != 1 {
+		t.Fatalf("update = %v, %v", updated, err)
+	}
+	roleLifecycleOverGRPC(t, client)
+	_, err = client.GetRole(ctx, &adminpb.GetRoleRequest{Name: parent + "/roles/" + testRoleID + "/extra"})
+	refused(t, "malformed name", err, codes.InvalidArgument, "Malformed resource name")
+}
+
+// roleLifecycleOverGRPC deletes and undeletes the test role and reads it and
+// a predefined role.
+func roleLifecycleOverGRPC(t *testing.T, client adminpb.IAMClient) {
+	t.Helper()
+	ctx := context.Background()
+	if deleted, err := client.DeleteRole(ctx, &adminpb.DeleteRoleRequest{Name: testRoleName}); err != nil || !deleted.GetDeleted() {
+		t.Fatalf("delete = %v, %v", deleted, err)
+	}
+	if restored, err := client.UndeleteRole(ctx, &adminpb.UndeleteRoleRequest{Name: testRoleName}); err != nil || restored.GetDeleted() {
+		t.Fatalf("undelete = %v, %v", restored, err)
+	}
+	if got, err := client.GetRole(ctx, &adminpb.GetRoleRequest{Name: testRoleName}); err != nil || len(got.GetEtag()) == 0 {
+		t.Fatalf("get = %v, %v", got, err)
+	}
+	if viewer, err := client.GetRole(ctx, &adminpb.GetRoleRequest{Name: "roles/iam.roleViewer"}); err != nil || len(viewer.GetIncludedPermissions()) == 0 {
+		t.Fatalf("predefined get = %v, %v", viewer, err)
 	}
 }

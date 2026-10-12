@@ -1,0 +1,350 @@
+{
+  "iam-custom-role-lifecycle": {
+    "recorded-date": "12-10-2026, 23:30:22",
+    "recorded-content": {
+      "role-created": {
+        "deleted": null,
+        "description": "gcp-local conformance run <run>",
+        "fields": [
+          "description",
+          "etag",
+          "includedPermissions",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "includedPermissions": [
+          "iam.serviceAccounts.get"
+        ],
+        "name": "projects/<project>/roles/<role>",
+        "stage": "GA",
+        "title": "gcp-local conformance"
+      },
+      "role-read": {
+        "deleted": null,
+        "description": "gcp-local conformance run <run>",
+        "fields": [
+          "description",
+          "etag",
+          "includedPermissions",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "includedPermissions": [
+          "iam.serviceAccounts.get"
+        ],
+        "name": "projects/<project>/roles/<role>",
+        "stage": "GA",
+        "title": "gcp-local conformance"
+      },
+      "role-listed": {
+        "deleted": null,
+        "fields": [
+          "description",
+          "etag",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "present": true
+      },
+      "role-listed-full": {
+        "deleted": null,
+        "fields": [
+          "description",
+          "etag",
+          "includedPermissions",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "present": true
+      },
+      "duplicate-create": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "denied-create": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "read-with-view": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "not-deleted-undelete": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "unknown-permission": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "unsupported-permission": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "above-project-permission": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "invalid-role-id": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "invalid-stage": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "allowed-before-grant": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "role-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "projects/<project>/roles/<role>"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "allowed-read": {
+        "email": "<account>",
+        "fields": [
+          "description",
+          "displayName",
+          "email",
+          "etag",
+          "name",
+          "oauth2ClientId",
+          "projectId",
+          "uniqueId"
+        ],
+        "http_status": 200
+      },
+      "role-deleted": {
+        "deleted": true,
+        "description": "gcp-local conformance run <run>",
+        "fields": [
+          "deleted",
+          "description",
+          "etag",
+          "includedPermissions",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "includedPermissions": [
+          "iam.serviceAccounts.get"
+        ],
+        "name": "projects/<project>/roles/<role>",
+        "stage": "GA",
+        "title": "gcp-local conformance"
+      },
+      "allowed-after-delete": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "deleted-read": {
+        "deleted": true,
+        "description": "gcp-local conformance run <run>",
+        "fields": [
+          "deleted",
+          "description",
+          "etag",
+          "includedPermissions",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "includedPermissions": [
+          "iam.serviceAccounts.get"
+        ],
+        "name": "projects/<project>/roles/<role>",
+        "stage": "GA",
+        "title": "gcp-local conformance"
+      },
+      "deleted-listed": {
+        "http_status": 200,
+        "present": false
+      },
+      "deleted-listed-shown": {
+        "deleted": true,
+        "fields": [
+          "deleted",
+          "description",
+          "etag",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "present": true
+      },
+      "deleted-delete": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "deleted-patch": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "deleted-id-create": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "role-undeleted": {
+        "deleted": null,
+        "description": "gcp-local conformance run <run>",
+        "fields": [
+          "description",
+          "etag",
+          "includedPermissions",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "includedPermissions": [
+          "iam.serviceAccounts.get"
+        ],
+        "name": "projects/<project>/roles/<role>",
+        "stage": "GA",
+        "title": "gcp-local conformance"
+      },
+      "allowed-after-undelete": {
+        "email": "<account>",
+        "fields": [
+          "description",
+          "displayName",
+          "email",
+          "etag",
+          "name",
+          "oauth2ClientId",
+          "projectId",
+          "uniqueId"
+        ],
+        "http_status": 200
+      },
+      "stale-etag-patch": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ABORTED"
+      },
+      "role-patched": {
+        "deleted": null,
+        "description": "gcp-local conformance run <run>",
+        "fields": [
+          "description",
+          "etag",
+          "includedPermissions",
+          "name",
+          "stage",
+          "title"
+        ],
+        "http_status": 200,
+        "includedPermissions": [
+          "iam.serviceAccounts.list"
+        ],
+        "name": "projects/<project>/roles/<role>",
+        "stage": "GA",
+        "title": "gcp-local conformance"
+      },
+      "allowed-after-patch": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "policy-with-deleted-role": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "projects/<project>/roles/<role>"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "deleted-role-rewritten": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "projects/<project>/roles/<role>"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "deleted-role-new-member": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "missing-role": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "other-project-role": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "malformed-role": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "cleanup": {
+        "account_absent": true,
+        "role_inactive": true
+      }
+    }
+  }
+}

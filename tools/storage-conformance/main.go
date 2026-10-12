@@ -104,6 +104,7 @@ func main() {
 			{Role: "roles/resourcemanager.projectIamAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountKeyAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/iam.roleAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/aiplatform.user", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/logging.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})

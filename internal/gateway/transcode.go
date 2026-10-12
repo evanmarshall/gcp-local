@@ -62,7 +62,10 @@ func (g *Gateway) transcodingFor(method string, request proto.Message) (contract
 		if len(bindings) == 0 {
 			return contract.Transcoding{}, false, nil
 		}
-		return bindings[0], true, nil
+		if len(bindings) == 1 {
+			return bindings[0], true, nil
+		}
+		return g.ownBinding(method, bindings, request)
 	}
 	// A request without a resource keeps the RPC's own dispatch, which
 	// refuses it.
@@ -83,6 +86,24 @@ func (g *Gateway) transcodingFor(method string, request proto.Message) (contract
 		}
 	}
 	return contract.Transcoding{}, false, nil
+}
+
+// ownBinding picks among one RPC's own bindings by resource, such as IAM
+// GetRole for roles/*, organizations/*/roles/*, or projects/*/roles/*. An
+// empty resource names a binding without a resource variable (ListRoles of
+// predefined roles), which is a coverage gap; any other unmatched name is
+// malformed.
+func (g *Gateway) ownBinding(method string, bindings []contract.Transcoding, request proto.Message) (contract.Transcoding, bool, error) {
+	resource, _ := requestResource(request, g.rpcs[method].ResourceField)
+	for _, binding := range bindings {
+		if bindResource(&Call{}, resource, bindingPattern(binding)) == nil {
+			return binding, true, nil
+		}
+	}
+	if resource == "" {
+		return contract.Transcoding{}, false, gap(method)
+	}
+	return contract.Transcoding{}, false, status.Error(codes.InvalidArgument, "Malformed resource name")
 }
 
 // requestResource reads a request's resource selector field.

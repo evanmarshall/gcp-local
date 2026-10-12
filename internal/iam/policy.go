@@ -110,13 +110,17 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 		return Policy{}, status.Error(codes.InvalidArgument, "A principal access boundary binds only to a project, folder, or organization principal set")
 	}
 	e.mu.Lock()
-	directory := e.directory
+	directory, lookup := e.directory, e.customRoles
+	previous := emptyPolicy()
+	if stored, ok := e.policies[resource]; ok {
+		previous = clonePolicy(stored.policy)
+	}
 	e.mu.Unlock()
 	denies, err := e.compileDenies(policy.DenyRules, directory)
 	if err != nil {
 		return Policy{}, err
 	}
-	conditions, err := e.compileBindings(policy.Bindings, directory)
+	conditions, err := e.compileBindings(policy.Bindings, directory, roleContext{resource: resource, previous: previous, lookup: lookup})
 	if err != nil {
 		return Policy{}, err
 	}
@@ -247,9 +251,17 @@ func (e *Engine) denyPermissions(permissions []string) ([]string, error) {
 	return converted, nil
 }
 
+// roleContext is what role validation reads: the policy's resource, its
+// stored policy, and the custom-role lookup.
+type roleContext struct {
+	resource string
+	previous Policy
+	lookup   CustomRoleLookup
+}
+
 // compileBindings validates each binding in order and compiles its condition.
 // Guards are keyed by the binding's own position in the policy.
-func (e *Engine) compileBindings(bindings []Binding, directory directory) ([]conditionGuard, error) {
+func (e *Engine) compileBindings(bindings []Binding, directory directory, roles roleContext) ([]conditionGuard, error) {
 	var guards []conditionGuard
 	for index, binding := range bindings {
 		if len(binding.Condition) > 0 {
@@ -259,8 +271,8 @@ func (e *Engine) compileBindings(bindings []Binding, directory directory) ([]con
 			}
 			guards = append(guards, conditionGuard{bindingIndex: index, condition: condition})
 		}
-		if _, ok := e.roles[binding.Role]; !ok {
-			return nil, status.Error(codes.Unimplemented, "Role is outside the pinned supported role set")
+		if err := e.checkRole(binding, roles); err != nil {
+			return nil, err
 		}
 		if err := validateMembers(binding.Members, directory); err != nil {
 			return nil, err
@@ -394,6 +406,39 @@ func (e *Engine) RetireMember(member, uniqueID string) {
 		}
 	}
 }
+
+// RetireRole removes every binding of a permanently deleted custom role, as
+// GCP does once the role's deletion is final, so a role later created with
+// the same ID inherits none of them. Condition guards follow their bindings.
+func (e *Engine) RetireRole(role string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for name, stored := range e.policies {
+		kept := make([]Binding, 0, len(stored.policy.Bindings))
+		var guards []conditionGuard
+		for index, binding := range stored.policy.Bindings {
+			if binding.Role == role {
+				continue
+			}
+			for _, guard := range stored.conditions {
+				if guard.bindingIndex == index {
+					guards = append(guards, conditionGuard{bindingIndex: len(kept), condition: guard.condition})
+				}
+			}
+			kept = append(kept, binding)
+		}
+		if len(kept) == len(stored.policy.Bindings) {
+			continue
+		}
+		e.revision++
+		stored.policy = clonePolicy(stored.policy)
+		stored.policy.Bindings = kept
+		stored.policy.ETag = base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(e.revision, 10)))
+		stored.conditions = guards
+		e.policies[name] = stored
+	}
+}
+
 func (e *Engine) ClearScope(owner string, scope state.Scope) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -26,10 +26,11 @@ const (
 
 // harness drives the provider through the gateway.
 type harness struct {
-	t      *testing.T
-	gate   *gateway.Gateway
-	engine *iam.Engine
-	index  *state.Index
+	t        *testing.T
+	gate     *gateway.Gateway
+	engine   *iam.Engine
+	index    *state.Index
+	provider *Provider
 }
 
 func newHarness(t *testing.T) *harness {
@@ -55,14 +56,14 @@ func newHarness(t *testing.T) *harness {
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)
 	}
-	_, err = New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine)
+	p, err := New(context.Background(), registry, backend.NewManager(time.Second, time.Second), index, engine)
 	if err != nil {
 		t.Fatalf("build the provider: %v", err)
 	}
 	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, engine: engine, index: index}
+	return &harness{t: t, gate: g, engine: engine, index: index, provider: p}
 }
 
 // expect issues one REST request and fails the test unless it returns want.
@@ -78,6 +79,12 @@ func (h *harness) expect(verb, path string, body any, want int) *httptest.Respon
 // invoke issues one REST request as the fixture principal.
 func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
 	h.t.Helper()
+	return h.invokeAs(testToken, verb, path, body)
+}
+
+// invokeAs issues one REST request as the principal a token names.
+func (h *harness) invokeAs(token, verb, path string, body any) *httptest.ResponseRecorder {
+	h.t.Helper()
 	var encoded []byte
 	if body != nil {
 		var err error
@@ -89,7 +96,7 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Authorization", "Bearer "+testToken)
+	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
 	h.gate.ServeHTTP(recorder, request)
 	return recorder

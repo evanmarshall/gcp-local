@@ -29,10 +29,12 @@ type GRPCDispatch interface {
 }
 
 // Transcoding pairs one gRPC method with the REST route whose provider method
-// serves it. Verb, Path, and Body come from the method's primary
-// google.api.http binding; Field is the JSON name of the top-level request
-// field the path binds; Body is "*", "", or a JSON field name. Unserved lists
-// the resource patterns of the method's other bindings, which no route serves.
+// serves it. Verb, Path, and Body come from one google.api.http binding,
+// usually the primary one; a method with several served bindings (IAM roles
+// under organizations and projects) has one row per binding. Field is the
+// JSON name of the top-level request field the path binds; Body is "*", "",
+// or a JSON field name. Unserved lists the resource patterns of the method's
+// other bindings, which no route serves.
 type Transcoding struct {
 	RPC, REST, Verb, Path, Field, Body string
 	Unserved                           []string

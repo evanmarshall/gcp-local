@@ -3,6 +3,7 @@ package iam
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -80,6 +81,9 @@ type Engine struct {
 	mu          sync.Mutex
 	index       *state.Index
 	roles       map[string]map[string]bool
+	definitions map[string]json.RawMessage
+	testable    map[string]string
+	customRoles CustomRoleLookup
 	rules       map[string]Rule
 	policies    map[string]storedPolicy
 	unsupported map[string]unsupportedPolicy
@@ -125,11 +129,11 @@ func New(index *state.Index) (*Engine, error) {
 	if index == nil {
 		return nil, errIndexRequired
 	}
-	roles, err := loadRoles()
+	catalog, err := loadRoles()
 	if err != nil {
 		return nil, err
 	}
-	engine := &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string][]orgPolicyRecord{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}
+	engine := &Engine{index: index, roles: catalog.permissions, definitions: catalog.definitions, testable: catalog.testable, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string][]orgPolicyRecord{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}
 	// A resource that leaves the index takes its policy with it, whichever
 	// provider deleted it: GCP gives a recreated resource an empty policy.
 	// A delete racing a same-name recreate can drop the new policy, never
@@ -437,7 +441,7 @@ func (e *Engine) matchBindings(check *Check, policyName, permission string, prin
 	stored := e.policies[policyName]
 	for index, binding := range stored.policy.Bindings {
 		member := firstMember(binding, principal, decision)
-		if member == "" || !e.roles[binding.Role][permission] {
+		if member == "" || !e.rolePermission(binding.Role, permission) {
 			continue
 		}
 		if len(binding.Condition) > 0 {

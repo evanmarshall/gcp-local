@@ -801,3 +801,39 @@ func TestDirectoryDeclaration(t *testing.T) {
 		t.Fatal("bootstrap with a directory:", err)
 	}
 }
+
+// TestCustomRolesGrantUntilDeletedAndRetire evaluates a custom role through
+// the owner's lookup: it grants while live, stops when deleted, and
+// RetireRole removes its bindings while later conditions keep their guards.
+func TestCustomRolesGrantUntilDeletedAndRetire(t *testing.T) {
+	engine, _ := setup(t)
+	const role = "projects/" + testProject + "/roles/objectReader"
+	var deleted atomic.Bool
+	engine.UseCustomRoles(func(name string) (iam.CustomRole, bool) {
+		return iam.CustomRole{Permissions: map[string]bool{testObjectGet: true}, Deleted: deleted.Load()}, name == role
+	})
+	if _, err := engine.SetPolicy(projectA, iam.Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	condition := mustMarshal(t, map[string]string{"title": "always", "expression": "1 == 1"})
+	if _, err := engine.SetPolicy(object().Parent, iam.Policy{Version: 3, Bindings: []iam.Binding{
+		{Role: role, Members: []string{fixture}},
+		{Role: testViewerRole, Members: []string{peer}, Condition: condition},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	read := call(testObjectGet, fixture, testProject)
+	grantedBy(t, engine, read, object().Parent, "live custom role")
+	deleted.Store(true)
+	denied(t, engine, read, "deleted custom role:")
+	engine.RetireRole(role)
+	policy, err := engine.GetPolicy(object().Parent)
+	if err != nil || len(policy.Bindings) != 1 || policy.Bindings[0].Role != testViewerRole {
+		t.Fatalf("retired policy = %+v, %v", policy, err)
+	}
+	grantedBy(t, engine, call(testObjectGet, peer, projectBName), object().Parent, "condition kept its guard")
+	// A project role can't be granted in another project's hierarchy.
+	if _, err := engine.SetPolicy(projectB, iam.Policy{Bindings: []iam.Binding{{Role: role, Members: []string{peer}}}}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("foreign project role: %v", err)
+	}
+}

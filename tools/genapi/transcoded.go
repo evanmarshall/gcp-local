@@ -27,8 +27,12 @@ type transcodedService struct {
 	variable          string
 	bindings          string
 	rest              map[string]string // gRPC method name to REST route ID
-	routes            []route
-	mixins            []mixinBinding
+	// alternates pairs a method's additional HTTP bindings, in order, with
+	// REST route IDs ("" leaves one unserved). The gateway picks the binding
+	// whose pattern matches the request's resource.
+	alternates map[string][]string
+	routes     []route
+	mixins     []mixinBinding
 }
 
 // mixinBinding pairs a shared mixin RPC (google.iam.v1.IAMPolicy) with one of
@@ -220,15 +224,17 @@ func transcodedDispatch(d transcodedService) []byte {
 		id := "/" + string(d.service.FullName()) + "/" + methodName
 		input, output := typeOf(m.Input()), typeOf(m.Output())
 		rule, _ := proto.GetExtension(m.Options(), annotations.E_Http).(*annotations.HttpRule)
-		restID, served := d.rest[methodName]
+		_, served := d.rest[methodName]
 		unaryStub(&stubs, name, methodName, input, output, id)
 		field, pattern := transcodedSelector(id, rule, served)
-		rpcDescriptor(&descriptors, id, field, pattern, false, input, output)
-		if !served {
-			continue
+		if alternates := d.alternates[methodName]; len(alternates) > 0 {
+			field, pattern = alternateSelector(id, rule, alternates), "**"
 		}
-		paired++
-		bindings.WriteString(bindingRow(d.routes, m, id, restID, rule, field))
+		rpcDescriptor(&descriptors, id, field, pattern, false, input, output)
+		if served {
+			paired++
+		}
+		bindings.WriteString(d.methodRows(m, id, rule, field))
 	}
 	if paired != len(d.rest) {
 		panic("A paired method is missing from " + name)
@@ -236,7 +242,7 @@ func transcodedDispatch(d transcodedService) []byte {
 	for _, mixin := range d.mixins {
 		id := "/" + string(mixin.method.Parent().FullName()) + "/" + string(mixin.method.Name())
 		field, _ := bindingSelector(id, mixin.rule)
-		bindings.WriteString(bindingRow(d.routes, mixin.method, id, mixin.rest, mixin.rule, field))
+		bindings.WriteString(bindingRow(d.routes, mixin.method, id, mixin.rest, mixin.rule, field, nil))
 	}
 	descriptors.WriteString("}\n")
 	bindings.WriteString("}\n")
@@ -248,6 +254,22 @@ func transcodedDispatch(d transcodedService) []byte {
 	fmt.Fprintf(&out, "// %s pairs each served %s method with the REST route that shares its provider method.\n", d.bindings, name)
 	out.Write(bindings.Bytes())
 	return out.Bytes()
+}
+
+// methodRows renders one method's Transcoding rows: its primary binding when
+// rest pairs it, and each additional binding that alternates pairs.
+func (d transcodedService) methodRows(m protoreflect.MethodDescriptor, id string, rule *annotations.HttpRule, field string) string {
+	var rows strings.Builder
+	alternates := d.alternates[string(m.Name())]
+	if restID, served := d.rest[string(m.Name())]; served {
+		rows.WriteString(bindingRow(d.routes, m, id, restID, rule, field, alternates))
+	}
+	for index, extra := range rule.GetAdditionalBindings() {
+		if index < len(alternates) && alternates[index] != "" {
+			rows.WriteString(bindingRow(d.routes, m, id, alternates[index], extra, field, nil))
+		}
+	}
+	return rows.String()
 }
 
 // importLines renders aliased imports in a stable order.
@@ -280,22 +302,25 @@ func (d transcodedService) messageType(imports map[string]string, m protoreflect
 
 // bindingRow renders one Transcoding row after checking that the paired REST
 // route exists with the binding's verb and that every other binding selects
-// the same field.
-func bindingRow(routes []route, m protoreflect.MethodDescriptor, id, restID string, rule *annotations.HttpRule, field string) string {
+// the same field. Additional bindings served by an alternate route are not
+// listed as unserved.
+func bindingRow(routes []route, m protoreflect.MethodDescriptor, id, restID string, rule *annotations.HttpRule, field string, alternates []string) string {
 	verb := ruleVerb(rule)
 	if !hasRoute(routes, restID, verb) {
 		panic("No " + verb + " REST route " + restID + " for " + id)
 	}
-	others := "nil"
-	if extras := rule.GetAdditionalBindings(); len(extras) > 0 {
-		unserved := make([]string, 0, len(extras))
-		for _, extra := range extras {
-			extraField, extraPattern := bindingSelector(id, extra)
-			if extraField != field {
-				panic("Additional binding of " + id + " selects another field")
-			}
+	unserved := []string{}
+	for index, extra := range rule.GetAdditionalBindings() {
+		extraField, extraPattern := bindingSelector(id, extra)
+		if extraField != field {
+			panic("Additional binding of " + id + " selects another field")
+		}
+		if index >= len(alternates) || alternates[index] == "" {
 			unserved = append(unserved, fmt.Sprintf("%q", extraPattern))
 		}
+	}
+	others := "nil"
+	if len(unserved) > 0 {
 		others = "[]string{" + strings.Join(unserved, ",") + "}"
 	}
 	return fmt.Sprintf("{RPC: %q, REST: %q, Verb: %q, Path: %q, Field: %q, Body: %q, Unserved: %s},\n", id, restID, verb, rulePath(rule),
@@ -314,6 +339,27 @@ func transcodedSelector(id string, rule *annotations.HttpRule, served bool) (str
 		return "", ""
 	}
 	return bindingSelector(id, rule)
+}
+
+// alternateSelector reads the resource field shared by a method's served
+// additional bindings; its primary binding may have no resource variable
+// (IAM ListRoles lists predefined roles at /v1/roles).
+func alternateSelector(id string, rule *annotations.HttpRule, alternates []string) string {
+	field := ""
+	for index, extra := range rule.GetAdditionalBindings() {
+		if index >= len(alternates) || alternates[index] == "" {
+			continue
+		}
+		extraField, _ := bindingSelector(id, extra)
+		if field != "" && extraField != field {
+			panic("Alternate bindings of " + id + " select different fields")
+		}
+		field = extraField
+	}
+	if field == "" {
+		panic("No served alternate binding for " + id)
+	}
+	return field
 }
 
 // bindingSelector reads the single resource variable of one HTTP binding.

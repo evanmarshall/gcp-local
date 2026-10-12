@@ -22,11 +22,12 @@ The original bucket/object attribute checks remain except for the documented reg
 
 ## Locally written cases
 
-The 13 `TestLocal*` cases in `selection.json` `local_test_ids` are not extracted from upstream; gcp-local wrote their configurations and assertions. They use the same pinned provider through their service's custom endpoint, fixture credentials, owned names, and an unchanged-plan check after each apply and refresh. All but `TestLocalServiceAccount` and `TestLocalProjectIamPolicy` probe for absence after destroy. Case-specific notes:
+The 14 `TestLocal*` cases in `selection.json` `local_test_ids` are not extracted from upstream; gcp-local wrote their configurations and assertions. They use the same pinned provider through their service's custom endpoint, fixture credentials, owned names, and an unchanged-plan check after each apply and refresh. All but `TestLocalServiceAccount` and `TestLocalProjectIamPolicy` probe for absence after destroy. Case-specific notes:
 
 - `TestLocalSpannerInstanceAndDatabase` drives `google_spanner_instance` and `google_spanner_database` through `spanner_custom_endpoint` and the official Spanner emulator backend.
 - `TestLocalProjectIamPolicy` uses `resource_manager_custom_endpoint`. The resource replaces the entire project policy (destroy re-applies an empty one), so the case runs last and its policy data re-applies every seeded fixture grant.
 - `TestLocalServiceAccount` uses `iam_custom_endpoint` (with `iam_beta_custom_endpoint` pinned to the same value); its create body uses the `{serviceAccount}` envelope.
+- `TestLocalProjectIamCustomRole` uses the same IAM endpoints plus `resource_manager_custom_endpoint` for its `google_project_iam_member`. Custom roles are soft-deleted, so its destroy check requires the role to read back `deleted: true` rather than absent.
 
 ## Endpoint audit
 

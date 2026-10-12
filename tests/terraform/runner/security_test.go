@@ -2,9 +2,11 @@ package terraform_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,7 +229,8 @@ func testAccSecretDestroy(t *testing.T, name string) func(*terraform.State) erro
 	}
 }
 
-// localIAMCase drives one service-account case through the adapter.
+// localIAMCase drives one IAM case (service accounts, custom roles, and
+// their project bindings) through the adapter.
 func localIAMCase(t *testing.T, test resource.TestCase) {
 	t.Helper()
 	for i, step := range test.Steps {
@@ -240,11 +243,12 @@ func localIAMCase(t *testing.T, test resource.TestCase) {
  access_token = %q
  iam_custom_endpoint = %q
  iam_beta_custom_endpoint = %q
+ resource_manager_custom_endpoint = %q
  universe_domain = "gcp-local.invalid"
  request_timeout = "2s"
  add_terraform_attribution_label = false
 }
-`, projectID, fixtureToken, endpoint+"/v1/", endpoint+"/v1/") + step.Config
+`, projectID, fixtureToken, endpoint+"/v1/", endpoint+"/v1/", endpoint+"/v1/") + step.Config
 		test.Steps[i] = step
 	}
 	resource.Test(t, test)
@@ -279,4 +283,82 @@ resource "google_service_account_key" "key" {
 			},
 		},
 	})
+}
+
+// testCustomRoleConfig renders a project custom role and one project binding
+// that grants it.
+func testCustomRoleConfig(roleID, title string, permissions ...string) string {
+	quoted := make([]string, len(permissions))
+	for i, permission := range permissions {
+		quoted[i] = fmt.Sprintf("%q", permission)
+	}
+	return fmt.Sprintf(`
+resource "google_project_iam_custom_role" "role" {
+ role_id     = "%s"
+ title       = "%s"
+ description = "gcp-local acceptance"
+ stage       = "GA"
+ permissions = [%s]
+}
+
+resource "google_project_iam_member" "member" {
+ project = "%s"
+ role    = google_project_iam_custom_role.role.name
+ member  = "serviceAccount:allowed@%s.iam.gserviceaccount.com"
+}
+`, roleID, title, strings.Join(quoted, ", "), projectID, projectID)
+}
+
+// TestLocalProjectIamCustomRole creates a custom role and a binding to it,
+// changes the role's title and permissions, and destroys both. The role is
+// soft-deleted, so it reads back with deleted: true.
+func TestLocalProjectIamCustomRole(t *testing.T) {
+	roleID := "gcp_local_tf_" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
+	name := "projects/" + projectID + "/roles/" + roleID
+	localIAMCase(t, resource.TestCase{
+		PreCheck:          func() { preCheck(t) },
+		ExternalProviders: pinnedProvider(),
+		CheckDestroy:      testCustomRoleDestroyed(name),
+		Steps: []resource.TestStep{
+			{
+				Config: testCustomRoleConfig(roleID, "Reader", "iam.serviceAccounts.get", "iam.serviceAccounts.list"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("google_project_iam_custom_role.role", "name", name),
+					resource.TestCheckResourceAttr("google_project_iam_custom_role.role", "permissions.#", "2"),
+					resource.TestCheckResourceAttr("google_project_iam_custom_role.role", "deleted", "false"),
+					resource.TestCheckResourceAttr("google_project_iam_member.member", "role", name),
+				),
+			},
+			{
+				Config: testCustomRoleConfig(roleID, "Lister", "iam.serviceAccounts.list"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("google_project_iam_custom_role.role", "title", "Lister"),
+					resource.TestCheckResourceAttr("google_project_iam_custom_role.role", "permissions.#", "1"),
+				),
+			},
+		},
+	})
+}
+
+// testCustomRoleDestroyed requires the destroyed role to read back deleted.
+func testCustomRoleDestroyed(name string) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint+"/v1/"+name, nil)
+		if err != nil {
+			return err
+		}
+		request.Header.Set("Authorization", "Bearer "+fixtureToken)
+		response, err := httpClient.Do(request)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		var role struct {
+			Deleted bool `json:"deleted"`
+		}
+		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<16)).Decode(&role); err != nil || response.StatusCode != 200 || !role.Deleted {
+			return fmt.Errorf("role %s after destroy: status %d, deleted %v, %v", name, response.StatusCode, role.Deleted, err)
+		}
+		return nil
+	}
 }

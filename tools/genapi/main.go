@@ -124,10 +124,12 @@ type GRPCDispatch interface {
  ServerStream(string, proto.Message, grpc.ServerStream) error
 }
 // Transcoding pairs one gRPC method with the REST route whose provider method
-// serves it. Verb, Path, and Body come from the method's primary
-// google.api.http binding; Field is the JSON name of the top-level request
-// field the path binds; Body is "*", "", or a JSON field name. Unserved lists
-// the resource patterns of the method's other bindings, which no route serves.
+// serves it. Verb, Path, and Body come from one google.api.http binding,
+// usually the primary one; a method with several served bindings (IAM roles
+// under organizations and projects) has one row per binding. Field is the
+// JSON name of the top-level request field the path binds; Body is "*", "",
+// or a JSON field name. Unserved lists the resource patterns of the method's
+// other bindings, which no route serves.
 type Transcoding struct { RPC, REST, Verb, Path, Field, Body string; Unserved []string }
 `)
 }
@@ -837,15 +839,15 @@ func resourceManagerRoutes() []byte {
 	return routeTable("ResourceManagerRoutes", "is the project IAM route table slice.", handWritten("main.go"), rows)
 }
 
-// iamRoutes generates the IAM service-account route slice.
+// iamRoutes generates the IAM service-account and role route slice.
 func iamRoutes() []byte {
-	return routeTable("IAMRoutes", "is the IAM service-account route table slice.", handWritten("main.go"), iamRows())
+	return routeTable("IAMRoutes", "is the IAM service-account and role route table slice.", handWritten("main.go"), iamRows())
 }
 
-// iamRows lists the IAM service-account REST routes.
+// iamRows lists the IAM service-account and role REST routes.
 func iamRows() []route {
 	const base = "/v1/projects/{project}/serviceAccounts"
-	return []route{
+	return slices.Concat([]route{
 		{"iam.serviceAccounts.create", http.MethodPost, base, true, false},
 		{"iam.serviceAccounts.list", http.MethodGet, base, false, false},
 		{"iam.serviceAccounts.get", http.MethodGet, base + "/{serviceAccount}", false, false},
@@ -860,6 +862,22 @@ func iamRows() []route {
 		// IAM Service Account Credentials v1 shares the path shape; the ID is
 		// its discovery method ID.
 		{"iamcredentials.projects.serviceAccounts.signBlob", http.MethodPost, base + "/{serviceAccount}:signBlob", true, false},
+		{"iam.roles.get", http.MethodGet, "/v1/roles/{role}", false, false},
+		{"iam.roles.list", http.MethodGet, "/v1/roles", false, false},
+	}, customRoleRows("projects", "{project}"), customRoleRows("organizations", "{organization}"))
+}
+
+// customRoleRows lists one parent kind's custom role routes, named by their
+// IAM v1 discovery method IDs (iam.projects.roles.create).
+func customRoleRows(kind, parent string) []route {
+	base, id := "/v1/"+kind+"/"+parent+"/roles", "iam."+kind+".roles."
+	return []route{
+		{id + "create", http.MethodPost, base, true, false},
+		{id + "list", http.MethodGet, base, false, false},
+		{id + "get", http.MethodGet, base + "/{role}", false, false},
+		{id + "patch", http.MethodPatch, base + "/{role}", true, false},
+		{id + "delete", http.MethodDelete, base + "/{role}", false, false},
+		{id + "undelete", http.MethodPost, base + "/{role}:undelete", true, false},
 	}
 }
 

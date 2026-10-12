@@ -3,7 +3,7 @@ package iam
 
 import "github.com/evanmarshall/gcp-local/api/generated/contract"
 
-// IAMRoutes is the IAM service-account route table slice.
+// IAMRoutes is the IAM service-account and role route table slice.
 var IAMRoutes = []contract.Route{
 	{Method: "iam.serviceAccounts.create", Verb: "POST", Path: "/v1/projects/{project}/serviceAccounts", JSONBody: true, Media: false},
 	{Method: "iam.serviceAccounts.list", Verb: "GET", Path: "/v1/projects/{project}/serviceAccounts", JSONBody: false, Media: false},
@@ -17,4 +17,18 @@ var IAMRoutes = []contract.Route{
 	{Method: "iam.serviceAccountKeys.get", Verb: "GET", Path: "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys/{keyId}", JSONBody: false, Media: false},
 	{Method: "iam.serviceAccountKeys.delete", Verb: "DELETE", Path: "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys/{keyId}", JSONBody: false, Media: false},
 	{Method: "iamcredentials.projects.serviceAccounts.signBlob", Verb: "POST", Path: "/v1/projects/{project}/serviceAccounts/{serviceAccount}:signBlob", JSONBody: true, Media: false},
+	{Method: "iam.roles.get", Verb: "GET", Path: "/v1/roles/{role}", JSONBody: false, Media: false},
+	{Method: "iam.roles.list", Verb: "GET", Path: "/v1/roles", JSONBody: false, Media: false},
+	{Method: "iam.projects.roles.create", Verb: "POST", Path: "/v1/projects/{project}/roles", JSONBody: true, Media: false},
+	{Method: "iam.projects.roles.list", Verb: "GET", Path: "/v1/projects/{project}/roles", JSONBody: false, Media: false},
+	{Method: "iam.projects.roles.get", Verb: "GET", Path: "/v1/projects/{project}/roles/{role}", JSONBody: false, Media: false},
+	{Method: "iam.projects.roles.patch", Verb: "PATCH", Path: "/v1/projects/{project}/roles/{role}", JSONBody: true, Media: false},
+	{Method: "iam.projects.roles.delete", Verb: "DELETE", Path: "/v1/projects/{project}/roles/{role}", JSONBody: false, Media: false},
+	{Method: "iam.projects.roles.undelete", Verb: "POST", Path: "/v1/projects/{project}/roles/{role}:undelete", JSONBody: true, Media: false},
+	{Method: "iam.organizations.roles.create", Verb: "POST", Path: "/v1/organizations/{organization}/roles", JSONBody: true, Media: false},
+	{Method: "iam.organizations.roles.list", Verb: "GET", Path: "/v1/organizations/{organization}/roles", JSONBody: false, Media: false},
+	{Method: "iam.organizations.roles.get", Verb: "GET", Path: "/v1/organizations/{organization}/roles/{role}", JSONBody: false, Media: false},
+	{Method: "iam.organizations.roles.patch", Verb: "PATCH", Path: "/v1/organizations/{organization}/roles/{role}", JSONBody: true, Media: false},
+	{Method: "iam.organizations.roles.delete", Verb: "DELETE", Path: "/v1/organizations/{organization}/roles/{role}", JSONBody: false, Media: false},
+	{Method: "iam.organizations.roles.undelete", Verb: "POST", Path: "/v1/organizations/{organization}/roles/{role}:undelete", JSONBody: true, Media: false},
 }

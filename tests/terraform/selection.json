@@ -24,6 +24,7 @@
     "TestLocalComputeNetworkAndSubnetwork",
     "TestLocalArtifactRegistryRepository",
     "TestLocalServiceAccount",
+    "TestLocalProjectIamCustomRole",
     "TestLocalCloudRunV2Service",
     "TestLocalProjectIamPolicy"
   ],
@@ -47,7 +48,7 @@
     "Storage generation/metageneration, etag, hashes, timestamps and defaults"
   ],
   "coverage": {
-    "local": "3 cases extracted from upstream and 13 written locally pass in a Linux network/PID namespace",
+    "local": "3 cases extracted from upstream and 14 written locally pass in a Linux network/PID namespace",
     "real_gcp": "Terraform not run; Storage outcomes compared with separate recorded scenarios",
     "second_plan": "empty after each configuration and refresh",
     "negative_control": "incorrect bucket RPO fails upstream assertion",

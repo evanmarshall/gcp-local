@@ -21,7 +21,7 @@ Each provider registers its plans with `Engine.Register` when it starts (Storage
 - OAuth scopes are checked before policy: when none of the token's scopes covers every permission the plan resolves to, the call is 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`. `cloud-platform` covers every plan; the [scope table](../guides/local-identity.md#oauth-scopes) lists the rest. Scopes outside the allowlist cover nothing.
 - Deny rules run before allow bindings, and principal access boundaries run before both ([below](#conditions-deny-rules-and-boundaries)).
 - `MarkUnsupported` stores known advanced configuration as a fail-closed marker; a matching allow can't bypass it.
-- Not supported: custom roles, roles without a committed snapshot, and `principal://` or `principalSet://` members other than groups (workforce and workload identity pools, `cloudIdentityCustomerId`), which are refused with `UNIMPLEMENTED`.
+- Roles: the pinned predefined roles and [custom roles](#custom-roles). Not supported: other predefined roles (no committed snapshot), and `principal://` or `principalSet://` members other than groups (workforce and workload identity pools, `cloudIdentityCustomerId`), which are refused with `UNIMPLEMENTED`.
 
 Policies are stored once per owning service and scope, returned as copies, and replaced only with a matching etag. A service reset clears that service's resource policies for the scope and keeps project and organization policy.
 
@@ -72,9 +72,18 @@ Not recorded: deny rules and boundaries need organization-level setup (`roles/ia
 
 Recorded (`storage-iam-groups`): bucket reads granted through a real group, through a group nesting it, and through a conditional binding naming the nested group; the non-member is denied and each revocation takes effect. The sandbox keeps two [standing groups](../contributing/gcp-sandbox.md#standing-groups) for it. Not recorded: a grant through a `domain:` (the sandbox callers are service accounts, which no domain covers) and a deny policy naming a group (deny policies are attached at the project and need `iam.denyAdmin`, which the fixture doesn't hold). Not modeled: Workspace users outside groups (`group:` naming a user is "does not exist", not GCP's "is of type user"), `deleted:group:`, dynamic groups, and principal access boundary enrollment by group or domain.
 
+## Custom roles
+
+The IAM provider owns custom roles ([IAM roles](../services/security/iam-roles.md)); the engine reads them through a lookup the provider installs, never a copy.
+
+- A binding to `projects/P/roles/R` or `organizations/O/roles/R` grants the role's current permissions. A deleted role grants nothing from the moment of the delete; undelete restores the grant.
+- `SetPolicy` refuses, with GCP's 400s, a custom role that doesn't exist, isn't in the resource's own project or organization ancestry, or is malformed, and new members on a deleted role. Members a deleted role already had are kept, so a policy reads back and writes back unchanged. A role in a project the index doesn't know is 403, as GCP answers for a project that doesn't exist.
+- When a role's ID is reused after its reservation, or its project is reset, `RetireRole` removes its bindings from every policy.
+- The lookup runs under the engine lock; the provider never calls the engine while holding its role store.
+
 ## Role snapshots
 
-`internal/iam/roles/` holds 66 predefined roles read from GCP with `roles.get` (full view), last on 2026-10-12 UTC. `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. Builds and tests never fetch roles.
+`internal/iam/roles/` holds 72 predefined roles read from GCP with `roles.get` (full view), and `testable-permissions.json`, the project's `queryTestablePermissions` result grouped by custom-role support level, all last recorded on 2026-10-12 UTC. `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. `roles.get` and `roles.list` serve these snapshots, and custom roles are validated against the testable permissions. Builds and tests never fetch roles.
 
 To propose a refresh (read-only; needs an authorized account and quota project):
 
@@ -85,7 +94,7 @@ python3 scripts/live/record_iam_roles.py --allow-live \
   --service storage --service pubsub  # repeat for every committed set
 ```
 
-Review permission changes before replacing committed files, and revalidate affected recordings. [Permission discovery](../contributing/permission-discovery.md) minimizes a method's permissions from these snapshots.
+Each run also records the quota project's testable permissions. Review permission changes before replacing committed files, and revalidate affected recordings. [Permission discovery](../contributing/permission-discovery.md) minimizes a method's permissions from these snapshots.
 
 ## Bootstrap config
 

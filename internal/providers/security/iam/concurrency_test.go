@@ -55,3 +55,25 @@ func TestConcurrentAccountRequests(t *testing.T) {
 		}
 	})
 }
+
+// TestConcurrentRoleRequests races role create, get, list, patch, delete,
+// and undelete with grants that evaluate the role; -race fails it if the
+// engine's lookup reads a record unlocked.
+func TestConcurrentRoleRequests(t *testing.T) {
+	h, _ := roleHarness(t)
+	h.expect(http.MethodPost, testBase, map[string]any{"accountId": testAccount}, 200)
+	h.grantOnProject(iam.Binding{Role: "roles/iam.serviceAccountAdmin", Members: []string{testActor}})
+	providertest.Hammer(t, h.gate, testToken, 8, 5, func(int) []providertest.Request {
+		return []providertest.Request{
+			{Method: http.MethodPost, Path: testRoles, Body: createRole(accountGet), Want: []int{200, 400, 409}},
+			{Method: http.MethodGet, Path: testRole, Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: testRoles + "?showDeleted=true&view=FULL", Want: []int{200}},
+			{Method: http.MethodPatch, Path: testRole + "?updateMask=title", Body: map[string]any{"title": "racing"}, Want: []int{200, 400, 404}},
+			{Method: http.MethodPost, Path: testBase + "/" + testAccount + ":setIamPolicy", Body: map[string]any{"policy": map[string]any{
+				"bindings": []map[string]any{{"role": testRoleName, "members": []string{testActor}}}}}, Want: []int{200, 400}},
+			{Method: http.MethodGet, Path: testBase + "/" + testAccount, Want: []int{200}},
+			{Method: http.MethodDelete, Path: testRole, Want: []int{200, 400, 404}},
+			{Method: http.MethodPost, Path: testRole + ":undelete", Body: map[string]any{}, Want: []int{200, 400, 404}},
+		}
+	})
+}

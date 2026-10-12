@@ -88,12 +88,15 @@ var bigtableTableAdminRPC = transcodedService{
 	routes: bigtableRows(),
 }
 
-// iamAdminRPC is the google.iam.admin.v1.IAM service-account surface of the
-// IAM REST provider. The REST update route is the PATCH method, so it serves
-// PatchServiceAccount. SignBlob stays a gap because the REST signBlob route is
-// the IAM Credentials API, whose request and response differ, and
+// iamAdminRPC is the google.iam.admin.v1.IAM service-account and role surface
+// of the IAM REST provider. The REST update route is the PATCH method, so it
+// serves PatchServiceAccount. SignBlob stays a gap because the REST signBlob
+// route is the IAM Credentials API, whose request and response differ, and
 // CreateServiceAccountKey because its key file's token_uri names the HTTP
-// origin the request arrived on, which a gRPC request does not carry.
+// origin the request arrived on, which a gRPC request does not carry. Role
+// methods bind organizations (or roles/* for GetRole) first and the other
+// parents as additional bindings; ListRoles without a parent (predefined
+// roles) has no resource variable and stays a gap.
 var iamAdminRPC = transcodedService{
 	service: iamadminpb.File_google_iam_admin_v1_iam_proto.Services().ByName("IAM"),
 	alias:   adminpb, importPath: "cloud.google.com/go/iam/admin/apiv1/adminpb",
@@ -104,6 +107,17 @@ var iamAdminRPC = transcodedService{
 		"DeleteServiceAccount": "iam.serviceAccounts.delete", "ListServiceAccountKeys": "iam.serviceAccountKeys.list",
 		"GetServiceAccountKey": "iam.serviceAccountKeys.get", "DeleteServiceAccountKey": "iam.serviceAccountKeys.delete",
 		getIamPolicy: "iam.serviceAccounts.getIamPolicy", setIamPolicy: "iam.serviceAccounts.setIamPolicy",
+		"GetRole": "iam.roles.get", "CreateRole": "iam.organizations.roles.create",
+		"UpdateRole": "iam.organizations.roles.patch", "DeleteRole": "iam.organizations.roles.delete",
+		"UndeleteRole": "iam.organizations.roles.undelete",
+	},
+	alternates: map[string][]string{
+		"GetRole":      {"iam.organizations.roles.get", "iam.projects.roles.get"},
+		"ListRoles":    {"iam.organizations.roles.list", "iam.projects.roles.list"},
+		"CreateRole":   {"iam.projects.roles.create"},
+		"UpdateRole":   {"iam.projects.roles.patch"},
+		"DeleteRole":   {"iam.projects.roles.delete"},
+		"UndeleteRole": {"iam.projects.roles.undelete"},
 	},
 	routes: iamRows(),
 }

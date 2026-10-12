@@ -1,0 +1,21 @@
+{
+  "description": "Access to administer all custom roles in the project.",
+  "etag": "AA==",
+  "includedPermissions": [
+    "iam.roles.create",
+    "iam.roles.createTagBinding",
+    "iam.roles.delete",
+    "iam.roles.deleteTagBinding",
+    "iam.roles.get",
+    "iam.roles.list",
+    "iam.roles.listEffectiveTags",
+    "iam.roles.listTagBindings",
+    "iam.roles.undelete",
+    "iam.roles.update",
+    "resourcemanager.projects.get",
+    "resourcemanager.projects.getIamPolicy"
+  ],
+  "name": "roles/iam.roleAdmin",
+  "stage": "GA",
+  "title": "Role Administrator"
+}

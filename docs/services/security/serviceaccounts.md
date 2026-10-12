@@ -46,7 +46,7 @@ After an interrupted run, `python -m gcp_validation.services.security.serviceacc
 
 ## Gaps
 
-- gRPC refuses with `UNIMPLEMENTED`: `CreateServiceAccountKey` (the key file's `token_uri` names the HTTP origin, which a gRPC request doesn't carry; create keys over REST), the deprecated IAM `SignBlob` and `SignJwt` (REST `signBlob` is the IAM Credentials API), `UpdateServiceAccount` (PUT), `TestIamPermissions`, and every role and other method.
+- gRPC refuses with `UNIMPLEMENTED`: `CreateServiceAccountKey` (the key file's `token_uri` names the HTTP origin, which a gRPC request doesn't carry; create keys over REST), the deprecated IAM `SignBlob` and `SignJwt` (REST `signBlob` is the IAM Credentials API), `UpdateServiceAccount` (PUT), `TestIamPermissions`, and every other method except the [role methods](iam-roles.md).
 
 - Keys and `signBlob` are modeled locally, not recorded; recording keys would mint real credentials.
 - A key file's `token_uri` names this emulator, which does not accept JWT-bearer grants: a key signs but cannot mint access tokens.
