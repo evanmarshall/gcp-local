@@ -20,6 +20,7 @@ jobs:
       - run: python3 scripts/install_firestore.py
       - run: python3 scripts/install_spanner.py
       - run: python3 scripts/install_redis.py
+      - run: python3 scripts/install_postgres.py
       - run: python3 -m venv .venv-tools
       - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt
       - run: .venv-tools/bin/python -m pip check
@@ -49,6 +50,11 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             sh scripts/check_redis.sh
+      - run: sh scripts/go.sh test -c -tags=cloudsqlintegration -race -o bin/cloudsql-integration ./internal/providers/cloudsql
+      - name: Verify Cloud SQL against real PostgreSQL behind the connector
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            sh scripts/check_cloudsql.sh
       - name: Compare local REST providers against their recorded contracts
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
@@ -131,6 +137,7 @@ jobs:
       - run: python scripts/install_firestore.py
       - run: python scripts/install_spanner.py
       - run: python scripts/install_redis.py
+      - run: python scripts/install_postgres.py
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - name: Warm pinned module and build dependencies before isolation
         run: |
@@ -241,6 +248,7 @@ jobs:
             sh scripts/go.sh test -tags=sdkintegration -race -count=1 -timeout 60s ./internal/identity
       - run: python scripts/install_spanner.py
       - run: python scripts/install_redis.py
+      - run: python scripts/install_postgres.py
       - run: python scripts/install_firestore.py
       - run: python scripts/install_pubsub.py
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless

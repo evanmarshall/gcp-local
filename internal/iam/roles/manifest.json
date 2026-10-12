@@ -1,7 +1,7 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
-  "recorded_at": "2026-10-12T00:56:12.762277+00:00",
-  "scope": "Read-only predefined artifactregistry, bigquery, bigtable, cloudtasks, compute, firestore, identity, kms, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
+  "recorded_at": "2026-10-12T01:48:30.501818+00:00",
+  "scope": "Read-only predefined artifactregistry, bigquery, bigtable, cloudsql, cloudtasks, compute, firestore, identity, kms, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
   "roles": [
     {
       "file": "artifactregistry.admin.json",
@@ -62,6 +62,26 @@
       "file": "bigtable.viewer.json",
       "name": "roles/bigtable.viewer",
       "sha256": "9895added05b9280d0cdbafb565b8d7f4b60de587777a0c3d022cdccc4664812"
+    },
+    {
+      "file": "cloudsql.admin.json",
+      "name": "roles/cloudsql.admin",
+      "sha256": "6241e1ab5353078e28d999d5d26218701a6b47d1772b6ecc9c6c7b4b3abcfa70"
+    },
+    {
+      "file": "cloudsql.editor.json",
+      "name": "roles/cloudsql.editor",
+      "sha256": "dcb056255210abad30660e9ed7bf3501fdf5a2e5a0ca1e965e51fe52c4c36497"
+    },
+    {
+      "file": "cloudsql.viewer.json",
+      "name": "roles/cloudsql.viewer",
+      "sha256": "da10c9dbc719151b7eed11b6e6991182ba46699254fae2aef034c34ea5813bae"
+    },
+    {
+      "file": "cloudsql.client.json",
+      "name": "roles/cloudsql.client",
+      "sha256": "2b26a0daa6b5737fd35a3faa737bbd7b0cc317da5e8208fb47be025c79b2aeff"
     },
     {
       "file": "cloudtasks.admin.json",

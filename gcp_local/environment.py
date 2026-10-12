@@ -52,6 +52,8 @@ SOURCE_FILES = (
     "toolchains/spanner.json",
     "scripts/install_redis.py",
     "toolchains/redis.json",
+    "scripts/install_postgres.py",
+    "toolchains/postgres.json",
     "examples/workflow/worker.py",
 )
 SOURCE_DIRECTORIES = ("api", "cmd", "internal", "gcp_local")

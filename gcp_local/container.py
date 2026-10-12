@@ -52,6 +52,7 @@ def core_arguments(identity: Path, iam: Path) -> list[str]:
         "-spanner-emulator=/opt/spanner/emulator_main",
         "-spanner-libraries=/opt/spanner/lib",
         "-redis-server=/opt/redis/redis-server",
+        "-cloudsql-postgres=/opt/postgres",
         f"-run-process={WORKFLOW_IMAGE}={PYTHON} -I {WORKFLOW_WORKER}",
     ]
     socket = os.environ.get("GCP_LOCAL_RUN_DOCKER_SOCKET")

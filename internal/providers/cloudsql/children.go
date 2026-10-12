@@ -2,6 +2,8 @@ package cloudsql
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -59,8 +61,14 @@ func (p *Provider) sqlOn(ctx context.Context, project, instance, sql string) ([]
 // databaseWire renders one sql#database row.
 func databaseWire(project, instance string, row []string) map[string]any {
 	return map[string]any{keyKind: "sql#database", keyName: row[0], "charset": row[1], "collation": row[2],
-		"instance": instance, pathProject: project,
+		pathInstance: instance, pathProject: project, "etag": databaseETag(instance, row[0]),
 		keySelfLink: instanceLink(project, instance) + "/databases/" + row[0]}
+}
+
+// databaseETag is a stable tag for one database of one instance.
+func databaseETag(instance, name string) string {
+	sum := sha256.Sum256([]byte(instance + "/" + name))
+	return hex.EncodeToString(sum[:8])
 }
 
 // databaseBody is the databases.insert subset the provider models.

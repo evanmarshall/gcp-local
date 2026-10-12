@@ -128,9 +128,11 @@ func instanceLink(project, instance string) string {
 }
 
 // apiError builds the Cloud SQL JSON error envelope. reason is included only
-// where the service's reason code is known; it is omitted otherwise.
+// where the service's reason code is known; it is omitted otherwise. Recorded:
+// v1beta4 errors carry no status field, so statusText documents intent only.
 func apiError(code int, statusText, reason, message string) *gateway.RESTResponse {
-	body := map[string]any{"code": code, "status": statusText, "message": message}
+	_ = statusText
+	body := map[string]any{"code": code, "message": message}
 	if reason != "" {
 		body["errors"] = []any{map[string]any{"domain": "global", "reason": reason, "message": message}}
 	}

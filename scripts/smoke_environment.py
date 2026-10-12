@@ -49,6 +49,7 @@ SERVICE_PROBES = [
     ("iam", "GET", "/v1/projects/{project}/serviceAccounts"),
     ("resourcemanager", "POST", "/v1/projects/{project}:getIamPolicy"),
     ("redis", "GET", "/v1/projects/{project}/locations/us-central1/instances"),
+    ("cloudsql", "GET", "/sql/v1beta4/projects/{project}/instances"),
     ("compute", "GET", "/compute/v1/projects/{project}/global/networks"),
     ("compute", "GET", "/v1/projects/{project}/locations/global/connectivityTests"),
 ]

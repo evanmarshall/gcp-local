@@ -47,6 +47,13 @@ COPY scripts/install_redis.py scripts/install_redis.py
 COPY toolchains/redis.json toolchains/redis.json
 RUN python3 scripts/install_redis.py
 
+# Downloads the checksum-pinned PostgreSQL builds Cloud SQL runs per instance.
+FROM python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS postgres
+WORKDIR /src
+COPY scripts/install_postgres.py scripts/install_postgres.py
+COPY toolchains/postgres.json toolchains/postgres.json
+RUN python3 scripts/install_postgres.py
+
 # The launcher (gcp_local/container.py) and the bundled workflow worker need
 # Python. The interpreter and standard library come from the same digest-pinned
 # image as the build stage and link against the runtime base's glibc and
@@ -70,6 +77,8 @@ COPY --from=firestore /src/.tools/firestore/emulator.jar /opt/firestore/emulator
 COPY --from=spanner /src/.tools/spanner /opt/spanner
 # Memorystore starts one redis-server per instance on loopback inside the core.
 COPY --from=redis /src/.tools/redis/bin/redis-server /opt/redis/redis-server
+# Cloud SQL runs one PostgreSQL server per instance, on a private Unix socket.
+COPY --from=postgres /src/.tools/postgres /opt/postgres
 COPY --from=python /usr/local/lib/ /usr/local/lib/
 COPY --from=python /usr/local/bin/python3.12 /usr/local/bin/python3
 COPY gcp_local /usr/local/lib/python3.12/site-packages/gcp_local

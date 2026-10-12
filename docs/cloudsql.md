@@ -76,3 +76,20 @@ sh scripts/check_cloudsql.sh   # real PostgreSQL, loopback-only runner; skips un
 `check_cloudsql.sh` drives real servers: a denied insert starts no backend, real databases/roles, SQL through the authorized connector as a created user, `28P01` for a wrong password, refusal of a principal without `cloudsql.instances.connect`, project isolation with a POSTGRES_15 peer instance, and reset closing an open session and removing the server's data. Unit tests cover authorization before backend start, patch/settings-version/deletion-protection behavior, operations, isolation, reset, connector refusal paths, and the SCRAM client against the RFC 7677 vector.
 
 The bounded live recorder is [gcp_validation/cloudsql.py](../gcp_validation/cloudsql.py) with [tests/conformance/cloudsql](../tests/conformance/cloudsql) (scenario `cloudsql-postgres-instance-admin`): one `db-f1-micro` `ENTERPRISE` `POSTGRES_16` instance in `us-central1`, owned manifest written before creation, labeled ownership checks, deletion-protection round trip, one database and one user, the `denied` identity's project-level 403s, and cleanup that disables protection before deleting. It has **not** been run against GCP, so there is no recording and no fidelity claim; error reasons and messages above are unrecorded. Its scope file uses `services: ["cloudsql"]` with limits `max_instances 1`, `max_databases 1`, `max_users 1`, `max_run_seconds 2700`.
+
+## Recorded scenario
+
+`cloudsql-postgres-instance-admin` was recorded and revalidated against real GCP on 2026-10-12 with one
+ENTERPRISE `db-f1-micro` POSTGRES_16 instance in us-central1, deleted at the end of each run. The local
+provider matches it in comparison mode (`sh scripts/check_rest_recordings.sh`). It covers `sql#operation`
+envelopes for create, update, database, user, and delete; the instance and database field sets;
+deletion protection (a protected delete is 400); the default `postgres` database and user in listings;
+denied read and database create (403); a duplicate instance (409); and 404 after delete. Cloud SQL
+v1beta4 errors carry no `status` field. Values of service-managed instance fields the local model
+fills (`gceZone`, `geminiConfig`, `maintenanceVersion`, `serverCaCert`, `serviceAccountEmailAddress`,
+`sqlNetworkArchitecture`, `upgradableDatabaseVersions`, and the OUTGOING address) are stand-ins; only
+their presence is recorded. The PostgreSQL wire protocol and the connector are covered by the
+`cloudsqlintegration` test against real PostgreSQL, not by a cloud recording.
+
+The packaged environment includes `cloudsql`; connectors are configured per instance with
+`-cloudsql-connector`, so the packaged admin API works but no connector is opened by default.

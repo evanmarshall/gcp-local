@@ -12,8 +12,10 @@
 !toolchains/firestore.json
 !scripts/install_spanner.py
 !scripts/install_redis.py
+!scripts/install_postgres.py
 !toolchains/spanner.json
 !toolchains/redis.json
+!toolchains/postgres.json
 !api
 !api/**
 !cmd
