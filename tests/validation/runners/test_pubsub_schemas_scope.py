@@ -42,16 +42,16 @@ def test_schema_scope_requires_explicit_approval_and_its_own_service(tmp_path):
     path = tmp_path / "scope.json"
     private_json(path, value)
     with pytest.raises(ValueError, match="must match the approved project"):
-        SchemaScope.load(path, SANDBOX)
+        SchemaScope.load(path, SANDBOX, "record")
     value["approved"] = True
     path.write_text(json.dumps(value))
-    assert SchemaScope.load(path, SANDBOX).project_number == "123456"
+    assert SchemaScope.load(path, SANDBOX, "record").project_number == "123456"
     value["services"] = ["pubsub-delivery"]
     path.write_text(json.dumps(value))
     with pytest.raises(ValueError, match="must match the approved project"):
-        SchemaScope.load(path, SANDBOX)
-    with pytest.raises(ValueError, match="separately approved"):
-        SchemaScope.load(None, SANDBOX)
+        SchemaScope.load(path, SANDBOX, "record")
+    with pytest.raises(ValueError, match="explicitly approved --gcp-pubsub-scope"):
+        SchemaScope.load(None, SANDBOX, "record")
 
 
 def test_definitions_are_named_by_revision():

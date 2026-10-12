@@ -113,7 +113,7 @@ class SyntheticClient:
 def test_separate_pubsub_approval_is_required(tmp_path):
     sandbox = ns(project="project-a", project_number="123456")
     with pytest.raises(ValueError, match="separate explicitly approved"):
-        LiveScope.load(None, sandbox)
+        LiveScope.load(None, sandbox, "record")
     value = {
         "schema": 1,
         "approved": False,
@@ -128,18 +128,18 @@ def test_separate_pubsub_approval_is_required(tmp_path):
     path = tmp_path / "scope.json"
     path.write_text(json.dumps(value))
     with pytest.raises(ValueError, match="scope must match"):
-        LiveScope.load(path, sandbox)
+        LiveScope.load(path, sandbox, "record")
     value["approved"] = True
     path.write_text(json.dumps(value))
-    assert LiveScope.load(path, sandbox).project == sandbox.project
+    assert LiveScope.load(path, sandbox, "record").project == sandbox.project
     value["services"] = ["storage"]
     path.write_text(json.dumps(value))
     with pytest.raises(ValueError, match="must match the approved project"):
-        LiveScope.load(path, sandbox)
+        LiveScope.load(path, sandbox, "record")
     value["services"], value["project"] = ["pubsub"], "foreign-project"
     path.write_text(json.dumps(value))
     with pytest.raises(ValueError, match="must match the approved project"):
-        LiveScope.load(path, sandbox)
+        LiveScope.load(path, sandbox, "record")
 
 
 def test_local_transport_refuses_cloud_adc_before_loading_credentials(tmp_path):

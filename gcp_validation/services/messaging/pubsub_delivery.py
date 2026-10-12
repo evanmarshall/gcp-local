@@ -5,7 +5,6 @@ services entry is ``pubsub-delivery`` (``scripts/live/plan_pubsub.py --scenario 
 """
 
 import fcntl
-import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +13,7 @@ from uuid import uuid4
 
 from gcp_validation.evidence import Inconclusive, now
 from gcp_validation.sandbox import Sandbox
+from gcp_validation.scope import load_scope_file, scope_document
 from gcp_validation.services.messaging.pubsub import PubSubClient, RPCFailure
 from gcp_validation.services.messaging.pubsub_scope import ACTORS, private_json
 
@@ -52,15 +52,17 @@ class DeliveryScope:
     project_number: str
 
     @classmethod
-    def load(cls, filename: str | None, sandbox: Sandbox | None) -> Self:
+    def load(cls, filename: str | None, sandbox: Sandbox | None, mode: str) -> Self:
         """Load the scope file and require it to match the fixed contract."""
-        if not filename or sandbox is None:
-            raise ValueError("Pub/Sub delivery requires a separately approved --gcp-pubsub-scope")
-        value = json.loads(Path(filename).read_text())
-        if value != delivery_scope(sandbox.project, sandbox.project_number, approved=True):
-            raise ValueError(
-                "Pub/Sub delivery scope must match the approved project, limits, and cleanup"
-            )
+        load_scope_file(
+            filename,
+            sandbox,
+            service="pubsub-delivery",
+            limits=DELIVERY_LIMITS,
+            mode=mode,
+            label="Pub/Sub delivery",
+            option="--gcp-pubsub-scope",
+        )
         return cls(sandbox.project, sandbox.project_number)
 
     def evidence(self) -> dict[str, Any]:
@@ -76,17 +78,9 @@ class DeliveryScope:
 
 def delivery_scope(project: str, project_number: str, *, approved: bool) -> dict[str, Any]:
     """Return the scope document; the planner writes it unapproved."""
-    return {
-        "schema": 1,
-        "approved": approved,
-        "services": ["pubsub-delivery"],
-        "project": project,
-        "project_number": project_number,
-        "location": "global",
-        "limits": DELIVERY_LIMITS,
-        "cleanup_required": True,
-        "scheduled_runs": False,
-    }
+    return scope_document(
+        "pubsub-delivery", project, project_number, DELIVERY_LIMITS, approved=approved
+    )
 
 
 class DeliveryFixture:

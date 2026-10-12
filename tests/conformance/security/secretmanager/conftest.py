@@ -15,7 +15,8 @@ def secretmanager(gcp_snapshot, gcp_target, pytestconfig):
     if gcp_target.mode == 'local':
         state = pytestconfig.gcp_artifacts / 'secretmanager-resources'
     else:
-        scope = LiveScope.load(pytestconfig.getoption('gcp_secretmanager_scope'), sandbox)
+        option = pytestconfig.getoption('gcp_secretmanager_scope')
+        scope = LiveScope.load(option, sandbox, gcp_target.mode)
         state = Path.home() / '.local/state/gcp-local' / sandbox.project / 'secretmanager'
         gcp_snapshot.context['scope'] = scope.evidence()
     fixture = SecretManagerFixture(SecretManagerClient(gcp_target, sandbox=sandbox, scope=scope), state)

@@ -341,12 +341,12 @@ def test_scope_requires_the_exact_approved_limits(tmp_path):
     path = tmp_path / 'scope.json'
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError):  # Plans are written unapproved.
-        LiveScope.load(SERVICE, LIMITS, path, sandbox)
+        LiveScope.load(SERVICE, LIMITS, path, sandbox, "record")
     path.write_text(json.dumps(dict(document, approved=True)))
-    assert LiveScope.load(SERVICE, LIMITS, path, sandbox).limits == LIMITS
+    assert LiveScope.load(SERVICE, LIMITS, path, sandbox, "record").limits == LIMITS
     path.write_text(json.dumps(dict(document, approved=True, limits=dict(LIMITS, max_trials=99))))
     with pytest.raises(ValueError):
-        LiveScope.load(SERVICE, LIMITS, path, sandbox)
+        LiveScope.load(SERVICE, LIMITS, path, sandbox, "record")
 
 
 def test_plan_names_temporary_grants_and_runs_nothing():

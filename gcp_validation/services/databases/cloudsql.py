@@ -36,9 +36,9 @@ INSTANCE_FIELDS = ('kind', 'name', 'databaseVersion', 'state', 'region', 'connec
                    'instanceType', 'backendType')
 
 
-def load_scope(filename: str, sandbox: Sandbox) -> LiveScope:
+def load_scope(filename: str, sandbox: Sandbox, mode: str) -> LiveScope:
     """Load the separately approved Cloud SQL live scope."""
-    return LiveScope.load(SERVICE, LIMITS, filename, sandbox)
+    return LiveScope.load(SERVICE, LIMITS, filename, sandbox, mode)
 
 
 class SqlAdminClient(RestClient):
@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--allow-live', action='store_true', required=True)
     args = parser.parse_args(argv)
     sandbox = Sandbox.load(args.profile)
-    scope = load_scope(args.scope, sandbox)
+    scope = load_scope(args.scope, sandbox, 'cleanup')
     target = Target.select('record', project=sandbox.project,
                            credentials_file=sandbox.identities['allowed'].credentials_file,
                            live_scope=sandbox.live_scope, allow_live=args.allow_live)

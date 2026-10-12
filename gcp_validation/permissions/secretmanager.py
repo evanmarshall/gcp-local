@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request
 
+from gcp_validation import scope as scopes
 from gcp_validation.evidence import Inconclusive, now
 from gcp_validation.live_rest import LiveScope, OwnedRun, Response, RestClient
 from gcp_validation.permissions.probe import (
@@ -586,17 +587,7 @@ def cleanup(transport: Transport, owned: OwnedRun) -> None:
 
 def scope_document(project: str, project_number: str) -> dict:
     """Return the exact scope file LiveScope accepts, left unapproved for the owner."""
-    return {
-        'schema': 1,
-        'approved': False,
-        'services': [SERVICE],
-        'project': project,
-        'project_number': project_number,
-        'location': 'global',
-        'limits': dict(LIMITS),
-        'cleanup_required': True,
-        'scheduled_runs': False,
-    }
+    return scopes.scope_document(SERVICE, project, project_number, LIMITS, approved=False)
 
 
 def live_plan(project: str, project_number: str, emails: dict[str, str], attachment: str) -> dict:

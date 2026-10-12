@@ -44,13 +44,13 @@ def test_delivery_scope_requires_explicit_approval_and_its_own_service(tmp_path)
     path = tmp_path / "scope.json"
     private_json(path, value)
     with pytest.raises(ValueError, match="must match the approved project"):
-        DeliveryScope.load(path, SANDBOX)
+        DeliveryScope.load(path, SANDBOX, "record")
     value["approved"] = True
     path.write_text(json.dumps(value))
-    assert DeliveryScope.load(path, SANDBOX).project_number == "123456"
+    assert DeliveryScope.load(path, SANDBOX, "record").project_number == "123456"
     value["services"] = ["pubsub"]
     path.write_text(json.dumps(value))
     with pytest.raises(ValueError, match="must match the approved project"):
-        DeliveryScope.load(path, SANDBOX)
-    with pytest.raises(ValueError, match="separately approved"):
-        DeliveryScope.load(None, SANDBOX)
+        DeliveryScope.load(path, SANDBOX, "record")
+    with pytest.raises(ValueError, match="explicitly approved --gcp-pubsub-scope"):
+        DeliveryScope.load(None, SANDBOX, "record")

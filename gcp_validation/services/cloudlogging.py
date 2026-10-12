@@ -24,9 +24,9 @@ ENTRY_FIELDS = ('severity', 'labels', 'resource')
 ENTRIES_PATHS = frozenset({'/v2/entries:write', '/v2/entries:list'})
 
 
-def load_scope(filename: str, sandbox: Sandbox) -> LiveScope:
+def load_scope(filename: str, sandbox: Sandbox, mode: str) -> LiveScope:
     """Load the owner-approved Logging live scope."""
-    return LiveScope.load(SERVICE, LIMITS, filename, sandbox)
+    return LiveScope.load(SERVICE, LIMITS, filename, sandbox, mode)
 
 
 class LoggingClient(RestClient):

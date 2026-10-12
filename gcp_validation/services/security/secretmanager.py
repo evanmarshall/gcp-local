@@ -21,6 +21,7 @@ from gcp_validation.sandbox import (
     load_credentials,
     refresh_credentials,
 )
+from gcp_validation.scope import load_scope_file
 from gcp_validation.services.messaging.pubsub_scope import private_json
 from gcp_validation.services.storage.client import NoRedirects
 
@@ -38,16 +39,9 @@ class LiveScope:
     project_number: str
 
     @classmethod
-    def load(cls, filename, sandbox):
-        if not filename or sandbox is None:
-            raise ValueError('Secret Manager requires a separate explicitly approved --gcp-secretmanager-scope')
-        value = json.loads(Path(filename).read_text())
-        expected = {'schema': 1, 'approved': True, 'services': ['secretmanager'],
-                    'project': sandbox.project, 'project_number': sandbox.project_number,
-                    'location': 'global', 'limits': LIMITS, 'cleanup_required': True,
-                    'scheduled_runs': False}
-        if value != expected or any(type(item) is not int for item in value['limits'].values()):
-            raise ValueError('Secret Manager scope must match the approved project, fixed limits, and cleanup contract')
+    def load(cls, filename, sandbox, mode: str):
+        load_scope_file(filename, sandbox, service='secretmanager', limits=LIMITS, mode=mode,
+                        label='Secret Manager', option='--gcp-secretmanager-scope')
         return cls(sandbox.project, sandbox.project_number)
 
     def evidence(self):
@@ -372,7 +366,7 @@ def main(argv=None):
     parser.add_argument('--allow-live', action='store_true', required=True)
     args = parser.parse_args(argv)
     sandbox = Sandbox.load(args.profile)
-    scope = LiveScope.load(args.scope, sandbox)
+    scope = LiveScope.load(args.scope, sandbox, 'cleanup')
     target = Target.select('record', project=sandbox.project, credentials_file=sandbox.identities['allowed'].credentials_file,
                            live_scope=sandbox.live_scope, allow_live=args.allow_live)
     client = SecretManagerClient(target, sandbox=sandbox, scope=scope)

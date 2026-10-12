@@ -10,6 +10,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from gcp_validation.sandbox import Sandbox
+from gcp_validation.scope import scope_document
 from gcp_validation.services.messaging.pubsub_delivery import DELIVERY_LIMITS, delivery_scope
 from gcp_validation.services.messaging.pubsub_schemas import SCHEMA_LIMITS, schema_scope
 from gcp_validation.services.messaging.pubsub_scope import LIMITS, private_json
@@ -23,17 +24,9 @@ def plan(profile: Sandbox, setup_account: str, scenario: str = "pull") -> dict[s
     member = "serviceAccount:" + profile.identities["fixture"].email
     result = {
         "status": "proposed-not-authorized",
-        "scope": {
-            "schema": 1,
-            "approved": False,
-            "services": ["pubsub"],
-            "project": profile.project,
-            "project_number": profile.project_number,
-            "location": "global",
-            "limits": LIMITS,
-            "cleanup_required": True,
-            "scheduled_runs": False,
-        },
+        "scope": scope_document(
+            "pubsub", profile.project, profile.project_number, LIMITS, approved=False
+        ),
         "preconditions": [
             "Explicit owner approval for this Pub/Sub plan, separate from Storage approval",
             "Dedicated project number matches; no existing topics/subscriptions",

@@ -367,7 +367,7 @@ def main(argv=None):
     parser.add_argument('--allow-live', action='store_true', required=True)
     args = parser.parse_args(argv)
     sandbox = Sandbox.load(args.profile)
-    scope = LiveScope.load(args.scope, sandbox)
+    scope = LiveScope.load(args.scope, sandbox, 'cleanup')
     target = Target.select('record', project=sandbox.project, credentials_file=sandbox.identities['allowed'].credentials_file,
                            live_scope=sandbox.live_scope, allow_live=args.allow_live)
     client = PubSubClient(target, sandbox=sandbox, scope=scope)

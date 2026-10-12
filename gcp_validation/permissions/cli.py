@@ -36,7 +36,7 @@ def state_dir(project: str) -> Path:
 
 def _live(args: argparse.Namespace) -> LiveTransport:
     sandbox = Sandbox.load(args.profile)
-    scope = LiveScope.load(SERVICE, LIMITS, args.scope, sandbox)
+    scope = LiveScope.load(SERVICE, LIMITS, args.scope, sandbox, 'record')
     target = Target.select(
         'record',
         project=sandbox.project,

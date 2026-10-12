@@ -11,7 +11,7 @@ def pubsub(gcp_snapshot, gcp_target, pytestconfig):
     if gcp_target.mode == 'local':
         state = pytestconfig.gcp_artifacts / 'pubsub-resources'
     else:
-        scope = LiveScope.load(pytestconfig.getoption('gcp_pubsub_scope'), sandbox)
+        scope = LiveScope.load(pytestconfig.getoption('gcp_pubsub_scope'), sandbox, gcp_target.mode)
         state = Path.home() / '.local/state/gcp-local' / sandbox.project / 'pubsub'
         gcp_snapshot.context['scope'] = scope.evidence()
     client = PubSubClient(gcp_target, sandbox=sandbox, scope=scope,

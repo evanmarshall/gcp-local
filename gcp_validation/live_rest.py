@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from gcp_validation.evidence import Inconclusive, check_observation, now
 from gcp_validation.sandbox import inspect_credentials, load_credentials, refresh_credentials
+from gcp_validation.scope import load_scope_file
 from gcp_validation.services.messaging.pubsub_scope import private_json
 from gcp_validation.services.storage.client import NoRedirects
 
@@ -29,16 +30,9 @@ class LiveScope:
     limits: dict
 
     @classmethod
-    def load(cls, service, limits, filename, sandbox):
-        if not filename or sandbox is None:
-            raise ValueError(f'{service} requires a separate explicitly approved --gcp-live-scope-file')
-        value = json.loads(Path(filename).read_text())
-        expected = {'schema': 1, 'approved': True, 'services': [service],
-                    'project': sandbox.project, 'project_number': sandbox.project_number,
-                    'location': 'global', 'limits': limits, 'cleanup_required': True,
-                    'scheduled_runs': False}
-        if value != expected or any(type(item) is not int for item in value['limits'].values()):
-            raise ValueError(f'{service} scope must match the approved project, fixed limits, and cleanup contract')
+    def load(cls, service, limits, filename, sandbox, mode: str):
+        load_scope_file(filename, sandbox, service=service, limits=limits, mode=mode,
+                        label=service, option='--gcp-live-scope-file')
         return cls(service, sandbox.project, sandbox.project_number, dict(limits))
 
     def evidence(self):

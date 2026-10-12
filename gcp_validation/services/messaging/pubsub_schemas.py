@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from gcp_validation.evidence import Inconclusive, now
 from gcp_validation.sandbox import Sandbox
+from gcp_validation.scope import load_scope_file, scope_document
 from gcp_validation.services.messaging.pubsub import PubSubClient, RPCFailure
 from gcp_validation.services.messaging.pubsub_scope import ACTORS, private_json
 
@@ -79,15 +80,17 @@ class SchemaScope:
     project_number: str
 
     @classmethod
-    def load(cls, filename: str | None, sandbox: Sandbox | None) -> Self:
+    def load(cls, filename: str | None, sandbox: Sandbox | None, mode: str) -> Self:
         """Load the scope file and require it to match the fixed contract."""
-        if not filename or sandbox is None:
-            raise ValueError("Pub/Sub schemas requires a separately approved --gcp-pubsub-scope")
-        value = json.loads(Path(filename).read_text())
-        if value != schema_scope(sandbox.project, sandbox.project_number, approved=True):
-            raise ValueError(
-                "Pub/Sub schema scope must match the approved project, limits, and cleanup"
-            )
+        load_scope_file(
+            filename,
+            sandbox,
+            service="pubsub-schemas",
+            limits=SCHEMA_LIMITS,
+            mode=mode,
+            label="Pub/Sub schemas",
+            option="--gcp-pubsub-scope",
+        )
         return cls(sandbox.project, sandbox.project_number)
 
     def evidence(self) -> dict[str, Any]:
@@ -103,17 +106,9 @@ class SchemaScope:
 
 def schema_scope(project: str, project_number: str, *, approved: bool) -> dict[str, Any]:
     """Return the scope document; the planner writes it unapproved."""
-    return {
-        "schema": 1,
-        "approved": approved,
-        "services": ["pubsub-schemas"],
-        "project": project,
-        "project_number": project_number,
-        "location": "global",
-        "limits": SCHEMA_LIMITS,
-        "cleanup_required": True,
-        "scheduled_runs": False,
-    }
+    return scope_document(
+        "pubsub-schemas", project, project_number, SCHEMA_LIMITS, approved=approved
+    )
 
 
 def attach_schema_clients(client: PubSubClient) -> None:

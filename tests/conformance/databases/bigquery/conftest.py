@@ -17,7 +17,7 @@ def bigquery(gcp_snapshot, gcp_target, pytestconfig):
     if gcp_target.mode == 'local':
         state = pytestconfig.gcp_artifacts / 'bigquery-resources'
     else:
-        scope = load_scope(pytestconfig.getoption('gcp_live_scope_file'), sandbox)
+        scope = load_scope(pytestconfig.getoption('gcp_live_scope_file'), sandbox, gcp_target.mode)
         state = Path.home() / '.local/state/gcp-local' / sandbox.project / SERVICE
         gcp_snapshot.context['scope'] = scope.evidence()
     fixture = DatasetFixture(BigQueryClient(gcp_target, LIVE_ENDPOINT, sandbox=sandbox, scope=scope), state)

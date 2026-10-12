@@ -12,7 +12,8 @@ def pubsub_schemas(gcp_snapshot, gcp_target, pytestconfig):
     if gcp_target.mode == "local":
         state = pytestconfig.gcp_artifacts / "pubsub-schema-resources"
     else:
-        scope = SchemaScope.load(pytestconfig.getoption("gcp_pubsub_scope"), sandbox)
+        option = pytestconfig.getoption("gcp_pubsub_scope")
+        scope = SchemaScope.load(option, sandbox, gcp_target.mode)
         state = Path.home() / ".local/state/gcp-local" / sandbox.project / "pubsub-schemas"
         gcp_snapshot.context["scope"] = scope.evidence()
     client = PubSubClient(

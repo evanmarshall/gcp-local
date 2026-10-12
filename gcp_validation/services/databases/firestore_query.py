@@ -29,9 +29,9 @@ def stream_error(observe: Observations, response: Response) -> dict[str, Any]:
     return selected
 
 
-def load_scope(filename: str, sandbox: Sandbox) -> LiveScope:
+def load_scope(filename: str, sandbox: Sandbox, mode: str) -> LiveScope:
     """Load the separately approved live scope for this recorder."""
-    return LiveScope.load(SERVICE, LIMITS, filename, sandbox)
+    return LiveScope.load(SERVICE, LIMITS, filename, sandbox, mode)
 
 
 def city(state: str, population: int) -> dict:
@@ -262,7 +262,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--allow-live", action="store_true", required=True)
     args = parser.parse_args(argv)
     sandbox = Sandbox.load(args.profile)
-    scope = load_scope(args.scope, sandbox)
+    scope = load_scope(args.scope, sandbox, 'cleanup')
     target = Target.select(
         "record",
         project=sandbox.project,

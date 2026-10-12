@@ -26,9 +26,9 @@ LIMITS = {'max_datasets': 1, 'max_tables': 5, 'max_rows': 10, 'max_queries': 30,
           'max_run_seconds': 600}
 
 
-def load_scope(filename: str, sandbox: Any) -> LiveScope:
+def load_scope(filename: str, sandbox: Any, mode: str) -> LiveScope:
     """Load the approved scope file for this scenario's limits."""
-    return LiveScope.load(SERVICE, LIMITS, filename, sandbox)
+    return LiveScope.load(SERVICE, LIMITS, filename, sandbox, mode)
 
 
 class SQLFixture(DatasetFixture):
@@ -203,7 +203,7 @@ def bigquery_sql(gcp_snapshot, gcp_target, pytestconfig):
     if gcp_target.mode == 'local':
         state = pytestconfig.gcp_artifacts / 'bigquery-sql-resources'
     else:
-        scope = load_scope(pytestconfig.getoption('gcp_live_scope_file'), sandbox)
+        scope = load_scope(pytestconfig.getoption('gcp_live_scope_file'), sandbox, gcp_target.mode)
         state = Path.home() / '.local/state/gcp-local' / sandbox.project / SERVICE
         gcp_snapshot.context['scope'] = scope.evidence()
     client = BigQueryClient(gcp_target, LIVE_ENDPOINT, sandbox=sandbox, scope=scope)

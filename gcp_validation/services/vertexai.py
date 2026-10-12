@@ -27,9 +27,9 @@ GENERATE = {**PROMPT,
 USAGE_COUNTS = frozenset({'promptTokenCount', 'totalTokenCount'})
 
 
-def load_scope(filename: str, sandbox: Sandbox) -> LiveScope:
+def load_scope(filename: str, sandbox: Sandbox, mode: str) -> LiveScope:
     """Load the owner-approved Vertex AI live scope."""
-    return LiveScope.load(SERVICE, LIMITS, filename, sandbox)
+    return LiveScope.load(SERVICE, LIMITS, filename, sandbox, mode)
 
 
 class InferenceRun(OwnedRun):

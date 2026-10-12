@@ -15,7 +15,8 @@ def pubsub_delivery(gcp_snapshot, gcp_target, pytestconfig):
         # The local project's number names its Pub/Sub service agent.
         number = os.environ["GCP_LOCAL_PUBSUB_PROJECT_NUMBER"]
     else:
-        scope = DeliveryScope.load(pytestconfig.getoption("gcp_pubsub_scope"), sandbox)
+        option = pytestconfig.getoption("gcp_pubsub_scope")
+        scope = DeliveryScope.load(option, sandbox, gcp_target.mode)
         state = Path.home() / ".local/state/gcp-local" / sandbox.project / "pubsub-delivery"
         number = scope.project_number
         gcp_snapshot.context["scope"] = scope.evidence()

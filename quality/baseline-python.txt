@@ -147,7 +147,6 @@
 10	E501	gcp_validation/services/artifactregistry.py
 11	ANN201	gcp_validation/services/databases/bigquery.py
 11	ANN201	gcp_validation/services/security/cloudkms.py
-11	E501	gcp_validation/live_rest.py
 11	E501	gcp_validation/services/messaging/cloudtasks.py
 11	E501	gcp_validation/services/security/serviceaccounts.py
 11	PLC0415	gcp_validation/services/messaging/pubsub.py
@@ -187,7 +186,6 @@
 2	D103	gcp_validation/services/security/serviceaccounts.py
 2	D103	gcp_validation/services/storage/client.py
 2	D107	gcp_validation/services/storage/client.py
-2	E501	gcp_validation/services/messaging/pubsub_scope.py
 2	E501	gcp_validation/services/storage/conditions.py
 2	E501	tests/conformance/security/resourcemanager/conftest.py
 2	E501	tests/conformance/storage/test_storage.py
@@ -226,11 +224,11 @@
 3	PT018	gcp_validation/services/messaging/pubsub.py
 30	ANN001	gcp_validation/live_rest.py
 30	E501	gcp_validation/services/messaging/pubsub.py
+33	E501	gcp_validation/services/security/secretmanager.py
 34	ANN001	gcp_validation/services/compute/networking.py
 34	ANN001	gcp_validation/services/messaging/pubsub.py
 34	ANN001	gcp_validation/services/security/secretmanager.py
 35	ANN001	gcp_validation/services/storage/client.py
-35	E501	gcp_validation/services/security/secretmanager.py
 4	ANN001	gcp_validation/services/messaging/pubsub_scope.py
 4	ANN201	gcp_validation/services/storage/authorization.py
 4	ANN201	gcp_validation/services/storage/sdk_slice.py
@@ -277,4 +275,5 @@
 8	ANN201	gcp_validation/services/messaging/cloudtasks.py
 8	ANN201	gcp_validation/services/security/serviceaccounts.py
 9	ANN201	gcp_validation/services/databases/spanner.py
+9	E501	gcp_validation/live_rest.py
 9	E501	gcp_validation/services/security/projectiam.py
