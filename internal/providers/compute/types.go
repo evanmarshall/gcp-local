@@ -5,14 +5,12 @@
 package compute
 
 import (
-	"encoding/json"
 	"net/url"
 	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -75,11 +73,6 @@ const (
 // answers on compute.googleapis.com but links resources under www.googleapis.com.
 const wireHost = "https://www.googleapis.com/compute/v1"
 
-// scopeOf builds the location scope of one compute resource path.
-func scopeOf(project, location string) state.Scope {
-	return state.Scope{Project: project, Location: location}
-}
-
 // globalName builds the canonical global resource name.
 func globalName(project, kind, id string) string {
 	return "//compute.googleapis.com/projects/" + url.PathEscape(project) + "/global/" + kind + "/" + url.PathEscape(id)
@@ -112,7 +105,8 @@ func gap(message string) error {
 	return status.Error(codes.Unimplemented, "Compute coverage gap: "+message)
 }
 
-// wireError builds the compute error body.
+// wireError renders the Compute body, which carries an errors[] reason list and
+// no status field, unlike the shared Google API body.
 func wireError(code int, reason, message string) *gateway.RESTResponse {
 	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
 		keyError: map[string]any{
@@ -120,16 +114,6 @@ func wireError(code int, reason, message string) *gateway.RESTResponse {
 			"errors": []any{map[string]any{keyCode: code, "reason": reason, keyMessage: message}},
 		},
 	}}
-}
-
-// statusInvalid reports a 400 for one malformed request field.
-func statusInvalid(message string) error {
-	return status.Error(codes.InvalidArgument, message)
-}
-
-// notFound reports the compute not-found status for one resource type.
-func notFound(kind, name string) error {
-	return status.Errorf(codes.NotFound, "The resource '%s/%s' was not found", kind, name)
 }
 
 // conflict reports the already-exists status for one resource type.
@@ -142,7 +126,7 @@ func missingReference() error {
 	return status.Error(codes.InvalidArgument, "The referenced network does not exist")
 }
 
-// stamp renders the compute timestamp shape.
+// stamp renders Compute's RFC 3339 timestamps with a zone offset.
 func stamp(moment time.Time) string {
 	return moment.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
 }
@@ -163,13 +147,4 @@ func fnv(name string) int {
 		hash = -hash
 	}
 	return hash % 997
-}
-
-// decodeBody decodes one request body into a generic map without unknown fields.
-func decodeBody(body []byte) (map[string]any, error) {
-	var value map[string]any
-	if json.Unmarshal(body, &value) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid request body")
-	}
-	return value, nil
 }

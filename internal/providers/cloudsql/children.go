@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
 // Request shape checks for databases and users.
@@ -81,10 +82,10 @@ type databaseBody struct {
 // createDatabase renders the CREATE DATABASE statement for a validated body.
 func (body databaseBody) createDatabase() (string, error) {
 	if !objectName(body.Name) {
-		return "", invalid("Invalid database name.")
+		return "", provider.Invalid("Invalid database name.")
 	}
 	if (body.Charset != "" && !charsetPattern.MatchString(body.Charset)) || (body.Collation != "" && !collationPattern.MatchString(body.Collation)) {
-		return "", invalid("Invalid charset or collation.")
+		return "", provider.Invalid("Invalid charset or collation.")
 	}
 	sql := "CREATE DATABASE " + quoteIdentifier(body.Name) + " OWNER " + superuserRole
 	if body.Charset != "" || body.Collation != "" {
@@ -103,7 +104,7 @@ func (body databaseBody) createDatabase() (string, error) {
 func (p *Provider) insertDatabase(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	var body databaseBody
 	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, invalid("Invalid JSON payload.")
+		return nil, provider.Invalid("Invalid JSON payload.")
 	}
 	sql, err := body.createDatabase()
 	if err != nil {
@@ -173,7 +174,7 @@ func (p *Provider) insertUser(call gateway.Call, request *gateway.RESTRequest, p
 		Type     string `json:"type"`
 	}
 	if json.Unmarshal(request.JSON, &body) != nil || !objectName(body.Name) || strings.HasPrefix(body.Name, "pg_") || strings.ContainsRune(body.Password, 0) {
-		return nil, invalid("Invalid user.")
+		return nil, provider.Invalid("Invalid user.")
 	}
 	if body.Type != "" && body.Type != "BUILT_IN" {
 		return nil, gap("user type %s (IAM database authentication)", body.Type)
@@ -213,7 +214,7 @@ func (p *Provider) listUsers(call gateway.Call, request *gateway.RESTRequest, pr
 func (p *Provider) deleteUser(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	instance, name, started := request.Path[pathInstance], request.Query.Get("name"), p.clock()
 	if !objectName(name) || strings.HasPrefix(name, "pg_") {
-		return nil, invalid("Invalid user name.")
+		return nil, provider.Invalid("Invalid user name.")
 	}
 	if _, failure, err := p.sqlOn(call.Context, project, instance, "DROP ROLE "+quoteIdentifier(name)); failure != nil || err != nil {
 		return failure, err
@@ -224,7 +225,7 @@ func (p *Provider) deleteUser(call gateway.Call, request *gateway.RESTRequest, p
 // getOperation renders one recorded operation.
 func (p *Provider) getOperation(_ gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	var found map[string]any
-	_ = p.catalog.With(scopeOf(project), func(c *catalog) error {
+	_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 		for _, operation := range c.operations {
 			if operation.Name == request.Path[pathOperation] {
 				found = operation.wire(project)
@@ -246,7 +247,7 @@ func (p *Provider) listOperations(_ gateway.Call, request *gateway.RESTRequest, 
 	}
 	instance := request.Query.Get("instance")
 	var items []any
-	_ = p.catalog.With(scopeOf(project), func(c *catalog) error {
+	_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 		for _, operation := range slices.Backward(c.operations) {
 			if instance == "" || operation.Instance == instance {
 				items = append(items, operation.wire(project))

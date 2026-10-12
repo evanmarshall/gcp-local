@@ -15,6 +15,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -74,8 +75,8 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	if err := registerPermissions(engine); err != nil {
-		return nil, err
+	if err := provider.RegisterPermissions(engine, permissions); err != nil {
+		return nil, fmt.Errorf("secretmanager permissions: %w", err)
 	}
 	p := &Provider{
 		index: index, engine: engine,
@@ -125,16 +126,6 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// registerPermissions binds every method to its permission.
-func registerPermissions(engine *iam.Engine) error {
-	for method, permission := range permissions {
-		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-			return fmt.Errorf("register %s: %w", method, err)
-		}
-	}
-	return nil
-}
-
 // secretRecord is one stored secret and its versions.
 type secretRecord struct {
 	Name        string
@@ -164,26 +155,9 @@ func newScopeState() scopeState { return scopeState{secrets: map[string]*secretR
 
 func (s *scopeState) reset() { s.secrets = map[string]*secretRecord{} }
 
-// wireError builds the Secret Manager error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
-}
-
-// notFound reports the Secret Manager not-found status.
-func notFound(kind, name string) error {
-	return status.Errorf(codes.NotFound, "The resource '%s/%s' was not found", kind, name)
-}
-
 // gap reports an unimplemented slice boundary.
 func gap(message string) error {
 	return status.Error(codes.Unimplemented, "Secret Manager coverage gap: "+message)
-}
-
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }
 
 // numericProject matches a project number in a resource path.
@@ -192,7 +166,7 @@ var numericProject = regexp.MustCompile(`^[0-9]+$`)
 // wireProject is the project number GCP puts in returned resource names,
 // falling back to the ID when the index has no number.
 func (p *Provider) wireProject(project string) string {
-	if resource, ok := p.index.Get(projectResource(project)); ok && resource.Number != "" {
+	if resource, ok := p.index.Get(provider.ProjectResource(project)); ok && resource.Number != "" {
 		return resource.Number
 	}
 	return project
@@ -206,8 +180,8 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		project = resource.Scope.Project
 		request.Path["project"] = project
 	}
-	scope := scopeOf(project)
-	target := iam.Target{Name: projectResource(project)}
+	scope := provider.ProjectScope(project)
+	target := iam.Target{Name: provider.ProjectResource(project)}
 	switch call.Method {
 	case methodSecretsCreate, methodSecretsList, methodLocationsList:
 		return scope, target, nil, nil
@@ -225,7 +199,7 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 			return scope, target, nil, fmt.Errorf("open the secretmanager scope: %w", err)
 		}
 		if record == nil {
-			return scope, target, nil, notFound("secrets", id)
+			return scope, target, nil, provider.NotFound("secrets", id)
 		}
 		return scope, target, record, nil
 	}
@@ -264,17 +238,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 
 // denied renders the Secret Manager denial shape.
 func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.Target) *gateway.RESTResponse {
-	permission := "unspecified"
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			permission = check.Permission
-			break
-		}
-	}
+	permission := provider.DeniedPermission(decision)
 	actor := call.Principal.Subject
 	code := 403
 	if call.Principal.State != gateway.Authenticated {
 		actor, code = "Anonymous caller", 401
 	}
-	return wireError(code, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", actor, permission, target.Name))
+	return provider.WireError(code, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", actor, permission, target.Name))
 }

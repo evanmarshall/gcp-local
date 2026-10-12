@@ -14,6 +14,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -98,8 +99,8 @@ func New(_ context.Context, config DeliveryConfig, registry *gateway.Registry, m
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	if err := registerPermissions(engine); err != nil {
-		return nil, err
+	if err := errors.Join(provider.RegisterPermissions(engine, permissions), provider.RegisterPermissions(engine, statePermissions)); err != nil {
+		return nil, fmt.Errorf("cloudtasks permissions: %w", err)
 	}
 	p := &Provider{
 		index: index, engine: engine, tokens: config.Tokens,
@@ -190,19 +191,6 @@ func (p *Provider) stopWorker(scope state.Scope, key string) {
 	p.mu.Unlock()
 }
 
-// registerPermissions binds every method to its permission.
-func registerPermissions(engine *iam.Engine) error {
-	for _, table := range []map[string]string{permissions, statePermissions} {
-		for method, permission := range table {
-			if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-				return fmt.Errorf("register %s: %w", method, err)
-			}
-		}
-	}
-	return nil
-}
-
-// queueRecord is one stored queue.
 type queueRecord struct {
 	Name     string
 	Location string
@@ -262,7 +250,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Cloud Tasks request")
 	}
-	scope := scopeOf(request.Path["project"])
+	scope := provider.ProjectScope(request.Path["project"])
 	decision, target, authorizeErr := p.authorize(call, request)
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
@@ -287,7 +275,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 // queue and task access. A queue that is not indexed authorizes through the
 // project anchor and then reads 404.
 func (p *Provider) authorize(call gateway.Call, request *gateway.RESTRequest) (iam.Decision, iam.Target, error) {
-	project := iam.Target{Name: projectResource(request.Path["project"])}
+	project := iam.Target{Name: provider.ProjectResource(request.Path["project"])}
 	target := project
 	if queue := request.Path["queue"]; queue != "" {
 		target = iam.Target{Name: queueResource(request.Path["project"], request.Path["location"], queue)}
@@ -318,29 +306,11 @@ func (p *Provider) authorizeActAs(call gateway.Call, project, email string) erro
 	}
 }
 
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
-
 // denied renders the Cloud Tasks denial shape.
 func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.Target) *gateway.RESTResponse {
-	permission := "unspecified"
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			permission = check.Permission
-			break
-		}
-	}
+	permission := provider.DeniedPermission(decision)
 	if call.Principal.State != gateway.Authenticated {
-		return wireError(401, "UNAUTHENTICATED", "Request had invalid authentication credentials.")
+		return provider.WireError(401, "UNAUTHENTICATED", "Request had invalid authentication credentials.")
 	}
-	return wireError(403, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", call.Principal.Subject, permission, target.Name))
-}
-
-// wireError builds the Cloud Tasks error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
+	return provider.WireError(403, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", call.Principal.Subject, permission, target.Name))
 }

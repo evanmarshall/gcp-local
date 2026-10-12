@@ -19,6 +19,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -63,12 +64,12 @@ func serveData(t *testing.T, h *harness) *dataGateway {
 		t.Fatal(err)
 	}
 	for role, member := range map[string]string{roleViewer: viewerActor, "roles/bigtable.user": userActor} {
-		policy, err := h.engine.GetPolicy(projectResource(testProject))
+		policy, err := h.engine.GetPolicy(provider.ProjectResource(testProject))
 		if err != nil {
 			t.Fatal(err)
 		}
 		policy.Bindings = append(policy.Bindings, iam.Binding{Role: role, Members: []string{member}})
-		if _, err := h.engine.SetPolicy(projectResource(testProject), policy); err != nil {
+		if _, err := h.engine.SetPolicy(provider.ProjectResource(testProject), policy); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -148,7 +149,7 @@ func TestDataPlaneThroughAuthenticatedGateway(t *testing.T) {
 	d := serveData(t, h)
 	expectOK(t, "instance", h.invokeAs(d.tokens[testActor], http.MethodPost, testInstances, createBody()))
 	expectOK(t, "table", h.invokeAs(d.tokens[testActor], http.MethodPost, testInstances+"/"+testInstance+"/tables", map[string]any{
-		keyTableID: testTable, keyTable: map[string]any{keyFamilies: map[string]any{familyOne: map[string]any{}}},
+		"tableId": testTable, "table": map[string]any{"columnFamilies": map[string]any{familyOne: map[string]any{}}},
 	}))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -215,7 +216,7 @@ func TestDataPlaneDeniedBeforeBackend(t *testing.T) {
 	d := serveData(t, h)
 	expectOK(t, "instance", h.invokeAs(d.tokens[testActor], http.MethodPost, testInstances, createBody()))
 	expectOK(t, "table", h.invokeAs(d.tokens[testActor], http.MethodPost, testInstances+"/"+testInstance+"/tables", map[string]any{
-		keyTableID: testTable, keyTable: map[string]any{keyFamilies: map[string]any{familyOne: map[string]any{}}},
+		"tableId": testTable, "table": map[string]any{"columnFamilies": map[string]any{familyOne: map[string]any{}}},
 	}))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

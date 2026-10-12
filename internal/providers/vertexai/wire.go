@@ -1,6 +1,8 @@
 package vertexai
 
 import (
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+
 	"encoding/json"
 	"strings"
 
@@ -208,20 +210,17 @@ func lowerCamel(key string) string {
 func decodeBody(raw []byte, target any) error {
 	var generic any
 	if err := json.Unmarshal(raw, &generic); err != nil {
-		return invalid("Invalid JSON payload received.")
+		return provider.Invalid("Invalid JSON payload received.")
 	}
 	normalized, err := json.Marshal(camelKeys(generic))
 	if err != nil {
-		return invalid("Invalid JSON payload received.")
+		return provider.Invalid("Invalid JSON payload received.")
 	}
 	if err := json.Unmarshal(normalized, target); err != nil {
-		return invalid("Invalid JSON payload received.")
+		return provider.Invalid("Invalid JSON payload received.")
 	}
 	return nil
 }
-
-// invalid reports a request the API rejects.
-func invalid(message string) error { return status.Error(codes.InvalidArgument, message) }
 
 // gap reports a feature the local backends do not model.
 func gap(message string) error {
@@ -232,7 +231,7 @@ func gap(message string) error {
 // backend runs.
 func (r *GenerateRequest) validate() error {
 	if len(r.Contents) == 0 {
-		return invalid("Unable to submit request because it has an empty contents field.")
+		return provider.Invalid("Unable to submit request because it has an empty contents field.")
 	}
 	if r.CachedContent != "" {
 		return gap("cachedContent is not supported")
@@ -259,7 +258,7 @@ func (r *GenerateRequest) validateTools() error {
 		}
 		for _, declaration := range tool.FunctionDeclarations {
 			if declaration.Name == "" {
-				return invalid("Every function declaration needs a name.")
+				return provider.Invalid("Every function declaration needs a name.")
 			}
 		}
 	}
@@ -280,10 +279,10 @@ var validRoles = map[string]bool{"": true, roleUser: true, roleModel: true, role
 // validate checks one turn's role and parts.
 func (c Content) validate() error {
 	if !validRoles[c.Role] {
-		return invalid("Please use a valid role: user, model.")
+		return provider.Invalid("Please use a valid role: user, model.")
 	}
 	if len(c.Parts) == 0 {
-		return invalid("Unable to submit request because it must include at least one parts field.")
+		return provider.Invalid("Unable to submit request because it must include at least one parts field.")
 	}
 	for _, part := range c.Parts {
 		if len(part.FileData) > 0 {

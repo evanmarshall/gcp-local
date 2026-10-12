@@ -11,8 +11,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -84,29 +82,10 @@ const (
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("spanner requires registry, manager, index, and iam")
 
-// wireError builds the Spanner error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
-}
-
-// scopeOf names one project scope.
-func scopeOf(project string) state.Scope {
-	return state.Scope{Project: project, Location: state.Global}
-}
-
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
-
-// instanceName renders the canonical instance name.
 func instanceName(project, instance string) string {
 	return "projects/" + project + "/instances/" + instance
 }
 
-// databaseName renders the canonical database name.
 func databaseName(project, instance, database string) string {
 	return instanceName(project, instance) + "/databases/" + database
 }

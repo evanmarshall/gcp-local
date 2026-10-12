@@ -12,6 +12,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -43,7 +44,10 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	if err := registerPermissions(engine); err != nil {
+	if err := provider.RegisterPermissions(engine, permissions); err != nil {
+		return nil, fmt.Errorf("spanner permissions: %w", err)
+	}
+	if err := registerDataPermissions(engine); err != nil {
 		return nil, err
 	}
 	p := &Provider{manager: manager, index: index, engine: engine, clock: time.Now,
@@ -81,17 +85,6 @@ func (p *Provider) registerHandlers(registry *gateway.Registry) error {
 	return p.registerData(registry)
 }
 
-// registerPermissions binds every admin method to its permission, then the
-// data-plane plans.
-func registerPermissions(engine *iam.Engine) error {
-	for method, permission := range permissions {
-		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-			return fmt.Errorf("register %s: %w", method, err)
-		}
-	}
-	return registerDataPermissions(engine)
-}
-
 // handle is the gateway entry point for every Spanner method. Authorization
 // completes before any backend is started or called.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
@@ -99,7 +92,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Spanner request")
 	}
-	scope := scopeOf(request.Path[pathProject])
+	scope := provider.ProjectScope(request.Path[pathProject])
 	if _, failed := p.poisoned.Load(scope); failed {
 		return nil, status.Error(codes.FailedPrecondition, "A Spanner mutation outcome is unresolved; reset this scope")
 	}
@@ -110,7 +103,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
 			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
 		}
-		return denied(decision, target), nil
+		return provider.Denied(decision, target.Name), nil
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -125,25 +118,13 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
-// denied renders the Spanner denial shape.
-func denied(decision iam.Decision, target iam.Target) *gateway.RESTResponse {
-	permission := "unspecified"
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			permission = check.Permission
-			break
-		}
-	}
-	return wireError(http.StatusForbidden, "PERMISSION_DENIED", fmt.Sprintf("The caller does not have %s access to %s.", permission, target.Name))
-}
-
 // target selects the IAM resource for a request: the addressed database or
 // instance when the index knows it, else its nearest indexed ancestor, so a
 // missing resource is authorized against its parent and then reported by the
 // emulator, as GCP does.
 func (p *Provider) target(path map[string]string) iam.Target {
 	project := path[pathProject]
-	names := []string{projectResource(project)}
+	names := []string{provider.ProjectResource(project)}
 	if instance := path[pathInstance]; instance != "" {
 		names = append(names, fullName(instanceName(project, instance)))
 		if database := path[pathDatabase]; database != "" {
@@ -151,7 +132,7 @@ func (p *Provider) target(path map[string]string) iam.Target {
 		}
 	}
 	for i := len(names) - 1; i > 0; i-- {
-		if resource, ok := p.index.Get(names[i]); ok && resource.Service == serviceName && resource.Scope == scopeOf(project) {
+		if resource, ok := p.index.Get(names[i]); ok && resource.Service == serviceName && resource.Scope == provider.ProjectScope(project) {
 			return iam.Target{Name: names[i]}
 		}
 	}

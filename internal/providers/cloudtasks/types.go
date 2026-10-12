@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
 // serviceName is the provider and backend registry name.
@@ -22,11 +20,6 @@ var (
 
 // maxPayload bounds the decoded task HTTP body size (1 MiB, the cloud limit).
 const maxPayload = 1 << 20
-
-// scopeOf builds the location scope of one queue or task path.
-func scopeOf(project string) state.Scope {
-	return state.Scope{Project: project, Location: state.Global}
-}
 
 // wirePrefix is the full resource-name prefix of the index and IAM policies.
 const wirePrefix = "//cloudtasks.googleapis.com/"
@@ -46,14 +39,6 @@ func queueResource(project, location, id string) string {
 func taskName(project, location, queue, id string) string {
 	return queueName(project, location, queue) + "/tasks/" + url.PathEscape(id)
 }
-
-// notFound reports the Cloud Tasks not-found status.
-func notFound(kind, name string) error {
-	return statusNotFound("The resource '" + kind + "/" + name + "' was not found")
-}
-
-// stamp renders the Cloud Tasks timestamp shape.
-func stamp(moment time.Time) string { return moment.UTC().Format("2006-01-02T15:04:05.000000Z") }
 
 // parseDuration reads a protobuf JSON duration such as "1s" or "0.100s".
 func parseDuration(value string) (time.Duration, bool) {

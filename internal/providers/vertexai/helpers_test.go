@@ -24,18 +24,6 @@ const (
 	modelPath     = "/v1beta1/projects/" + testProject + "/locations/us-central1/publishers/google/models/"
 	actorUser     = "user"
 	actorViewer   = "viewer"
-	keyContents   = "contents"
-	keyParts      = "parts"
-	keyContent    = "content"
-	keyCandidates = "candidates"
-	keyText       = "text"
-	keyInstances  = "instances"
-	keyArgs       = "args"
-	keyName       = "name"
-	keyProperties = "properties"
-	keyRole       = "role"
-	keyParameters = "parameters"
-	keyDimensions = "outputDimensionality"
 	typeObject    = "OBJECT"
 	typeString    = "STRING"
 	fnWeather     = "get_weather"
@@ -144,26 +132,26 @@ func list(t *testing.T, value any, path ...any) []any {
 
 // prompt builds a one-turn user request.
 func prompt(text string) map[string]any {
-	return map[string]any{keyContents: []any{turn(actorUser, map[string]any{keyText: text})}}
+	return map[string]any{"contents": []any{turn(actorUser, map[string]any{"text": text})}}
 }
 
 // turn builds one content turn.
 func turn(role string, parts ...any) map[string]any {
-	return map[string]any{keyRole: role, keyParts: parts}
+	return map[string]any{"role": role, "parts": parts}
 }
 
 // firstPart reads the first candidate's first part.
 func firstPart(t *testing.T, value any) any {
 	t.Helper()
-	return at(t, value, keyCandidates, 0, keyContent, keyParts, 0)
+	return at(t, value, "candidates", 0, "content", "parts", 0)
 }
 
 // firstText joins the first candidate's text parts.
 func firstText(t *testing.T, value any) string {
 	t.Helper()
 	var builder strings.Builder
-	for _, part := range list(t, value, keyCandidates, 0, keyContent, keyParts) {
-		if text, ok := at(t, part, keyText).(string); ok {
+	for _, part := range list(t, value, "candidates", 0, "content", "parts") {
+		if text, ok := at(t, part, "text").(string); ok {
 			builder.WriteString(text)
 		}
 	}
@@ -173,8 +161,8 @@ func firstText(t *testing.T, value any) string {
 // weatherTool declares get_weather(city).
 func weatherTool() []any {
 	return []any{map[string]any{"functionDeclarations": []any{map[string]any{
-		keyName: fnWeather, "description": "Weather by city",
-		keyParameters: map[string]any{keyType: typeObject, keyProperties: map[string]any{argCity: map[string]any{keyType: typeString}}, "required": []any{argCity}},
+		"name": fnWeather, "description": "Weather by city",
+		"parameters": map[string]any{keyType: typeObject, "properties": map[string]any{argCity: map[string]any{keyType: typeString}}, "required": []any{argCity}},
 	}}}}
 }
 

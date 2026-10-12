@@ -14,6 +14,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -190,8 +191,8 @@ func (p *Provider) serviceDocument(scope state.Scope, record *serviceRecord) map
 		keyName:                 resource(scope.Project, scope.Location, kindService, record.Name),
 		"uid":                   record.UID,
 		"generation":            strconv.FormatInt(record.Generation, 10),
-		"createTime":            stamp(record.CreatedAt),
-		"updateTime":            stamp(record.UpdatedAt),
+		"createTime":            provider.Stamp(record.CreatedAt),
+		"updateTime":            provider.Stamp(record.UpdatedAt),
 		"ingress":               record.Ingress,
 		"template":              templateDocument(record),
 		"traffic":               traffic,
@@ -235,7 +236,7 @@ func (p *Provider) revisionDocument(scope state.Scope, record *serviceRecord, re
 		"service":        resource(scope.Project, scope.Location, kindService, record.Name),
 		"uid":            revision.ID + "-uid",
 		"generation":     strconv.FormatInt(record.Generation, 10),
-		"createTime":     stamp(revision.CreatedAt),
+		"createTime":     provider.Stamp(revision.CreatedAt),
 		"template":       templateDocument(&serviceRecord{Template: revision.Template}),
 		"serviceAccount": revision.Template.ServiceAccount,
 		"conditions":     []any{map[string]any{keyType: "ContainerReady", "state": ready, "message": detail}},
@@ -382,7 +383,7 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gat
 	var conflict *gateway.RESTResponse
 	err = p.scopes.With(scope, func(s *scopeState) error {
 		if s.services[id] != nil {
-			conflict = wireError(409, "ALREADY_EXISTS", "service "+id+" already exists")
+			conflict = provider.WireError(409, "ALREADY_EXISTS", "service "+id+" already exists")
 			return nil
 		}
 		revision := &revisionRecord{ID: template.Revision, Template: template, CreatedAt: now}
@@ -407,19 +408,11 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gat
 	return p.launchOperation(scope, id), nil
 }
 
-// idOf extracts the trailing identifier of a full resource name.
-func idOf(name string) string {
-	if index := strings.LastIndex(name, "/"); index >= 0 {
-		return name[index+1:]
-	}
-	return name
-}
-
 // indexService publishes the service and its location ancestry to the index.
 func (p *Provider) indexService(scope state.Scope, id string) error {
 	if err := p.index.Put(serviceName, state.Resource{
 		Name: locationTarget(scope), Service: serviceName, Kind: "location",
-		Parent: projectResource(scope.Project), Scope: scope,
+		Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); err != nil {
 		return fmt.Errorf("index the run location: %w", err)
 	}
@@ -432,11 +425,6 @@ func (p *Provider) indexService(scope state.Scope, id string) error {
 	return nil
 }
 
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
-
 // parseCreate validates one services.create request into its identifiers.
 func parseCreate(request *gateway.RESTRequest) (string, templateShape, error) {
 	body, requestErr := decodeRequest(request.JSON)
@@ -446,7 +434,7 @@ func parseCreate(request *gateway.RESTRequest) (string, templateShape, error) {
 	// The body carries the full resource name on a services.create call.
 	id := request.Path["service"]
 	if id == "" {
-		id = idOf(body.Name)
+		id = provider.LastSegment(body.Name)
 	}
 	// The released google provider sends the id as the serviceId query parameter.
 	if id == "" {
@@ -475,7 +463,7 @@ func (p *Provider) launchOperation(scope state.Scope, id string) *gateway.RESTRe
 	operationName := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/rel-" + id
 	record, refused, err := p.serviceRecordLookUp(scope, id)
 	if err != nil || refused != nil {
-		return &gateway.RESTResponse{JSON: wireError(500, "INTERNAL", "The created service vanished before its launch")}
+		return &gateway.RESTResponse{JSON: provider.WireError(500, "INTERNAL", "The created service vanished before its launch")}
 	}
 	revision := latestRevision(record)
 	if startErr := p.startRevision(record, revision); startErr != nil {
@@ -711,7 +699,6 @@ func (p *Provider) revisionsList(scope state.Scope, record *serviceRecord) (*gat
 	return &gateway.RESTResponse{JSON: map[string]any{"revisions": items}}, nil
 }
 
-// revisionGet returns one revision document.
 func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	p.recordMu.RLock()
 	defer p.recordMu.RUnlock()
@@ -721,7 +708,7 @@ func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope) 
 	}
 	revision := record.Revisions[request.Path["revision"]]
 	if revision == nil {
-		return wireError(404, "NOT_FOUND", "revision "+request.Path["revision"]+" is not found"), nil
+		return provider.WireError(404, "NOT_FOUND", "revision "+request.Path["revision"]+" is not found"), nil
 	}
 	return &gateway.RESTResponse{JSON: p.revisionDocument(scope, record, revision)}, nil
 }
@@ -739,7 +726,7 @@ func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTReques
 	}
 	revision := record.Revisions[id]
 	if revision == nil {
-		return wireError(404, "NOT_FOUND", "revision "+id+" is not found"), nil
+		return provider.WireError(404, "NOT_FOUND", "revision "+id+" is not found"), nil
 	}
 	if record.Traffic[id] > 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "Revision %q is still serving traffic", id)
@@ -752,7 +739,6 @@ func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTReques
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
-// operationsList returns the operations of the location.
 func (p *Provider) operationsList(scope state.Scope) (*gateway.RESTResponse, error) {
 	var names []string
 	_ = p.scopes.With(scope, func(s *scopeState) error {
@@ -770,12 +756,11 @@ func (p *Provider) operationsList(scope state.Scope) (*gateway.RESTResponse, err
 	return &gateway.RESTResponse{JSON: map[string]any{"operations": items}}, nil
 }
 
-// operationGet returns one operation document.
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + request.Path["operation"]
 	entry := p.operation(scope, name)
 	if entry == nil {
-		return wireError(404, "NOT_FOUND", "operation is not found"), nil
+		return provider.WireError(404, "NOT_FOUND", "operation is not found"), nil
 	}
 	return &gateway.RESTResponse{JSON: operationDocument(entry)}, nil
 }

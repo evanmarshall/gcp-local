@@ -9,6 +9,7 @@ import (
 
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,9 +37,9 @@ func mutationOf(ctx context.Context, b driver, message proto.Message, scope stat
 	switch request := message.(type) {
 	case *instancepb.CreateInstanceRequest:
 		return mutation{kind: kindInstance, name: request.GetParent() + "/instances/" + request.GetInstanceId(),
-			parent: projectResource(scope.Project), create: true, scope: scope}
+			parent: provider.ProjectResource(scope.Project), create: true, scope: scope}
 	case *instancepb.DeleteInstanceRequest:
-		return mutation{kind: kindInstance, name: request.GetName(), parent: projectResource(scope.Project),
+		return mutation{kind: kindInstance, name: request.GetName(), parent: provider.ProjectResource(scope.Project),
 			children: databasesOf(ctx, b, request.GetName()), scope: scope}
 	case *databasepb.CreateDatabaseRequest:
 		match := createStatement.FindStringSubmatch(request.GetCreateStatement())

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -67,7 +68,7 @@ func (p *Provider) executeConnectivity(call gateway.Call, request *gateway.RESTR
 func parseConnectivity(request *gateway.RESTRequest, project, id string) (*namedTest, error) {
 	var spec connectivityRequest
 	if json.Unmarshal(request.JSON, &spec) != nil {
-		return nil, statusInvalid("Invalid connectivity test specification")
+		return nil, provider.Invalid("Invalid connectivity test specification")
 	}
 	for _, endpoint := range []connectivityEndpoint{spec.Source, spec.Destination} {
 		if endpoint.ProjectID != "" && endpoint.ProjectID != project {
@@ -115,7 +116,7 @@ func connectivityFlow(project, protocol string, spec connectivityRequest) (flow,
 			continue
 		}
 		if *endpoint.target = net.ParseIP(strings.TrimSpace(endpoint.address)); *endpoint.target == nil {
-			return flow{}, statusInvalid("Connectivity test endpoints require a valid IP address or an instance")
+			return flow{}, provider.Invalid("Connectivity test endpoints require a valid IP address or an instance")
 		}
 	}
 	return result, nil
@@ -131,7 +132,7 @@ func instanceEndpoint(project, reference string) (string, error) {
 	_, rest, _ := strings.Cut(reference, "projects/")
 	parts := strings.Split(rest, "/")
 	if len(parts) != 5 || parts[1] != "zones" || parts[3] != "instances" || !uidPattern.MatchString(parts[4]) {
-		return "", statusInvalid("Invalid instance endpoint " + reference)
+		return "", provider.Invalid("Invalid instance endpoint " + reference)
 	}
 	if parts[0] != project {
 		return "", gap("cross-project connectivity test endpoints are not modeled")
@@ -144,7 +145,7 @@ func instanceEndpoint(project, reference string) (string, error) {
 func (p *Provider) createConnectivity(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	id := request.Query.Get("testId")
 	if !uidPattern.MatchString(id) {
-		return nil, statusInvalid("A connectivity test requires a valid testId")
+		return nil, provider.Invalid("A connectivity test requires a valid testId")
 	}
 	record, err := parseConnectivity(request, scope.Project, id)
 	if err != nil {

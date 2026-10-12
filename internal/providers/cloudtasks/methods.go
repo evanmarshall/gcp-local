@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"maps"
 	"sort"
-	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -104,20 +104,11 @@ func parseBody(body []byte) (map[string]any, error) {
 	}
 	var value map[string]any
 	if json.Unmarshal(body, &value) != nil {
-		return nil, statusInvalid("Invalid request body")
+		return nil, provider.Invalid("Invalid request body")
 	}
 	return value, nil
 }
 
-// textOf reads a string field as empty-safe text.
-func textOf(value any) string {
-	if value, ok := value.(string); ok {
-		return value
-	}
-	return ""
-}
-
-// createQueue stores one queue.
 func (p *Provider) createQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	body, err := parseBody(request.JSON)
 	if err != nil {
@@ -141,7 +132,7 @@ func (p *Provider) createQueue(request *gateway.RESTRequest, scope state.Scope) 
 	}
 	if err := p.index.Put(serviceName, state.Resource{
 		Name: queueResource(scope.Project, record.Location, record.Name), Service: serviceName,
-		Kind: "queue", Parent: projectResource(scope.Project), Scope: scope,
+		Kind: "queue", Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); err != nil {
 		return nil, fmt.Errorf("index the queue: %w", err)
 	}
@@ -150,9 +141,9 @@ func (p *Provider) createQueue(request *gateway.RESTRequest, scope state.Scope) 
 
 // newQueue validates one queue creation body into its record.
 func newQueue(request *gateway.RESTRequest, body map[string]any) (*queueRecord, error) {
-	id := lastSegment(textOf(body["name"]))
+	id := provider.LastSegment(provider.Text(body["name"]))
 	if !queuePattern.MatchString(id) {
-		return nil, statusInvalid("Invalid queue name " + id)
+		return nil, provider.Invalid("Invalid queue name " + id)
 	}
 	rate, _ := body["rateLimits"].(map[string]any)
 	retry, err := parseRetry(defaultRetry(), body["retryConfig"])
@@ -162,14 +153,6 @@ func newQueue(request *gateway.RESTRequest, body map[string]any) (*queueRecord, 
 	return &queueRecord{Name: id, Location: request.Path["location"], Rate: mergeRates(nil, rate), Retry: retry, State: "RUNNING"}, nil
 }
 
-// lastSegment extracts the trailing identifier of a full resource name.
-func lastSegment(name string) string {
-	if index := strings.LastIndex(name, "/"); index >= 0 {
-		return name[index+1:]
-	}
-	return name
-}
-
 // withQueue runs one mutation or read of an existing queue under the scope
 // lock and renders the resulting queue document.
 func (p *Provider) withQueue(scope state.Scope, id string, use func(*scopeState, *queueRecord) error) (*gateway.RESTResponse, error) {
@@ -177,7 +160,7 @@ func (p *Provider) withQueue(scope state.Scope, id string, use func(*scopeState,
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		record := s.queues[id]
 		if record == nil {
-			return notFound("queues", id)
+			return provider.NotFound("queues", id)
 		}
 		if err := use(s, record); err != nil {
 			return err
@@ -194,7 +177,6 @@ func (p *Provider) withQueue(scope state.Scope, id string, use func(*scopeState,
 // readQueue makes no change.
 func readQueue(*scopeState, *queueRecord) error { return nil }
 
-// getQueue returns one queue document.
 func (p *Provider) getQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	return p.withQueue(scope, request.Path["queue"], readQueue)
 }
@@ -239,7 +221,7 @@ func (p *Provider) deleteQueue(request *gateway.RESTRequest, scope state.Scope) 
 	var removed []string
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		if s.queues[id] == nil {
-			return notFound("queues", id)
+			return provider.NotFound("queues", id)
 		}
 		delete(s.queues, id)
 		removed = removeTasks(s, id)
@@ -296,7 +278,7 @@ func (p *Provider) setQueueIam(request *gateway.RESTRequest, scope state.Scope) 
 		Policy iam.Policy `json:"policy"`
 	}
 	if json.Unmarshal(request.JSON, &envelope) != nil {
-		return nil, statusInvalid("Invalid IAM policy")
+		return nil, provider.Invalid("Invalid IAM policy")
 	}
 	if _, err := p.getQueue(request, scope); err != nil {
 		return nil, err

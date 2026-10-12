@@ -11,6 +11,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
 // onePortPool returns a pool over one currently free loopback port.
@@ -93,6 +94,6 @@ func TestPublicAddressForwardsWithoutIAM(t *testing.T) {
 	if again := h.publishedAddress(testInstance); again != address {
 		t.Fatalf("the released port was not reused: %s, want %s", again, address)
 	}
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}))
 	expectRefused(t, address)
 }

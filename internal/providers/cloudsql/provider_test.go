@@ -15,6 +15,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -27,7 +28,6 @@ const (
 	testOperations = "/sql/v1beta4/projects/" + testProject + "/operations"
 	testVersion    = "POSTGRES_16"
 	testDatabase   = "app"
-	keyTier        = "tier"
 	smallTier      = "db-g1-small"
 	testPath       = testInstances + "/" + testInstance
 	adminToken     = "admin"
@@ -68,9 +68,9 @@ func grants(t *testing.T, index *state.Index, engine *iam.Engine) {
 		peerProject: {{Role: "roles/cloudsql.admin", Members: []string{principal(peerToken)}}},
 	}
 	for project, binding := range bindings {
-		must(t, index.Put(ownerProjects, state.Resource{Name: projectResource(project), Service: ownerProjects,
-			Kind: kindProject, Number: "123456", Scope: scopeOf(project)}))
-		_, err := engine.SetPolicy(projectResource(project), iam.Policy{Bindings: binding})
+		must(t, index.Put(ownerProjects, state.Resource{Name: provider.ProjectResource(project), Service: ownerProjects,
+			Kind: kindProject, Number: "123456", Scope: provider.ProjectScope(project)}))
+		_, err := engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: binding})
 		must(t, err)
 	}
 }
@@ -180,7 +180,7 @@ func settingsBodyOf(fields map[string]any) map[string]any {
 // insertBody is a minimal POSTGRES_16 insert request for the test instance.
 func insertBody() map[string]any {
 	return map[string]any{keyName: testInstance, "region": "us-central1", "databaseVersion": testVersion, "rootPassword": "root-secret",
-		keySettings: map[string]any{keyTier: "db-f1-micro", "edition": "ENTERPRISE", "userLabels": map[string]string{"managed-by": "gcp-local"}}}
+		keySettings: map[string]any{"tier": "db-f1-micro", "edition": "ENTERPRISE", "userLabels": map[string]string{"managed-by": "gcp-local"}}}
 }
 
 // createInstance inserts the test instance and checks the completed operation.
@@ -201,7 +201,7 @@ func TestDeniedInsertStartsNoBackend(t *testing.T) {
 		t.Fatalf("a denied request started a backend: %+v", status)
 	}
 	body := h.expect(h.invoke(adminToken, http.MethodPost, testInstances, map[string]any{keyName: "mysql", "databaseVersion": "MYSQL_8_0",
-		keySettings: map[string]any{keyTier: "db-f1-micro"}}), http.StatusNotImplemented)
+		keySettings: map[string]any{"tier": "db-f1-micro"}}), http.StatusNotImplemented)
 	if message, _ := object(t, body["error"])["message"].(string); !strings.Contains(message, "coverage gap") {
 		t.Fatalf("unsupported version = %v", body)
 	}
@@ -227,10 +227,10 @@ func TestInstanceReads(t *testing.T) {
 func TestInstancePatch(t *testing.T) {
 	h := newHarness(t)
 	h.createInstance()
-	h.expect(h.invoke(viewerToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{keyTier: smallTier})), http.StatusForbidden)
+	h.expect(h.invoke(viewerToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier})), http.StatusForbidden)
 	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{
 		keyDeletionProtection: true, "userLabels": map[string]string{"team": "data"}, keySettingsVersion: "1"})), http.StatusOK)
-	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{keyTier: smallTier, keySettingsVersion: "1"})), http.StatusPreconditionFailed)
+	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier, keySettingsVersion: "1"})), http.StatusPreconditionFailed)
 	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"databaseFlags": []any{}})), http.StatusNotImplemented)
 	settings := object(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings])
 	if settings[keyDeletionProtection] != true || settings[keySettingsVersion] != "2" || object(t, settings["userLabels"])["team"] != "data" {
@@ -242,7 +242,7 @@ func TestInstancePatch(t *testing.T) {
 func TestInstanceDeleteAndOperations(t *testing.T) {
 	h := newHarness(t)
 	h.createInstance()
-	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{keyTier: smallTier})), http.StatusOK)
+	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier})), http.StatusOK)
 	h.expect(h.invoke(viewerToken, http.MethodDelete, testPath, nil), http.StatusForbidden)
 	deleted := h.expect(h.invoke(adminToken, http.MethodDelete, testPath, nil), http.StatusOK)
 	h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusNotFound)
@@ -301,7 +301,7 @@ func TestProjectIsolationAndReset(t *testing.T) {
 	h.expect(h.invoke(peerToken, http.MethodGet, peer+"/"+testInstance, nil), http.StatusNotFound)
 	h.expect(h.invoke(peerToken, http.MethodPost, peer, insertBody()), http.StatusOK)
 	original := h.fleet()
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}))
 	if original.stops != 1 || original.server(testInstance) != nil {
 		t.Fatal("reset did not stop the project's servers")
 	}

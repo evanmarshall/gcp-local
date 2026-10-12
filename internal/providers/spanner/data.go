@@ -11,6 +11,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -260,7 +261,7 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 		return state.Scope{}, status.Error(codes.InvalidArgument, "Malformed resource name")
 	}
 	path := map[string]string{pathProject: parts[1], pathInstance: parts[3], pathDatabase: parts[5]}
-	scope := scopeOf(parts[1])
+	scope := provider.ProjectScope(parts[1])
 	if _, failed := p.poisoned.Load(scope); failed {
 		return scope, status.Error(codes.FailedPrecondition, "A Spanner mutation outcome is unresolved; reset this scope")
 	}
@@ -281,19 +282,9 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 			return scope, fmt.Errorf("authorize %s: %w", call.Method, err)
 		}
 		return scope, status.Errorf(code, "Caller is missing IAM permission %s on resource %s.",
-			deniedPermission(decision), strings.TrimPrefix(target.Name, "//spanner.googleapis.com/"))
+			provider.DeniedPermission(decision), strings.TrimPrefix(target.Name, "//spanner.googleapis.com/"))
 	}
 	return scope, nil
-}
-
-// deniedPermission names the first failed check of a decision.
-func deniedPermission(decision iam.Decision) string {
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			return check.Permission
-		}
-	}
-	return "unspecified"
 }
 
 // selected is a request whose transaction selector can begin a transaction.

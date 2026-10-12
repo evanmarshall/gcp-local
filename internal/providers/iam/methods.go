@@ -10,6 +10,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -60,7 +61,7 @@ func (p *Provider) accountsCreate(request *gateway.RESTRequest, scope state.Scop
 	}
 	id := body.AccountID
 	if id == "" && body.Name != "" {
-		id = lastSegment(body.Name)
+		id = provider.LastSegment(body.Name)
 	}
 	if !uid.MatchString(id) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", id)
@@ -91,7 +92,7 @@ func (p *Provider) accountsCreate(request *gateway.RESTRequest, scope state.Scop
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: accountResource(scope.Project, accountEmail(scope.Project, id)), Service: serviceName,
-		Kind: kindAccount, Parent: projectResource(scope.Project), Scope: scope,
+		Kind: kindAccount, Parent: provider.ProjectResource(scope.Project), Scope: scope,
 		// The unique id is the account's numeric identity (an ID token's sub).
 		Number: accountUniqueID(created),
 	}); indexErr != nil {
@@ -100,15 +101,6 @@ func (p *Provider) accountsCreate(request *gateway.RESTRequest, scope state.Scop
 	return &gateway.RESTResponse{JSON: accountWire(created)}, nil
 }
 
-// lastSegment returns the id after the final '/', or the value itself.
-func lastSegment(value string) string {
-	if index := strings.LastIndex(value, "/"); index >= 0 {
-		return value[index+1:]
-	}
-	return value
-}
-
-// accountWire renders one account document.
 func accountWire(record *accountRecord) map[string]any {
 	return map[string]any{
 		keyName:          accountName(record.Project, record.ID),
@@ -140,11 +132,10 @@ func (p *Provider) accountLocked(scope state.Scope, account string) *accountReco
 	return record
 }
 
-// accountsGet returns one account.
 func (p *Provider) accountsGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
-		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+		return nil, provider.NotFound(kindAccount, request.Path["serviceAccount"])
 	}
 	return &gateway.RESTResponse{JSON: accountWire(record)}, nil
 }
@@ -165,7 +156,7 @@ func (p *Provider) accountsList(scope state.Scope) (*gateway.RESTResponse, error
 func (p *Provider) accountsUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
-		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+		return nil, provider.NotFound(kindAccount, request.Path["serviceAccount"])
 	}
 	var body struct {
 		ServiceAccount struct {
@@ -203,7 +194,7 @@ func (p *Provider) accountsUpdate(request *gateway.RESTRequest, scope state.Scop
 func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	account := request.Path["serviceAccount"]
 	if p.accountLocked(scope, account) == nil {
-		return nil, notFound(kindAccount, account)
+		return nil, provider.NotFound(kindAccount, account)
 	}
 	var indexErr error
 	_ = p.scopes.With(scope, func(s *scopeState) error {
@@ -221,7 +212,7 @@ func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scop
 func (p *Provider) keysList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
-		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+		return nil, provider.NotFound(kindAccount, request.Path["serviceAccount"])
 	}
 	items := []any{}
 	for _, key := range record.Keys {
@@ -234,7 +225,7 @@ func (p *Provider) keysList(request *gateway.RESTRequest, scope state.Scope) (*g
 func (p *Provider) keysCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
-		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+		return nil, provider.NotFound(kindAccount, request.Path["serviceAccount"])
 	}
 	buffer := make([]byte, 24)
 	if _, err := rand.Read(buffer); err != nil {
@@ -253,14 +244,13 @@ func (p *Provider) keysCreate(request *gateway.RESTRequest, scope state.Scope) (
 	return &gateway.RESTResponse{JSON: response}, nil
 }
 
-// keyWire renders one key document.
 func keyWire(_ *accountRecord, key *keyRecord) map[string]any {
 	return map[string]any{
 		keyName:           key.ID,
 		"keyAlgorithm":    "KEY_ALG_RSA_2048",
 		"keyOrigin":       "GOOGLE_PROVIDED",
 		"keyType":         "USER_MANAGED",
-		"validAfterTime":  stamp(key.CreatedAt),
+		"validAfterTime":  provider.Stamp(key.CreatedAt),
 		"validBeforeTime": "3999-12-31T23:59:59.999999Z",
 	}
 }
@@ -269,12 +259,12 @@ func keyWire(_ *accountRecord, key *keyRecord) map[string]any {
 func (p *Provider) keysGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
-		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+		return nil, provider.NotFound(kindAccount, request.Path["serviceAccount"])
 	}
 	keyID := "projects/" + record.Project + "/serviceAccounts/" + record.ID + "/keys/" + request.Path["keyId"]
 	key, ok := record.Keys[keyID]
 	if !ok {
-		return nil, notFound(kindKey, request.Path["keyId"])
+		return nil, provider.NotFound(kindKey, request.Path["keyId"])
 	}
 	return &gateway.RESTResponse{JSON: keyWire(record, key)}, nil
 }
@@ -283,11 +273,11 @@ func (p *Provider) keysGet(request *gateway.RESTRequest, scope state.Scope) (*ga
 func (p *Provider) keysDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
-		return nil, notFound(kindAccount, request.Path["serviceAccount"])
+		return nil, provider.NotFound(kindAccount, request.Path["serviceAccount"])
 	}
 	keyID := "projects/" + record.Project + "/serviceAccounts/" + record.ID + "/keys/" + request.Path["keyId"]
 	if _, ok := record.Keys[keyID]; !ok {
-		return nil, notFound(kindKey, request.Path["keyId"])
+		return nil, provider.NotFound(kindKey, request.Path["keyId"])
 	}
 	_ = p.scopes.With(scope, func(_ *scopeState) error {
 		delete(record.Keys, keyID)

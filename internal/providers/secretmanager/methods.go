@@ -8,11 +8,11 @@ import (
 	"maps"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -29,7 +29,7 @@ func labelsOf(value any) map[string]string {
 	labels := map[string]string{}
 	if values, ok := value.(map[string]any); ok {
 		for key, label := range values {
-			labels[key] = textOf(label)
+			labels[key] = provider.Text(label)
 		}
 	}
 	return labels
@@ -104,31 +104,6 @@ func (p *Provider) executeVersion(call gateway.Call, request *gateway.RESTReques
 	}
 }
 
-// decodeBody reads one request body as a plain map.
-func decodeBody(body []byte) (map[string]any, error) {
-	var value map[string]any
-	if json.Unmarshal(body, &value) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid request body")
-	}
-	return value, nil
-}
-
-// textOf reads a string field as empty-safe text.
-func textOf(value any) string {
-	if value, ok := value.(string); ok {
-		return value
-	}
-	return ""
-}
-
-// idOfName extracts the trailing identifier of a full resource name.
-func idOfName(name string) string {
-	if index := strings.LastIndex(name, "/"); index >= 0 {
-		return name[index+1:]
-	}
-	return name
-}
-
 // secretDocument renders the secret wire shape.
 func secretDocument(project string, record *secretRecord) map[string]any {
 	labels := map[string]string{}
@@ -137,7 +112,7 @@ func secretDocument(project string, record *secretRecord) map[string]any {
 		keyName:       secretWireName(project, record.Name),
 		"replication": record.Replication,
 		"labels":      labels,
-		"createTime":  stamp(record.CreatedAt),
+		"createTime":  provider.Stamp(record.CreatedAt),
 		"etag":        etag(record.CreatedAt, record.Revision),
 	}
 }
@@ -148,11 +123,11 @@ func versionDocument(project string, record *secretRecord, version *versionRecor
 		"name":              versionWireName(project, record.Name, version.Number),
 		"state":             version.State,
 		"replicationStatus": map[string]any{"automatic": map[string]any{}},
-		"createTime":        stamp(version.CreatedAt),
+		"createTime":        provider.Stamp(version.CreatedAt),
 		"etag":              etag(version.CreatedAt, version.Revision),
 	}
 	if version.State == stateDestroyed {
-		document["destroyTime"] = stamp(version.DestroyedAt)
+		document["destroyTime"] = provider.Stamp(version.DestroyedAt)
 	}
 	return document
 }
@@ -191,7 +166,7 @@ func sortedVersions(record *secretRecord) []*versionRecord {
 
 // create stores one secret.
 func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := decodeBody(request.JSON)
+	body, err := provider.DecodeObject(request.JSON)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +182,7 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gat
 	var conflict *gateway.RESTResponse
 	err = p.scopes.With(scope, func(s *scopeState) error {
 		if s.secrets[id] != nil {
-			conflict = wireError(409, "ALREADY_EXISTS", "secret "+id+" already exists")
+			conflict = provider.WireError(409, "ALREADY_EXISTS", "secret "+id+" already exists")
 			return nil
 		}
 		s.secrets[id] = &secretRecord{
@@ -224,7 +199,7 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gat
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: secretResource(scope.Project, id), Service: serviceName,
-		Kind: "secret", Parent: projectResource(scope.Project), Scope: scope,
+		Kind: "secret", Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the secret: %w", indexErr)
 	}
@@ -262,7 +237,7 @@ func (p *Provider) list(scope state.Scope) (*gateway.RESTResponse, error) {
 
 // update replaces the labels of one secret.
 func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	body, err := decodeBody(request.JSON)
+	body, err := provider.DecodeObject(request.JSON)
 	if err != nil {
 		return nil, err
 	}
@@ -344,11 +319,10 @@ func (p *Provider) versionsList(scope state.Scope, record *secretRecord) (*gatew
 	return &gateway.RESTResponse{JSON: map[string]any{"versions": items}}, nil
 }
 
-// versionGet returns one version document.
 func (p *Provider) versionGet(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
 	version := versionOf(record, request.Path["version"])
 	if version == nil {
-		return nil, notFound("versions", request.Path["version"])
+		return nil, provider.NotFound("versions", request.Path["version"])
 	}
 	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
 }
@@ -357,7 +331,7 @@ func (p *Provider) versionGet(request *gateway.RESTRequest, scope state.Scope, r
 func (p *Provider) versionAccess(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
 	version := versionOf(record, request.Path["version"])
 	if version == nil {
-		return nil, notFound("versions", request.Path["version"])
+		return nil, provider.NotFound("versions", request.Path["version"])
 	}
 	if version.State == stateDestroyed {
 		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is destroyed", version.Number)
@@ -378,7 +352,7 @@ func (p *Provider) versionAccess(request *gateway.RESTRequest, scope state.Scope
 func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
 	version := versionOf(record, request.Path["version"])
 	if version == nil {
-		return nil, notFound("versions", request.Path["version"])
+		return nil, provider.NotFound("versions", request.Path["version"])
 	}
 	if version.State == stateDestroyed {
 		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is already destroyed", version.Number)
@@ -420,7 +394,7 @@ func base64Encode(payload []byte) string { return base64.StdEncoding.EncodeToStr
 func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Scope, record *secretRecord, state string) (*gateway.RESTResponse, error) {
 	version := versionOf(record, request.Path["version"])
 	if version == nil {
-		return nil, notFound("versions", request.Path["version"])
+		return nil, provider.NotFound("versions", request.Path["version"])
 	}
 	if version.State == stateDestroyed {
 		return nil, status.Errorf(codes.InvalidArgument, "Version %s of the secret is destroyed", version.Number)
@@ -434,7 +408,7 @@ func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Sco
 func secretID(request *gateway.RESTRequest, body map[string]any) (string, error) {
 	id := request.Path["secret"]
 	if id == "" {
-		id = idOfName(textOf(body["name"]))
+		id = provider.LastSegment(provider.Text(body["name"]))
 	}
 	if id == "" {
 		id = request.Query.Get("secretId")

@@ -9,6 +9,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,8 +28,8 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	if err := registerPermissions(engine); err != nil {
-		return nil, err
+	if err := provider.RegisterPermissions(engine, permissions); err != nil {
+		return nil, fmt.Errorf("artifactregistry permissions: %w", err)
 	}
 	p := &Provider{
 		index: index, engine: engine,
@@ -86,16 +87,6 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// registerPermissions binds every method to its permission.
-func registerPermissions(engine *iam.Engine) error {
-	for method, permission := range permissions {
-		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-			return fmt.Errorf("register %s: %w", method, err)
-		}
-	}
-	return nil
-}
-
 // handle is the gateway entry point for every Artifact Registry method.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
@@ -112,7 +103,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
 			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
 		}
-		return p.denied(call, decision, target), nil
+		return provider.Denied(decision, target.Name), nil
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -127,23 +118,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
-// denied renders the denial shape.
-func (p *Provider) denied(_ gateway.Call, decision iam.Decision, target iam.Target) *gateway.RESTResponse {
-	permission := "unspecified"
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			permission = check.Permission
-			break
-		}
-	}
-	return wireError(403, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", "The caller", permission, target.Name))
-}
-
 // resolve derives the scope and IAM target for one request.
 func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
 	project := request.Path["project"]
-	scope := scopeOf(project)
-	target := iam.Target{Name: projectResource(project)}
+	scope := provider.ProjectScope(project)
+	target := iam.Target{Name: provider.ProjectResource(project)}
 	repository := request.Path["repository"]
 	switch call.Method {
 	case methodReposCreate, methodReposList:
@@ -153,7 +132,7 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid repository id %q", repository)
 		}
 		if p.repositoryLocked(scope, repository) == nil {
-			return scope, target, notFound(kindRepository, repository)
+			return scope, target, provider.NotFound(kindRepository, repository)
 		}
 		target.Name = repositoryResource(project, repository)
 		return scope, target, nil

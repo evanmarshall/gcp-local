@@ -11,11 +11,6 @@ import (
 	"errors"
 	"regexp"
 	"time"
-
-	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/state"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // serviceName owns the Bigtable backend registration.
@@ -122,23 +117,6 @@ func (s *scopeState) reset() {
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("bigtable requires registry, manager, index, and iam")
 
-// wireError builds the Bigtable error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
-}
-
-// notFound reports the Bigtable not-found status.
-func notFound(kind, name string) error {
-	return status.Errorf(codes.NotFound, "The resource '%s/%s' was not found", kind, name)
-}
-
-// scopeOf names one project scope.
-func scopeOf(project string) state.Scope {
-	return state.Scope{Project: project, Location: state.Global}
-}
-
 // instanceResource names one instance in the IAM index.
 func instanceResource(project, instance string) string {
 	return "//bigtableadmin.googleapis.com/projects/" + project + "/instances/" + instance
@@ -149,25 +127,14 @@ func tableResource(project, instance, table string) string {
 	return instanceResource(project, instance) + "/tables/" + table
 }
 
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
-
-// instanceName renders the canonical instance name.
 func instanceName(project, instance string) string {
 	return "projects/" + project + "/instances/" + instance
 }
 
-// tableName renders the canonical table name.
 func tableName(project, instance, table string) string {
 	return instanceName(project, instance) + "/tables/" + table
 }
 
-// clusterName renders the canonical cluster name.
 func clusterName(project, instance, cluster string) string {
 	return instanceName(project, instance) + "/clusters/" + cluster
 }
-
-// stamp renders one RFC3339 timestamp.
-func stamp(moment time.Time) string { return moment.UTC().Format("2006-01-02T15:04:05.000000Z") }

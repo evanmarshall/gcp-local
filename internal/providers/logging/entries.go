@@ -16,6 +16,7 @@ import (
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -127,7 +128,7 @@ func appendUnique(values []string, value string) []string {
 
 // store appends one project's entries, dropping the oldest beyond the cap.
 func (p *Provider) store(project string, entries []pending) error {
-	if err := p.scopes.With(scopeOf(project), func(s *scopeState) error {
+	if err := p.scopes.With(provider.ProjectScope(project), func(s *scopeState) error {
 		for _, item := range entries {
 			if item.project != project {
 				continue
@@ -230,7 +231,7 @@ func (p *Provider) query(request *loggingpb.ListLogEntriesRequest) (listQuery, e
 func (p *Provider) matching(q listQuery) ([]listed, error) {
 	var matches []listed
 	for _, project := range q.projects {
-		if err := p.scopes.With(scopeOf(project), func(s *scopeState) error {
+		if err := p.scopes.With(provider.ProjectScope(project), func(s *scopeState) error {
 			for _, stored := range s.entries {
 				if q.filter.matches(view{project: project, stored: stored}) {
 					matches = append(matches, listed{project: project, stored: stored})
@@ -345,7 +346,7 @@ func (p *Provider) logsQuery(request *loggingpb.ListLogsRequest) (string, int, i
 // logNames lists the distinct logs of one project in name order.
 func (p *Provider) logNames(project string) ([]string, error) {
 	names := map[string]bool{}
-	if err := p.scopes.With(scopeOf(project), func(s *scopeState) error {
+	if err := p.scopes.With(provider.ProjectScope(project), func(s *scopeState) error {
 		for _, stored := range s.entries {
 			names[logName(project, stored.logID)] = true
 		}
@@ -392,7 +393,7 @@ func (p *Provider) deleteLog(call gateway.Call, request *loggingpb.DeleteLogRequ
 		return err
 	}
 	removed := 0
-	if err := p.scopes.With(scopeOf(project), func(s *scopeState) error {
+	if err := p.scopes.With(provider.ProjectScope(project), func(s *scopeState) error {
 		kept := s.entries[:0]
 		for _, stored := range s.entries {
 			if stored.logID == id {

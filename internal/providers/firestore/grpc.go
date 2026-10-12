@@ -10,6 +10,7 @@ import (
 	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -83,7 +84,7 @@ func ownerContext(ctx context.Context, project string) context.Context {
 // planned validates a gRPC request, registers the project's database anchor,
 // and authorizes every plan before any backend work.
 func (p *Provider) planned(call gateway.Call, request proto.Message) (backend.Key, error) {
-	scope := scopeOf(call.Project)
+	scope := provider.ProjectScope(call.Project)
 	if err := scope.Validate(); err != nil {
 		return backend.Key{}, status.Errorf(codes.InvalidArgument, "Invalid project %q", call.Project)
 	}

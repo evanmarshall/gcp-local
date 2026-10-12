@@ -18,6 +18,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -47,7 +48,7 @@ func validatePush(config *pb.PushConfig) error {
 	}
 	token := config.GetOidcToken()
 	if token.GetServiceAccountEmail() == "" || len(token.GetAudience()) > 2048 || strings.ContainsAny(token.GetAudience(), "\r\n") {
-		return invalid("Invalid push account or audience")
+		return provider.Invalid("Invalid push account or audience")
 	}
 	return nil
 }
@@ -57,7 +58,7 @@ func validatePush(config *pb.PushConfig) error {
 func validatePushEndpoint(raw string) error {
 	endpoint, err := url.Parse(raw)
 	if err != nil {
-		return invalid("Invalid push endpoint")
+		return provider.Invalid("Invalid push endpoint")
 	}
 	ip := net.ParseIP(endpoint.Hostname())
 	if endpoint.Scheme != "http" || ip == nil || !ip.IsLoopback() || endpoint.Port() == "" || endpoint.User != nil || endpoint.Fragment != "" {
@@ -75,7 +76,7 @@ func (p *Provider) authorizePush(call gateway.Call, config *pb.PushConfig) error
 	if !found || resource.Service != "iam" || resource.Kind != "serviceAccount" || resource.Scope != scopeOf(call) {
 		return gap("configure a same-project push service account")
 	}
-	project, _ := p.index.Get(projectResource(call.Project))
+	project, _ := p.index.Get(provider.ProjectResource(call.Project))
 	if !regexp.MustCompile(`^[1-9][0-9]{0,19}$`).MatchString(project.Number) {
 		return gap("push requires the numeric resource project number")
 	}
@@ -186,7 +187,7 @@ func (p *Provider) pushToken(ctx context.Context, call gateway.Call, config *pb.
 	if _, failed := p.poisoned.Load(scopeOf(call)); failed {
 		return "", status.Error(codes.FailedPrecondition, "Pub/Sub scope needs reset")
 	}
-	project, ok := p.index.Get(projectResource(call.Project))
+	project, ok := p.index.Get(provider.ProjectResource(call.Project))
 	if !ok {
 		return "", gap("push project disappeared")
 	}

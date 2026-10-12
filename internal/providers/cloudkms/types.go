@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -113,7 +112,6 @@ type cryptoKeyBody struct {
 	ImportOnly      bool              `json:"importOnly"`
 }
 
-// keyRingRecord is one stored key ring.
 type keyRingRecord struct {
 	Name      string
 	CreatedAt time.Time
@@ -163,14 +161,7 @@ func (s *scopeState) reset() {
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("cloudkms requires registry, manager, index, and iam")
 
-// wireError builds the KMS error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
-}
-
-// notFound reports the KMS not-found status.
+// notFound uses KMS's "<kind> <name> not found." text, not the shared kind/name form.
 func notFound(kind, name string) error {
 	return status.Errorf(codes.NotFound, "%s %s not found.", kind, name)
 }
@@ -178,12 +169,6 @@ func notFound(kind, name string) error {
 // gap reports an unimplemented slice boundary.
 func gap(message string) error {
 	return status.Error(codes.Unimplemented, "Cloud KMS coverage gap: "+message)
-}
-
-// scopeOf names one project scope. Locations are part of each resource
-// reference, so every KMS resource of a project shares one scope.
-func scopeOf(project string) state.Scope {
-	return state.Scope{Project: project, Location: state.Global}
 }
 
 // ref addresses one KMS resource from the request path.
@@ -216,10 +201,5 @@ func (r ref) versionName(number string) string {
 func (r ref) ringResource() string { return "//cloudkms.googleapis.com/" + r.ringName() }
 func (r ref) keyResource() string  { return "//cloudkms.googleapis.com/" + r.keyName() }
 
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
-
-// stamp renders one timestamp.
+// stamp keeps nanosecond precision, which KMS returns where most APIs use microseconds.
 func stamp(moment time.Time) string { return moment.UTC().Format("2006-01-02T15:04:05.000000000Z") }

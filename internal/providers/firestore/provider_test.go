@@ -15,6 +15,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -119,12 +120,12 @@ func newHarness(t *testing.T) *harness {
 	}
 	for _, project := range []string{testProject, otherProject} {
 		if err := index.Put("resourcemanager", state.Resource{
-			Name: projectResource(project), Service: "resourcemanager",
-			Kind: "project", Number: "123456", Scope: scopeOf(project),
+			Name: provider.ProjectResource(project), Service: "resourcemanager",
+			Kind: "project", Number: "123456", Scope: provider.ProjectScope(project),
 		}); err != nil {
 			t.Fatalf("register the project: %v", err)
 		}
-		if _, err := engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{
+		if _, err := engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: []iam.Binding{
 			{Role: "roles/datastore.user", Members: []string{principal("actor", project)}},
 			{Role: "roles/datastore.viewer", Members: []string{principal("viewer", project)}},
 			{Role: "roles/datastore.indexAdmin", Members: []string{principal("admin", project)}},
@@ -228,7 +229,7 @@ func TestAllowedRequestIsForwardedWithoutCallerCredentials(t *testing.T) {
 		t.Fatalf("forwarded response = %d %s", recorder.Code, recorder.Body.String())
 	}
 	instances := h.started()
-	if len(instances) != 1 || instances[0].scope != scopeOf(testProject) {
+	if len(instances) != 1 || instances[0].scope != provider.ProjectScope(testProject) {
 		t.Fatalf("instances = %d", len(instances))
 	}
 	starts, _, got := instances[0].counts()
@@ -294,7 +295,7 @@ func TestResetStopsTheEmulatorAndClearsFieldConfiguration(t *testing.T) {
 		t.Fatalf("field update = %d %s", recorder.Code, recorder.Body.String())
 	}
 	h.invoke(actor, http.MethodGet, docPath(), nil)
-	if err := h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}); err != nil {
+	if err := h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	if _, stops, _ := h.started()[0].counts(); stops != 1 {

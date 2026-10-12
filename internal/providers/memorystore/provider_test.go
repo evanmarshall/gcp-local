@@ -17,20 +17,20 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
 // Names repeated across the provider tests.
 const (
-	testProject    = "demo-redis"
-	peerProject    = "peer-redis"
-	testRegion     = "us-central1"
-	otherRegion    = "us-east1"
-	testInstance   = "cache-1"
-	adminToken     = "admin"
-	viewerToken    = "viewer"
-	peerToken      = "peer"
-	keyAuthEnabled = "authEnabled"
+	testProject  = "demo-redis"
+	peerProject  = "peer-redis"
+	testRegion   = "us-central1"
+	otherRegion  = "us-east1"
+	testInstance = "cache-1"
+	adminToken   = "admin"
+	viewerToken  = "viewer"
+	peerToken    = "peer"
 )
 
 func base(project, region string) string {
@@ -95,7 +95,7 @@ func must(t *testing.T, err error) {
 func (h *harness) fake(project string) *fakeDriver {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.fakes[scopeOf(project, testRegion)]
+	return h.fakes[state.Scope{Project: project, Location: testRegion}]
 }
 
 // object narrows a decoded JSON value to an object, failing the test otherwise.
@@ -174,7 +174,7 @@ func TestDeniedCallsStartNoBackend(t *testing.T) {
 func TestInstanceLifecycle(t *testing.T) {
 	h := newHarness(t)
 	h.clock(time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC))
-	created := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{keyAuthEnabled: true})), http.StatusOK)
+	created := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{"authEnabled": true})), http.StatusOK)
 	instance := checkOperation(t, created, "create", instanceType)
 	name := "projects/demo-redis/locations/us-central1/instances/cache-1"
 	for field, want := range map[string]any{"name": name, fieldTier: "BASIC", fieldMemory: 1.0, fieldVersion: "REDIS_7_2",
@@ -310,12 +310,12 @@ func TestScopeIsolationAndReset(t *testing.T) {
 	if items, _ := listed["instances"].([]any); len(items) != 1 || object(t, items[0])["name"] != "projects/demo-redis/locations/us-east1/instances/cache-1" {
 		t.Fatalf("regional list = %v", listed)
 	}
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject, testRegion)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: state.Scope{Project: testProject, Location: testRegion}}))
 	if fake := h.fake(testProject); fake.stops != 1 || len(fake.running()) != 0 {
 		t.Fatalf("reset did not stop the scope's servers: %+v", fake)
 	}
 	h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"/"+testInstance, nil), http.StatusNotFound)
-	if _, ok := h.index.Get(fullName(instanceName(scopeOf(testProject, testRegion), testInstance))); ok {
+	if _, ok := h.index.Get(fullName(instanceName(state.Scope{Project: testProject, Location: testRegion}, testInstance))); ok {
 		t.Fatal("reset kept the scope's index reference")
 	}
 	h.expect(h.invoke(adminToken, http.MethodGet, base(testProject, otherRegion)+"/instances/"+testInstance, nil), http.StatusOK)
@@ -329,8 +329,8 @@ func TestScopeIsolationAndReset(t *testing.T) {
 
 func TestFailedPublicationStopsTheNewServer(t *testing.T) {
 	h := newHarness(t)
-	name := fullName(instanceName(scopeOf(testProject, testRegion), testInstance))
-	must(t, h.index.Put("other", state.Resource{Name: name, Service: "other", Kind: "instance", Scope: scopeOf(testProject, testRegion)}))
+	name := fullName(instanceName(state.Scope{Project: testProject, Location: testRegion}, testInstance))
+	must(t, h.index.Put("other", state.Resource{Name: name, Service: "other", Kind: "instance", Scope: state.Scope{Project: testProject, Location: testRegion}}))
 	recorder := h.create(adminToken, testProject, testRegion, testInstance, basic(nil))
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
@@ -381,9 +381,9 @@ func TestProductionPlansNeedRecordedRoles(t *testing.T) {
 	index := state.NewIndex()
 	engine, err := iam.New(index)
 	must(t, err)
-	must(t, index.Put("resourcemanager", state.Resource{Name: projectResource(testProject), Service: "resourcemanager",
+	must(t, index.Put("resourcemanager", state.Resource{Name: provider.ProjectResource(testProject), Service: "resourcemanager",
 		Kind: "project", Number: "1", Scope: state.Scope{Project: testProject, Location: state.Global}}))
-	_, roleErr := engine.SetPolicy(projectResource(testProject), iam.Policy{Bindings: []iam.Binding{
+	_, roleErr := engine.SetPolicy(provider.ProjectResource(testProject), iam.Policy{Bindings: []iam.Binding{
 		{Role: "roles/redis.admin", Members: []string{principal(adminToken)}}}})
 	manager := backend.NewManager(time.Second, time.Second)
 	t.Cleanup(func() { must(t, manager.Shutdown(context.Background())) })

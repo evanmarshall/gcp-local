@@ -17,6 +17,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -42,10 +43,10 @@ func newRealHarness(t *testing.T) *realHarness {
 		t.Fatal(err)
 	}
 	for _, project := range []string{testProject, otherProject} {
-		if err := index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: scopeOf(project)}); err != nil {
+		if err := index.Put("resourcemanager", state.Resource{Name: provider.ProjectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: provider.ProjectScope(project)}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{
+		if _, err := engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: []iam.Binding{
 			{Role: "roles/datastore.user", Members: []string{principal("actor", project)}},
 		}}); err != nil {
 			t.Fatal(err)
@@ -123,7 +124,7 @@ func TestEmulatorLifecycleIsolationAndReset(t *testing.T) {
 	if fields, _ := read["fields"].(map[string]any); code != http.StatusOK || fields["title"].(map[string]any)["stringValue"] != "fog" {
 		t.Fatalf("project document after other write = %d %+v", code, read)
 	}
-	if err := h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}); err != nil {
+	if err := h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	if code, _ := h.invoke(owner, http.MethodGet, documentsPath(testProject)+"/"+testDoc, nil); code != http.StatusNotFound {

@@ -9,6 +9,7 @@ import (
 
 	"cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -149,7 +150,7 @@ func (t tableAdmin) remove(ctx context.Context) (*gateway.RESTResponse, error) {
 func (t tableAdmin) deleteInstance(ctx context.Context) (*gateway.RESTResponse, error) {
 	instance := t.request.Path["instance"]
 	if t.provider.instanceLocked(t.scope, instance) == nil {
-		return nil, notFound(kindInstance, instance)
+		return nil, provider.NotFound(kindInstance, instance)
 	}
 	listing, err := t.admin.ListTables(ctx, &adminpb.ListTablesRequest{Parent: t.instance()})
 	if err != nil {

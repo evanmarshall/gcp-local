@@ -21,19 +21,13 @@ import (
 const (
 	testNetwork     = "vpc-1"
 	testFirewall    = "fw-1"
-	testAllowed     = "allowed"
 	testProject     = "demo-net"
-	testKindProj    = "project"
 	testSubnetOne   = "subnet-1"
 	testPeerNetwork = "peer-net"
 	testPeerSubnet  = "peer-subnet"
 	testPeering     = "peering-1"
-	testTCP         = "tcp"
 	testSubnetCIDR  = "10.0.0.0/20"
 	testSourceCIDR  = "10.0.0.0/8"
-	keyNats         = "nats"
-	keyNATRanges    = "sourceSubnetworkIpRangesToNat"
-	keySourceRanges = "sourceRanges"
 )
 
 // harness drives the provider through the gateway.
@@ -53,7 +47,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	if err := index.Put("resourcemanager", state.Resource{
 		Name: "//cloudresourcemanager.googleapis.com/projects/demo-net", Service: "resourcemanager",
-		Kind: testKindProj, Number: "123456", Scope: state.Scope{Project: testProject, Location: state.Global},
+		Kind: "project", Number: "123456", Scope: state.Scope{Project: testProject, Location: state.Global},
 	}); err != nil {
 		t.Fatalf("register the project: %v", err)
 	}
@@ -97,7 +91,7 @@ func TestFirewallAndRouteReferenceMissingNetwork(t *testing.T) {
 	h := newHarness(t)
 	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: testFirewall, keyNetwork: "missing-net",
-		testAllowed: []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"80"}}},
+		"allowed": []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"80"}}},
 	})
 	if recorder.Code != 400 {
 		t.Fatalf("firewall on missing network status = %d body %s", recorder.Code, recorder.Body.String())
@@ -115,14 +109,14 @@ func TestFirewallLifecycleAndUpdate(t *testing.T) {
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{keyName: testNetwork})
 	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: testFirewall, keyNetwork: testNetwork, keyDirection: directionIngress,
-		testAllowed:     []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"80"}}},
-		keySourceRanges: []any{testSourceCIDR},
+		"allowed":      []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"80"}}},
+		"sourceRanges": []any{testSourceCIDR},
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("firewall create status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 	recorder = h.invoke(http.MethodPut, "/compute/v1/projects/demo-net/global/firewalls/fw-1", map[string]any{
-		keyName: testFirewall, keyNetwork: testNetwork, testAllowed: []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
+		keyName: testFirewall, keyNetwork: testNetwork, "allowed": []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"443"}}},
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("firewall update status = %d body %s", recorder.Code, recorder.Body.String())
@@ -149,7 +143,7 @@ func TestOperationsCompleteAndList(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &operation); err != nil {
 		t.Fatalf("decode operation: %v", err)
 	}
-	if operation.Status != opDone {
+	if operation.Status != "DONE" {
 		t.Fatalf("operation status = %s", operation.Status)
 	}
 	recorder = h.invoke(http.MethodGet, "/compute/v1/projects/demo-net/global/operations/"+operation.Name, nil)
@@ -198,8 +192,8 @@ func TestRouterLifecycleWithNAT(t *testing.T) {
 	}
 	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
 		keyName: "router-1", keyNetwork: testNetwork,
-		keyNats: []any{map[string]any{
-			keyName: "nat-1", keyNATRanges: listOfSubnetworks, "subnetworks": []any{map[string]any{keyName: testSubnetOne}},
+		"nats": []any{map[string]any{
+			keyName: "nat-1", "sourceSubnetworkIpRangesToNat": listOfSubnetworks, "subnetworks": []any{map[string]any{keyName: testSubnetOne}},
 		}},
 	})
 	if recorder.Code != 200 {
@@ -212,8 +206,8 @@ func TestRouterLifecycleWithNAT(t *testing.T) {
 	// A NAT referencing a missing subnetwork is refused.
 	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
 		keyName: "router-2", keyNetwork: testNetwork,
-		keyNats: []any{map[string]any{
-			keyName: "nat-2", keyNATRanges: listOfSubnetworks, "subnetworks": []any{map[string]any{keyName: "missing-subnet"}},
+		"nats": []any{map[string]any{
+			keyName: "nat-2", "sourceSubnetworkIpRangesToNat": listOfSubnetworks, "subnetworks": []any{map[string]any{keyName: "missing-subnet"}},
 		}},
 	})
 	if recorder.Code != 400 {
@@ -276,7 +270,7 @@ func (h *harness) topology(network, subnet, cidr string) {
 	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
 		keyName: subnet, keyNetwork: "projects/demo-net/global/networks/" + network, keyIPCIDR: cidr,
 	})
-	if status, errs := operationErrors(h.t, recorder); status != opDone || len(errs) != 0 {
+	if status, errs := operationErrors(h.t, recorder); status != "DONE" || len(errs) != 0 {
 		h.t.Fatalf("subnetwork %s operation = %s %v", subnet, status, errs)
 	}
 }
@@ -285,7 +279,7 @@ func TestNetworkInUseDeleteFailsInOperation(t *testing.T) {
 	h := newHarness(t)
 	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
 	status, errs := operationErrors(t, h.invoke(http.MethodDelete, "/compute/v1/projects/demo-net/global/networks/vpc-1", nil))
-	if status != opDone || len(errs) != 1 || errs[0] != "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE" {
+	if status != "DONE" || len(errs) != 1 || errs[0] != "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE" {
 		t.Fatalf("in-use delete operation = %s %v", status, errs)
 	}
 	if recorder := h.invoke(http.MethodGet, "/compute/v1/projects/demo-net/global/networks/vpc-1", nil); recorder.Code != 200 {
@@ -298,7 +292,7 @@ func TestNetworkInUseDeleteFailsInOperation(t *testing.T) {
 		t.Fatalf("missing subnetwork delete status = %d", recorder.Code)
 	}
 	status, errs = operationErrors(t, h.invoke(http.MethodDelete, "/compute/v1/projects/demo-net/global/networks/vpc-1", nil))
-	if status != opDone || len(errs) != 0 {
+	if status != "DONE" || len(errs) != 0 {
 		t.Fatalf("network delete operation = %s %v", status, errs)
 	}
 	if recorder := h.invoke(http.MethodGet, "/compute/v1/projects/demo-net/global/networks/vpc-1", nil); recorder.Code != 404 {
@@ -317,7 +311,7 @@ func TestOverlappingSubnetworkFailsInOperation(t *testing.T) {
 	}
 	_ = json.Unmarshal(recorder.Body.Bytes(), &operation)
 	status, errs := operationErrors(t, recorder)
-	if status != opDone || len(errs) != 1 || errs[0] != "INVALID_USAGE" {
+	if status != "DONE" || len(errs) != 1 || errs[0] != "INVALID_USAGE" {
 		t.Fatalf("overlap operation = %s %v", status, errs)
 	}
 	// The failed operation stays readable through regionOperations.get.
@@ -355,8 +349,8 @@ func TestDocumentsMatchRecordedFieldSets(t *testing.T) {
 	}
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: testFirewall, keyNetwork: "projects/demo-net/global/networks/vpc-1", keyDirection: directionIngress,
-		keyPriority: 1000, keySourceRanges: []any{testRangeA},
-		testAllowed: []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"8080"}}},
+		keyPriority: 1000, "sourceRanges": []any{testRangeA},
+		"allowed": []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"8080"}}},
 	})
 	firewall := decode(t, h.invoke(http.MethodGet, "/compute/v1/projects/demo-net/global/firewalls/fw-1", nil))
 	if got := fieldSet(firewall); got != "allowed,creationTimestamp,description,direction,disabled,id,kind,"+
@@ -370,7 +364,7 @@ func (h *harness) analyzeFlow(source, dest string, port int) Reachability {
 	h.t.Helper()
 	spec := map[string]any{
 		keyProject: testProject, keySourceIP: source, keyDestIP: dest,
-		keyProtocol: testTCP, keyPort: port,
+		keyProtocol: "tcp", keyPort: port,
 	}
 	encoded, _ := json.Marshal(spec) //nolint:errchkjson // plain map bodies
 	request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/_local/networking/reachability", bytes.NewReader(encoded))
@@ -385,8 +379,6 @@ func (h *harness) analyzeFlow(source, dest string, port int) Reachability {
 
 // Shared expectations of the analyzer tests.
 const (
-	opDone         = "DONE"
-	testAll        = "all"
 	dropToInternet = "DROP PRIVATE_TRAFFIC_TO_INTERNET"
 )
 
@@ -418,8 +410,8 @@ func TestAnalyzerReportsUnknownIPRegardlessOfIngress(t *testing.T) {
 	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: testFirewall, keyNetwork: testNetwork, keyDirection: directionIngress,
-		testAllowed:     []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"443"}}},
-		keySourceRanges: []any{testSourceCIDR},
+		"allowed":      []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"443"}}},
+		"sourceRanges": []any{testSourceCIDR},
 	})
 	for _, port := range []int{443, 80} {
 		verdict := h.analyzeFlow("10.0.0.5", "10.0.0.9", port)
@@ -479,7 +471,7 @@ func TestPeeringStatesAndCrossNetworkDrop(t *testing.T) {
 	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
 	h.topology(testPeerNetwork, testPeerSubnet, "10.1.0.0/20")
 	h.expectDropToInternet("10.0.0.5", "10.1.0.9")
-	if status, errs := operationErrors(t, h.addPeering(testNetwork, testPeerNetwork, testPeering)); status != opDone || len(errs) != 0 {
+	if status, errs := operationErrors(t, h.addPeering(testNetwork, testPeerNetwork, testPeering)); status != "DONE" || len(errs) != 0 {
 		t.Fatalf("addPeering operation = %s %v", status, errs)
 	}
 	if states := h.peeringStates(testNetwork); strings.Join(states, ",") != "INACTIVE" {
@@ -523,11 +515,11 @@ func TestEgressDenyDropsBeforeRouting(t *testing.T) {
 	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: "egress-allow", keyNetwork: testNetwork, keyDirection: directionEgress,
-		testAllowed: []any{map[string]any{keyIPProto: testAll}}, keyPriority: 100,
+		"allowed": []any{map[string]any{keyIPProto: "all"}}, keyPriority: 100,
 	})
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: "egress-block", keyNetwork: testNetwork, keyDirection: directionEgress,
-		"denied": []any{map[string]any{keyIPProto: testAll}}, keyPriority: 100,
+		"denied": []any{map[string]any{keyIPProto: "all"}}, keyPriority: 100,
 	})
 	verdict := h.analyzeFlow("10.0.4.5", "10.0.0.9", 443)
 	want := "START_FROM_PRIVATE_NETWORK|APPLY_EGRESS_FIREWALL_RULE egress-block|DROP FIREWALL_RULE"
@@ -541,7 +533,7 @@ func TestEgressAllowStillReportsUnknownIP(t *testing.T) {
 	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: "egress-all", keyNetwork: testNetwork, keyDirection: directionEgress,
-		testAllowed: []any{map[string]any{keyIPProto: testAll}},
+		"allowed": []any{map[string]any{keyIPProto: "all"}},
 	})
 	verdict := h.analyzeFlow("10.0.0.5", "10.0.0.9", 443)
 	if verdict.Result != verdictUnknown || verdict.Trace[1] != "APPLY_EGRESS_FIREWALL_RULE egress-all" {
@@ -627,7 +619,7 @@ func TestConnectivityRerunAnalyzesCurrentTopology(t *testing.T) {
 	h.invoke(http.MethodPost, tests+"?testId=check-web", connectivityBody("10.0.0.5", 443))
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: "egress-block", keyNetwork: testNetwork, keyDirection: directionEgress,
-		"denied": []any{map[string]any{keyIPProto: testAll}},
+		"denied": []any{map[string]any{keyIPProto: "all"}},
 	})
 	// Reads return the stored analysis; only rerun re-evaluates.
 	if result, _ := h.testResult("check-web"); result != resultUndetermined {
@@ -657,7 +649,7 @@ func TestAnalyzerDoesNotClaimNATEgress(t *testing.T) {
 	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
 		keyName: "router-1", keyNetwork: testNetwork,
-		keyNats: []any{map[string]any{keyName: "nat-1", keyNATRanges: allSubnetworks}},
+		"nats": []any{map[string]any{keyName: "nat-1", "sourceSubnetworkIpRangesToNat": allSubnetworks}},
 	})
 	// External destinations and NAT are unrecorded: an explicit gap, not a pass.
 	if verdict := h.analyzeFlow("10.0.1.5", "203.0.113.9", 443); verdict.Result != verdictUnsupported {

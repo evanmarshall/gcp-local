@@ -14,6 +14,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -48,8 +49,8 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 	if registry == nil || manager == nil || index == nil || engine == nil || runtime == nil {
 		return nil, errProviderShape
 	}
-	if err := registerPermissions(engine); err != nil {
-		return nil, err
+	if err := provider.RegisterPermissions(engine, permissions); err != nil {
+		return nil, fmt.Errorf("run permissions: %w", err)
 	}
 	p := &Provider{
 		index: index, engine: engine, runtime: runtime, tokens: config.Tokens, baseURL: config.BaseURL,
@@ -139,7 +140,7 @@ func (p *Provider) resolve(_ gateway.Call, parts map[string]string, kind, id str
 	if !uidPattern.MatchString(id) || location == "" {
 		return iam.Target{}, state.Scope{}, nil, status.Error(codes.InvalidArgument, "Invalid Cloud Run resource name")
 	}
-	scope := ScopeOf(parts["project"], location)
+	scope := state.Scope{Project: parts["project"], Location: location}
 	target := iam.Target{Name: resource(scope.Project, scope.Location, kind, id)}
 	var record *serviceRecord
 	if err := p.scopes.With(scope, func(s *scopeState) error {
@@ -168,28 +169,15 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 // errUnimplemented is the default dispatch gap for unregistered methods.
 var errUnimplemented = status.Error(codes.Unimplemented, "Cloud Run coverage gap: this method is not implemented")
 
-// wireError builds the Cloud Run REST error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		keyError: map[string]any{keyCode: code, keyStatus: statusText, keyMessage: message},
-	}}
-}
-
 // denied renders the Cloud Run denial shape with the failed permission.
 func denied(call gateway.Call, target iam.Target, decision iam.Decision) *gateway.RESTResponse {
-	permission := "unspecified"
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			permission = check.Permission
-			break
-		}
-	}
+	permission := provider.DeniedPermission(decision)
 	actor := call.Principal.Subject
 	code := 403
 	if call.Principal.State != gateway.Authenticated {
 		actor, code = "Anonymous caller", 401
 	}
-	return wireError(code, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", actor, permission, target.Name))
+	return provider.WireError(code, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", actor, permission, target.Name))
 }
 
 // handle is the gateway entry point for every Cloud Run v2 method.
@@ -230,12 +218,12 @@ func (p *Provider) resolveCall(call gateway.Call, request *gateway.RESTRequest) 
 	case methodServicesCreate, methodServicesList, methodOperationsList:
 		// Project-scoped methods authorize against the project ancestor; the
 		// location namespace may not exist yet on a first create.
-		scope := ScopeOf(parts["project"], parts["location"])
-		return iam.Target{Name: projectResource(scope.Project)}, scope, nil, nil
+		scope := state.Scope{Project: parts["project"], Location: parts["location"]}
+		return iam.Target{Name: provider.ProjectResource(scope.Project)}, scope, nil, nil
 	case methodOperationsGet, methodOperationsDelete:
 		// Operations authorize on the project ancestor like collection methods.
-		scope := ScopeOf(parts["project"], parts["location"])
-		return iam.Target{Name: projectResource(scope.Project)}, scope, nil, nil
+		scope := state.Scope{Project: parts["project"], Location: parts["location"]}
+		return iam.Target{Name: provider.ProjectResource(scope.Project)}, scope, nil, nil
 	case methodRevisionsList:
 		return p.resolve(call, parts, kindService, parts["service"])
 	case methodRevisionsGet, methodRevisionsDelete:
@@ -278,7 +266,7 @@ func (p *Provider) serviceRecordLookUp(scope state.Scope, id string) (*serviceRe
 		return nil, nil, fmt.Errorf("open the run scope: %w", err)
 	}
 	if record == nil {
-		return nil, wireError(404, "NOT_FOUND", "service "+id+" is not found"), nil
+		return nil, provider.WireError(404, "NOT_FOUND", "service "+id+" is not found"), nil
 	}
 	return record, nil, nil
 }

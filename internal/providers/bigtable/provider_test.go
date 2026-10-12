@@ -17,6 +17,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 )
@@ -28,13 +29,8 @@ const (
 	testCluster   = "demo-btc1"
 	testTable     = "demo-table"
 	testZone      = "us-central1-b"
-	keyTableID    = "tableId"
-	keyTable      = "table"
-	keyFamilies   = "columnFamilies"
 	familyOne     = "cf1"
 	familyTwo     = "cf2"
-	keyGCRule     = "gcRule"
-	keyMods       = "modifications"
 	testToken     = "actor"
 	testInstances = "/v2/projects/" + testProject + "/instances"
 	testActor     = "serviceAccount:actor@" + testProject + ".iam.gserviceaccount.com"
@@ -195,22 +191,22 @@ func TestInstanceAndTableLifecycle(t *testing.T) {
 	expectOK(t, "cluster list", h.invoke(http.MethodGet, instance+"/clusters", nil))
 	expectOK(t, "cluster get", h.invoke(http.MethodGet, instance+"/clusters/"+testCluster, nil))
 	expectOK(t, "table create", h.invoke(http.MethodPost, instance+"/tables", map[string]any{
-		keyTableID: testTable,
-		keyTable: map[string]any{keyFamilies: map[string]any{
-			familyOne: map[string]any{keyGCRule: map[string]any{"maxAge": "2160s"}},
+		"tableId": testTable,
+		"table": map[string]any{"columnFamilies": map[string]any{
+			familyOne: map[string]any{"gcRule": map[string]any{"maxAge": "2160s"}},
 		}},
 	}))
 	expectOK(t, "table get", h.invoke(http.MethodGet, instance+"/tables/"+testTable, nil))
 	expectOK(t, "table list", h.invoke(http.MethodGet, instance+"/tables", nil))
 	modify := instance + "/tables/" + testTable + ":modifyColumnFamilies"
 	expectOK(t, "family create", h.invoke(http.MethodPost, modify, map[string]any{
-		keyMods: []any{map[string]any{"id": familyTwo, "create": map[string]any{keyGCRule: map[string]any{"maxNumVersions": 3}}}},
+		"modifications": []any{map[string]any{"id": familyTwo, "create": map[string]any{"gcRule": map[string]any{"maxNumVersions": 3}}}},
 	}))
 	expectOK(t, "family drop", h.invoke(http.MethodPost, modify, map[string]any{
-		keyMods: []any{map[string]any{"id": familyOne, "drop": true}},
+		"modifications": []any{map[string]any{"id": familyOne, "drop": true}},
 	}))
-	families := decode(t, h.invoke(http.MethodGet, instance+"/tables/"+testTable, nil))[keyFamilies]
-	want := map[string]any{familyTwo: map[string]any{keyGCRule: map[string]any{"maxNumVersions": float64(3)}}}
+	families := decode(t, h.invoke(http.MethodGet, instance+"/tables/"+testTable, nil))["columnFamilies"]
+	want := map[string]any{familyTwo: map[string]any{"gcRule": map[string]any{"maxNumVersions": float64(3)}}}
 	if !reflect.DeepEqual(families, want) {
 		t.Fatalf("families after create/drop = %v, want %v", families, want)
 	}
@@ -297,7 +293,7 @@ func TestRecordedInstanceIam(t *testing.T) {
 		t.Fatalf("viewer read = %d %s", recorder.Code, recorder.Body.String())
 	}
 	expectError(t, "viewer table create", h.invokeAs("allowed", http.MethodPost, path+"/tables",
-		map[string]any{keyTableID: "denied", keyTable: map[string]any{}}), 403, "PERMISSION_DENIED")
+		map[string]any{"tableId": "denied", "table": map[string]any{}}), 403, "PERMISSION_DENIED")
 
 	// A recreated instance does not inherit the deleted instance's bindings.
 	expectEmpty(t, "instance delete", h.invoke(http.MethodDelete, path, nil))
@@ -318,22 +314,22 @@ func TestRecordedTableShapes(t *testing.T) {
 		for _, family := range families {
 			wantFamilies[family] = map[string]any{}
 		}
-		want := map[string]any{"name": name, "granularity": "MILLIS", keyFamilies: wantFamilies}
+		want := map[string]any{"name": name, "granularity": "MILLIS", "columnFamilies": wantFamilies}
 		if recorder.Code != 200 || !reflect.DeepEqual(table, want) {
 			t.Fatalf("%s = %d %v, want %v", label, recorder.Code, table, want)
 		}
 	}
 	expectTable("table create", h.invoke(http.MethodPost, tables, map[string]any{
-		keyTableID: "t1", keyTable: map[string]any{keyFamilies: map[string]any{familyOne: map[string]any{}}},
+		"tableId": "t1", "table": map[string]any{"columnFamilies": map[string]any{familyOne: map[string]any{}}},
 	}), familyOne)
 	expectTable("family modify", h.invoke(http.MethodPost, tables+"/t1:modifyColumnFamilies", map[string]any{
-		keyMods: []any{map[string]any{"id": familyTwo, "create": map[string]any{}}},
+		"modifications": []any{map[string]any{"id": familyTwo, "create": map[string]any{}}},
 	}), familyOne, familyTwo)
 	expectTable("table read", h.invoke(http.MethodGet, tables+"/t1", nil), familyOne, familyTwo)
-	expectError(t, "duplicate table", h.invoke(http.MethodPost, tables, map[string]any{keyTableID: "t1", keyTable: map[string]any{}}), 409, "ALREADY_EXISTS")
+	expectError(t, "duplicate table", h.invoke(http.MethodPost, tables, map[string]any{"tableId": "t1", "table": map[string]any{}}), 409, "ALREADY_EXISTS")
 	expectEmpty(t, "table delete", h.invoke(http.MethodDelete, tables+"/t1", nil))
 	expectError(t, "table absent", h.invoke(http.MethodGet, tables+"/t1", nil), 404, "NOT_FOUND")
-	expectError(t, "invalid table id", h.invoke(http.MethodPost, tables, map[string]any{keyTableID: "-bad", keyTable: map[string]any{}}), 400, "INVALID_ARGUMENT")
+	expectError(t, "invalid table id", h.invoke(http.MethodPost, tables, map[string]any{"tableId": "-bad", "table": map[string]any{}}), 400, "INVALID_ARGUMENT")
 }
 
 func TestUnknownAndDeniedPaths(t *testing.T) {
@@ -394,7 +390,7 @@ func tablePath(project, table string) string {
 func (h *harness) createTable(project, table string) {
 	h.t.Helper()
 	expectOK(h.t, "table create "+project, h.invoke(http.MethodPost, "/v2/projects/"+project+"/instances/"+testInstance+"/tables", map[string]any{
-		keyTableID: table, keyTable: map[string]any{keyFamilies: map[string]any{familyOne: map[string]any{}}},
+		"tableId": table, "table": map[string]any{"columnFamilies": map[string]any{familyOne: map[string]any{}}},
 	}))
 }
 
@@ -418,7 +414,7 @@ func TestDeniedRequestsNeverReachTheEmulator(t *testing.T) {
 		t.Helper()
 		before := h.backendCalls.Load()
 		for _, request := range denied {
-			recorder := h.invokeAs("denied", request.verb, request.path, map[string]any{keyTableID: testTable})
+			recorder := h.invokeAs("denied", request.verb, request.path, map[string]any{"tableId": testTable})
 			expectError(t, request.verb+" "+request.path, recorder, 403, "PERMISSION_DENIED")
 		}
 		if calls := h.backendCalls.Load() - before; calls != 0 {
@@ -455,7 +451,7 @@ func TestResetClearsTables(t *testing.T) {
 	h := newHarness(t)
 	h.instance()
 	h.createTable(testProject, testTable)
-	key := backend.Key{Service: serviceName, Scope: scopeOf(testProject)}
+	key := backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}
 	if err := h.manager.Reset(context.Background(), key); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -489,7 +485,7 @@ func TestProjectIsolation(t *testing.T) {
 	h.createTable(testProject, "only-here")
 	expectError(t, "foreign table absent", h.invoke(http.MethodGet, tablePath(otherProject, "only-here"), nil), 404, "NOT_FOUND")
 
-	if err := h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}); err != nil {
+	if err := h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	table := decode(t, h.invoke(http.MethodGet, tablePath(otherProject, testTable), nil))

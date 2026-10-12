@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,7 +32,6 @@ var (
 	errExhausted    = errors.New("the subnetwork has no free internal address")
 )
 
-// executeInstances handles the instance methods.
 func (p *Provider) executeInstances(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodInstancesInsert:
@@ -45,7 +45,6 @@ func (p *Provider) executeInstances(call gateway.Call, request *gateway.RESTRequ
 	}
 }
 
-// zoneRegion derives the region of a zone.
 func zoneRegion(zone string) (string, bool) {
 	if !zonePattern.MatchString(zone) {
 		return "", false
@@ -71,29 +70,29 @@ type instanceInterface struct {
 // parseInstance validates an instance insert body. A second interface or
 // any external, IPv6, or alias address is an explicit gap.
 func parseInstance(body map[string]any) (instanceInterface, string, error) {
-	machineType := textOf(body["machineType"])
+	machineType := provider.Text(body["machineType"])
 	if machineType == "" {
-		return instanceInterface{}, "", statusInvalid("An instance requires a machineType")
+		return instanceInterface{}, "", provider.Invalid("An instance requires a machineType")
 	}
-	if !hasBootDisk(listOfMaps(body["disks"])) {
-		return instanceInterface{}, "", statusInvalid("An instance requires a boot disk")
+	if !hasBootDisk(provider.MapList(body["disks"])) {
+		return instanceInterface{}, "", provider.Invalid("An instance requires a boot disk")
 	}
-	nics := listOfMaps(body["networkInterfaces"])
+	nics := provider.MapList(body["networkInterfaces"])
 	if len(nics) == 0 {
-		return instanceInterface{}, "", statusInvalid("An instance requires a network interface")
+		return instanceInterface{}, "", provider.Invalid("An instance requires a network interface")
 	}
 	if len(nics) > 1 {
 		return instanceInterface{}, "", gap("instances with more than one network interface are not modeled")
 	}
 	nic := nics[0]
 	for _, field := range []string{"accessConfigs", "ipv6AccessConfigs", "aliasIpRanges"} {
-		if len(listOfMaps(nic[field])) > 0 {
+		if len(provider.MapList(nic[field])) > 0 {
 			return instanceInterface{}, "", gap("instance " + field + " (external, IPv6, or alias addresses) are not modeled")
 		}
 	}
 	return instanceInterface{
-		network: networkName(textOf(nic[keyNetwork])), subnetwork: subnetName(textOf(nic["subnetwork"])),
-		address: textOf(nic["networkIP"]),
+		network: networkName(provider.Text(nic[keyNetwork])), subnetwork: subnetName(provider.Text(nic["subnetwork"])),
+		address: provider.Text(nic["networkIP"]),
 	}, machineType[strings.LastIndex(machineType, "/")+1:], nil
 }
 
@@ -113,7 +112,7 @@ func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scop
 	zone := request.Path["zone"]
 	region, ok := zoneRegion(zone)
 	if !ok {
-		return nil, statusInvalid("Invalid zone " + zone)
+		return nil, provider.Invalid("Invalid zone " + zone)
 	}
 	body, err := parseInsert(request)
 	if err != nil {
@@ -124,7 +123,7 @@ func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scop
 		return nil, err
 	}
 	record := &instanceRecord{
-		Name: textOf(body[keyName]), Zone: zone, Region: region, Description: textOf(body[keyDescription]),
+		Name: provider.Text(body[keyName]), Zone: zone, Region: region, Description: provider.Text(body[keyDescription]),
 		MachineType: machineType, CreatedAt: p.clock(),
 	}
 	record.Labels, _ = body["labels"].(map[string]any)
@@ -133,7 +132,7 @@ func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scop
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: instanceName(scope.Project, zone, record.Name), Service: serviceName, Kind: kindInstance,
-		Parent: projectResource(scope.Project), Scope: scope,
+		Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); indexErr != nil {
 		return nil, gap("index the instance")
 	}
@@ -249,7 +248,6 @@ func usableHost(block *net.IPNet, ip net.IP) bool {
 	return offset >= 2 && offset+2 < uint64(1)<<(bits-ones)
 }
 
-// getInstance returns one instance document.
 func (p *Provider) getInstance(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	zone, name := request.Path["zone"], request.Path["instance"]
 	var document map[string]any
@@ -260,7 +258,7 @@ func (p *Provider) getInstance(request *gateway.RESTRequest, scope state.Scope) 
 		return nil
 	})
 	if document == nil {
-		return nil, notFound(kindInstance, name)
+		return nil, provider.NotFound(kindInstance, name)
 	}
 	return &gateway.RESTResponse{JSON: document}, nil
 }
@@ -291,7 +289,7 @@ func (p *Provider) deleteInstance(request *gateway.RESTRequest, scope state.Scop
 		return nil
 	})
 	if !found {
-		return nil, notFound(kindInstance, name)
+		return nil, provider.NotFound(kindInstance, name)
 	}
 	_ = p.index.Remove(serviceName, scope, instanceName(scope.Project, zone, name))
 	return p.newOperation(scope, "zone", zone, "delete", instanceLink(scope.Project, zone, name))

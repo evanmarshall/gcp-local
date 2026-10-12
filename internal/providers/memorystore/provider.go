@@ -10,6 +10,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -107,11 +108,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, status.Error(codes.Internal, "Invalid Memorystore request")
 	}
 	project, location := request.Path[pathProject], request.Path[pathLocation]
-	decision, err := p.engine.Authorize(call, iam.Target{Name: projectResource(project)}, nil)
+	decision, err := p.engine.Authorize(call, iam.Target{Name: provider.ProjectResource(project)}, nil)
 	if err != nil {
 		return refusal(call, request, decision, err)
 	}
-	scope := scopeOf(project, location)
+	scope := state.Scope{Project: project, Location: location}
 	if location == "-" {
 		return nil, gap("listing across all locations (\"-\")")
 	}
@@ -142,7 +143,7 @@ func refusal(call gateway.Call, request *gateway.RESTRequest, decision iam.Decis
 				break
 			}
 		}
-		return wireError(http.StatusForbidden, "PERMISSION_DENIED", fmt.Sprintf(
+		return provider.WireError(http.StatusForbidden, "PERMISSION_DENIED", fmt.Sprintf(
 			"Permission '%s' denied on resource '%s' (or it may not exist).", permission, fullName(addressed(call.Method, request.Path)))), nil
 	case codes.Unauthenticated:
 		return nil, err
@@ -153,7 +154,7 @@ func refusal(call gateway.Call, request *gateway.RESTRequest, decision iam.Decis
 
 // addressed names the resource a request acts on, for error messages.
 func addressed(method string, path map[string]string) string {
-	scope := scopeOf(path[pathProject], path[pathLocation])
+	scope := state.Scope{Project: path[pathProject], Location: path[pathLocation]}
 	switch method {
 	case methodCreate, methodList:
 		return "projects/" + scope.Project + "/locations/" + scope.Location

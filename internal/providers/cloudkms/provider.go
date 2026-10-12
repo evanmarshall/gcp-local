@@ -16,6 +16,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -34,8 +35,8 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	if err := registerPermissions(engine); err != nil {
-		return nil, err
+	if err := provider.RegisterPermissions(engine, permissions); err != nil {
+		return nil, fmt.Errorf("cloudkms permissions: %w", err)
 	}
 	p := &Provider{
 		index: index, engine: engine,
@@ -93,16 +94,6 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// registerPermissions binds every method to its permission.
-func registerPermissions(engine *iam.Engine) error {
-	for method, permission := range permissions {
-		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-			return fmt.Errorf("register %s: %w", method, err)
-		}
-	}
-	return nil
-}
-
 // handle is the gateway entry point for every Cloud KMS method.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
@@ -136,7 +127,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 
 // denied renders the KMS denial shape.
 func (p *Provider) denied(_ gateway.Call, decision iam.Decision, target iam.Target) *gateway.RESTResponse {
-	return wireError(403, "PERMISSION_DENIED", decision.Reason+" "+target.Name)
+	return provider.WireError(403, "PERMISSION_DENIED", decision.Reason+" "+target.Name)
 }
 
 // projectMethods and ringMethods are authorized on the project and key ring;
@@ -156,8 +147,8 @@ var (
 // target, matching the real surface's ancestor-inherited permissions.
 func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, ref, iam.Target, error) {
 	resource := refOf(request)
-	scope := scopeOf(resource.project)
-	project := projectResource(resource.project)
+	scope := provider.ProjectScope(resource.project)
+	project := provider.ProjectResource(resource.project)
 	if err := validateRef(resource); err != nil {
 		return scope, resource, iam.Target{Name: project}, err
 	}

@@ -1,11 +1,5 @@
 package run
 
-import (
-	"fmt"
-
-	"github.com/evanmarshall/gcp-local/internal/iam"
-)
-
 // permissions follows Google's documented Cloud Run access-control table. These
 // are the simulator's permission plan, not recorded cloud-fidelity claims.
 var permissions = map[string]string{
@@ -42,13 +36,3 @@ const (
 	methodOperationsDelete = "run.operations.delete"
 	methodServicesInvoke   = "run.services.invoke"
 )
-
-// registerPermissions binds every method to its permission.
-func registerPermissions(engine *iam.Engine) error {
-	for method, permission := range permissions {
-		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-			return fmt.Errorf("register %s: %w", method, err)
-		}
-	}
-	return nil
-}

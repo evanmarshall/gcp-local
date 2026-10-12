@@ -115,7 +115,6 @@ func (p *Provider) versionsList(_ *gateway.RESTRequest, scope state.Scope, resou
 	return respond(map[string]any{"cryptoKeyVersions": items})
 }
 
-// versionsGet returns one version.
 func (p *Provider) versionsGet(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	return p.withVersion(scope, resource, func(*cryptoKeyRecord, *versionRecord) error { return nil })
 }

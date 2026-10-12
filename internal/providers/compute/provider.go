@@ -12,6 +12,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -137,24 +138,13 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 // references resolve across regions.
 func (p *Provider) resolveTarget(_ gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target) {
 	project := request.Path["project"]
-	return scopeOf(project, state.Global), iam.Target{Name: projectResource(project)}
-}
-
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
+	return provider.ProjectScope(project), iam.Target{Name: provider.ProjectResource(project)}
 }
 
 // denied renders the compute denial shape; Network Management methods use the
 // standard Google API error shape instead.
 func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.Target) (*gateway.RESTResponse, error) {
-	permission := "unspecified"
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			permission = check.Permission
-			break
-		}
-	}
+	permission := provider.DeniedPermission(decision)
 	if call.Principal.State != gateway.Authenticated {
 		if strings.HasPrefix(call.Method, "networkmanagement.") {
 			return nil, status.Error(codes.Unauthenticated, "The request does not have valid authentication credentials")

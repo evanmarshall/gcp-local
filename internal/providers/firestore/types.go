@@ -4,9 +4,6 @@ import (
 	"errors"
 	"regexp"
 	"time"
-
-	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
 // serviceName owns the Firestore backend registration.
@@ -124,25 +121,7 @@ var errProviderShape = errors.New("firestore requires registry, manager, index, 
 // stream messages.
 var streamedREST = map[string]bool{methodRunQuery: true, methodRunAggregation: true, methodBatchGet: true}
 
-// wireError builds the Firestore error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
-}
-
-// scopeOf names one project scope. Databases are project-scoped here; the
-// real (default) database lives in the project namespace.
-func scopeOf(project string) state.Scope {
-	return state.Scope{Project: project, Location: state.Global}
-}
-
 // databaseResource names the default database in the IAM index.
 func databaseResource(project string) string {
 	return "//firestore.googleapis.com/projects/" + project + "/databases/(default)"
-}
-
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }

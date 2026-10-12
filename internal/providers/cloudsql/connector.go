@@ -16,6 +16,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
 // Connector sentinels.
@@ -65,7 +66,7 @@ func parseSpec(spec ConnectorSpec) (connectorTarget, error) {
 		return connectorTarget{}, errConnectorAddress
 	}
 	parts := strings.Split(spec.ConnectionName, ":")
-	if len(parts) != 3 || scopeOf(parts[0]).Validate() != nil || !regionPattern.MatchString(parts[1]) || !instanceNamePattern.MatchString(parts[2]) {
+	if len(parts) != 3 || provider.ProjectScope(parts[0]).Validate() != nil || !regionPattern.MatchString(parts[1]) || !instanceNamePattern.MatchString(parts[2]) {
 		return connectorTarget{}, errConnectorName
 	}
 	if !strings.HasPrefix(spec.Principal, "serviceAccount:") && !strings.HasPrefix(spec.Principal, "user:") {
@@ -124,7 +125,7 @@ func (p *Provider) serve(ctx context.Context, target connectorTarget, client net
 		return
 	}
 	_ = client.SetDeadline(time.Time{})
-	key := backend.Key{Service: serviceName, Scope: scopeOf(target.project)}
+	key := backend.Key{Service: serviceName, Scope: provider.ProjectScope(target.project)}
 	err = p.manager.Session(ctx, key, func(ctx context.Context, active backend.Backend) error {
 		fleet, err := driverOf(active)
 		if err != nil {

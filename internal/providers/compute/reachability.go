@@ -1,6 +1,8 @@
 package compute
 
 import (
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+
 	"encoding/json"
 	"fmt"
 	"net"
@@ -76,7 +78,7 @@ func newFlow(project, sourceIP, sourceNetwork, destIP, protocol string, port int
 	source := net.ParseIP(strings.TrimSpace(sourceIP))
 	destination := net.ParseIP(strings.TrimSpace(destIP))
 	if source == nil || destination == nil {
-		return flow{}, statusInvalid("Connectivity test endpoints require valid IP addresses")
+		return flow{}, provider.Invalid("Connectivity test endpoints require valid IP addresses")
 	}
 	return flow{
 		project: project, sourceIP: source, sourceNetwork: networkName(sourceNetwork),
@@ -155,7 +157,7 @@ const (
 // analyze evaluates one flow against a consistent view of the topology.
 func (p *Provider) analyze(spec flow) analysis {
 	var outcome analysis
-	_ = p.scopes.With(scopeOf(spec.project, stateGlobal), func(s *scopeState) error {
+	_ = p.scopes.With(provider.ProjectScope(spec.project), func(s *scopeState) error {
 		outcome = s.analyze(spec)
 		return nil
 	})
@@ -336,9 +338,6 @@ func cidrContains(cidr string, ip net.IP) bool {
 	}
 	return network.Contains(ip)
 }
-
-// stateGlobal names the single compute location scope.
-const stateGlobal = "global"
 
 // relativeNetwork renders the relative network URI Connectivity Tests uses.
 func relativeNetwork(project, network string) string {

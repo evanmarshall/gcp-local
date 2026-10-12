@@ -9,6 +9,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -130,7 +131,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, status.Error(codes.Internal, "Invalid Firestore request")
 	}
 	project := request.Path["project"]
-	scope := scopeOf(project)
+	scope := provider.ProjectScope(project)
 	if err := scope.Validate(); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid project %q", project)
 	}
@@ -145,7 +146,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
 			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
 		}
-		denied := p.denied(decision, databaseResource(project))
+		denied := provider.Denied(decision, databaseResource(project))
 		if streamedREST[call.Method] {
 			// Streamed REST methods answer with a JSON array, errors included.
 			denied.JSON = []any{denied.JSON}
@@ -174,18 +175,6 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
-// denied renders the Firestore REST denial shape.
-func (p *Provider) denied(decision iam.Decision, resource string) *gateway.RESTResponse {
-	permission := "unspecified"
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			permission = check.Permission
-			break
-		}
-	}
-	return wireError(403, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", "The caller", permission, resource))
-}
-
 // ensureDatabase registers the project's default database resource once, so
 // document authorization anchors on it. The call is idempotent per project.
 func (p *Provider) ensureDatabase(scope state.Scope) {
@@ -195,7 +184,7 @@ func (p *Provider) ensureDatabase(scope state.Scope) {
 	}
 	if err := p.index.Put(serviceName, state.Resource{
 		Name: name, Service: serviceName,
-		Kind: "database", Parent: projectResource(scope.Project), Scope: scope,
+		Kind: "database", Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); err != nil {
 		return
 	}

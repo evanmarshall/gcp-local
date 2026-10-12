@@ -1,6 +1,8 @@
 package compute
 
 import (
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -61,12 +63,12 @@ func (h *harness) vmTopology() {
 		h.topology(net.network, net.subnet, net.cidr)
 		h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 			keyName: net.network + "-allow", keyNetwork: "projects/demo-net/global/networks/" + net.network,
-			keyDirection: directionIngress, keyPriority: 1000, keySourceRanges: []any{testRangeA},
-			testAllowed: []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"8080"}}},
+			keyDirection: directionIngress, keyPriority: 1000, "sourceRanges": []any{testRangeA},
+			"allowed": []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"8080"}}},
 		}, 200)
 	}
 	for _, vm := range []struct{ name, subnet string }{{vmOne, vmSubnetA}, {vmTwo, vmSubnetA}, {vmThree, vmSubnetB}} {
-		if status, errs := operationErrors(h.t, h.invoke(http.MethodPost, zonePath+"/instances", instanceBody(vm.name, vm.subnet))); status != opDone || len(errs) != 0 {
+		if status, errs := operationErrors(h.t, h.invoke(http.MethodPost, zonePath+"/instances", instanceBody(vm.name, vm.subnet))); status != "DONE" || len(errs) != 0 {
 			h.t.Fatalf("instance %s operation = %s %v", vm.name, status, errs)
 		}
 	}
@@ -161,8 +163,8 @@ func TestInstanceInternetEgressNeedsCloudNAT(t *testing.T) {
 	h.expectVerdict(h.instanceTest("t-nonat", vmInternet, 443), resultUnreachable, "PRIVATE_GOOGLE_ACCESS_DISALLOWED", stepsRouteDrop)
 	if status, errs := operationErrors(t, h.invoke(http.MethodPost, regionPath+"/routers", map[string]any{
 		keyName: "router", keyNetwork: "projects/demo-net/global/networks/" + vmNetA, keyRegion: "us-central1",
-		keyNats: []any{map[string]any{keyName: "nat", "natIpAllocateOption": natAutoOnly, keyNATRanges: allSubnetworks}},
-	})); status != opDone || len(errs) != 0 {
+		"nats": []any{map[string]any{keyName: "nat", "natIpAllocateOption": natAutoOnly, "sourceSubnetworkIpRangesToNat": allSubnetworks}},
+	})); status != "DONE" || len(errs) != 0 {
 		t.Fatalf("router operation = %s %v", status, errs)
 	}
 	h.expectVerdict(h.instanceTest("t-nat", vmInternet, 443), resultReachable, "", stepsNATDelivered)
@@ -181,7 +183,7 @@ func TestInstanceLifecycleAndAddresses(t *testing.T) {
 		instance := decode(t, h.expectCode(http.MethodGet, zonePath+"/instances/"+name, nil, 200))
 		nics, _ := instance["networkInterfaces"].([]any)
 		nic, _ := nics[0].(map[string]any)
-		addresses = append(addresses, textOf(nic["networkIP"]))
+		addresses = append(addresses, provider.Text(nic["networkIP"]))
 	}
 	if got := strings.Join(addresses, ","); got != "10.10.0.2,10.10.0.3,10.20.0.2" {
 		t.Fatalf("instance addresses = %s", got)
@@ -193,17 +195,17 @@ func TestInstanceLifecycleAndAddresses(t *testing.T) {
 	h.expectCode(http.MethodPost, zonePath+"/instances", instanceBody(vmOne, vmSubnetA), 409)
 	// The subnetwork and network an instance uses are refused in the operation.
 	status, errs := operationErrors(t, h.invoke(http.MethodDelete, regionPath+"/subnetworks/"+vmSubnetB, nil))
-	if status != opDone || len(errs) != 1 || errs[0] != "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE" {
+	if status != "DONE" || len(errs) != 1 || errs[0] != "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE" {
 		t.Fatalf("in-use subnetwork delete = %s %v", status, errs)
 	}
 	deleted := decode(t, h.expectCode(http.MethodDelete, zonePath+"/instances/"+vmThree, nil, 200))
-	path := strings.TrimPrefix(textOf(deleted[keySelfLink]), "https://www.googleapis.com")
-	if operation := decode(t, h.expectCode(http.MethodGet, path, nil, 200)); operation["status"] != opDone {
+	path := strings.TrimPrefix(provider.Text(deleted[keySelfLink]), "https://www.googleapis.com")
+	if operation := decode(t, h.expectCode(http.MethodGet, path, nil, 200)); operation["status"] != "DONE" {
 		t.Fatalf("zone operation = %v", operation)
 	}
 	h.expectCode(http.MethodGet, zonePath+"/instances/"+vmThree, nil, 404)
 	h.expectCode(http.MethodDelete, zonePath+"/instances/"+vmThree, nil, 404)
-	if status, errs := operationErrors(t, h.invoke(http.MethodDelete, regionPath+"/subnetworks/"+vmSubnetB, nil)); status != opDone || len(errs) != 0 {
+	if status, errs := operationErrors(t, h.invoke(http.MethodDelete, regionPath+"/subnetworks/"+vmSubnetB, nil)); status != "DONE" || len(errs) != 0 {
 		t.Fatalf("free subnetwork delete = %s %v", status, errs)
 	}
 }
@@ -239,7 +241,7 @@ func TestInstanceEndpointsKeepAddressPathsHonest(t *testing.T) {
 	// A tagged ingress rule that could decide the flow is an explicit gap.
 	h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: "tagged", keyNetwork: "projects/demo-net/global/networks/" + vmNetA, keyDirection: directionIngress,
-		"targetTags": []any{"web"}, testAllowed: []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"9090"}}},
+		"targetTags": []any{"web"}, "allowed": []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"9090"}}},
 	}, 200)
 	h.expectCode(http.MethodPost, connectivityTests+"?testId=t-tagged", map[string]any{
 		keySource:      map[string]any{kindInstance: instanceRef(vmOne)},

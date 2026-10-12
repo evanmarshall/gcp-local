@@ -37,7 +37,6 @@ type peeringRecord struct {
 	CreatedAt            time.Time
 }
 
-// subnetworkRecord is one stored subnetwork.
 type subnetworkRecord struct {
 	Name          string
 	Description   string
@@ -68,7 +67,6 @@ type firewallRecord struct {
 	CreatedAt         time.Time
 }
 
-// routeRecord is one stored route.
 type routeRecord struct {
 	Name           string
 	Network        string

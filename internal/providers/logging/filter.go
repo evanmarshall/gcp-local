@@ -81,7 +81,6 @@ func textMatches(v view, text string) bool {
 	return false
 }
 
-// comparison is one field comparison.
 type comparison struct {
 	field, op, value string
 	pattern          *regexp.Regexp

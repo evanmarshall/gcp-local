@@ -12,6 +12,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -192,7 +193,7 @@ func writeInvocationError(w http.ResponseWriter, err error) {
 	if mapped, ok := invocationStatus[status.Code(err)]; ok {
 		code = mapped
 	}
-	body := wireError(code, status.Code(err).String(), status.Convert(err).Message())
+	body := provider.WireError(code, status.Code(err).String(), status.Convert(err).Message())
 	body.Headers = http.Header{}
 	for _, header := range body.Headers.Values("Content-Type") {
 		w.Header().Set("Content-Type", header)

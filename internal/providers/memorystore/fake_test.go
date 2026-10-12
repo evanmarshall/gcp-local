@@ -10,6 +10,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -44,7 +45,7 @@ func newFakeAuthorizer() *fakeAuthorizer {
 func (f *fakeAuthorizer) grant(project, subject string, permissions []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	target := projectResource(project)
+	target := provider.ProjectResource(project)
 	if f.grants[target] == nil {
 		f.grants[target] = map[string]map[string]bool{}
 	}

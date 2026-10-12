@@ -9,6 +9,7 @@ import (
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -24,7 +25,7 @@ func validateStream(request *pb.StreamingPullRequest, first bool) error {
 		return validateStreamFlow(request)
 	}
 	if request.GetSubscription() != "" || request.GetClientId() != "" || request.GetMaxOutstandingMessages() != 0 || request.GetMaxOutstandingBytes() != 0 {
-		return invalid("Subscription, client ID, and flow control belong only in the first request")
+		return provider.Invalid("Subscription, client ID, and flow control belong only in the first request")
 	}
 	return validateStreamFlow(request)
 }
@@ -33,15 +34,15 @@ func validateStream(request *pb.StreamingPullRequest, first bool) error {
 // ack-deadline arrays, and out-of-range deadlines.
 func validateStreamFlow(request *pb.StreamingPullRequest) error {
 	if request.GetMaxOutstandingMessages() < 0 || request.GetMaxOutstandingBytes() < 0 || len(request.GetModifyDeadlineSeconds()) != len(request.GetModifyDeadlineAckIds()) {
-		return invalid("Invalid streaming flow control or ack deadlines")
+		return provider.Invalid("Invalid streaming flow control or ack deadlines")
 	}
 	for _, seconds := range request.GetModifyDeadlineSeconds() {
 		if seconds < 0 || seconds > 600 {
-			return invalid("Ack deadline must be zero through 600 seconds")
+			return provider.Invalid("Ack deadline must be zero through 600 seconds")
 		}
 	}
 	if deadline := request.GetStreamAckDeadlineSeconds(); deadline != 0 && (deadline < 10 || deadline > 600) {
-		return invalid("Stream ack deadline must be 10 through 600 seconds")
+		return provider.Invalid("Stream ack deadline must be 10 through 600 seconds")
 	}
 	return nil
 }
@@ -77,7 +78,7 @@ func openStream(call gateway.Call, downstream gateway.Stream) (*pb.StreamingPull
 		return nil, err
 	}
 	if first.GetSubscription() != call.Resource {
-		return nil, invalid("Stream subscription disagrees with request scope")
+		return nil, provider.Invalid("Stream subscription disagrees with request scope")
 	}
 	return first, nil
 }

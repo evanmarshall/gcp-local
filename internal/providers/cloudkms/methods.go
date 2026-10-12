@@ -10,6 +10,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -84,7 +85,7 @@ func (p *Provider) keyRingsCreate(request *gateway.RESTRequest, scope state.Scop
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: resource.ringResource(), Service: serviceName,
-		Kind: kindKeyRing, Parent: projectResource(resource.project), Scope: scope,
+		Kind: kindKeyRing, Parent: provider.ProjectResource(resource.project), Scope: scope,
 	}); indexErr != nil {
 		return nil, gap("index the key ring")
 	}
@@ -97,7 +98,6 @@ func keyRingDocument(resource ref, record *keyRingRecord) map[string]any {
 	return map[string]any{keyName: resource.ringName(), keyCreateTime: stamp(record.CreatedAt)}
 }
 
-// keyRingsGet returns one key ring.
 func (p *Provider) keyRingsGet(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	var document map[string]any
 	err := p.scopes.With(scope, func(s *scopeState) error {
@@ -269,7 +269,6 @@ func (p *Provider) keyResponse(scope state.Scope, resource ref, use func(*crypto
 	return respond(document)
 }
 
-// cryptoKeysGet returns one crypto key.
 func (p *Provider) cryptoKeysGet(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	return p.keyResponse(scope, resource, func(*cryptoKeyRecord) error { return nil })
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -61,12 +62,12 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 	}
 	return p, nil
 }
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
 func gap(message string) error {
 	return status.Error(codes.Unimplemented, "Storage coverage gap: "+message)
 }
+
+// wireError renders the Storage JSON API body, which carries an errors[] reason
+// list and no status field, unlike the shared Google API body.
 func wireError(code int, reason, message string) *gateway.RESTResponse {
 	return &gateway.RESTResponse{Status: code, JSON: map[string]any{"error": map[string]any{"code": code, "message": message, "errors": []any{map[string]any{"domain": "global", "reason": reason, "message": message}}}}}
 }
@@ -98,7 +99,8 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 	return renderDenial(call, target, d.ID, permission), d.ID, nil
 }
 
-// deniedPermission reports the first permission the decision failed on.
+// deniedPermission returns "" when no check failed so authorize can treat an
+// unexplained denial as an internal error instead of rendering "unspecified".
 func deniedPermission(d iam.Decision) string {
 	for _, check := range d.Checks {
 		if !check.Allowed {
@@ -218,7 +220,7 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 	projectMethod := call.Method == MethodBucketsInsert || call.Method == MethodBucketsList
 	if projectMethod {
 		scope.Project = call.Project
-		target.Name = projectResource(call.Project)
+		target.Name = provider.ProjectResource(call.Project)
 		project, ok := p.index.Get(target.Name)
 		if !ok || project.Kind != kindProjectRef || !numericProjectNumber.MatchString(project.Number) {
 			return iam.Target{}, state.Scope{}, projectMethod, nil, gap("configure the explicit project and numeric project number")
@@ -577,7 +579,7 @@ func (p *Provider) executeFolder(call gateway.Call, r *gateway.RESTRequest, scop
 			Name string `json:"name"`
 		}
 		if json.Unmarshal(r.JSON, &body) != nil || body.Name == "" {
-			return nil, invalid("Expected a folder name")
+			return nil, provider.Invalid("Expected a folder name")
 		}
 		folderID = body.Name
 		if _, ok, _ := p.catalog.Folder(scope, bucket, folderID); ok {

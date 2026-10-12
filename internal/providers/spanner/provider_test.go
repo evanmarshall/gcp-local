@@ -17,6 +17,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -61,9 +62,9 @@ func newHarness(t *testing.T) *harness {
 	must(t, err)
 	h.engine = engine
 	for project, token := range map[string]string{testProject: adminToken, peerProject: peerToken} {
-		must(t, h.index.Put(ownerProjects, state.Resource{Name: projectResource(project), Service: ownerProjects,
-			Kind: kindProject, Number: "123456", Scope: scopeOf(project)}))
-		_, err := engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{
+		must(t, h.index.Put(ownerProjects, state.Resource{Name: provider.ProjectResource(project), Service: ownerProjects,
+			Kind: kindProject, Number: "123456", Scope: provider.ProjectScope(project)}))
+		_, err := engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: []iam.Binding{
 			{Role: "roles/spanner.admin", Members: []string{principal(token)}}}})
 		must(t, err)
 	}
@@ -156,10 +157,8 @@ func object(t *testing.T, value any) map[string]any {
 
 // createDatabase is the databases.create body for one database id.
 func createDatabase(id string) map[string]any {
-	return map[string]any{keyCreateStatement: "CREATE DATABASE `" + id + "`"}
+	return map[string]any{"createStatement": "CREATE DATABASE `" + id + "`"}
 }
-
-const keyCreateStatement = "createStatement"
 
 func (h *harness) createInstance() {
 	h.t.Helper()
@@ -240,7 +239,7 @@ func TestResetStopsBackendAndClearsScope(t *testing.T) {
 	h.createInstance()
 	h.expect(h.invoke(adminToken, http.MethodPost, testPath+"/databases", createDatabase(testDatabase)), http.StatusOK)
 	first := h.fake(testProject)
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}))
 	if first.stops == 0 {
 		t.Fatal("reset did not stop the emulator")
 	}
@@ -265,7 +264,7 @@ func TestProjectsUseIsolatedBackends(t *testing.T) {
 	if h.fake(testProject) == h.fake(peerProject) {
 		t.Fatal("projects share one emulator")
 	}
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(peerProject)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(peerProject)}))
 	h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)
 	if _, found := h.index.Get(fullName(instanceName(testProject, testInstance))); !found {
 		t.Fatal("resetting one project removed another project's reference")
@@ -304,7 +303,7 @@ func TestUncertainCreateIsReconciledOrBlocksScope(t *testing.T) {
 	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, body), http.StatusServiceUnavailable)
 	h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusBadRequest)
 	fake.fault = nil
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}))
 	h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusNotFound)
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
@@ -49,10 +50,10 @@ func runSDKServer(t *testing.T) *sdkServer {
 		t.Fatal(err)
 	}
 	for _, project := range []string{testProject, otherProject} {
-		if err := index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: scopeOf(project)}); err != nil {
+		if err := index.Put("resourcemanager", state.Resource{Name: provider.ProjectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: provider.ProjectScope(project)}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{
+		if _, err := engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: []iam.Binding{
 			{Role: "roles/datastore.user", Members: []string{principal("actor", project)}},
 		}}); err != nil {
 			t.Fatal(err)

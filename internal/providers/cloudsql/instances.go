@@ -14,6 +14,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -57,13 +58,13 @@ type instanceBody struct {
 func (p *Provider) check(body instanceBody) error {
 	switch {
 	case !instanceNamePattern.MatchString(body.Name):
-		return invalid("Invalid instance name.")
+		return provider.Invalid("Invalid instance name.")
 	case p.releases[body.DatabaseVersion] == "":
 		return gap("databaseVersion %q (installed: %s)", body.DatabaseVersion, strings.Join(sortedKeys(p.releases), ", "))
 	case body.MasterInstanceName != "" || len(body.ReplicaConfiguration) > 0 || len(body.FailoverReplica) > 0:
 		return gap("replicas")
 	case body.Settings == nil || !tierPattern.MatchString(body.Settings.Tier):
-		return invalid("Invalid request: settings.tier is required.")
+		return provider.Invalid("Invalid request: settings.tier is required.")
 	case len(body.Settings.DatabaseFlags) > 0:
 		return gap("settings.databaseFlags")
 	default:
@@ -74,10 +75,10 @@ func (p *Provider) check(body instanceBody) error {
 // checkFields validates the free-form insert fields.
 func checkFields(body instanceBody) error {
 	if strings.ContainsRune(body.RootPassword, 0) {
-		return invalid("Invalid root password.")
+		return provider.Invalid("Invalid root password.")
 	}
 	if body.Region != "" && !regionPattern.MatchString(body.Region) {
-		return invalid("Invalid region.")
+		return provider.Invalid("Invalid region.")
 	}
 	return nil
 }
@@ -100,7 +101,7 @@ func (p *Provider) record(body instanceBody) (instanceRecord, error) {
 		record.PrivateNetwork = ip.PrivateNetwork
 	}
 	if !record.IPv4 && record.PrivateNetwork == "" {
-		return instanceRecord{}, invalid("At least one of public IP or private IP must be enabled.")
+		return instanceRecord{}, provider.Invalid("At least one of public IP or private IP must be enabled.")
 	}
 	return record, nil
 }
@@ -109,7 +110,7 @@ func (p *Provider) record(body instanceBody) (instanceRecord, error) {
 func (p *Provider) insertInstance(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	var body instanceBody
 	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, invalid("Invalid JSON payload.")
+		return nil, provider.Invalid("Invalid JSON payload.")
 	}
 	record, err := p.record(body)
 	if err != nil {
@@ -165,17 +166,16 @@ func (p *Provider) start(ctx context.Context, fleet driver, project string, reco
 // publish indexes a created instance and stores its metadata.
 func (p *Provider) publish(project string, record instanceRecord) error {
 	err := p.index.Put(serviceName, state.Resource{Name: instanceResource(project, record.Name), Service: serviceName,
-		Kind: kindInstance, Parent: projectResource(project), Scope: scopeOf(project)})
+		Kind: kindInstance, Parent: provider.ProjectResource(project), Scope: provider.ProjectScope(project)})
 	if err != nil {
 		return fmt.Errorf("index the instance: %w", err)
 	}
-	return p.catalog.With(scopeOf(project), func(c *catalog) error { //nolint:wrapcheck // the store returns scope validation only
+	return p.catalog.With(provider.ProjectScope(project), func(c *catalog) error { //nolint:wrapcheck // the store returns scope validation only
 		c.instances[record.Name] = record.clone()
 		return nil
 	})
 }
 
-// getInstance renders one instance.
 func (p *Provider) getInstance(_ gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	record, ok := p.lookup(project, request.Path[pathInstance])
 	if !ok {
@@ -190,7 +190,7 @@ func (p *Provider) listInstances(_ gateway.Call, request *gateway.RESTRequest, p
 		return nil, gap("instances.list filter and pageToken")
 	}
 	var items []any
-	_ = p.catalog.With(scopeOf(project), func(c *catalog) error {
+	_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 		for _, name := range sortedKeys(c.instances) {
 			record := c.instances[name]
 			items = append(items, record.wire(project, p.releases[record.Version]))
@@ -223,20 +223,20 @@ type instancePatch struct {
 func decodePatch(raw json.RawMessage) (instancePatch, error) {
 	var top, settings map[string]json.RawMessage
 	if json.Unmarshal(raw, &top) != nil {
-		return instancePatch{}, invalid("Invalid JSON payload.")
+		return instancePatch{}, provider.Invalid("Invalid JSON payload.")
 	}
 	if err := supportedKeys(top, patchTopLevel, ""); err != nil || top[keySettings] == nil {
 		return instancePatch{}, err
 	}
 	var patch instancePatch
 	if json.Unmarshal(top[keySettings], &settings) != nil || json.Unmarshal(top[keySettings], &patch) != nil {
-		return instancePatch{}, invalid("Invalid settings.")
+		return instancePatch{}, provider.Invalid("Invalid settings.")
 	}
 	if err := supportedKeys(settings, patchSettings, "settings."); err != nil {
 		return instancePatch{}, err
 	}
 	if patch.Tier != nil && !tierPattern.MatchString(*patch.Tier) {
-		return instancePatch{}, invalid("Invalid tier.")
+		return instancePatch{}, provider.Invalid("Invalid tier.")
 	}
 	return patch, nil
 }
@@ -275,7 +275,7 @@ func (p *Provider) patchInstance(call gateway.Call, request *gateway.RESTRequest
 	name, started := request.Path[pathInstance], p.clock()
 	var failure *gateway.RESTResponse
 	err = p.use(call.Context, project, func(context.Context, driver) error {
-		return p.catalog.With(scopeOf(project), func(c *catalog) error {
+		return p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 			record, ok := c.instances[name]
 			switch {
 			case !ok:
@@ -315,10 +315,10 @@ func (p *Provider) deleteInstance(call gateway.Call, request *gateway.RESTReques
 		if err := fleet.remove(ctx, name); err != nil {
 			return err
 		}
-		if err := p.index.Remove(serviceName, scopeOf(project), instanceResource(project, name)); err != nil {
+		if err := p.index.Remove(serviceName, provider.ProjectScope(project), instanceResource(project, name)); err != nil {
 			return fmt.Errorf("remove the instance reference: %w", err)
 		}
-		return p.catalog.With(scopeOf(project), func(c *catalog) error {
+		return p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 			delete(c.instances, name)
 			return nil
 		})

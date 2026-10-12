@@ -9,6 +9,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -49,7 +50,7 @@ func (p *Provider) policyTarget(call gateway.Call, request *gateway.RESTRequest,
 		return nil
 	}
 	if target.Name != tableResource(request.Path["project"], request.Path["instance"], request.Path["table"]) {
-		return notFound(kindTable, request.Path["table"])
+		return provider.NotFound(kindTable, request.Path["table"])
 	}
 	return nil
 }
@@ -132,7 +133,7 @@ func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Sco
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: instanceResource(scope.Project, record.Name), Service: serviceName,
-		Kind: kindInstance, Parent: projectResource(scope.Project), Scope: scope,
+		Kind: kindInstance, Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the instance: %w", indexErr)
 	}
@@ -183,8 +184,8 @@ func (p *Provider) createOperation(project string, record *instanceRecord) map[s
 			instanceName(project, record.Name), record.Cluster.Location, number),
 		"metadata": map[string]any{
 			"@type":       typeCreateInstanceMetadata,
-			"requestTime": stamp(record.CreatedAt),
-			"finishTime":  stamp(record.CreatedAt),
+			"requestTime": provider.Stamp(record.CreatedAt),
+			"finishTime":  provider.Stamp(record.CreatedAt),
 		},
 		"done":     true,
 		"response": result,
@@ -236,7 +237,7 @@ func instanceSummary(project string, record *instanceRecord) map[string]any {
 // instanceWire renders one instance document as instances.get returns it.
 func instanceWire(project string, record *instanceRecord) map[string]any {
 	wire := instanceSummary(project, record)
-	wire["createTime"] = stamp(record.CreatedAt)
+	wire["createTime"] = provider.Stamp(record.CreatedAt)
 	wire["knowledgeCatalogRegion"] = region(record.Cluster.Location)
 	return wire
 }
@@ -249,7 +250,6 @@ func region(zone string) string {
 	return zone
 }
 
-// clusterWire renders one cluster document.
 func clusterWire(project, instance string, record *clusterRecord) map[string]any {
 	return map[string]any{
 		keyName:              clusterName(project, instance, record.Name),
@@ -273,11 +273,10 @@ func (p *Provider) instanceLocked(scope state.Scope, instance string) *instanceR
 	return record
 }
 
-// instancesGet returns one instance.
 func (p *Provider) instancesGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.instanceLocked(scope, request.Path["instance"])
 	if record == nil {
-		return nil, notFound(kindInstance, request.Path["instance"])
+		return nil, provider.NotFound(kindInstance, request.Path["instance"])
 	}
 	return &gateway.RESTResponse{JSON: instanceWire(scope.Project, record)}, nil
 }
@@ -307,7 +306,7 @@ func (p *Provider) instancesUpdate(request *gateway.RESTRequest, scope state.Sco
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		record := s.instances[request.Path["instance"]]
 		if record == nil {
-			return notFound(kindInstance, request.Path["instance"])
+			return provider.NotFound(kindInstance, request.Path["instance"])
 		}
 		record.DisplayName = body.DisplayName
 		record.Labels = body.Labels
@@ -335,23 +334,21 @@ func emptyResponse() *gateway.RESTResponse {
 	return &gateway.RESTResponse{JSON: map[string]any{}}
 }
 
-// clustersList returns the instance's clusters.
 func (p *Provider) clustersList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.instanceLocked(scope, request.Path["instance"])
 	if record == nil {
-		return nil, notFound(kindInstance, request.Path["instance"])
+		return nil, provider.NotFound(kindInstance, request.Path["instance"])
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{"clusters": []any{clusterWire(scope.Project, record.Name, record.Cluster)}}}, nil
 }
 
-// clustersGet returns one cluster.
 func (p *Provider) clustersGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.instanceLocked(scope, request.Path["instance"])
 	if record == nil {
-		return nil, notFound(kindInstance, request.Path["instance"])
+		return nil, provider.NotFound(kindInstance, request.Path["instance"])
 	}
 	if record.Cluster.Name != request.Path["cluster"] {
-		return nil, notFound(kindCluster, request.Path["cluster"])
+		return nil, provider.NotFound(kindCluster, request.Path["cluster"])
 	}
 	return &gateway.RESTResponse{JSON: clusterWire(scope.Project, record.Name, record.Cluster)}, nil
 }

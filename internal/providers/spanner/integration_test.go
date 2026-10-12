@@ -13,6 +13,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -28,9 +29,9 @@ func TestOfficialEmulatorLifecycle(t *testing.T) {
 	h.engine, err = iam.New(h.index)
 	must(t, err)
 	for project, token := range map[string]string{testProject: adminToken, peerProject: peerToken} {
-		must(t, h.index.Put(ownerProjects, state.Resource{Name: projectResource(project), Service: ownerProjects,
-			Kind: kindProject, Number: "123456", Scope: scopeOf(project)}))
-		_, err := h.engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{
+		must(t, h.index.Put(ownerProjects, state.Resource{Name: provider.ProjectResource(project), Service: ownerProjects,
+			Kind: kindProject, Number: "123456", Scope: provider.ProjectScope(project)}))
+		_, err := h.engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: []iam.Binding{
 			{Role: "roles/spanner.admin", Members: []string{principal(token)}}}})
 		must(t, err)
 	}
@@ -51,8 +52,8 @@ func TestOfficialEmulatorLifecycle(t *testing.T) {
 	}
 	h.createInstance()
 	h.expect(h.invoke(adminToken, http.MethodPost, testPath+"/databases", map[string]any{
-		keyCreateStatement: "CREATE DATABASE `" + testDatabase + "`",
-		"extraStatements":  []string{"CREATE TABLE Items (Id STRING(36) NOT NULL, Name STRING(64)) PRIMARY KEY (Id)"},
+		"createStatement": "CREATE DATABASE `" + testDatabase + "`",
+		"extraStatements": []string{"CREATE TABLE Items (Id STRING(36) NOT NULL, Name STRING(64)) PRIMARY KEY (Id)"},
 	}), http.StatusOK)
 	ddl := h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/databases/"+testDatabase+"/ddl", nil), http.StatusOK)
 	if statements, _ := ddl["statements"].([]any); len(statements) != 1 || statements[0] != "CREATE TABLE Items (\n  Id STRING(36) NOT NULL,\n  Name STRING(64),\n) PRIMARY KEY(Id)" {
@@ -62,7 +63,7 @@ func TestOfficialEmulatorLifecycle(t *testing.T) {
 	h.expect(h.invoke(peerToken, http.MethodGet, peerInstances+"/"+testInstance, nil), http.StatusNotFound)
 	h.expect(h.invoke(peerToken, http.MethodPost, peerInstances, instanceBody(peerProject)), http.StatusOK)
 
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}))
 	h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusNotFound)
 	h.expect(h.invoke(peerToken, http.MethodGet, peerInstances+"/"+testInstance, nil), http.StatusOK)
 	h.createInstance()

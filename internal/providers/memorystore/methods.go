@@ -11,6 +11,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -71,7 +72,7 @@ func (p *Provider) publish(scope state.Scope, record instance) (operation, error
 		return operation{}, fmt.Errorf("store the instance: %w", err)
 	}
 	if err := p.index.Put(serviceName, state.Resource{Name: fullName(name), Service: serviceName, Kind: "instance",
-		Parent: projectResource(scope.Project), Scope: scope}); err != nil {
+		Parent: provider.ProjectResource(scope.Project), Scope: scope}); err != nil {
 		_ = p.catalog.With(scope, func(value *catalog) error {
 			delete(value.instances, record.ID)
 			value.operations = value.operations[:len(value.operations)-1]

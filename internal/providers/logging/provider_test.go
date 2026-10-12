@@ -16,6 +16,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/genproto/googleapis/api/monitoredres"
 	"google.golang.org/grpc"
@@ -29,19 +30,6 @@ import (
 const (
 	projectA      = "logs-a"
 	projectB      = "logs-b"
-	keyResource   = "resource"
-	keyEntries    = "entries"
-	keyNames      = "resourceNames"
-	keyFilter     = "filter"
-	keyOrder      = "orderBy"
-	keyPageSize   = "pageSize"
-	keyPageToken  = "pageToken"
-	keyNextToken  = "nextPageToken"
-	keyLogName    = "logName"
-	keyLabels     = "labels"
-	keyType       = "type"
-	keySeverity   = "severity"
-	keyText       = "textPayload"
 	typeGlobal    = "global"
 	labelEnv      = "env"
 	textDisk      = "disk almost full"
@@ -88,8 +76,8 @@ func newHarness(t *testing.T) *harness {
 		projectB: {{Role: "roles/logging.admin", Members: member(projectBOwner)}},
 	}
 	for i, project := range []string{projectA, projectB} {
-		name := projectResource(project)
-		if err := index.Put("resourcemanager", state.Resource{Name: name, Service: "resourcemanager", Kind: "project", Number: []string{"111", "222"}[i], Scope: scopeOf(project)}); err != nil {
+		name := provider.ProjectResource(project)
+		if err := index.Put("resourcemanager", state.Resource{Name: name, Service: "resourcemanager", Kind: "project", Number: []string{"111", "222"}[i], Scope: provider.ProjectScope(project)}); err != nil {
 			t.Fatalf("register the project: %v", err)
 		}
 		if _, err := engine.SetPolicy(name, iam.Policy{Bindings: grants[project]}); err != nil {
@@ -141,16 +129,16 @@ func (h *harness) list(actor string, body map[string]any) (map[string]any, int) 
 
 // listA lists project A with extra request fields.
 func (h *harness) listA(actor string, extra map[string]any) (map[string]any, int) {
-	body := map[string]any{keyNames: []any{projectAName}}
+	body := map[string]any{"resourceNames": []any{projectAName}}
 	maps.Copy(body, extra)
 	return h.list(actor, body)
 }
 
 // global is the global monitored resource.
-func global() map[string]any { return map[string]any{keyType: typeGlobal} }
+func global() map[string]any { return map[string]any{"type": typeGlobal} }
 
 func appEntry(severity, text, timestamp string) map[string]any {
-	entry := map[string]any{keyLogName: appLog, keySeverity: severity, keyText: text}
+	entry := map[string]any{"logName": appLog, "severity": severity, "textPayload": text}
 	if timestamp != "" {
 		entry["timestamp"] = timestamp
 	}
@@ -161,15 +149,15 @@ func appEntry(severity, text, timestamp string) map[string]any {
 func (h *harness) seed() {
 	h.t.Helper()
 	code := h.write(actorWriter, map[string]any{
-		keyResource: global(),
-		keyLabels:   map[string]any{labelEnv: "test"},
-		keyEntries: []any{
+		"resource": global(),
+		"labels":   map[string]any{labelEnv: "test"},
+		"entries": []any{
 			appEntry(severityInfo, textStarted, "2026-10-11T10:00:00Z"),
 			appEntry("WARNING", textDisk, "2026-10-11T10:05:00Z"),
 			appEntry("ERROR", textFailed, "2026-10-11T10:10:00Z"),
-			map[string]any{keyLogName: auditLog, keySeverity: "NOTICE", "timestamp": "2026-10-11T10:15:00Z",
-				keyResource:   map[string]any{keyType: "gce_instance", keyLabels: map[string]any{"zone": "us-central1-a"}},
-				"jsonPayload": map[string]any{"user": "alice", "status": 503, "nested": map[string]any{"kind": "audit"}}, keyLabels: map[string]any{labelEnv: "prod"}},
+			map[string]any{"logName": auditLog, "severity": "NOTICE", "timestamp": "2026-10-11T10:15:00Z",
+				"resource":    map[string]any{"type": "gce_instance", "labels": map[string]any{"zone": "us-central1-a"}},
+				"jsonPayload": map[string]any{"user": "alice", "status": 503, "nested": map[string]any{"kind": "audit"}}, "labels": map[string]any{labelEnv: "prod"}},
 		},
 	})
 	if code != http.StatusOK {
@@ -180,7 +168,7 @@ func (h *harness) seed() {
 // entriesOf reads a listing's entries as objects.
 func entriesOf(t *testing.T, value map[string]any) []map[string]any {
 	t.Helper()
-	raw, _ := value[keyEntries].([]any)
+	raw, _ := value["entries"].([]any)
 	entries := make([]map[string]any, 0, len(raw))
 	for _, item := range raw {
 		entry, ok := item.(map[string]any)
@@ -197,11 +185,11 @@ func payloads(t *testing.T, value map[string]any) []string {
 	t.Helper()
 	var texts []string
 	for _, entry := range entriesOf(t, value) {
-		if text, ok := entry[keyText].(string); ok {
+		if text, ok := entry["textPayload"].(string); ok {
 			texts = append(texts, text)
 			continue
 		}
-		name, _ := entry[keyLogName].(string)
+		name, _ := entry["logName"].(string)
 		texts = append(texts, "json:"+name)
 	}
 	return texts
@@ -229,7 +217,7 @@ func TestPermissionPlans(t *testing.T) {
 
 func TestDeniedWritesStoreNothing(t *testing.T) {
 	h := newHarness(t)
-	body := map[string]any{keyResource: global(), keyEntries: []any{appEntry(severityInfo, "x", "")}}
+	body := map[string]any{"resource": global(), "entries": []any{appEntry(severityInfo, "x", "")}}
 	if code := h.write(actorViewer, body); code != http.StatusForbidden {
 		t.Fatalf("viewer write: %d", code)
 	}
@@ -237,8 +225,8 @@ func TestDeniedWritesStoreNothing(t *testing.T) {
 		t.Fatalf("anonymous write: %d", code)
 	}
 	// One entry in a project the caller cannot write rejects the whole request.
-	mixed := map[string]any{keyResource: global(), keyEntries: []any{
-		appEntry(severityInfo, "a", ""), map[string]any{keyLogName: projectBName + "/logs/app", keyText: "b"},
+	mixed := map[string]any{"resource": global(), "entries": []any{
+		appEntry(severityInfo, "a", ""), map[string]any{"logName": projectBName + "/logs/app", "textPayload": "b"},
 	}}
 	if code := h.write(actorWriter, mixed); code != http.StatusForbidden {
 		t.Fatalf("cross-project write: %d", code)
@@ -264,15 +252,15 @@ func TestReadAndDeleteNeedTheirPermissions(t *testing.T) {
 func TestWriteDefaults(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	value, _ := h.listA(actorViewer, map[string]any{keyFilter: `logName="` + appLog + `"`})
+	value, _ := h.listA(actorViewer, map[string]any{"filter": `logName="` + appLog + `"`})
 	entries := entriesOf(t, value)
 	if len(entries) != 3 || entries[0]["receiveTimestamp"] != "2026-10-11T12:00:00Z" || entries[0]["insertId"] == "" {
 		t.Fatalf("entries = %v", entries)
 	}
-	if !reflect.DeepEqual(entries[0][keyLabels], map[string]any{labelEnv: "test"}) || !reflect.DeepEqual(entries[0][keyResource], map[string]any{keyType: typeGlobal, keyLabels: map[string]any{"project_id": projectA}}) {
+	if !reflect.DeepEqual(entries[0]["labels"], map[string]any{labelEnv: "test"}) || !reflect.DeepEqual(entries[0]["resource"], map[string]any{"type": "global", "labels": map[string]any{"project_id": projectA}}) {
 		t.Fatalf("defaults = %v", entries[0])
 	}
-	if code := h.write(actorWriter, map[string]any{keyEntries: []any{appEntry(severityInfo, "x", "")}}); code != http.StatusBadRequest {
+	if code := h.write(actorWriter, map[string]any{"entries": []any{appEntry(severityInfo, "x", "")}}); code != http.StatusBadRequest {
 		t.Fatalf("missing resource: %d", code)
 	}
 }
@@ -280,13 +268,13 @@ func TestWriteDefaults(t *testing.T) {
 func TestProjectsAreIsolated(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	if code := h.write(projectBOwner, map[string]any{keyLogName: projectBName + "/logs/app", keyResource: global(), keyEntries: []any{map[string]any{keyText: "from b"}}}); code != http.StatusOK {
+	if code := h.write(projectBOwner, map[string]any{"logName": projectBName + "/logs/app", "resource": global(), "entries": []any{map[string]any{"textPayload": "from b"}}}); code != http.StatusOK {
 		t.Fatalf("project B write: %d", code)
 	}
-	if _, code := h.list(actorViewer, map[string]any{keyNames: []any{projectBName}}); code != http.StatusForbidden {
+	if _, code := h.list(actorViewer, map[string]any{"resourceNames": []any{projectBName}}); code != http.StatusForbidden {
 		t.Fatalf("project A viewer read project B: %d", code)
 	}
-	if value, _ := h.list(projectBOwner, map[string]any{keyNames: []any{projectBName}}); !reflect.DeepEqual(payloads(t, value), []string{"from b"}) {
+	if value, _ := h.list(projectBOwner, map[string]any{"resourceNames": []any{projectBName}}); !reflect.DeepEqual(payloads(t, value), []string{"from b"}) {
 		t.Fatalf("project B entries = %v", payloads(t, value))
 	}
 }
@@ -321,7 +309,7 @@ func TestFilters(t *testing.T) {
 		{"labels.missing:*", nil},
 	}
 	for _, item := range cases {
-		value, code := h.listA(actorViewer, map[string]any{keyFilter: item.filter})
+		value, code := h.listA(actorViewer, map[string]any{"filter": item.filter})
 		if code != http.StatusOK || !reflect.DeepEqual(payloads(t, value), item.want) {
 			t.Fatalf("filter %q: %d %v, want %v", item.filter, code, payloads(t, value), item.want)
 		}
@@ -331,15 +319,15 @@ func TestFilters(t *testing.T) {
 func TestInvalidRequests(t *testing.T) {
 	h := newHarness(t)
 	for _, bad := range []map[string]any{
-		{keyFilter: "severity>=LOUD"}, {keyFilter: "unknownField=1"}, {keyFilter: `textPayload="open`},
-		{keyFilter: "(severity=INFO"}, {keyFilter: "timestamp>yesterday"}, {keyFilter: "severity="},
-		{keyOrder: keySeverity}, {keyPageToken: encodeToken(1, "another request")},
+		{"filter": "severity>=LOUD"}, {"filter": "unknownField=1"}, {"filter": `textPayload="open`},
+		{"filter": "(severity=INFO"}, {"filter": "timestamp>yesterday"}, {"filter": "severity="},
+		{"orderBy": "severity"}, {"pageToken": encodeToken(1, "another request")},
 	} {
 		if _, code := h.listA(actorViewer, bad); code != http.StatusBadRequest {
 			t.Fatalf("request %v accepted: %d", bad, code)
 		}
 	}
-	if _, code := h.list(actorViewer, map[string]any{keyNames: []any{"organizations/1"}}); code != http.StatusNotImplemented {
+	if _, code := h.list(actorViewer, map[string]any{"resourceNames": []any{"organizations/1"}}); code != http.StatusNotImplemented {
 		t.Fatalf("organization listing: %d", code)
 	}
 }
@@ -347,15 +335,15 @@ func TestInvalidRequests(t *testing.T) {
 func TestOrderAndPaging(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	value, _ := h.listA(actorViewer, map[string]any{keyOrder: orderDesc, keyPageSize: 3})
-	if got := payloads(t, value); !reflect.DeepEqual(got, []string{auditPayload, textFailed, textDisk}) || value[keyNextToken] == nil {
+	value, _ := h.listA(actorViewer, map[string]any{"orderBy": orderDesc, "pageSize": 3})
+	if got := payloads(t, value); !reflect.DeepEqual(got, []string{auditPayload, textFailed, textDisk}) || value["nextPageToken"] == nil {
 		t.Fatalf("desc page = %v", value)
 	}
-	next, _ := h.listA(actorViewer, map[string]any{keyOrder: orderDesc, keyPageSize: 3, keyPageToken: value[keyNextToken]})
-	if got := payloads(t, next); !reflect.DeepEqual(got, []string{textStarted}) || next[keyNextToken] != nil {
+	next, _ := h.listA(actorViewer, map[string]any{"orderBy": orderDesc, "pageSize": 3, "pageToken": value["nextPageToken"]})
+	if got := payloads(t, next); !reflect.DeepEqual(got, []string{textStarted}) || next["nextPageToken"] != nil {
 		t.Fatalf("second page = %v", next)
 	}
-	if _, code := h.listA(actorViewer, map[string]any{keyPageToken: value[keyNextToken]}); code != http.StatusBadRequest {
+	if _, code := h.listA(actorViewer, map[string]any{"pageToken": value["nextPageToken"]}); code != http.StatusBadRequest {
 		t.Fatalf("token reused with another order: %d", code)
 	}
 }
@@ -369,7 +357,7 @@ func (h *harness) logPage(query string) ([]any, string) {
 		h.t.Fatalf("logs page: %d %v", recorder.Code, err)
 	}
 	names, _ := page["logNames"].([]any)
-	token, _ := page[keyNextToken].(string)
+	token, _ := page["nextPageToken"].(string)
 	return names, token
 }
 
@@ -392,7 +380,7 @@ func TestLogsListAndDelete(t *testing.T) {
 	if missing := h.call(http.MethodDelete, "/v2/"+auditLog, nil, actorAdmin); missing.Code != http.StatusNotFound {
 		t.Fatalf("second delete: %d", missing.Code)
 	}
-	if err := h.provider.Reset(scopeOf(projectA)); err != nil {
+	if err := h.provider.Reset(provider.ProjectScope(projectA)); err != nil {
 		t.Fatal(err)
 	}
 	if value, _ := h.listA(actorViewer, nil); len(payloads(t, value)) != 0 {

@@ -14,7 +14,6 @@ import (
 	"net/http"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -106,17 +105,6 @@ var (
 	ErrRolesUnrecorded = errors.New("cloud SQL role snapshots are not recorded")
 )
 
-// scopeOf names one project scope. Instance names are unique per project, so
-// a project's instances share one backend lifecycle across regions.
-func scopeOf(project string) state.Scope {
-	return state.Scope{Project: project, Location: state.Global}
-}
-
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
-
 // instanceResource names an instance in the IAM index.
 func instanceResource(project, instance string) string {
 	return "//cloudsql.googleapis.com/projects/" + project + "/instances/" + instance
@@ -139,14 +127,9 @@ func apiError(code int, statusText, reason, message string) *gateway.RESTRespons
 	return &gateway.RESTResponse{Status: code, JSON: map[string]any{"error": body}}
 }
 
-// notFound reports a missing instance in the Cloud SQL shape.
+// notFound renders Cloud SQL's instanceDoesNotExist body, which has its own reason field.
 func notFound() *gateway.RESTResponse {
 	return apiError(http.StatusNotFound, "NOT_FOUND", "instanceDoesNotExist", "The Cloud SQL instance does not exist.")
-}
-
-// invalid reports an invalid request field.
-func invalid(message string) error {
-	return status.Error(codes.InvalidArgument, message)
 }
 
 // gap reports an unsupported request shape explicitly.

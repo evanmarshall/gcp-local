@@ -1,6 +1,8 @@
 package pubsub
 
 import (
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+
 	"regexp"
 	"strings"
 
@@ -16,16 +18,12 @@ var namePattern = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,61}[a-z0-9])/(
 func gap(message string) error {
 	return status.Error(codes.Unimplemented, "Pub/Sub coverage gap: "+message)
 }
-func invalid(message string) error { return status.Error(codes.InvalidArgument, message) }
 func canonical(name string) string { return "//pubsub.googleapis.com/" + name }
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
 
 func resourceName(name, kind string) (string, error) {
 	parts := namePattern.FindStringSubmatch(name)
 	if len(parts) != 4 || (kind != "" && parts[2] != kind) || strings.HasPrefix(parts[3], "goog") {
-		return "", invalid("Invalid Pub/Sub resource name")
+		return "", provider.Invalid("Invalid Pub/Sub resource name")
 	}
 	return parts[1], nil
 }
@@ -79,7 +77,7 @@ func validatePull(r *pb.PullRequest) error {
 		return err
 	}
 	if r.GetMaxMessages() < 1 || r.GetMaxMessages() > 1000 {
-		return invalid("Max messages must be one through 1000")
+		return provider.Invalid("Max messages must be one through 1000")
 	}
 	return nil
 }
@@ -90,7 +88,7 @@ func validateModifyAckDeadline(r *pb.ModifyAckDeadlineRequest) error {
 		return err
 	}
 	if r.GetAckDeadlineSeconds() < 0 || r.GetAckDeadlineSeconds() > 600 {
-		return invalid("Ack deadline must be zero through 600 seconds")
+		return provider.Invalid("Ack deadline must be zero through 600 seconds")
 	}
 	return nil
 }
@@ -109,7 +107,7 @@ func validateSubscription(r *pb.Subscription) error {
 		return err
 	}
 	if deadline := r.GetAckDeadlineSeconds(); deadline != 0 && (deadline < 10 || deadline > 600) {
-		return invalid("Ack deadline must be 10 through 600 seconds")
+		return provider.Invalid("Ack deadline must be 10 through 600 seconds")
 	}
 	return nil
 }
@@ -121,17 +119,17 @@ func validatePublish(r *pb.PublishRequest) error {
 		return err
 	}
 	if len(r.GetMessages()) == 0 || len(r.GetMessages()) > 1000 {
-		return invalid("Supply one through 1000 messages")
+		return provider.Invalid("Supply one through 1000 messages")
 	}
 	for _, m := range r.GetMessages() {
 		if m == nil {
-			return invalid("Missing message")
+			return provider.Invalid("Missing message")
 		}
 		if err := fields(m, "data", "attributes"); err != nil {
 			return err
 		}
 		if len(m.GetData()) == 0 && len(m.GetAttributes()) == 0 {
-			return invalid("Messages need data or attributes")
+			return provider.Invalid("Messages need data or attributes")
 		}
 	}
 	if proto.Size(r) > 1<<20 {

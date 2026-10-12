@@ -19,6 +19,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -251,24 +252,14 @@ func (p *Provider) project(name string) (string, error) {
 	return id, nil
 }
 
-// projectResource names the resource-manager project.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
-
-// scopeOf is the global scope of one project.
-func scopeOf(project string) state.Scope {
-	return state.Scope{Project: project, Location: state.Global}
-}
-
 // authorize checks the method's permission on every named project before any
 // state is read or written.
 func (p *Provider) authorize(call gateway.Call, projects []string) error {
 	for _, project := range projects {
 		scoped := call
 		scoped.Project = project
-		scoped.Resource = projectResource(project)
-		_, err := p.engine.Authorize(scoped, iam.Target{Name: projectResource(project)}, nil)
+		scoped.Resource = provider.ProjectResource(project)
+		_, err := p.engine.Authorize(scoped, iam.Target{Name: provider.ProjectResource(project)}, nil)
 		if err == nil {
 			continue
 		}

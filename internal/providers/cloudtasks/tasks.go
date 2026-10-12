@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -38,9 +39,9 @@ func (p *Provider) createTask(call gateway.Call, request *gateway.RESTRequest, s
 	}
 	task, ok := body["task"].(map[string]any)
 	if !ok {
-		return nil, statusInvalid("A task is required")
+		return nil, provider.Invalid("A task is required")
 	}
-	full, err := p.fullView(call, request, textOf(body["responseView"]))
+	full, err := p.fullView(call, request, provider.Text(body["responseView"]))
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func (p *Provider) storeTask(scope state.Scope, location string, record *taskRec
 	var document map[string]any
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		if s.queues[record.Queue] == nil {
-			return notFound("queues", record.Queue)
+			return provider.NotFound("queues", record.Queue)
 		}
 		key := taskKey(record.Queue, record.ID)
 		if s.tasks[key] != nil {
@@ -92,16 +93,16 @@ func (p *Provider) newTask(task map[string]any, queue string) (*taskRecord, erro
 	if err != nil {
 		return nil, err
 	}
-	scheduleAt, err := parseSchedule(textOf(task["scheduleTime"]), p.clock)
+	scheduleAt, err := parseSchedule(provider.Text(task["scheduleTime"]), p.clock)
 	if err != nil {
 		return nil, err
 	}
-	id := lastSegment(textOf(task["name"]))
+	id := provider.LastSegment(provider.Text(task["name"]))
 	if id == "" {
 		id = strconv.FormatUint(rand.Uint64N(9e18)+1e18, 10)
 	}
 	if !taskPattern.MatchString(id) {
-		return nil, statusInvalid("Invalid task name " + id)
+		return nil, provider.Invalid("Invalid task name " + id)
 	}
 	record := &taskRecord{
 		ID: id, Queue: queue, URL: target, Method: method, Headers: map[string]string{},
@@ -111,7 +112,7 @@ func (p *Provider) newTask(task map[string]any, queue string) (*taskRecord, erro
 		return nil, err
 	}
 	if oidc, ok := httpRequest["oidcToken"].(map[string]any); ok {
-		record.ServiceAccount, record.Audience = textOf(oidc["serviceAccountEmail"]), textOf(oidc["audience"])
+		record.ServiceAccount, record.Audience = provider.Text(oidc["serviceAccountEmail"]), provider.Text(oidc["audience"])
 		if record.Audience == "" {
 			record.Audience = target
 		}
@@ -127,24 +128,24 @@ func parseSchedule(value string, now func() time.Time) (time.Time, error) {
 	}
 	moment, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return time.Time{}, statusInvalid("Invalid scheduleTime " + value)
+		return time.Time{}, provider.Invalid("Invalid scheduleTime " + value)
 	}
 	return moment, nil
 }
 
 // parseTarget validates the absolute HTTP(S) target URL and the method.
 func parseTarget(httpRequest map[string]any) (string, string, error) {
-	target := textOf(httpRequest["url"])
+	target := provider.Text(httpRequest["url"])
 	parsed, err := url.Parse(target)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return "", "", statusInvalid("HttpRequest.url must be an absolute http or https URL")
+		return "", "", provider.Invalid("HttpRequest.url must be an absolute http or https URL")
 	}
-	method := textOf(httpRequest["httpMethod"])
+	method := provider.Text(httpRequest["httpMethod"])
 	if method == "" {
 		method = http.MethodPost
 	}
 	if !taskMethods[method] {
-		return "", "", statusInvalid("Invalid HttpRequest.httpMethod " + method)
+		return "", "", provider.Invalid("Invalid HttpRequest.httpMethod " + method)
 	}
 	return target, method, nil
 }
@@ -154,16 +155,16 @@ func parsePayloadAndHeaders(record *taskRecord, httpRequest map[string]any) erro
 	if encoded, ok := httpRequest["body"].(string); ok {
 		decoded, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
-			return statusInvalid("HttpRequest.body must be base64")
+			return provider.Invalid("HttpRequest.body must be base64")
 		}
 		if len(decoded) > maxPayload {
-			return statusInvalid("The task body exceeds 1 MiB")
+			return provider.Invalid("The task body exceeds 1 MiB")
 		}
 		record.Body = decoded
 	}
 	if headers, ok := httpRequest["headers"].(map[string]any); ok {
 		for key, value := range headers {
-			record.Headers[http.CanonicalHeaderKey(key)] = textOf(value)
+			record.Headers[http.CanonicalHeaderKey(key)] = provider.Text(value)
 		}
 	}
 	return nil
@@ -192,8 +193,8 @@ func taskDocument(project, location string, record *taskRecord, full bool) map[s
 	document := map[string]any{
 		"name":             taskName(project, location, record.Queue, record.ID),
 		"httpRequest":      httpRequestDocument(record, full),
-		"scheduleTime":     stamp(record.ScheduleAt),
-		"createTime":       stamp(record.Created),
+		"scheduleTime":     provider.Stamp(record.ScheduleAt),
+		"createTime":       provider.Stamp(record.Created),
 		"dispatchDeadline": dispatchDeadline,
 		"view":             "BASIC",
 	}
@@ -208,7 +209,7 @@ func taskDocument(project, location string, record *taskRecord, full bool) map[s
 	}
 	if record.First != nil {
 		// GCP retains only the dispatch time of the first attempt.
-		document["firstAttempt"] = map[string]any{"dispatchTime": stamp(record.First.Dispatch)}
+		document["firstAttempt"] = map[string]any{"dispatchTime": provider.Stamp(record.First.Dispatch)}
 	}
 	if record.Last != nil {
 		document["lastAttempt"] = attemptDocument(record.Last)
@@ -246,8 +247,8 @@ func attemptDocument(attempt *attemptRecord) map[string]any {
 		response["message"] = attempt.Message
 	}
 	return map[string]any{
-		"scheduleTime": stamp(attempt.Schedule), "dispatchTime": stamp(attempt.Dispatch),
-		"responseTime": stamp(attempt.Response), "responseStatus": response,
+		"scheduleTime": provider.Stamp(attempt.Schedule), "dispatchTime": provider.Stamp(attempt.Dispatch),
+		"responseTime": provider.Stamp(attempt.Response), "responseStatus": response,
 	}
 }
 
@@ -258,7 +259,7 @@ func (p *Provider) withTask(scope state.Scope, request *gateway.RESTRequest, ful
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		record := s.tasks[key]
 		if record == nil {
-			return notFound("tasks", request.Path["task"])
+			return provider.NotFound("tasks", request.Path["task"])
 		}
 		document = taskDocument(scope.Project, request.Path["location"], record, full)
 		return use(s, key)
@@ -269,7 +270,6 @@ func (p *Provider) withTask(scope state.Scope, request *gateway.RESTRequest, ful
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// getTask returns one task document.
 func (p *Provider) getTask(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	full, err := p.fullView(call, request, "")
 	if err != nil {
@@ -288,7 +288,7 @@ func (p *Provider) listTasks(call gateway.Call, request *gateway.RESTRequest, sc
 	var items []any
 	err = p.scopes.With(scope, func(s *scopeState) error {
 		if s.queues[queue] == nil {
-			return notFound("queues", queue)
+			return provider.NotFound("queues", queue)
 		}
 		keys := make([]string, 0, len(s.tasks))
 		for key, task := range s.tasks {

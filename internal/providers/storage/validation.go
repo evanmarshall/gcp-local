@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -93,7 +94,7 @@ func validateQueryValues(method string, r *gateway.RESTRequest) error {
 		return gap("only the noAcl projection is supported")
 	}
 	if versions := r.Query.Get("versions"); versions != "" && versions != "true" && versions != "false" {
-		return invalid("versions must be a boolean")
+		return provider.Invalid("versions must be a boolean")
 	}
 	return nil
 }
@@ -389,7 +390,7 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	metadata := map[string]any{}
 	_ = json.Unmarshal(payload, &metadata)
 	metadata["softDeletePolicy"] = map[string]string{"retentionDurationSeconds": string(request.SoftDelete.Seconds)}
-	project, _ := p.index.Get(projectResource(scope.Project))
+	project, _ := p.index.Get(provider.ProjectResource(scope.Project))
 	metadata["projectNumber"] = project.Number
 	metadata["metageneration"] = "1"
 	metadata["etag"] = objectETag(request.Name, "1")

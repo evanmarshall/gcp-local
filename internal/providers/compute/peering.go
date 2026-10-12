@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -22,7 +23,7 @@ type peeringRequest struct {
 func parsePeering(body map[string]any) peeringRequest {
 	if nested, ok := body["networkPeering"].(map[string]any); ok {
 		return peeringRequest{
-			name: textOf(nested[keyName]), network: textOf(nested[keyNetwork]),
+			name: provider.Text(nested[keyName]), network: provider.Text(nested[keyNetwork]),
 			exchange:     boolOf(nested["exchangeSubnetRoutes"], true),
 			importCustom: boolOf(nested["importCustomRoutes"], false),
 			export:       boolOf(nested["exportCustomRoutes"], false),
@@ -31,7 +32,7 @@ func parsePeering(body map[string]any) peeringRequest {
 		}
 	}
 	return peeringRequest{
-		name: textOf(body[keyName]), network: textOf(body[keyPeerNetwork]),
+		name: provider.Text(body[keyName]), network: provider.Text(body[keyPeerNetwork]),
 		exchange: boolOf(body["autoCreateRoutes"], true), exportPublic: true,
 	}
 }
@@ -49,14 +50,14 @@ func peerProject(reference string) string {
 
 // addPeering stores one peering of a network toward a same-project peer.
 func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := decodeBody(request.JSON)
+	body, err := provider.DecodeObject(request.JSON)
 	if err != nil {
 		return nil, err
 	}
 	spec := parsePeering(body)
 	peer := networkName(spec.network)
 	if !uidPattern.MatchString(spec.name) || peer == "" {
-		return nil, statusInvalid("A peering requires a name and a peer network")
+		return nil, provider.Invalid("A peering requires a name and a peer network")
 	}
 	if project := peerProject(spec.network); project != "" && project != scope.Project {
 		return nil, gap("cross-project network peering is not modeled")
@@ -74,7 +75,7 @@ func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (
 		if errors.Is(err, errAlreadyExists) {
 			return nil, conflict("peering", spec.name)
 		}
-		return nil, notFound(kindNetwork, network)
+		return nil, provider.NotFound(kindNetwork, network)
 	}
 	return p.newOperation(scope, "global", "", "addPeering", selfLink(scope.Project, "networks", network))
 }
@@ -98,11 +99,11 @@ func (s *scopeState) addPeering(network string, peering peeringRecord) error {
 // removePeering deletes one named peering of a network. Compute refuses an
 // unknown peering name with 400.
 func (p *Provider) removePeering(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := decodeBody(request.JSON)
+	body, err := provider.DecodeObject(request.JSON)
 	if err != nil {
 		return nil, err
 	}
-	name := textOf(body[keyName])
+	name := provider.Text(body[keyName])
 	network := request.Path["network"]
 	removed := false
 	if err := p.scopes.With(scope, func(s *scopeState) error {
@@ -119,7 +120,7 @@ func (p *Provider) removePeering(request *gateway.RESTRequest, scope state.Scope
 		}
 		return nil
 	}); err != nil {
-		return nil, notFound(kindNetwork, network)
+		return nil, provider.NotFound(kindNetwork, network)
 	}
 	if !removed {
 		return nil, status.Errorf(codes.InvalidArgument, "There is no peering named '%s' in network '%s'", name, network)

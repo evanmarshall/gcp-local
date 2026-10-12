@@ -8,11 +8,6 @@ import (
 	"errors"
 	"regexp"
 	"time"
-
-	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/state"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // serviceName owns the BigQuery backend registration.
@@ -126,24 +121,6 @@ func (s *scopeState) reset() {
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("bigquery requires registry, manager, index, and iam")
 
-// wireError builds the BigQuery error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
-}
-
-// notFound reports the BigQuery not-found status.
-func notFound(kind, name string) error {
-	return status.Errorf(codes.NotFound, "The resource '%s/%s' was not found", kind, name)
-}
-
-// scopeOf names one project scope.
-func scopeOf(project string) state.Scope {
-	return state.Scope{Project: project, Location: state.Global}
-}
-
-// tableKey is the state key of one table.
 func tableKey(dataset, table string) string { return dataset + "/" + table }
 
 // datasetResource names one dataset in the IAM index.
@@ -154,9 +131,4 @@ func datasetResource(project, dataset string) string {
 // tableResource names one table in the IAM index.
 func tableResource(project, dataset, table string) string {
 	return datasetResource(project, dataset) + "/tables/" + table
-}
-
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }

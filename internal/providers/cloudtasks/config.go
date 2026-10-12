@@ -1,6 +1,8 @@
 package cloudtasks
 
 import (
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+
 	"maps"
 	"time"
 )
@@ -47,21 +49,21 @@ func parseRetry(current retryPolicy, raw any) (retryPolicy, error) {
 		return current, nil
 	}
 	if !ok {
-		return current, statusInvalid("Invalid retryConfig")
+		return current, provider.Invalid("Invalid retryConfig")
 	}
 	next := current
 	var valid bool
 	if next.MaxAttempts, valid = intField(body, "maxAttempts", current.MaxAttempts); !valid || next.MaxAttempts < -1 {
-		return current, statusInvalid("Invalid retryConfig.maxAttempts")
+		return current, provider.Invalid("Invalid retryConfig.maxAttempts")
 	}
 	if next.MaxDoublings, valid = intField(body, "maxDoublings", current.MaxDoublings); !valid || next.MaxDoublings < 0 {
-		return current, statusInvalid("Invalid retryConfig.maxDoublings")
+		return current, provider.Invalid("Invalid retryConfig.maxDoublings")
 	}
 	if next.MinBackoff, valid = durationField(body, "minBackoff", current.MinBackoff); !valid {
-		return current, statusInvalid("Invalid retryConfig.minBackoff")
+		return current, provider.Invalid("Invalid retryConfig.minBackoff")
 	}
 	if next.MaxBackoff, valid = durationField(body, "maxBackoff", current.MaxBackoff); !valid || next.MaxBackoff < next.MinBackoff {
-		return current, statusInvalid("Invalid retryConfig.maxBackoff")
+		return current, provider.Invalid("Invalid retryConfig.maxBackoff")
 	}
 	return next, nil
 }

@@ -10,12 +10,12 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-// executeNetwork handles the network methods.
 func (p *Provider) executeNetwork(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodNetworksCreate:
@@ -42,13 +42,13 @@ func (p *Provider) createNetwork(request *gateway.RESTRequest, scope state.Scope
 	}
 	var created *networkRecord
 	err = p.scopes.With(scope, func(s *scopeState) error {
-		name := textOf(body["name"])
+		name := provider.Text(body["name"])
 		if s.networks[name] != nil {
 			return errAlreadyExists
 		}
 		routing, _ := body["routingConfig"].(map[string]any)
 		created = &networkRecord{
-			Name: name, Description: textOf(body[keyDescription]),
+			Name: name, Description: provider.Text(body[keyDescription]),
 			AutoCreateSubnetworks: boolOf(body[keyAutoSubnets], true),
 			RoutingMode:           textOr(routing["routingMode"], "REGIONAL"),
 			MTU:                   intOf(body["mtu"], 0), Generation: s.nextGeneration(), CreatedAt: p.clock(),
@@ -57,24 +57,23 @@ func (p *Provider) createNetwork(request *gateway.RESTRequest, scope state.Scope
 		return nil
 	})
 	if err != nil {
-		return nil, conflict("network", textOf(body["name"]))
+		return nil, conflict("network", provider.Text(body["name"]))
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: globalName(project, kindNetwork, created.Name), Service: serviceName,
-		Kind: kindNetwork, Parent: projectResource(project), Scope: scope,
+		Kind: kindNetwork, Parent: provider.ProjectResource(project), Scope: scope,
 	}); indexErr != nil {
 		return nil, gap("index the network")
 	}
 	return p.newOperation(scope, "global", "", "insert", selfLink(scope.Project, "networks", created.Name))
 }
 
-// getNetwork returns one network document.
 func (p *Provider) getNetwork(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["network"]
 	var record *networkRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.networks[name]; return nil })
 	if record == nil {
-		return nil, notFound(kindNetwork, name)
+		return nil, provider.NotFound(kindNetwork, name)
 	}
 	return &gateway.RESTResponse{JSON: p.renderNetwork(scope, record)}, nil
 }
@@ -106,7 +105,7 @@ func (p *Provider) deleteNetwork(_ gateway.Call, request *gateway.RESTRequest, s
 		func(s *scopeState) string { return s.networkUser(name) },
 		func(s *scopeState) { delete(s.networks, name) })
 	if !found {
-		return nil, notFound(kindNetwork, name)
+		return nil, provider.NotFound(kindNetwork, name)
 	}
 	if user != "" {
 		return p.failedOperation(scope, "global", "", "delete", target, &operationError{
@@ -189,7 +188,6 @@ var (
 	errAlreadyExists = errors.New("already exists")
 )
 
-// executeSubnetwork handles the subnetwork methods.
 func (p *Provider) executeSubnetwork(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodSubnetworksCreate:
@@ -218,11 +216,11 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 	if cidrErr != nil {
 		return nil, cidrErr
 	}
-	network := networkName(textOf(body["network"]))
+	network := networkName(provider.Text(body["network"]))
 	if !p.networkExists(scope, network) {
 		return nil, missingReference()
 	}
-	name := textOf(body["name"])
+	name := provider.Text(body["name"])
 	target := regionalSelfLink(project, region, "subnetworks", name)
 	var created *subnetworkRecord
 	var overlap string
@@ -234,7 +232,7 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 			return nil
 		}
 		created = &subnetworkRecord{
-			Name: name, Description: textOf(body[keyDescription]), Network: network, Region: region,
+			Name: name, Description: provider.Text(body[keyDescription]), Network: network, Region: region,
 			IPCIDRRange: cidr, Gateway: defaultGateway(cidr),
 			PrivateAccess: boolOf(body["privateIpGoogleAccess"], false),
 			Generation:    1, CreatedAt: p.clock(),
@@ -281,13 +279,12 @@ func (s *scopeState) overlappingSubnet(network, cidr string) string {
 	return ""
 }
 
-// getSubnetwork returns one subnetwork document.
 func (p *Provider) getSubnetwork(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["subnetwork"]
 	var record *subnetworkRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.subnetworks[name]; return nil })
 	if record == nil {
-		return nil, notFound(kindSubnetwork, name)
+		return nil, provider.NotFound(kindSubnetwork, name)
 	}
 	return &gateway.RESTResponse{JSON: subnetworkDocument(scope.Project, record)}, nil
 }
@@ -316,7 +313,7 @@ func (p *Provider) deleteSubnetwork(request *gateway.RESTRequest, scope state.Sc
 		},
 		func(s *scopeState) { delete(s.subnetworks, name) })
 	if !found {
-		return nil, notFound(kindSubnetwork, name)
+		return nil, provider.NotFound(kindSubnetwork, name)
 	}
 	if user != "" {
 		return p.failedOperation(scope, "region", region, "delete", target, &operationError{
@@ -344,7 +341,7 @@ func (p *Provider) removeRegionResource(request *gateway.RESTRequest, scope stat
 		return nil
 	})
 	if !found {
-		return nil, notFound(kind, name)
+		return nil, provider.NotFound(kind, name)
 	}
 	_ = p.index.Remove(serviceName, scope, regionalName(project, region, kind, name))
 	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, plural, name))
@@ -387,7 +384,6 @@ func defaultGateway(cidr string) string {
 	return ip.String()
 }
 
-// executeFirewall handles the firewall methods.
 func (p *Provider) executeFirewall(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodFirewallsCreate, methodFirewallsUpdate:
@@ -408,24 +404,24 @@ func (p *Provider) writeFirewall(call gateway.Call, request *gateway.RESTRequest
 	if err != nil {
 		return nil, err
 	}
-	network := networkName(textOf(body["network"]))
+	network := networkName(provider.Text(body["network"]))
 	if !p.networkExists(scope, network) {
 		return nil, missingReference()
 	}
-	name := textOf(body["name"])
+	name := provider.Text(body["name"])
 	if call.Method == methodFirewallsUpdate && name == "" {
 		name = request.Path["firewall"]
 	}
 	err = p.storeFirewall(scope, body, network, name, call.Method == methodFirewallsCreate)
 	if err != nil {
 		if errors.Is(err, errMissing) {
-			return nil, notFound(kindFirewall, name)
+			return nil, provider.NotFound(kindFirewall, name)
 		}
 		return nil, conflict("firewall", name)
 	}
 	_ = p.index.Put(serviceName, state.Resource{
 		Name: globalName(project, kindFirewall, name), Service: serviceName,
-		Kind: kindFirewall, Parent: projectResource(project), Scope: scope,
+		Kind: kindFirewall, Parent: provider.ProjectResource(project), Scope: scope,
 	})
 	operationType := "insert"
 	if call.Method == methodFirewallsUpdate {
@@ -453,9 +449,9 @@ func (p *Provider) storeFirewall(scope state.Scope, body map[string]any, network
 		}
 		created.Network = network
 		created.Direction = textOr(body[keyDirection], directionIngress)
-		created.Allowed = listOfMaps(body["allowed"])
-		created.Denied = listOfMaps(body["denied"])
-		created.Description = textOf(body[keyDescription])
+		created.Allowed = provider.MapList(body["allowed"])
+		created.Denied = provider.MapList(body["denied"])
+		created.Description = provider.Text(body[keyDescription])
 		created.SourceRanges = stringListOf(body["sourceRanges"])
 		created.DestinationRanges = stringListOf(body["destinationRanges"])
 		created.TargetTags = stringListOf(body["targetTags"])
@@ -470,13 +466,12 @@ func (p *Provider) storeFirewall(scope state.Scope, body map[string]any, network
 	return nil
 }
 
-// getFirewall returns one firewall document.
 func (p *Provider) getFirewall(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["firewall"]
 	var record *firewallRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.firewalls[name]; return nil })
 	if record == nil {
-		return nil, notFound(kindFirewall, name)
+		return nil, provider.NotFound(kindFirewall, name)
 	}
 	return &gateway.RESTResponse{JSON: firewallDocument(scope.Project, record)}, nil
 }
@@ -515,7 +510,7 @@ func (p *Provider) deleteGlobal(scope state.Scope, kind, name string, remove fun
 		return nil
 	})
 	if !found {
-		return nil, notFound(kind, name)
+		return nil, provider.NotFound(kind, name)
 	}
 	_ = p.index.Remove(serviceName, scope, globalName(project, kind, name))
 	return p.newOperation(scope, "global", "", "delete", selfLink(scope.Project, kind+"s", name))
@@ -523,13 +518,12 @@ func (p *Provider) deleteGlobal(scope state.Scope, kind, name string, remove fun
 
 // textOr returns the first non-empty text of the field and the fallback.
 func textOr(value any, fallback string) string {
-	if text := textOf(value); text != "" {
+	if text := provider.Text(value); text != "" {
 		return text
 	}
 	return fallback
 }
 
-// executeRoute handles the route methods.
 func (p *Provider) executeRoute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodRoutesCreate:
@@ -554,11 +548,11 @@ func (p *Provider) createRoute(request *gateway.RESTRequest, scope state.Scope) 
 	if cidrErr != nil {
 		return nil, cidrErr
 	}
-	network := networkName(textOf(body["network"]))
+	network := networkName(provider.Text(body["network"]))
 	if !p.networkExists(scope, network) {
 		return nil, missingReference()
 	}
-	name := textOf(body["name"])
+	name := provider.Text(body["name"])
 	var created *routeRecord
 	err = p.scopes.With(scope, func(s *scopeState) error {
 		if s.routes[name] != nil {
@@ -566,8 +560,8 @@ func (p *Provider) createRoute(request *gateway.RESTRequest, scope state.Scope) 
 		}
 		created = &routeRecord{
 			Name: name, Network: network, DestRange: cidr,
-			NextHopGateway: textOf(body["nextHopGateway"]),
-			NextHopIP:      textOf(body["nextHopIp"]),
+			NextHopGateway: provider.Text(body["nextHopGateway"]),
+			NextHopIP:      provider.Text(body["nextHopIp"]),
 			Priority:       intOf(body[keyPriority], 1000), Tags: stringListOf(body["tags"]),
 			Generation: 1, CreatedAt: p.clock(),
 		}
@@ -579,18 +573,17 @@ func (p *Provider) createRoute(request *gateway.RESTRequest, scope state.Scope) 
 	}
 	_ = p.index.Put(serviceName, state.Resource{
 		Name: globalName(project, kindRoute, name), Service: serviceName,
-		Kind: kindRoute, Parent: projectResource(project), Scope: scope,
+		Kind: kindRoute, Parent: provider.ProjectResource(project), Scope: scope,
 	})
 	return p.newOperation(scope, "global", "", "insert", selfLink(scope.Project, "routes", name))
 }
 
-// getRoute returns one route document.
 func (p *Provider) getRoute(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["route"]
 	var record *routeRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.routes[name]; return nil })
 	if record == nil {
-		return nil, notFound(kindRoute, name)
+		return nil, provider.NotFound(kindRoute, name)
 	}
 	return &gateway.RESTResponse{JSON: routeDocument(scope.Project, record)}, nil
 }
@@ -607,7 +600,6 @@ func (p *Provider) listRoutes(scope state.Scope) (*gateway.RESTResponse, error) 
 	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
 }
 
-// deleteRoute removes one route.
 func (p *Provider) deleteRoute(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["route"]
 	remove := func(s *scopeState) bool {
@@ -618,7 +610,6 @@ func (p *Provider) deleteRoute(request *gateway.RESTRequest, scope state.Scope) 
 	return p.deleteGlobal(scope, kindRoute, name, remove)
 }
 
-// executeRouters handles the router methods.
 func (p *Provider) executeRouters(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodRoutersCreate:
@@ -638,10 +629,10 @@ func (p *Provider) createRouter(request *gateway.RESTRequest, scope state.Scope)
 	if err != nil {
 		return nil, err
 	}
-	name := textOf(body["name"])
-	network := networkName(textOf(body["network"]))
+	name := provider.Text(body["name"])
+	network := networkName(provider.Text(body["network"]))
 	if name == "" || network == "" {
-		return nil, statusInvalid("A router requires a name and a network")
+		return nil, provider.Invalid("A router requires a name and a network")
 	}
 	if !p.networkExists(scope, network) {
 		return nil, missingReference()
@@ -682,7 +673,7 @@ const allSubnetworks = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 func (p *Provider) parseNATs(raw any, scope state.Scope) ([]natRecord, error) {
 	items, ok := raw.([]any)
 	if !ok || len(items) == 0 {
-		return nil, statusInvalid("A router requires at least one NAT gateway")
+		return nil, provider.Invalid("A router requires at least one NAT gateway")
 	}
 	nats := make([]natRecord, 0, len(items))
 	for _, item := range items {
@@ -708,27 +699,27 @@ const (
 func (p *Provider) parseNAT(raw any, scope state.Scope) (natRecord, error) {
 	gateway, ok := raw.(map[string]any)
 	if !ok {
-		return natRecord{}, statusInvalid("Invalid NAT gateway entry")
+		return natRecord{}, provider.Invalid("Invalid NAT gateway entry")
 	}
 	record := natRecord{
-		Name: textOf(gateway["name"]), Allocation: textOr(gateway["natIpAllocateOption"], natAutoOnly),
-		Ranges: textOf(gateway["sourceSubnetworkIpRangesToNat"]),
+		Name: provider.Text(gateway["name"]), Allocation: textOr(gateway["natIpAllocateOption"], natAutoOnly),
+		Ranges: provider.Text(gateway["sourceSubnetworkIpRangesToNat"]),
 	}
 	if !uidPattern.MatchString(record.Name) || record.Ranges == "" {
-		return natRecord{}, statusInvalid("A NAT gateway requires a name and sourceSubnetworkIpRangesToNat")
+		return natRecord{}, provider.Invalid("A NAT gateway requires a name and sourceSubnetworkIpRangesToNat")
 	}
 	if record.Allocation != natAutoOnly {
 		return natRecord{}, gap("NAT gateways with manually allocated addresses are not modeled")
 	}
-	for _, entry := range listOfMaps(gateway["subnetworks"]) {
-		subnet := subnetName(textOf(entry["name"]))
+	for _, entry := range provider.MapList(gateway["subnetworks"]) {
+		subnet := subnetName(provider.Text(entry["name"]))
 		if !p.subnetworkExists(scope, subnet) {
 			return natRecord{}, missingReference()
 		}
 		record.Subnetworks = append(record.Subnetworks, subnet)
 	}
 	if (record.Ranges == listOfSubnetworks) != (len(record.Subnetworks) > 0) {
-		return natRecord{}, statusInvalid("Only a LIST_OF_SUBNETWORKS NAT gateway names subnetworks")
+		return natRecord{}, provider.Invalid("Only a LIST_OF_SUBNETWORKS NAT gateway names subnetworks")
 	}
 	return record, nil
 }
@@ -748,13 +739,12 @@ func (p *Provider) subnetworkExists(scope state.Scope, name string) bool {
 	return found
 }
 
-// getRouter returns one router document.
 func (p *Provider) getRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["router"]
 	var record *routerRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.routers[name]; return nil })
 	if record == nil {
-		return nil, notFound(kindRouter, name)
+		return nil, provider.NotFound(kindRouter, name)
 	}
 	return &gateway.RESTResponse{JSON: routerDocument(scope.Project, record)}, nil
 }
@@ -771,7 +761,6 @@ func (p *Provider) listRouters(scope state.Scope) (*gateway.RESTResponse, error)
 	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
 }
 
-// deleteRouter removes one router.
 func (p *Provider) deleteRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	return p.removeRegionResource(request, scope, "routers", kindRouter,
 		func(s *scopeState, name string) { delete(s.routers, name) },
@@ -802,7 +791,6 @@ func (p *Provider) subnetworkIam(call gateway.Call, request *gateway.RESTRequest
 	return &gateway.RESTResponse{JSON: policy}, nil
 }
 
-// subnetworkIamResource renders the canonical subnetwork resource name.
 func subnetworkIamResource(project, region, subnetwork string) string {
 	return "//compute.googleapis.com/projects/" + project + "/regions/" + region + "/subnetworks/" + subnetwork
 }

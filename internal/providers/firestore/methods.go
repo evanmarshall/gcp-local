@@ -312,12 +312,10 @@ func (p *Provider) fieldLocked(scope state.Scope, collection, field string) *fie
 	return record
 }
 
-// projectField renders the canonical field name.
 func projectField(project, collection, field string) string {
 	return "projects/" + project + "/databases/(default)/collectionGroups/" + collection + "/fields/" + field
 }
 
-// fieldWire renders one field document.
 func fieldWire(name string, ttl, index map[string]any, configured bool) map[string]any {
 	document := map[string]any{
 		"name":        name,

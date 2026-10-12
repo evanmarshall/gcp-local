@@ -50,12 +50,12 @@ func TestDeniedCallsNeverReachTheBackend(t *testing.T) {
 	h := newHarness(t, Config{})
 	model := &countingModel{}
 	h.provider.model = model
-	embedBody := map[string]any{keyContent: turn(actorUser, map[string]any{keyText: "hi"})}
+	embedBody := map[string]any{"content": turn(actorUser, map[string]any{"text": "hi"})}
 	cases := map[string]any{
 		testModel + ":generateContent":               prompt("hi"),
 		testModel + ":streamGenerateContent?alt=sse": prompt("hi"),
 		testModel + ":countTokens":                   prompt("hi"),
-		testEmbedding + ":predict":                   map[string]any{keyInstances: []any{map[string]any{keyContent: "hi"}}},
+		testEmbedding + ":predict":                   map[string]any{"instances": []any{map[string]any{"content": "hi"}}},
 		"gemini-embedding-001:embedContent":          embedBody,
 	}
 	for suffix, body := range cases {
@@ -99,7 +99,7 @@ func TestUsageMatchesCountTokens(t *testing.T) {
 	if at(t, generated, "usageMetadata", "promptTokenCount") != count["totalTokens"] || count["totalTokens"] != float64(5) {
 		t.Fatalf("usage %v count %v", generated["usageMetadata"], count)
 	}
-	if reason := at(t, generated, keyCandidates, 0, "finishReason"); reason != finishStop {
+	if reason := at(t, generated, "candidates", 0, "finishReason"); reason != finishStop {
 		t.Fatalf("finish reason: %v", reason)
 	}
 }
@@ -108,19 +108,19 @@ func TestStubFunctionCalling(t *testing.T) {
 	h := newHarness(t, Config{})
 	body := prompt("Use get_weather for Paris")
 	body["tools"] = []any{map[string]any{"functionDeclarations": []any{
-		map[string]any{keyName: "get_time", keyParameters: map[string]any{keyType: typeObject, keyProperties: map[string]any{"zone": map[string]any{keyType: typeString}}}},
-		map[string]any{keyName: fnWeather, keyParameters: map[string]any{keyType: typeObject, keyProperties: map[string]any{
+		map[string]any{"name": "get_time", "parameters": map[string]any{keyType: typeObject, "properties": map[string]any{"zone": map[string]any{keyType: typeString}}}},
+		map[string]any{"name": fnWeather, "parameters": map[string]any{keyType: typeObject, "properties": map[string]any{
 			argCity: map[string]any{keyType: typeString}, "unit": map[string]any{keyType: typeString, "enum": []any{"celsius", "fahrenheit"}}, "days": map[string]any{keyType: "INTEGER"},
 		}}},
 	}}}
 	part := firstPart(t, h.generate(body))
-	want := map[string]any{keyName: fnWeather, keyArgs: map[string]any{argCity: "stub-city", "unit": "celsius", "days": float64(1)}}
+	want := map[string]any{"name": fnWeather, "args": map[string]any{argCity: "stub-city", "unit": "celsius", "days": float64(1)}}
 	if !reflect.DeepEqual(at(t, part, "functionCall"), want) {
 		t.Fatalf("function call = %v", part)
 	}
-	body[keyContents] = append(list(t, body, keyContents),
+	body["contents"] = append(list(t, body, "contents"),
 		turn("model", part),
-		turn(actorUser, map[string]any{"functionResponse": map[string]any{keyName: fnWeather, "response": map[string]any{"temp": 21}}}),
+		turn(actorUser, map[string]any{"functionResponse": map[string]any{"name": fnWeather, "response": map[string]any{"temp": 21}}}),
 	)
 	if got := firstText(t, h.generate(body)); !strings.Contains(got, "get_weather result") || !strings.Contains(got, `"temp":21`) {
 		t.Fatalf("answer after function result = %q", got)
@@ -137,9 +137,9 @@ func TestSnakeCaseFieldsAreAccepted(t *testing.T) {
 	// google-genai sends parameters_json_schema in proto spelling; property
 	// names inside the schema keep their underscores.
 	body["tools"] = []any{map[string]any{"function_declarations": []any{map[string]any{
-		keyName: "lookup", "parameters_json_schema": map[string]any{keyType: "object", keyProperties: map[string]any{"user_id": map[string]any{keyType: "string"}}},
+		"name": "lookup", "parameters_json_schema": map[string]any{keyType: "object", "properties": map[string]any{"user_id": map[string]any{keyType: "string"}}},
 	}}}}
-	want := map[string]any{keyName: "lookup", keyArgs: map[string]any{"user_id": "stub-user_id"}}
+	want := map[string]any{"name": "lookup", "args": map[string]any{"user_id": "stub-user_id"}}
 	if part := firstPart(t, h.generate(body)); !reflect.DeepEqual(at(t, part, "functionCall"), want) {
 		t.Fatalf("function call = %v", part)
 	}
@@ -149,7 +149,7 @@ func TestStubJSONOutput(t *testing.T) {
 	h := newHarness(t, Config{})
 	body := prompt("list colors")
 	body["generationConfig"] = map[string]any{"responseMimeType": "application/json", "responseSchema": map[string]any{
-		keyType: typeObject, keyProperties: map[string]any{"colors": map[string]any{keyType: "ARRAY", "items": map[string]any{keyType: typeString}}},
+		keyType: typeObject, "properties": map[string]any{"colors": map[string]any{keyType: "ARRAY", "items": map[string]any{keyType: typeString}}},
 	}}
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(firstText(t, h.generate(body))), &parsed); err != nil {
@@ -173,7 +173,7 @@ func TestStreamingMatchesUnary(t *testing.T) {
 	}
 	for i, event := range events {
 		final := i == len(events)-1
-		if final != (at(t, event, keyCandidates, 0, "finishReason") == finishStop) || final != (event["usageMetadata"] != nil) {
+		if final != (at(t, event, "candidates", 0, "finishReason") == finishStop) || final != (event["usageMetadata"] != nil) {
 			t.Fatalf("event %d finish/usage placement: %v", i, event)
 		}
 	}
@@ -186,7 +186,7 @@ func TestStreamingMatchesUnary(t *testing.T) {
 
 func TestStubEmbeddings(t *testing.T) {
 	h := newHarness(t, Config{})
-	body := map[string]any{keyInstances: []any{map[string]any{keyContent: "alpha"}, map[string]any{keyContent: "beta"}}, keyParameters: map[string]any{keyDimensions: 16}}
+	body := map[string]any{"instances": []any{map[string]any{"content": "alpha"}, map[string]any{"content": "beta"}}, "parameters": map[string]any{"outputDimensionality": 16}}
 	first := decode(t, h.call(modelPath+testEmbedding+":predict", body, actorUser))
 	if second := decode(t, h.call(modelPath+testEmbedding+":predict", body, actorUser)); !reflect.DeepEqual(first, second) {
 		t.Fatal("embeddings differ between identical calls")
@@ -196,12 +196,12 @@ func TestStubEmbeddings(t *testing.T) {
 	if len(alpha) != 16 || reflect.DeepEqual(alpha, beta) || math.Abs(norm(t, alpha)-1) > 1e-9 {
 		t.Fatalf("alpha=%v beta=%v", alpha, beta)
 	}
-	fullSize := decode(t, h.call(modelPath+testEmbedding+":predict", map[string]any{keyInstances: []any{map[string]any{keyContent: "x"}}}, actorUser))
+	fullSize := decode(t, h.call(modelPath+testEmbedding+":predict", map[string]any{"instances": []any{map[string]any{"content": "x"}}}, actorUser))
 	if got := len(list(t, fullSize, "predictions", 0, "embeddings", "values")); got != 768 {
 		t.Fatalf("default dimensions = %d", got)
 	}
 	embedded := decode(t, h.call(modelPath+"gemini-embedding-001:embedContent", map[string]any{
-		keyContent: turn(actorUser, map[string]any{keyText: "alpha"}), "embedContentConfig": map[string]any{keyDimensions: 16},
+		"content": turn(actorUser, map[string]any{"text": "alpha"}), "embedContentConfig": map[string]any{"outputDimensionality": 16},
 	}, actorUser))
 	if !reflect.DeepEqual(list(t, embedded, "embedding", "values"), alpha) {
 		t.Fatal("embedContent and predict disagree for the same text and size")
@@ -220,9 +220,9 @@ func TestRequestValidation(t *testing.T) {
 		body any
 		want int
 	}{
-		{modelPath + testModel + ":generateContent", map[string]any{keyContents: []any{}}, http.StatusBadRequest},
+		{modelPath + testModel + ":generateContent", map[string]any{"contents": []any{}}, http.StatusBadRequest},
 		{modelPath + testModel + ":generateContent", search, http.StatusNotImplemented},
-		{modelPath + testModel + ":generateContent", map[string]any{keyContents: []any{turn(actorUser, map[string]any{"fileData": map[string]any{"fileUri": "gs://b/o"}})}}, http.StatusNotImplemented},
+		{modelPath + testModel + ":generateContent", map[string]any{"contents": []any{turn(actorUser, map[string]any{"fileData": map[string]any{"fileUri": "gs://b/o"}})}}, http.StatusNotImplemented},
 		{"/v1/projects/424242/locations/global/publishers/google/models/" + testModel + ":generateContent", prompt("hi"), http.StatusOK},
 	}
 	for _, item := range cases {

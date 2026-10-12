@@ -7,9 +7,11 @@ import (
 	"strings"
 
 	"errors"
+
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -86,11 +88,11 @@ func (p *Provider) registerRestPermissions() error {
 func restResourceFor(method, project string, request *gateway.RESTRequest) string {
 	switch method {
 	case restTopicsList:
-		return projectResourceOf(project)
+		return provider.ProjectResource(project)
 	case restTopicsCreate, restTopicsGet, restTopicsDelete, restTopicsGetIam, restTopicsSetIam:
 		return restTopicName(project, request.Path["topic"])
 	case restSubscriptionsList:
-		return projectResourceOf(project)
+		return provider.ProjectResource(project)
 	case restSubsGetIam, restSubsSetIam:
 		return restSubscriptionName(project, request.Path["subscription"])
 	default:
@@ -106,11 +108,6 @@ func restTopicName(project, topic string) string {
 // restSubscriptionName renders the relative subscription resource name.
 func restSubscriptionName(project, sub string) string {
 	return "projects/" + project + "/subscriptions/" + sub
-}
-
-// projectResourceOf renders the canonical project resource name.
-func projectResourceOf(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }
 
 // handleRest is the gateway entry point for the JSON REST surface. The

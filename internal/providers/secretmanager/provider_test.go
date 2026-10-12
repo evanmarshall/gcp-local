@@ -19,12 +19,9 @@ import (
 
 // Test names and keys repeated across the lifecycle tests.
 const (
-	testProject    = "demo-secret"
-	testSecret     = "tokens"
-	testAccessor   = "accessor"
-	testKeyData    = "data"
-	testKeyPayload = "payload"
-	testKeyLabels  = "labels"
+	testProject  = "demo-secret"
+	testSecret   = "tokens"
+	testAccessor = "accessor"
 )
 
 // harness drives the provider through the gateway.
@@ -103,7 +100,7 @@ func replicationAuto() map[string]any {
 func (h *harness) addVersion(t *testing.T, payload string) {
 	t.Helper()
 	recorder := h.invoke(http.MethodPost, "/v1/projects/"+testProject+"/secrets/"+testSecret+":addVersion", map[string]any{
-		testKeyPayload: map[string]any{testKeyData: base64Of(payload)},
+		"payload": map[string]any{"data": base64Of(payload)},
 	}, "actor")
 	if recorder.Code != 200 {
 		t.Fatalf("addVersion status = %d body %s", recorder.Code, recorder.Body.String())
@@ -186,7 +183,7 @@ func TestDestroyBoundaryAndMetadataRead(t *testing.T) {
 	h := newHarness(t)
 	h.create(replicationAuto())
 	h.invoke(http.MethodPost, "/v1/projects/"+testProject+"/secrets/"+testSecret+":addVersion", map[string]any{
-		testKeyPayload: map[string]any{testKeyData: base64Of("destroy-me")},
+		"payload": map[string]any{"data": base64Of("destroy-me")},
 	}, "actor")
 	recorder := h.invoke(http.MethodPost, "/v1/projects/"+testProject+"/secrets/"+testSecret+"/versions/1:destroy", map[string]any{}, "actor")
 	if recorder.Code != 200 {
@@ -219,7 +216,7 @@ func TestListUpdateAndDeleteLifecycle(t *testing.T) {
 	h := newHarness(t)
 	h.create(replicationAuto())
 	recorder := h.invoke(http.MethodPatch, "/v1/projects/"+testProject+"/secrets/"+testSecret, map[string]any{
-		testKeyLabels: map[string]any{"env": "synthetic"},
+		"labels": map[string]any{"env": "synthetic"},
 	}, "actor")
 	if recorder.Code != 200 {
 		t.Fatalf("update status = %d body %s", recorder.Code, recorder.Body.String())
@@ -291,14 +288,14 @@ func TestRecordedWireContract(t *testing.T) {
 	h := newHarness(t)
 	secret := "/v1/projects/" + testProject + "/secrets/" + testSecret
 	recorder := h.invoke(http.MethodPost, "/v1/projects/"+testProject+"/secrets?secretId="+testSecret, map[string]any{
-		"replication": replicationAuto(), testKeyLabels: map[string]any{"managed-by": "gcp-local"},
+		"replication": replicationAuto(), "labels": map[string]any{"managed-by": "gcp-local"},
 	}, "actor")
 	var created map[string]any
 	_ = json.Unmarshal(recorder.Body.Bytes(), &created)
 	if recorder.Code != 200 || created["name"] != "projects/123456/secrets/"+testSecret || created["etag"] == nil {
 		t.Fatalf("create = %d %v", recorder.Code, created)
 	}
-	if labels, _ := created[testKeyLabels].(map[string]any); labels["managed-by"] != "gcp-local" {
+	if labels, _ := created["labels"].(map[string]any); labels["managed-by"] != "gcp-local" {
 		t.Fatalf("labels were not stored: %v", created)
 	}
 	h.addVersion(t, "hello")
@@ -319,7 +316,7 @@ func checkRecordedAccess(t *testing.T, h *harness, secret string) {
 		t.Fatalf("number-path latest access = %d %s", recorder.Code, recorder.Body.String())
 	}
 	oversize := h.invoke(http.MethodPost, secret+":addVersion", map[string]any{
-		testKeyPayload: map[string]any{testKeyData: base64Of(strings.Repeat("x", 64<<10+1))},
+		"payload": map[string]any{"data": base64Of(strings.Repeat("x", 64<<10+1))},
 	}, "actor")
 	if oversize.Code != 400 {
 		t.Fatalf("oversize payload = %d", oversize.Code)

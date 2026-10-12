@@ -54,8 +54,9 @@ func mustWriteFile(t *testing.T, path string, content []byte) {
 
 const testProject = "project-a"
 
-// testObjectGet is the read permission exercised by the engine tests.
 const testCloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
+
+// testObjectGet is the read permission exercised by the engine tests.
 const testObjectGet = "storage.objects.get"
 
 // testViewerRole is the object-viewer role used by the condition tests.

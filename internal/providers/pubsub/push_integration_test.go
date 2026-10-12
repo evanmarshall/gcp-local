@@ -20,6 +20,7 @@ import (
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -32,7 +33,7 @@ const pushAgent = "serviceAccount:service-123456@gcp-sa-pubsub.iam.gserviceaccou
 func pushAccount(t *testing.T, f *integration) string {
 	t.Helper()
 	account := iam.AccountResource("project-a", pushEmail)
-	must(t, f.p.index.Put("iam", state.Resource{Name: account, Service: "iam", Kind: "serviceAccount", Number: "123456789012345678901", Parent: projectResource("project-a"), Scope: state.Scope{Project: "project-a", Location: state.Global}}))
+	must(t, f.p.index.Put("iam", state.Resource{Name: account, Service: "iam", Kind: "serviceAccount", Number: "123456789012345678901", Parent: provider.ProjectResource("project-a"), Scope: state.Scope{Project: "project-a", Location: state.Global}}))
 	return account
 }
 func grantPush(t *testing.T, f *integration, account string, agent bool) {

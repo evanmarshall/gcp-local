@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -91,7 +92,7 @@ func setText(document map[string]any, key, value string) {
 // in the project's global scope, so the lookup walks the single scope.
 func (p *Provider) subnetworksOf(project, network string) []any {
 	links := []any{}
-	scope := scopeOf(project, stateGlobal)
+	scope := provider.ProjectScope(project)
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		names := make([]string, 0, len(s.subnetworks))
 		for name := range s.subnetworks {
@@ -227,11 +228,11 @@ func operationDocument(project string, record *operationRecord) map[string]any {
 
 // parseInsert reads one insert body as a validated map.
 func parseInsert(request *gateway.RESTRequest) (map[string]any, error) {
-	body, err := decodeBody(request.JSON)
+	body, err := provider.DecodeObject(request.JSON)
 	if err != nil {
 		return nil, err
 	}
-	name := textOf(body["name"])
+	name := provider.Text(body["name"])
 	if name == "" {
 		name = request.Path["network"]
 	}
@@ -249,14 +250,6 @@ func parseInsert(request *gateway.RESTRequest) (map[string]any, error) {
 	}
 	body["name"] = name
 	return body, nil
-}
-
-// textOf reads a string field as empty-safe text.
-func textOf(value any) string {
-	if value, ok := value.(string); ok {
-		return value
-	}
-	return ""
 }
 
 // intOf reads a numeric field with a default.
@@ -287,35 +280,22 @@ func stringListOf(value any) []string {
 	return result
 }
 
-// listOfMaps reads a JSON array of objects field.
-func listOfMaps(value any) []map[string]any {
-	entries, _ := value.([]any)
-	result := make([]map[string]any, 0, len(entries))
-	for _, entry := range entries {
-		if object, ok := entry.(map[string]any); ok {
-			result = append(result, object)
-		}
-	}
-	return result
-}
-
 // parseCidr validates one CIDR range field and returns it.
 func parseCidr(body map[string]any, key string) (string, error) {
-	value := textOf(body[key])
+	value := provider.Text(body[key])
 	if value == "" || !cidrPattern.MatchString(value) {
 		return "", status.Errorf(codes.InvalidArgument, "Invalid %s %q", key, value)
 	}
 	return value, nil
 }
 
-// operationGet returns one operation document.
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope, kind string) (*gateway.RESTResponse, error) {
 	name := scope.Project + "/" + kind + "/" + request.Path["operation"]
 	p.mu.RLock()
 	record := p.records[name]
 	p.mu.RUnlock()
 	if record == nil {
-		return nil, notFound("operations", request.Path["operation"])
+		return nil, provider.NotFound("operations", request.Path["operation"])
 	}
 	return &gateway.RESTResponse{JSON: operationDocument(scope.Project, record)}, nil
 }

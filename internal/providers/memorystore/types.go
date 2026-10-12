@@ -89,11 +89,6 @@ var (
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("memorystore requires registry, manager, index, and an authorizer")
 
-// scopeOf names one project and region scope.
-func scopeOf(project, location string) state.Scope {
-	return state.Scope{Project: project, Location: location}
-}
-
 // validScope accepts only region locations; Memorystore has no global scope.
 func validScope(scope state.Scope) error {
 	if err := scope.Validate(); err != nil {
@@ -108,12 +103,6 @@ func validScope(scope state.Scope) error {
 // errRegion reports a location that is not a region name.
 var errRegion = errors.New("memorystore locations are regions")
 
-// projectResource names the resource-manager project the checks anchor on.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
-}
-
-// instanceName renders the canonical instance name.
 func instanceName(scope state.Scope, instance string) string {
 	return "projects/" + scope.Project + "/locations/" + scope.Location + "/instances/" + instance
 }
@@ -123,19 +112,12 @@ func fullName(name string) string {
 	return "//redis.googleapis.com/" + name
 }
 
-// wireError builds the Google API error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
-}
-
 // invalid reports a request the service would reject as malformed.
 func invalid(format string, args ...any) error {
 	return status.Errorf(codes.InvalidArgument, format, args...)
 }
 
-// notFound renders the missing-resource error.
+// notFound uses Memorystore's full-name text, not the shared kind/name form.
 func notFound(name string) error {
 	return status.Errorf(codes.NotFound, "Resource '%s' was not found", name)
 }

@@ -25,7 +25,6 @@ type operation struct {
 	Response         map[string]any // the Instance at completion, or nil for Empty
 }
 
-// operationName renders the canonical operation name.
 func operationName(scope state.Scope, id string) string {
 	return "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + id
 }

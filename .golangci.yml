@@ -77,10 +77,12 @@ linters:
     wrapcheck:
       # gRPC status errors carry the wire status the peer must read, and context
       # cancellation/deadline must stay comparable with errors.Is, so wrapping
-      # any of these would itself be the defect. Every other returned error is
-      # wrapped with diagnostic context.
+      # any of these would itself be the defect. The shared provider package's
+      # Invalid, NotFound, and DecodeObject return such status errors too. Every
+      # other returned error is wrapped with diagnostic context.
       ignore-sig-regexps:
         - 'status\.(Error|Errorf)\(c '
+        - 'internal/providers/provider\.(Invalid|NotFound|DecodeObject)\('
         - 'func \(context\.Context\)\.Err\(\) error'
         - 'func \(\*google\.golang\.org/grpc/internal/status\.Status\)\.Err\(\) error'
         - 'func \(google\.golang\.org/grpc\.ServerStream\)\.(RecvMsg|SendMsg)\(m any\) error'
@@ -104,6 +106,13 @@ linters:
     presets:
       - comments
       - std-error-handling
+    rules:
+      # Test bodies spell out wire field names and fixture values so a reader
+      # sees the request a scenario sends. A constant named after its own
+      # literal hides nothing, and a repeated literal in a test is not a defect.
+      - path: _test\.go
+        linters:
+          - goconst
 
 issues:
   max-issues-per-linter: 0

@@ -1,11 +1,5 @@
 package pubsub
 
-import (
-	"fmt"
-
-	"github.com/evanmarshall/gcp-local/internal/iam"
-)
-
 const publisher = "/google.pubsub.v1.Publisher/"
 const subscriber = "/google.pubsub.v1.Subscriber/"
 const attach = "pubsub.attachSubscription"
@@ -40,12 +34,3 @@ var permissions = map[string]string{
 // permissionSubscriptionsConsume is the single permission that governs every
 // subscription message operation.
 const permissionSubscriptionsConsume = "pubsub.subscriptions.consume"
-
-func registerPermissions(engine *iam.Engine) error {
-	for method, permission := range permissions {
-		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
-			return fmt.Errorf("register %s: %w", method, err)
-		}
-	}
-	return nil
-}

@@ -23,7 +23,7 @@ type ProcessConfig struct {
 	// particular, host GCP credentials and proxy variables are never inherited.
 	Environment []string
 	Probe       func(context.Context) error
-	// Reset removes only assets owned by this scoped instance, after Stop.
+	// ResetAssets removes only assets owned by this scoped instance, after Stop.
 	ResetAssets func(context.Context) error
 	// Credential optionally runs the child as another user, for backends such
 	// as PostgreSQL that refuse to run as root. Nil keeps the caller's user.

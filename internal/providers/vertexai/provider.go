@@ -19,6 +19,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -271,12 +272,12 @@ type predictRequest struct {
 // texts validates the instances and returns their content.
 func (r *predictRequest) texts() ([]string, error) {
 	if len(r.Instances) == 0 {
-		return nil, invalid("instances must not be empty")
+		return nil, provider.Invalid("instances must not be empty")
 	}
 	texts := make([]string, len(r.Instances))
 	for i, instance := range r.Instances {
 		if instance.Content == nil {
-			return nil, invalid("Each instance needs a content string")
+			return nil, provider.Invalid("Each instance needs a content string")
 		}
 		texts[i] = *instance.Content
 	}
@@ -286,7 +287,7 @@ func (r *predictRequest) texts() ([]string, error) {
 // checkDimensions rejects an output size outside the supported range.
 func checkDimensions(dimensions int) error {
 	if dimensions < 0 || dimensions > maxDimensions {
-		return invalid("outputDimensionality is out of range")
+		return provider.Invalid("outputDimensionality is out of range")
 	}
 	return nil
 }
@@ -313,7 +314,7 @@ func (p *Provider) predict(ctx context.Context, request *gateway.RESTRequest, t 
 	}
 	var body predictRequest
 	if err := json.Unmarshal(request.JSON, &body); err != nil {
-		return nil, invalid("Invalid JSON payload received.")
+		return nil, provider.Invalid("Invalid JSON payload received.")
 	}
 	texts, err := body.texts()
 	if err != nil {
@@ -356,7 +357,7 @@ type embedRequest struct {
 // text validates the content and returns its text and requested size.
 func (r *embedRequest) text() (string, int, error) {
 	if r.Content == nil || len(r.Content.Parts) == 0 {
-		return "", 0, invalid("content must include at least one part")
+		return "", 0, provider.Invalid("content must include at least one part")
 	}
 	for _, part := range r.Content.Parts {
 		if part.Text == "" {

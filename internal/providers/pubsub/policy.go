@@ -13,6 +13,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -24,11 +25,11 @@ func (p *Provider) policy(call gateway.Call, raw any) (any, error) {
 		return nil, err
 	}
 	if project != call.Project {
-		return nil, invalid("Policy project mismatch")
+		return nil, provider.Invalid("Policy project mismatch")
 	}
 	request, ok := raw.(proto.Message)
 	if !ok {
-		return nil, invalid("Invalid IAM request")
+		return nil, provider.Invalid("Invalid IAM request")
 	}
 	update, err := p.policyUpdate(&call, request)
 	if err != nil {
@@ -91,7 +92,7 @@ func decodeSetPolicy(r *iampb.SetIamPolicyRequest) (*iam.Policy, error) {
 		return nil, gap("partial IAM policy updates")
 	}
 	if r.GetPolicy() == nil {
-		return nil, invalid("Missing IAM policy")
+		return nil, provider.Invalid("Missing IAM policy")
 	}
 	if err := fields(r.GetPolicy(), "version", "bindings", "etag"); err != nil {
 		return nil, err
@@ -99,7 +100,7 @@ func decodeSetPolicy(r *iampb.SetIamPolicyRequest) (*iam.Policy, error) {
 	policy := iam.Policy{Version: int(r.GetPolicy().GetVersion()), ETag: base64.StdEncoding.EncodeToString(r.GetPolicy().GetEtag())}
 	for _, binding := range r.GetPolicy().GetBindings() {
 		if binding == nil {
-			return nil, invalid("Missing IAM binding")
+			return nil, provider.Invalid("Missing IAM binding")
 		}
 		if err := fields(binding, "role", "members", "condition"); err != nil {
 			return nil, err

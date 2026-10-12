@@ -7,7 +7,6 @@ import (
 	"errors"
 	"regexp"
 
-	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -29,19 +28,7 @@ var projectIDPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,28}[a-z0-9]$`)
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("resourcemanager requires registry, manager, index, and iam")
 
-// wireError builds the error body.
-func wireError(code int, statusText, message string) *gateway.RESTResponse {
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{
-		"error": map[string]any{"code": code, "status": statusText, "message": message},
-	}}
-}
-
-// notFound reports the project not-found status.
+// notFound uses Resource Manager's quoted-project text, not the shared kind/name form.
 func notFound(project string) error {
 	return status.Errorf(codes.NotFound, "The project %q was not found", project)
-}
-
-// projectResource names the resource-manager project ancestor.
-func projectResource(project string) string {
-	return "//cloudresourcemanager.googleapis.com/projects/" + project
 }

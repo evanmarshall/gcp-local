@@ -9,7 +9,6 @@
 1	cyclop	internal/providers/iam/methods.go
 1	cyclop	internal/providers/iam/provider_test.go
 1	cyclop	internal/providers/pubsub/rest_wire.go
-1	cyclop	internal/providers/resourcemanager/provider.go
 1	cyclop	internal/providers/storage/provider_test.go
 1	cyclop	internal/providers/storage/state_test.go
 1	errchkjson	internal/providers/artifactregistry/provider_test.go
@@ -27,8 +26,6 @@
 1	gocognit	internal/runtime/server.go
 1	gocognit	internal/state/scoped_test.go
 1	gocognit	tools/genapi/main.go
-1	goconst	internal/providers/artifactregistry/provider_test.go
-1	goconst	internal/providers/iam/provider_test.go
 1	goconst	internal/providers/storage/permissions.go
 1	goconst	internal/providers/storage/validation.go
 1	goconst	tools/genapi/main.go
@@ -61,4 +58,3 @@
 4	goconst	internal/providers/pubsub/permissions.go
 4	goconst	internal/providers/pubsub/rest.go
 4	wrapcheck	internal/providers/storage/state.go
-6	goconst	internal/providers/bigquery/provider_test.go

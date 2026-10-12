@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"net/url"
 	"regexp"
-	"time"
 
-	"github.com/evanmarshall/gcp-local/internal/state"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -17,13 +16,14 @@ const serviceName = "run"
 // uidPattern pins the accepted Cloud Run identifier shape.
 var uidPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
-// validateIngress accepts Cloud Run's documented ingress values. Ingress and
-// analytical VPC behavior remain scoped in #16/#17; the setting is recorded here.
+// ingressSettings are Cloud Run's documented ingress values.
 var ingressSettings = map[string]bool{
 	"INGRESS_TRAFFIC_ALL": true, "INGRESS_TRAFFIC_INTERNAL_ONLY": true,
 	"INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER": true,
 }
 
+// validateIngress accepts a documented ingress value. Ingress and analytical
+// VPC behavior remain scoped in #16/#17; the setting is recorded here.
 func validateIngress(value string) error {
 	if value == "" || ingressSettings[value] {
 		return nil
@@ -86,8 +86,8 @@ type containerSpec struct {
 // template features stay out until their cloud behavior is recorded.
 func resolveTemplate(template map[string]any) (templateShape, error) {
 	shape := templateShape{
-		Revision:       text(template["revision"]),
-		ServiceAccount: text(template["serviceAccount"]),
+		Revision:       provider.Text(template["revision"]),
+		ServiceAccount: provider.Text(template["serviceAccount"]),
 	}
 	// The v2 API names the revision identity by its email, without a member prefix.
 	if account := shape.ServiceAccount; account != "" && !serviceAccountEmail.MatchString(account) {
@@ -114,13 +114,13 @@ func resolveContainer(value any) (containerSpec, error) {
 	if first == nil {
 		return containerSpec{}, status.Error(codes.InvalidArgument, "Invalid container entry")
 	}
-	image := text(first["image"])
+	image := provider.Text(first["image"])
 	if image == "" || len(image) > maxImageLength {
 		return containerSpec{}, status.Errorf(codes.InvalidArgument, "A revision requires a container image of at most %d characters", maxImageLength)
 	}
 	port := 8080
 	// The v2 API carries the serving port as ports[0].containerPort.
-	if ports := mapList(first["ports"]); len(ports) > 0 && number(ports[0]["containerPort"]) > 0 {
+	if ports := provider.MapList(first["ports"]); len(ports) > 0 && number(ports[0]["containerPort"]) > 0 {
 		port = int(number(ports[0]["containerPort"]))
 	}
 	env, refused := resolveEnv(first["env"])
@@ -133,12 +133,12 @@ func resolveContainer(value any) (containerSpec, error) {
 // resolveEnv validates plain-text environment entries of a container.
 func resolveEnv(value any) (map[string]string, error) {
 	env := map[string]string{}
-	for _, entry := range mapList(value) {
-		name := text(entry["name"])
-		if name == "" || text(entry["valueSource"]) != "" {
+	for _, entry := range provider.MapList(value) {
+		name := provider.Text(entry["name"])
+		if name == "" || provider.Text(entry["valueSource"]) != "" {
 			return nil, status.Errorf(codes.InvalidArgument, "Container environment variable %q is unsupported in this slice", name)
 		}
-		env[name] = text(entry["value"])
+		env[name] = provider.Text(entry["value"])
 	}
 	return env, nil
 }
@@ -149,14 +149,6 @@ var serviceAccountEmail = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z
 // maxImageLength bounds the accepted container image reference length.
 const maxImageLength = 2048
 
-// text reads a string field, treating absence as empty.
-func text(value any) string {
-	if value, ok := value.(string); ok {
-		return value
-	}
-	return ""
-}
-
 // number reads a JSON number field as a float.
 func number(value any) float64 {
 	if value, ok := value.(float64); ok {
@@ -165,28 +157,8 @@ func number(value any) float64 {
 	return 0
 }
 
-// mapList reads a JSON array of objects without keeping provider-internal state.
-func mapList(value any) []map[string]any {
-	entries, _ := value.([]any)
-	result := make([]map[string]any, 0, len(entries))
-	for _, entry := range entries {
-		if object, ok := entry.(map[string]any); ok {
-			result = append(result, object)
-		}
-	}
-	return result
-}
-
 // Shared wire JSON keys of the Cloud Run v2 error and document shapes.
 const (
 	keyError, keyCode, keyStatus, keyMessage = "error", "code", "status", "message"
 	keyName, keyType                         = "name", "type"
 )
-
-// stamp renders Cloud Run's RFC 3339 timestamp shape.
-func stamp(moment time.Time) string { return moment.UTC().Format("2006-01-02T15:04:05.000000Z") }
-
-// ScopeOf builds the location scope of a Cloud Run v2 resource path.
-func ScopeOf(project, location string) state.Scope {
-	return state.Scope{Project: project, Location: location}
-}

@@ -71,19 +71,10 @@ var errNotEnrolled = errors.New("the subject is not enrolled")
 // serviceReference is the full resource name of the test service.
 const serviceReference = "projects/demo-project/locations/us-central1/services/svc"
 
-// imageReference is the test container image; testImageKey is its body key.
+// imageReference is the test container image.
 const (
 	imageReference    = "example.local/svc:1"
-	testImageKey      = "image"
 	testFirstRevision = "svc-00001"
-	keyPercent        = "percent"
-)
-
-// Test-body keys repeated across the service documents.
-const (
-	testName       = "name"
-	testContainers = "containers"
-	testTemplate   = "template"
 )
 
 // harness builds a provider with a fake runtime and a project registration.
@@ -168,9 +159,9 @@ func TestServiceLifecycleCreatesRevisionAndRecordsScope(t *testing.T) {
 func (h *harness) create(t *testing.T) {
 	t.Helper()
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
-		testName:     serviceReference,
-		testTemplate: map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference, "ports": []any{map[string]any{"containerPort": 8080}}}}},
-		"ingress":    "INGRESS_TRAFFIC_ALL",
+		"name":     serviceReference,
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference, "ports": []any{map[string]any{"containerPort": 8080}}}}},
+		"ingress":  "INGRESS_TRAFFIC_ALL",
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -196,15 +187,15 @@ func (h *harness) create(t *testing.T) {
 func TestCreateRejectsUnknownTemplateFieldsAndInvalidNames(t *testing.T) {
 	h := newHarness(t)
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
-		testName:     serviceReference,
-		testTemplate: map[string]any{testContainers: []any{}},
+		"name":     serviceReference,
+		"template": map[string]any{"containers": []any{}},
 	})
 	if code := status.Code(statusFrom(recorder)); code != codes.InvalidArgument {
 		t.Fatalf("empty containers status = %d code=%v body %s", recorder.Code, code, recorder.Body.String())
 	}
 	recorder = h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
-		testTemplate: map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
-		"ingress":    "INGRESS_TRAFFIC_SOMETING",
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
+		"ingress":  "INGRESS_TRAFFIC_SOMETING",
 	})
 	if status.Code(statusFrom(recorder)) != codes.InvalidArgument {
 		t.Fatalf("bad ingress status = %d body %s", recorder.Code, recorder.Body.String())
@@ -227,8 +218,8 @@ func TestFailedStartupFailsOperation(t *testing.T) {
 	h := newHarness(t)
 	h.runtime.failNext = context.DeadlineExceeded
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
-		testName:     serviceReference,
-		testTemplate: map[string]any{testContainers: []any{map[string]any{"image": "example.local/broken:1"}}},
+		"name":     serviceReference,
+		"template": map[string]any{"containers": []any{map[string]any{"image": "example.local/broken:1"}}},
 	})
 	var operation struct {
 		Done  bool `json:"done"`
@@ -247,8 +238,8 @@ func TestFailedStartupFailsOperation(t *testing.T) {
 func TestDeleteStopsContainersAndClearsScope(t *testing.T) {
 	h := newHarness(t)
 	h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
-		testName:     serviceReference,
-		testTemplate: map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
+		"name":     serviceReference,
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
 	})
 	recorder := h.invoke(http.MethodDelete, "/v2/projects/demo-project/locations/us-central1/services/svc", nil)
 	if recorder.Code != 200 {
@@ -269,11 +260,11 @@ func TestDeleteStopsContainersAndClearsScope(t *testing.T) {
 func TestUpdateStartsNewRevisionAndShiftsTraffic(t *testing.T) {
 	h := newHarness(t)
 	h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
-		testName:     serviceReference,
-		testTemplate: map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
+		"name":     serviceReference,
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
 	})
 	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
-		testTemplate: map[string]any{testContainers: []any{map[string]any{"image": "example.local/svc:2"}}},
+		"template": map[string]any{"containers": []any{map[string]any{"image": "example.local/svc:2"}}},
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("update status = %d body %s", recorder.Code, recorder.Body.String())
@@ -312,8 +303,8 @@ func TestUpdateStartsNewRevisionAndShiftsTraffic(t *testing.T) {
 func TestSetIamPolicyStoresAndReturnsPolicy(t *testing.T) {
 	h := newHarness(t)
 	h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
-		testName:     serviceReference,
-		testTemplate: map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
+		"name":     serviceReference,
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
 	})
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services/svc:setIamPolicy", map[string]any{
 		"policy": map[string]any{"bindings": []any{map[string]any{
@@ -332,8 +323,8 @@ func TestSetIamPolicyStoresAndReturnsPolicy(t *testing.T) {
 func TestOperationGetAndList(t *testing.T) {
 	h := newHarness(t)
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", map[string]any{
-		testName:     serviceReference,
-		testTemplate: map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
+		"name":     serviceReference,
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
 	})
 	var operation struct {
 		Name string `json:"name"`
@@ -408,10 +399,10 @@ func TestWorkloadMetadataBindsPerRevisionListener(t *testing.T) {
 		return harnessBind, func() { _ = server.Close() }, nil
 	}
 	body := map[string]any{
-		testName: serviceReference,
-		testTemplate: map[string]any{
-			testContainers:        []any{map[string]any{testImageKey: imageReference, "ports": []any{map[string]any{"containerPort": 9090}}}},
-			testServiceAccountKey: "worker@demo-project.iam.gserviceaccount.com",
+		"name": serviceReference,
+		"template": map[string]any{
+			"containers":     []any{map[string]any{"image": imageReference, "ports": []any{map[string]any{"containerPort": 9090}}}},
+			"serviceAccount": "worker@demo-project.iam.gserviceaccount.com",
 		},
 	}
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", body)
@@ -429,10 +420,10 @@ func TestWorkloadMetadataBindsPerRevisionListener(t *testing.T) {
 func TestTemplateServiceAccountIsAnEmail(t *testing.T) {
 	h := newHarness(t)
 	body := map[string]any{
-		testName: serviceReference,
-		testTemplate: map[string]any{
-			testContainers:        []any{map[string]any{testImageKey: imageReference}},
-			testServiceAccountKey: "serviceAccount:worker@demo-project.iam.gserviceaccount.com",
+		"name": serviceReference,
+		"template": map[string]any{
+			"containers":     []any{map[string]any{"image": imageReference}},
+			"serviceAccount": "serviceAccount:worker@demo-project.iam.gserviceaccount.com",
 		},
 	}
 	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", body)
@@ -484,10 +475,10 @@ func TestUpdateSplitsTrafficAcrossRevisions(t *testing.T) {
 	h := newHarness(t)
 	h.create(t)
 	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
-		"template": map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
 		"traffic": []any{
-			map[string]any{"revision": testFirstRevision, keyPercent: 90},
-			map[string]any{"latestRevision": true, keyPercent: 10},
+			map[string]any{"revision": testFirstRevision, "percent": 90},
+			map[string]any{"latestRevision": true, "percent": 10},
 		},
 	})
 	if recorder.Code != 200 {
@@ -518,10 +509,10 @@ func TestUpdateRejectsBadTrafficSplit(t *testing.T) {
 	h := newHarness(t)
 	h.create(t)
 	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
-		"template": map[string]any{testContainers: []any{map[string]any{testImageKey: imageReference}}},
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
 		"traffic": []any{
-			map[string]any{keyName: testFirstRevision, keyPercent: 90},
-			map[string]any{"latestRevision": true, keyPercent: 90},
+			map[string]any{keyName: testFirstRevision, "percent": 90},
+			map[string]any{"latestRevision": true, "percent": 90},
 		},
 	})
 	if recorder.Code != 200 {

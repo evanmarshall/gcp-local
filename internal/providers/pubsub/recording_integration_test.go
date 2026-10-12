@@ -11,6 +11,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
 func TestBoundedRecorderThroughProductionLocalADC(t *testing.T) {
@@ -19,7 +20,7 @@ func TestBoundedRecorderThroughProductionLocalADC(t *testing.T) {
 		enrollments = append(enrollments, identity.Enrollment{Subject: "serviceAccount:" + actor + "@project-a.iam.gserviceaccount.com", Project: "project-a", SubjectToken: subjectSecret + "-recorder-" + actor})
 	}
 	f := running(t, enrollments...)
-	_, err := f.p.iam.SetPolicy(projectResource("project-a"), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{owner, enrollments[0].Subject}}}})
+	_, err := f.p.iam.SetPolicy(provider.ProjectResource("project-a"), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{owner, enrollments[0].Subject}}}})
 	must(t, err)
 	directory := t.TempDir()
 	profiles := map[string]any{}

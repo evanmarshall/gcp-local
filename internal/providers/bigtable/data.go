@@ -10,6 +10,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -151,7 +152,7 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 	if len(parts) < 4 {
 		return state.Scope{}, status.Error(codes.InvalidArgument, "Malformed resource name")
 	}
-	scope := scopeOf(parts[1])
+	scope := provider.ProjectScope(parts[1])
 	target, exists := p.dataTarget(scope, parts)
 	decision, err := p.engine.Authorize(call, target, nil)
 	if decision.ID != "" {
@@ -162,11 +163,11 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
 			return scope, fmt.Errorf("authorize %s: %w", call.Method, err)
 		}
-		return scope, status.Errorf(code, "Request had insufficient permissions: %s on %s.", deniedPermission(decision),
+		return scope, status.Errorf(code, "Request had insufficient permissions: %s on %s.", provider.DeniedPermission(decision),
 			strings.TrimPrefix(target.Name, "//bigtableadmin.googleapis.com/"))
 	}
 	if !exists {
-		return scope, notFound(kindInstance, parts[3])
+		return scope, provider.NotFound(kindInstance, parts[3])
 	}
 	return scope, nil
 }
@@ -176,7 +177,7 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 func (p *Provider) dataTarget(scope state.Scope, parts []string) (iam.Target, bool) {
 	project, instance := parts[1], parts[3]
 	if !uid.MatchString(instance) || p.instanceLocked(scope, instance) == nil {
-		return iam.Target{Name: projectResource(project)}, false
+		return iam.Target{Name: provider.ProjectResource(project)}, false
 	}
 	target := iam.Target{Name: instanceResource(project, instance)}
 	if len(parts) == 6 {
@@ -185,16 +186,6 @@ func (p *Provider) dataTarget(scope state.Scope, parts []string) (iam.Target, bo
 		}
 	}
 	return target, true
-}
-
-// deniedPermission names the first failed check of a decision.
-func deniedPermission(decision iam.Decision) string {
-	for _, check := range decision.Checks {
-		if !check.Allowed {
-			return check.Permission
-		}
-	}
-	return "unspecified"
 }
 
 // gap reports an unsupported request shape explicitly.

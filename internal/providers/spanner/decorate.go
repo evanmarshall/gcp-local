@@ -10,6 +10,7 @@ import (
 
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/protobuf/proto"
 )
@@ -167,12 +168,12 @@ func (d decorator) database(ctx context.Context, document map[string]any, creati
 	var created time.Time
 	_ = d.created.With(d.scope, func(times *createdDatabases) error { created = (*times)[name]; return nil })
 	if !created.IsZero() {
-		setDefault(document, "createTime", stamp(created))
+		setDefault(document, "createTime", provider.Stamp(created))
 		earliest := d.now.Add(-retentionDuration(retention))
 		if earliest.Before(created) {
 			earliest = created
 		}
-		setDefault(document, "earliestVersionTime", stamp(earliest))
+		setDefault(document, "earliestVersionTime", provider.Stamp(earliest))
 	}
 	if !creation {
 		setDefault(document, "encryptionInfo", []any{map[string]any{"encryptionType": defaultEncryptionType}})
@@ -214,6 +215,3 @@ func retentionDuration(value string) time.Duration {
 	unit := map[byte]time.Duration{'s': time.Second, 'm': time.Minute, 'h': time.Hour, 'd': 24 * time.Hour}[value[len(value)-1]]
 	return time.Duration(number) * unit
 }
-
-// stamp renders one RFC 3339 timestamp with microseconds.
-func stamp(moment time.Time) string { return moment.UTC().Format("2006-01-02T15:04:05.000000Z") }

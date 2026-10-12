@@ -18,6 +18,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -161,7 +162,7 @@ func TestPostgresThroughConnector(t *testing.T) {
 	if got := len(fleetRoots(t)); got != before+2 {
 		t.Fatalf("backend roots = %d, want %d", got, before+2)
 	}
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(testProject)}))
 	if _, err := open.query(ctx, "SELECT 1"); err == nil {
 		t.Fatal("a session survived reset")
 	}

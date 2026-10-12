@@ -15,6 +15,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -56,8 +57,8 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		return nil, errProviderShape
 	}
 	p := &Provider{manager: manager, index: index, iam: engine}
-	if err := registerPermissions(engine); err != nil {
-		return nil, err
+	if err := provider.RegisterPermissions(engine, permissions); err != nil {
+		return nil, fmt.Errorf("pubsub permissions: %w", err)
 	}
 	if err := manager.Register(serviceName, backend.Definition{Validate: state.GlobalScope, New: factory, AfterReset: func(scope state.Scope) error {
 		if err := p.resetPush(scope); err != nil {
@@ -118,7 +119,7 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 	if _, failed := p.poisoned.Load(scopeOf(call)); failed {
 		return status.Error(codes.FailedPrecondition, "Pub/Sub mutation outcome is unresolved; reset this scope")
 	}
-	project, found := p.index.Get(projectResource(call.Project))
+	project, found := p.index.Get(provider.ProjectResource(call.Project))
 	if !found || project.Service != "resourcemanager" || project.Kind != "project" {
 		return gap("configure the resource project hierarchy")
 	}
@@ -232,7 +233,7 @@ func (p *Provider) preflight(call gateway.Call, request proto.Message) error {
 			return err
 		}
 		if project != call.Project {
-			return invalid("Resource project mismatch")
+			return provider.Invalid("Resource project mismatch")
 		}
 	}
 	if err := validate(request); err != nil {
@@ -348,7 +349,7 @@ func (p *Provider) publish(call gateway.Call) error {
 	if strings.Contains(call.Resource, "/subscriptions/") {
 		kind = "subscription"
 	}
-	if err := p.index.Put(serviceName, state.Resource{Name: canonical(call.Resource), Service: serviceName, Kind: kind, Parent: projectResource(call.Project), Scope: scopeOf(call)}); err != nil {
+	if err := p.index.Put(serviceName, state.Resource{Name: canonical(call.Resource), Service: serviceName, Kind: kind, Parent: provider.ProjectResource(call.Project), Scope: scopeOf(call)}); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return status.Error(codes.FailedPrecondition, "Backend mutation could not be indexed; reset this scope")
 	}

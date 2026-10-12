@@ -12,6 +12,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -56,13 +57,13 @@ func fixture(t *testing.T) (*Provider, *gateway.Registry, *faultDriver) {
 	t.Helper()
 	index := state.NewIndex()
 	for _, project := range []string{testProject, "project-b"} {
-		must(t, index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: state.Scope{Project: project, Location: state.Global}}))
+		must(t, index.Put("resourcemanager", state.Resource{Name: provider.ProjectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: state.Scope{Project: project, Location: state.Global}}))
 	}
 	engine, err := iam.New(index)
 	must(t, err)
-	_, err = engine.SetPolicy(projectResource(testProject), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{owner}}}})
+	_, err = engine.SetPolicy(provider.ProjectResource(testProject), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{owner}}}})
 	must(t, err)
-	_, err = engine.SetPolicy(projectResource("project-b"), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{other}}}})
+	_, err = engine.SetPolicy(provider.ProjectResource("project-b"), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{other}}}})
 	must(t, err)
 	manager := backend.NewManager(time.Second, time.Second)
 	registry, b := gateway.NewRegistry(), &faultDriver{}
@@ -217,7 +218,7 @@ func TestPushActAsDeniedBeforeAnyBackendAccess(t *testing.T) {
 	must(t, err)
 	must(t, p.publish(call(publisher+"CreateTopic", testTopic, owner)))
 	email := "push-worker@project-a.iam.gserviceaccount.com"
-	must(t, p.index.Put("iam", state.Resource{Name: iam.AccountResource(testProject, email), Service: "iam", Kind: "serviceAccount", Number: "123456789012345678901", Parent: projectResource(testProject), Scope: state.Scope{Project: testProject, Location: state.Global}}))
+	must(t, p.index.Put("iam", state.Resource{Name: iam.AccountResource(testProject, email), Service: "iam", Kind: "serviceAccount", Number: "123456789012345678901", Parent: provider.ProjectResource(testProject), Scope: state.Scope{Project: testProject, Location: state.Global}}))
 	request := &pb.Subscription{Name: testSub, Topic: testTopic, PushConfig: &pb.PushConfig{PushEndpoint: "http://127.0.0.1:8888/receive", AuthenticationMethod: &pb.PushConfig_OidcToken_{OidcToken: &pb.PushConfig_OidcToken{ServiceAccountEmail: email}}}}
 	_, err = registry.Invoke(call(subscriber+"CreateSubscription", testSub, owner), request)
 	if status.Code(err) != codes.PermissionDenied || b.calls != 0 || b.starts != 0 {

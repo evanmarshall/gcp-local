@@ -9,6 +9,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -99,7 +100,7 @@ func (p *Provider) repositoriesCreate(request *gateway.RESTRequest, scope state.
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: repositoryResource(scope.Project, name), Service: serviceName,
-		Kind: kindRepository, Parent: projectResource(scope.Project), Scope: scope,
+		Kind: kindRepository, Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the repository: %w", indexErr)
 	}
@@ -155,8 +156,8 @@ func repositoryWire(project string, record *repositoryRecord, view int) map[stri
 		document["cleanupPolicyDryRun"] = true
 	}
 	if view != viewCreate {
-		document["createTime"] = stamp(record.CreatedAt)
-		document["updateTime"] = stamp(record.UpdatedAt)
+		document["createTime"] = provider.Stamp(record.CreatedAt)
+		document["updateTime"] = provider.Stamp(record.UpdatedAt)
 	}
 	if view == viewGet {
 		document["registryUri"] = registryURI(project, record)
@@ -176,11 +177,10 @@ func (p *Provider) repositoryLocked(scope state.Scope, repository string) *repos
 	return record
 }
 
-// repositoriesGet returns one repository.
 func (p *Provider) repositoriesGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.repositoryLocked(scope, request.Path["repository"])
 	if record == nil {
-		return nil, notFound(kindRepository, request.Path["repository"])
+		return nil, provider.NotFound(kindRepository, request.Path["repository"])
 	}
 	return &gateway.RESTResponse{JSON: repositoryWire(scope.Project, record, viewGet)}, nil
 }
@@ -204,7 +204,7 @@ func (p *Provider) repositoriesList(request *gateway.RESTRequest, scope state.Sc
 func (p *Provider) repositoriesUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.repositoryLocked(scope, request.Path["repository"])
 	if record == nil {
-		return nil, notFound(kindRepository, request.Path["repository"])
+		return nil, provider.NotFound(kindRepository, request.Path["repository"])
 	}
 	var body struct {
 		Description string            `json:"description"`
@@ -236,7 +236,7 @@ func (p *Provider) repositoriesUpdate(request *gateway.RESTRequest, scope state.
 func (p *Provider) repositoriesDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	repository := request.Path["repository"]
 	if p.repositoryLocked(scope, repository) == nil {
-		return nil, notFound(kindRepository, repository)
+		return nil, provider.NotFound(kindRepository, repository)
 	}
 	var indexErr error
 	_ = p.scopes.With(scope, func(s *scopeState) error {

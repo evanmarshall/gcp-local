@@ -7,16 +7,14 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-func invalid(message string) error { return status.Error(codes.InvalidArgument, message) }
 func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, name string) (*gateway.RESTResponse, error) {
 	var patch map[string]json.RawMessage
 	if json.Unmarshal(r.JSON, &patch) != nil || patch == nil {
-		return nil, invalid("Expected a bucket patch")
+		return nil, provider.Invalid("Expected a bucket patch")
 	}
 	for key := range patch {
 		if key != "labels" {
@@ -47,7 +45,7 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	if raw, ok := patch["labels"]; ok {
 		var changes map[string]*string
 		if json.Unmarshal(raw, &changes) != nil {
-			return nil, invalid("Labels must be strings or null")
+			return nil, provider.Invalid("Labels must be strings or null")
 		}
 		labels, _ := metadata["labels"].(map[string]any)
 		if labels == nil || changes == nil {
@@ -70,7 +68,7 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	metadata["updated"] = time.Now().UTC().Format(time.RFC3339Nano)
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
-		return nil, invalid("Unable to encode the bucket update")
+		return nil, provider.Invalid("Unable to encode the bucket update")
 	}
 	if err := p.catalog.UpdateMetadata(scope, name, string(encoded)); err != nil {
 		return nil, err

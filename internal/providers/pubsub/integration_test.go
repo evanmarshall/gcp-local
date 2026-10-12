@@ -21,6 +21,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc"
@@ -52,12 +53,12 @@ func running(t *testing.T, extra ...identity.Enrollment) *integration {
 	registry, index := gateway.NewRegistry(), state.NewIndex()
 	for _, project := range []string{"project-a", "project-b"} {
 		number := map[string]string{"project-a": "123456", "project-b": "654321"}[project]
-		must(t, index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: number, Scope: state.Scope{Project: project, Location: state.Global}}))
+		must(t, index.Put("resourcemanager", state.Resource{Name: provider.ProjectResource(project), Service: "resourcemanager", Kind: "project", Number: number, Scope: state.Scope{Project: project, Location: state.Global}}))
 	}
 	engine, err := iam.New(index)
 	must(t, err)
 	for project, actor := range map[string]string{"project-a": owner, "project-b": other} {
-		_, err = engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{actor}}}})
+		_, err = engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.admin", Members: []string{actor}}}})
 		must(t, err)
 	}
 	identities, err := identity.New(identity.Config{Principals: append([]identity.Enrollment{

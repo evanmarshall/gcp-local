@@ -18,17 +18,12 @@ import (
 
 // Names and keys repeated across the lifecycle tests.
 const (
-	testProject    = "demo-bq"
-	testDataset    = "demo_dataset"
-	testTable      = "demo_table"
-	testToken      = "actor"
-	testDatasets   = "/bigquery/v2/projects/" + testProject + "/datasets"
-	testActor      = "serviceAccount:actor@" + testProject + ".iam.gserviceaccount.com"
-	testSchemaKey  = "schema"
-	testFieldsKey  = "fields"
-	testNameMode   = "name"
-	testStringMode = "type"
-	keyDatasetID   = "datasetId"
+	testProject  = "demo-bq"
+	testDataset  = "demo_dataset"
+	testTable    = "demo_table"
+	testToken    = "actor"
+	testDatasets = "/bigquery/v2/projects/" + testProject + "/datasets"
+	testActor    = "serviceAccount:actor@" + testProject + ".iam.gserviceaccount.com"
 )
 
 // harness drives the provider through the gateway.
@@ -93,7 +88,7 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 // dataset creates the fixture dataset.
 func (h *harness) dataset() {
 	h.t.Helper()
-	recorder := h.invoke(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{keyDatasetID: testDataset}})
+	recorder := h.invoke(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": testDataset}})
 	if recorder.Code != 200 {
 		h.t.Fatalf("dataset create status = %d body %s", recorder.Code, recorder.Body.String())
 	}
@@ -104,8 +99,8 @@ func (h *harness) table() {
 	h.t.Helper()
 	h.dataset()
 	recorder := h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", map[string]any{
-		"tableReference": map[string]any{keyDatasetID: testDataset, "tableId": testTable},
-		testSchemaKey:    map[string]any{testFieldsKey: []any{map[string]any{testNameMode: "title", testStringMode: "STRING"}}},
+		"tableReference": map[string]any{"datasetId": testDataset, "tableId": testTable},
+		"schema":         map[string]any{"fields": []any{map[string]any{"name": "title", "type": "STRING"}}},
 	})
 	if recorder.Code != 200 {
 		h.t.Fatalf("table create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -124,7 +119,7 @@ func TestDatasetAndTableLifecycle(t *testing.T) {
 		t.Fatalf("table get status = %d", recorder.Code)
 	}
 	// Duplicate dataset is refused.
-	recorder = h.invoke(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{keyDatasetID: testDataset}})
+	recorder = h.invoke(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": testDataset}})
 	if recorder.Code != 409 {
 		t.Fatalf("duplicate dataset status = %d", recorder.Code)
 	}
@@ -178,7 +173,7 @@ func TestTableRequiresSchema(t *testing.T) {
 	h := newHarness(t)
 	h.dataset()
 	recorder := h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", map[string]any{
-		"tableReference": map[string]any{keyDatasetID: testDataset, "tableId": "no-schema"},
+		"tableReference": map[string]any{"datasetId": testDataset, "tableId": "no-schema"},
 	})
 	if recorder.Code != 400 {
 		t.Fatalf("missing schema status = %d", recorder.Code)

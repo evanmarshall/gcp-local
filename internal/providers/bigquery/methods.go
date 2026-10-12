@@ -9,6 +9,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,7 +28,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.datasetsUpdate(request, scope)
 	case methodDatasetsGetIam, methodDatasetsSetIam:
 		// Recorded: dataset IAM methods need allowlisting; access is per table.
-		return wireError(400, "INVALID_ARGUMENT", "This feature requires allowlisting."), nil
+		return provider.WireError(400, "INVALID_ARGUMENT", "This feature requires allowlisting."), nil
 	case methodTablesGetIam, methodTablesSetIam:
 		return p.tableIam(call, request, target)
 	case methodDatasetsDelete:
@@ -109,14 +110,13 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 	}
 	if indexErr := p.index.Put(serviceName, state.Resource{
 		Name: datasetResource(scope.Project, dataset), Service: serviceName,
-		Kind: kindDataset, Parent: projectResource(scope.Project), Scope: scope,
+		Kind: kindDataset, Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); indexErr != nil {
 		return nil, fmt.Errorf("index the dataset: %w", indexErr)
 	}
 	return &gateway.RESTResponse{JSON: datasetWire(scope.Project, dataset, created)}, nil
 }
 
-// datasetWire renders one dataset document.
 func datasetWire(project, dataset string, record *datasetRecord) map[string]any {
 	labels := map[string]string{}
 	if record != nil && record.Labels != nil {
@@ -155,12 +155,11 @@ func datasetWire(project, dataset string, record *datasetRecord) map[string]any 
 	return document
 }
 
-// datasetsGet returns one dataset.
 func (p *Provider) datasetsGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	dataset := request.Path["datasetId"]
 	record := p.datasetLocked(scope, dataset)
 	if record == nil {
-		return nil, notFound(kindDataset, dataset)
+		return nil, provider.NotFound(kindDataset, dataset)
 	}
 	return &gateway.RESTResponse{JSON: datasetWire(scope.Project, dataset, record)}, nil
 }
@@ -182,7 +181,7 @@ func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scop
 	dataset := request.Path["datasetId"]
 	record := p.datasetLocked(scope, dataset)
 	if record == nil {
-		return nil, notFound(kindDataset, dataset)
+		return nil, provider.NotFound(kindDataset, dataset)
 	}
 	var body struct {
 		Labels       map[string]string `json:"labels"`
@@ -200,7 +199,7 @@ func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scop
 func (p *Provider) datasetsDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	dataset := request.Path["datasetId"]
 	if p.datasetLocked(scope, dataset) == nil {
-		return nil, notFound(kindDataset, dataset)
+		return nil, provider.NotFound(kindDataset, dataset)
 	}
 	contents := request.Query.Get("deleteContents") == "true"
 	var removed []string
@@ -282,7 +281,7 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
 	}
 	if p.datasetLocked(scope, dataset) == nil {
-		return nil, notFound(kindDataset, dataset)
+		return nil, provider.NotFound(kindDataset, dataset)
 	}
 	if body.Schema == nil || body.Schema["fields"] == nil {
 		return nil, status.Error(codes.InvalidArgument, "A table requires a schema with fields")
@@ -352,12 +351,11 @@ func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *t
 	return document
 }
 
-// tablesGet returns one table.
 func (p *Provider) tablesGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	dataset, table := request.Path["datasetId"], request.Path["tableId"]
 	record := p.tableLocked(scope, dataset, table)
 	if record == nil {
-		return nil, notFound(kindTable, table)
+		return nil, provider.NotFound(kindTable, table)
 	}
 	return &gateway.RESTResponse{JSON: p.tableWire(scope, dataset, table, record)}, nil
 }
@@ -382,7 +380,7 @@ func (p *Provider) tablesUpdate(request *gateway.RESTRequest, scope state.Scope)
 	dataset, table := request.Path["datasetId"], request.Path["tableId"]
 	record := p.tableLocked(scope, dataset, table)
 	if record == nil {
-		return nil, notFound(kindTable, table)
+		return nil, provider.NotFound(kindTable, table)
 	}
 	var body struct {
 		Labels       map[string]string `json:"labels"`
@@ -400,7 +398,7 @@ func (p *Provider) tablesUpdate(request *gateway.RESTRequest, scope state.Scope)
 func (p *Provider) tablesDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	dataset, table := request.Path["datasetId"], request.Path["tableId"]
 	if p.tableLocked(scope, dataset, table) == nil {
-		return nil, notFound(kindTable, table)
+		return nil, provider.NotFound(kindTable, table)
 	}
 	var indexErr error
 	_ = p.scopes.With(scope, func(s *scopeState) error {
@@ -419,7 +417,7 @@ func (p *Provider) rowsInsert(request *gateway.RESTRequest, scope state.Scope) (
 	dataset, table := request.Path["datasetId"], request.Path["tableId"]
 	record := p.tableLocked(scope, dataset, table)
 	if record == nil {
-		return nil, notFound(kindTable, table)
+		return nil, provider.NotFound(kindTable, table)
 	}
 	var body struct {
 		Rows []struct {
@@ -458,7 +456,7 @@ func (p *Provider) rowsList(request *gateway.RESTRequest, scope state.Scope) (*g
 	dataset, table := request.Path["datasetId"], request.Path["tableId"]
 	record := p.tableLocked(scope, dataset, table)
 	if record == nil {
-		return nil, notFound(kindTable, table)
+		return nil, provider.NotFound(kindTable, table)
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{
 		keyKind:     "bigquery#tableDataList",
@@ -515,7 +513,7 @@ func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*
 	}
 	table := p.tableLocked(scope, parsed.dataset, parsed.table)
 	if table == nil {
-		return nil, notFound("table", parsed.table)
+		return nil, provider.NotFound("table", parsed.table)
 	}
 	fields := nullableFields(schemaFields(table.Schema))
 	if len(parsed.columns) > 0 {
@@ -566,7 +564,7 @@ func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*
 func (p *Provider) jobsResults(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	job := p.jobLocked(scope, request.Path["jobId"])
 	if job == nil {
-		return nil, notFound("job", request.Path["jobId"])
+		return nil, provider.NotFound("job", request.Path["jobId"])
 	}
 	return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, false)}, nil
 }

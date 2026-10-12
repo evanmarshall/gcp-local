@@ -13,6 +13,7 @@ import (
 
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -127,10 +128,10 @@ func TestDataPlaneDeniedBeforeBackend(t *testing.T) {
 	h := newHarness(t)
 	h.createInstance()
 	h.expect(h.invoke(adminToken, http.MethodPost, testPath+"/databases", createDatabase(testDatabase)), http.StatusOK)
-	policy, err := h.engine.GetPolicy(projectResource(testProject))
+	policy, err := h.engine.GetPolicy(provider.ProjectResource(testProject))
 	must(t, err)
 	policy.Bindings = append(policy.Bindings, iam.Binding{Role: "roles/spanner.viewer", Members: []string{principal(viewerToken)}})
-	_, err = h.engine.SetPolicy(projectResource(testProject), policy)
+	_, err = h.engine.SetPolicy(provider.ProjectResource(testProject), policy)
 	must(t, err)
 	endpoint := h.serveGRPC()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

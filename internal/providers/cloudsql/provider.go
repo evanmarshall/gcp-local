@@ -12,6 +12,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -145,8 +146,8 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, status.Error(codes.Internal, "Invalid Cloud SQL request")
 	}
 	project := request.Path[pathProject]
-	if scopeOf(project).Validate() != nil {
-		return nil, invalid("Invalid project.")
+	if provider.ProjectScope(project).Validate() != nil {
+		return nil, provider.Invalid("Invalid project.")
 	}
 	target := p.target(project, p.addressed(call.Method, request, project))
 	decision, authorizeErr := p.engine.Authorize(call, target, nil)
@@ -187,7 +188,7 @@ func (p *Provider) addressed(method string, request *gateway.RESTRequest, projec
 		return request.Query.Get("instance")
 	case methodOperationsGet:
 		var instance string
-		_ = p.catalog.With(scopeOf(project), func(c *catalog) error {
+		_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 			for _, operation := range c.operations {
 				if operation.Name == request.Path[pathOperation] {
 					instance = operation.Instance
@@ -208,17 +209,17 @@ func (p *Provider) addressed(method string, request *gateway.RESTRequest, projec
 func (p *Provider) target(project, instance string) iam.Target {
 	if instance != "" {
 		name := instanceResource(project, instance)
-		if resource, ok := p.index.Get(name); ok && resource.Service == serviceName && resource.Scope == scopeOf(project) {
+		if resource, ok := p.index.Get(name); ok && resource.Service == serviceName && resource.Scope == provider.ProjectScope(project) {
 			return iam.Target{Name: name, Attributes: iam.ResourceAttributes{
 				Name: "projects/" + project + "/instances/" + instance, Type: "sqladmin.googleapis.com/Instance", Service: "sqladmin.googleapis.com"}}
 		}
 	}
-	return iam.Target{Name: projectResource(project)}
+	return iam.Target{Name: provider.ProjectResource(project)}
 }
 
 // use runs one backend operation for a project after authorization.
 func (p *Provider) use(ctx context.Context, project string, operation func(context.Context, driver) error) error {
-	err := p.manager.Use(ctx, backend.Key{Service: serviceName, Scope: scopeOf(project)}, func(ctx context.Context, active backend.Backend) error {
+	err := p.manager.Use(ctx, backend.Key{Service: serviceName, Scope: provider.ProjectScope(project)}, func(ctx context.Context, active backend.Backend) error {
 		fleet, err := driverOf(active)
 		if err != nil {
 			return err
@@ -235,7 +236,7 @@ func (p *Provider) use(ctx context.Context, project string, operation func(conte
 func (p *Provider) lookup(project, instance string) (instanceRecord, bool) {
 	var record instanceRecord
 	var found bool
-	_ = p.catalog.With(scopeOf(project), func(c *catalog) error {
+	_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 		var stored instanceRecord
 		stored, found = c.instances[instance]
 		record = stored.clone()
@@ -247,7 +248,7 @@ func (p *Provider) lookup(project, instance string) (instanceRecord, bool) {
 // complete records a finished operation and returns its wire form.
 func (p *Provider) complete(call gateway.Call, project, kind, instance string, started time.Time) (*gateway.RESTResponse, error) {
 	operation := newOperation(kind, instance, subject(call.Principal), started, p.clock())
-	if err := p.catalog.With(scopeOf(project), func(c *catalog) error { c.record(operation); return nil }); err != nil {
+	if err := p.catalog.With(provider.ProjectScope(project), func(c *catalog) error { c.record(operation); return nil }); err != nil {
 		return nil, fmt.Errorf("record the operation: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: operation.wire(project)}, nil

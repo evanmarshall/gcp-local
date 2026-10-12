@@ -21,6 +21,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -49,9 +50,9 @@ func TestOfficialEmulatorDataPlane(t *testing.T) {
 	h := &harness{t: t, index: state.NewIndex()}
 	h.engine, err = iam.New(h.index)
 	must(t, err)
-	must(t, h.index.Put(ownerProjects, state.Resource{Name: projectResource(testProject), Service: ownerProjects,
-		Kind: kindProject, Number: "123456", Scope: scopeOf(testProject)}))
-	_, err = h.engine.SetPolicy(projectResource(testProject), iam.Policy{Bindings: []iam.Binding{
+	must(t, h.index.Put(ownerProjects, state.Resource{Name: provider.ProjectResource(testProject), Service: ownerProjects,
+		Kind: kindProject, Number: "123456", Scope: provider.ProjectScope(testProject)}))
+	_, err = h.engine.SetPolicy(provider.ProjectResource(testProject), iam.Policy{Bindings: []iam.Binding{
 		{Role: "roles/spanner.databaseAdmin", Members: []string{dataAdmin}},
 		{Role: "roles/spanner.admin", Members: []string{dataAdmin}},
 		{Role: "roles/spanner.viewer", Members: []string{dataViewer}}}})
@@ -94,8 +95,8 @@ func TestOfficialEmulatorDataPlane(t *testing.T) {
 
 	h.expect(h.invoke(admin, http.MethodPost, testInstances, instanceBody(testProject)), http.StatusOK)
 	h.expect(h.invoke(admin, http.MethodPost, testPath+"/databases", map[string]any{
-		keyCreateStatement: "CREATE DATABASE `" + testDatabase + "`",
-		"extraStatements":  []string{"CREATE TABLE Items (Id STRING(36) NOT NULL, Name STRING(64)) PRIMARY KEY (Id)"},
+		"createStatement": "CREATE DATABASE `" + testDatabase + "`",
+		"extraStatements": []string{"CREATE TABLE Items (Id STRING(36) NOT NULL, Name STRING(64)) PRIMARY KEY (Id)"},
 	}), http.StatusOK)
 
 	client := spannerClient(ctx, t, endpoint, admin, database)

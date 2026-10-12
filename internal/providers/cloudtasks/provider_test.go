@@ -20,22 +20,10 @@ import (
 
 // Names and keys repeated across the queue and task tests.
 const (
-	testProject    = "demo-tasks"
-	testLocation   = "us-central1"
-	testQueue      = "workflow"
-	testKeyURL     = "url"
-	keyName        = "name"
-	testKeyBody    = "body"
-	testMethodPOST = "POST"
-	testKeyRequest = "httpRequest"
-	testKeyMethod  = "httpMethod"
-	testKeyTask    = "task"
-	testUnreached  = "http://127.0.0.1:1/"
-	keySchedule    = "scheduleTime"
-	keyBindings    = "bindings"
-	keyMaxAttempts = "maxAttempts"
-	keyMaxBackoff  = "maxBackoff"
-	keyMinBackoff  = "minBackoff"
+	testProject   = "demo-tasks"
+	testLocation  = "us-central1"
+	testQueue     = "workflow"
+	testUnreached = "http://127.0.0.1:1/"
 )
 
 // harness drives the provider through the gateway.
@@ -114,7 +102,7 @@ var basePrefix = "/v2beta3/projects/" + testProject + "/locations/" + testLocati
 func TestQueueLifecycleAndPurge(t *testing.T) {
 	h := newHarness(t)
 	recorder := h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{
-		keyName: "projects/" + testProject + "/locations/" + testLocation + "/queues/" + testQueue,
+		"name": "projects/" + testProject + "/locations/" + testLocation + "/queues/" + testQueue,
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("queue create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -148,9 +136,9 @@ func TestTaskLifecycleAndDispatch(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer target.Close()
-	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{testKeyTask: map[string]any{
-		keySchedule:    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
-		testKeyRequest: map[string]any{testKeyURL: target.URL, testKeyMethod: testMethodPOST},
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{"task": map[string]any{
+		"scheduleTime": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		"httpRequest":  map[string]any{"url": target.URL, "httpMethod": "POST"},
 	}})
 	if recorder.Code != 200 {
 		t.Fatalf("task create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -182,8 +170,8 @@ func TestTaskLifecycleAndDispatch(t *testing.T) {
 
 func TestTaskOnMissingQueueIsRefused(t *testing.T) {
 	h := newHarness(t)
-	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/missing/tasks", map[string]any{testKeyTask: map[string]any{
-		testKeyRequest: map[string]any{testKeyURL: testUnreached, testKeyMethod: testMethodPOST},
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/missing/tasks", map[string]any{"task": map[string]any{
+		"httpRequest": map[string]any{"url": testUnreached, "httpMethod": "POST"},
 	}})
 	if recorder.Code != 404 {
 		t.Fatalf("task on missing queue status = %d body %s", recorder.Code, recorder.Body.String())
@@ -198,7 +186,7 @@ func TestQueueIAMPolicyGrantsAndReads(t *testing.T) {
 		t.Fatalf("getIamPolicy status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 	recorder = h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+":setIamPolicy", map[string]any{
-		"policy": map[string]any{keyBindings: []any{map[string]any{
+		"policy": map[string]any{"bindings": []any{map[string]any{
 			"role":    "roles/cloudtasks.enqueuer",
 			"members": []any{"serviceAccount:enqueuer@" + testProject + ".iam.gserviceaccount.com"},
 		}}},
@@ -220,15 +208,15 @@ func TestQueueIAMPolicyGrantsAndReads(t *testing.T) {
 
 func TestScheduledTaskWaitsThenDispatches(t *testing.T) {
 	h := newHarness(t)
-	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{"name": testQueue})
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer target.Close()
 	schedule := time.Now().Add(2 * time.Second).UTC().Format(time.RFC3339)
-	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{testKeyTask: map[string]any{
-		keySchedule:    schedule,
-		testKeyRequest: map[string]any{testKeyURL: target.URL, testKeyMethod: testMethodPOST},
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{"task": map[string]any{
+		"scheduleTime": schedule,
+		"httpRequest":  map[string]any{"url": target.URL, "httpMethod": "POST"},
 	}})
 	if recorder.Code != 200 {
 		t.Fatalf("scheduled task create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -256,10 +244,10 @@ func TestScheduledTaskWaitsThenDispatches(t *testing.T) {
 
 func TestInvalidScheduleTimeIsRefused(t *testing.T) {
 	h := newHarness(t)
-	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
-	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{testKeyTask: map[string]any{
-		keySchedule:    "not-a-time",
-		testKeyRequest: map[string]any{testKeyURL: testUnreached, testKeyMethod: testMethodPOST},
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{"name": testQueue})
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{"task": map[string]any{
+		"scheduleTime": "not-a-time",
+		"httpRequest":  map[string]any{"url": testUnreached, "httpMethod": "POST"},
 	}})
 	if recorder.Code != 400 {
 		t.Fatalf("invalid schedule status = %d body %s", recorder.Code, recorder.Body.String())
@@ -268,7 +256,7 @@ func TestInvalidScheduleTimeIsRefused(t *testing.T) {
 
 func TestQueueUpdateReplacesRateLimits(t *testing.T) {
 	h := newHarness(t)
-	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{"name": testQueue})
 	recorder := h.invoke(http.MethodPatch, basePrefix+"/queues/"+testQueue, map[string]any{
 		"rateLimits": map[string]any{"maxDispatchesPerSecond": 5},
 	})
@@ -292,7 +280,7 @@ func TestQueueUpdateReplacesRateLimits(t *testing.T) {
 
 func TestEveryRouteIsHandled(t *testing.T) {
 	h := newHarness(t)
-	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue})
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{"name": testQueue})
 	gap := "this method is not implemented"
 	probe := func(verb, path string) {
 		recorder := h.invoke(verb, path, nil)
@@ -346,8 +334,8 @@ func expectError(t *testing.T, recorder *httptest.ResponseRecorder, code int, st
 func (h *harness) createRetryQueue() map[string]any {
 	h.t.Helper()
 	recorder := h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{
-		keyName:       "projects/" + testProject + "/locations/" + testLocation + "/queues/" + testQueue,
-		"retryConfig": map[string]any{keyMaxAttempts: 2, keyMinBackoff: "1s", keyMaxBackoff: "1s"},
+		"name":        "projects/" + testProject + "/locations/" + testLocation + "/queues/" + testQueue,
+		"retryConfig": map[string]any{"maxAttempts": 2, "minBackoff": "1s", "maxBackoff": "1s"},
 	})
 	if recorder.Code != 200 {
 		h.t.Fatalf("queue create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -357,24 +345,24 @@ func (h *harness) createRetryQueue() map[string]any {
 
 // taskBody builds one task creation body for an HTTP target.
 func taskBody(target string, oidc string) map[string]any {
-	request := map[string]any{testKeyURL: target, testKeyMethod: testMethodPOST, testKeyBody: "Z2NwLWxvY2Fs"}
+	request := map[string]any{"url": target, "httpMethod": "POST", "body": "Z2NwLWxvY2Fs"}
 	if oidc != "" {
 		request["oidcToken"] = map[string]any{"serviceAccountEmail": oidc}
 	}
-	return map[string]any{testKeyTask: map[string]any{testKeyRequest: request}}
+	return map[string]any{"task": map[string]any{"httpRequest": request}}
 }
 
 func TestQueueDocumentMatchesRecordedShape(t *testing.T) {
 	h := newHarness(t)
 	queue := h.createRetryQueue()
-	fields := []string{keyName, "rateLimits", "retryConfig", "state", "taskTtl", "tombstoneTtl", "type"}
+	fields := []string{"name", "rateLimits", "retryConfig", "state", "taskTtl", "tombstoneTtl", "type"}
 	if !reflect.DeepEqual(fieldNames(queue), fields) {
 		t.Fatalf("queue fields = %v", fieldNames(queue))
 	}
-	if queue[keyName] != "projects/"+testProject+"/locations/"+testLocation+"/queues/"+testQueue || queue["state"] != "RUNNING" {
+	if queue["name"] != "projects/"+testProject+"/locations/"+testLocation+"/queues/"+testQueue || queue["state"] != "RUNNING" {
 		t.Fatalf("queue = %v", queue)
 	}
-	retry := map[string]any{keyMaxAttempts: float64(2), keyMaxBackoff: "1s", "maxDoublings": float64(16), keyMinBackoff: "1s"}
+	retry := map[string]any{"maxAttempts": float64(2), "maxBackoff": "1s", "maxDoublings": float64(16), "minBackoff": "1s"}
 	if !reflect.DeepEqual(queue["retryConfig"], retry) {
 		t.Fatalf("retryConfig = %v", queue["retryConfig"])
 	}
@@ -393,8 +381,8 @@ func TestQueueDocumentMatchesRecordedShape(t *testing.T) {
 
 func TestQueueRetryDefaults(t *testing.T) {
 	h := newHarness(t)
-	queue := decode(t, h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{keyName: testQueue}))
-	retry := map[string]any{keyMaxAttempts: float64(100), keyMaxBackoff: "3600s", "maxDoublings": float64(16), keyMinBackoff: "0.100s"}
+	queue := decode(t, h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{"name": testQueue}))
+	retry := map[string]any{"maxAttempts": float64(100), "maxBackoff": "3600s", "maxDoublings": float64(16), "minBackoff": "0.100s"}
 	if !reflect.DeepEqual(queue["retryConfig"], retry) {
 		t.Fatalf("default retryConfig = %v", queue["retryConfig"])
 	}
@@ -414,10 +402,10 @@ func TestQueueEnqueuerAuthorizesTaskCreate(t *testing.T) {
 		t.Fatalf("empty policy = %v", policy)
 	}
 	expectError(t, h.invokeAs("enqueuer", http.MethodPost, queuePath+"/tasks", taskBody("https://10.255.255.1/gcp-local", "")), 403, "PERMISSION_DENIED")
-	granted := decode(t, h.invoke(http.MethodPost, queuePath+":setIamPolicy", map[string]any{"policy": map[string]any{keyBindings: []any{
+	granted := decode(t, h.invoke(http.MethodPost, queuePath+":setIamPolicy", map[string]any{"policy": map[string]any{"bindings": []any{
 		map[string]any{"role": "roles/cloudtasks.enqueuer", "members": []any{"serviceAccount:" + email("enqueuer")}},
 	}}}))
-	if !reflect.DeepEqual(fieldNames(granted), []string{keyBindings, "etag", "version"}) {
+	if !reflect.DeepEqual(fieldNames(granted), []string{"bindings", "etag", "version"}) {
 		t.Fatalf("granted policy = %v", granted)
 	}
 	_ = h.invoke(http.MethodPost, queuePath+":pause", map[string]any{}) // Hold the task so its view stays stable.
@@ -426,12 +414,12 @@ func TestQueueEnqueuerAuthorizesTaskCreate(t *testing.T) {
 		t.Fatalf("enqueuer create = %d %s", recorder.Code, recorder.Body.String())
 	}
 	task := decode(t, recorder)
-	if !reflect.DeepEqual(fieldNames(task), []string{"createTime", "dispatchDeadline", testKeyRequest, keyName, keySchedule, "view"}) {
+	if !reflect.DeepEqual(fieldNames(task), []string{"createTime", "dispatchDeadline", "httpRequest", "name", "scheduleTime", "view"}) {
 		t.Fatalf("task fields = %v", fieldNames(task))
 	}
-	echo := map[string]any{"headers": map[string]any{"User-Agent": "Google-Cloud-Tasks"}, testKeyMethod: testMethodPOST, testKeyURL: "https://10.255.255.1/gcp-local"}
-	name, _ := task[keyName].(string)
-	if task["view"] != "BASIC" || !reflect.DeepEqual(task[testKeyRequest], echo) || !strings.HasPrefix(name, "projects/"+testProject+"/locations/"+testLocation+"/queues/"+testQueue+"/tasks/") {
+	echo := map[string]any{"headers": map[string]any{"User-Agent": "Google-Cloud-Tasks"}, "httpMethod": "POST", "url": "https://10.255.255.1/gcp-local"}
+	name, _ := task["name"].(string)
+	if task["view"] != "BASIC" || !reflect.DeepEqual(task["httpRequest"], echo) || !strings.HasPrefix(name, "projects/"+testProject+"/locations/"+testLocation+"/queues/"+testQueue+"/tasks/") {
 		t.Fatalf("task = %v", task)
 	}
 	expectError(t, h.invokeAs("enqueuer", http.MethodGet, queuePath+"/tasks", nil), 403, "PERMISSION_DENIED")
@@ -480,13 +468,13 @@ func TestRetryExhaustionRemovesTask(t *testing.T) {
 	h.provider.retention = 500 * time.Millisecond
 	h.createRetryQueue()
 	created := decode(t, h.invoke(http.MethodPost, queuePath+"/tasks", taskBody(testUnreached, "")))
-	name, _ := created[keyName].(string)
+	name, _ := created["name"].(string)
 	path := queuePath + "/tasks/" + name[strings.LastIndex(name, "/")+1:]
 	first := decode(t, h.pollTask(path, func(recorder *httptest.ResponseRecorder) bool {
 		last, _ := decode(t, recorder)["lastAttempt"].(map[string]any)
 		return last["responseStatus"] != nil
 	}))
-	fields := []string{"createTime", "dispatchCount", "dispatchDeadline", "firstAttempt", testKeyRequest, "lastAttempt", keyName, keySchedule, "view"}
+	fields := []string{"createTime", "dispatchCount", "dispatchDeadline", "firstAttempt", "httpRequest", "lastAttempt", "name", "scheduleTime", "view"}
 	last, _ := first["lastAttempt"].(map[string]any)
 	response, _ := last["responseStatus"].(map[string]any)
 	if !reflect.DeepEqual(fieldNames(first), fields) || !reflect.DeepEqual(fieldNames(last), []string{"dispatchTime", "responseStatus", "responseTime", "scheduleTime"}) || response["code"] != float64(2) {
@@ -509,7 +497,7 @@ func TestSuccessfulDispatchRemovesTask(t *testing.T) {
 	}))
 	defer target.Close()
 	created := decode(t, h.invoke(http.MethodPost, queuePath+"/tasks", taskBody(target.URL, "")))
-	name, _ := created[keyName].(string)
+	name, _ := created["name"].(string)
 	h.pollTask(queuePath+"/tasks/"+name[strings.LastIndex(name, "/")+1:], func(recorder *httptest.ResponseRecorder) bool { return recorder.Code == 404 })
 	if agent := <-agents; agent != "Google-Cloud-Tasks" {
 		t.Fatalf("dispatch User-Agent = %q", agent)

@@ -30,7 +30,7 @@ func TestRealRedisLifecycle(t *testing.T) {
 	if status := h.manager.Status(); len(status) != 0 {
 		t.Fatalf("a denied request started a backend: %+v", status)
 	}
-	secured := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{keyAuthEnabled: true})), http.StatusOK)
+	secured := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{"authEnabled": true})), http.StatusOK)
 	address := endpoint(t, secured)
 	auth, _ := h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"/"+testInstance+"/authString", nil), http.StatusOK)["authString"].(string)
 	exerciseAuth(t, address, auth)
@@ -51,7 +51,7 @@ func TestRealRedisLifecycle(t *testing.T) {
 	h.expect(h.invoke(adminToken, http.MethodDelete, testInstances+"/"+testInstance, nil), http.StatusOK)
 	expectClosed(t, address)
 	peer := h.expect(h.create(peerToken, peerProject, testRegion, testInstance, basic(nil)), http.StatusOK)
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject, testRegion)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: state.Scope{Project: testProject, Location: testRegion}}))
 	expectClosed(t, openAddress)
 	h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"/open", nil), http.StatusNotFound)
 	expectReply(t, client(t, endpoint(t, peer)), "PONG", "PING")
@@ -63,7 +63,7 @@ func TestRealRedisPublishedPort(t *testing.T) {
 	pool, err := dataplane.Parse("16300-16301", "127.0.0.1")
 	must(t, err)
 	h := realHarness(t, pool)
-	secured := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{keyAuthEnabled: true})), http.StatusOK)
+	secured := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{"authEnabled": true})), http.StatusOK)
 	address := endpoint(t, secured)
 	if address != "127.0.0.1:16300" {
 		t.Fatalf("published endpoint = %s; want the first port of the range", address)
@@ -83,7 +83,7 @@ func TestRealRedisPublishedPort(t *testing.T) {
 		t.Fatal("a forwarded session survived instance deletion")
 	}
 	expectClosed(t, address)
-	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject, testRegion)}))
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: state.Scope{Project: testProject, Location: testRegion}}))
 	expectClosed(t, open)
 }
 

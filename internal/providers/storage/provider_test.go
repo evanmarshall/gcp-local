@@ -15,6 +15,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -47,10 +48,10 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	for _, project := range []string{testProject, peerProject} {
-		if err := index.Put("resourcemanager", state.Resource{Name: projectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: state.Scope{Project: project, Location: state.Global}}); err != nil {
+		if err := index.Put("resourcemanager", state.Resource{Name: provider.ProjectResource(project), Service: "resourcemanager", Kind: "project", Number: "123456", Scope: state.Scope{Project: project, Location: state.Global}}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := engine.SetPolicy(projectResource(project), iam.Policy{Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{"serviceAccount:admin@" + project + ".test"}}}}); err != nil {
+		if _, err := engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{"serviceAccount:admin@" + project + ".test"}}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -150,11 +151,11 @@ func TestProviderFailsClosedForUnsupportedFeatures(t *testing.T) {
 	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=resumable&name=a", []byte(`{}`), 501)
 	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=a&predefinedAcl=publicRead", []byte("x"), 501)
 	f.request("admin@project-a.test", "PUT", "/storage/v1/b/owned-bucket/iam", []byte(`{"bindings":[{"role":"roles/storage.objectViewer","members":["allUsers"]}]}`), 412)
-	if err := f.p.iam.MarkUnsupported(projectResource(testProject), []string{"deny"}); err != nil {
+	if err := f.p.iam.MarkUnsupported(provider.ProjectResource(testProject), []string{"deny"}); err != nil {
 		t.Fatal(err)
 	}
 	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=a", []byte("x"), 501)
-	if err := f.p.iam.MarkUnsupported(projectResource(testProject), nil); err != nil {
+	if err := f.p.iam.MarkUnsupported(provider.ProjectResource(testProject), nil); err != nil {
 		t.Fatal(err)
 	}
 	body := f.request("admin@project-a.test", "GET", "/storage/v1/b/owned-bucket/o", nil, 200).Body.String()
