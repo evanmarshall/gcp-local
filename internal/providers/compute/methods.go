@@ -192,14 +192,25 @@ func (s *scopeState) networkUser(network string) string {
 	return ""
 }
 
-// firstUser names the first record, in name order, that uses a resource.
+// firstUser names the first record, in key order, that uses a resource. A
+// regional record's key is region/name, so it reads regions/R/kind/name.
 func firstUser[T any](kind string, records map[string]T, uses func(T) bool) string {
-	for _, name := range sortedKeys(records) {
-		if uses(records[name]) {
-			return kind + "/" + name
+	for _, key := range sortedKeys(records) {
+		if !uses(records[key]) {
+			continue
 		}
+		if region, name, regional := strings.Cut(key, "/"); regional {
+			return "regions/" + region + "/" + kind + "/" + name
+		}
+		return kind + "/" + key
 	}
 	return ""
+}
+
+// regionalKey is the scope-state key of one regional resource. Subnetworks and
+// routers are regional: the same name may exist once in each region.
+func regionalKey(region, name string) string {
+	return region + "/" + name
 }
 
 // instanceUser names the first instance, in zone/name order, that uses a resource.
@@ -230,7 +241,7 @@ func (p *Provider) executeSubnetwork(call gateway.Call, request *gateway.RESTReq
 	case methodSubnetworksGet:
 		return p.getSubnetwork(request, scope)
 	case methodSubnetworksList:
-		return p.listSubnetworks(scope)
+		return p.listSubnetworks(request.Path["region"], scope)
 	case methodSubnetworksGetIam, methodSubnetworksSetIam:
 		return p.subnetworkIam(call, request, scope)
 	default:
@@ -262,7 +273,7 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 		if s.networks[network] == nil {
 			return missingReference()
 		}
-		if s.subnetworks[name] != nil {
+		if s.subnetworks[regionalKey(region, name)] != nil {
 			return errAlreadyExists
 		}
 		if overlap = s.overlappingSubnet(network, cidr); overlap != "" {
@@ -275,7 +286,7 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 		}); err != nil {
 			return gap("index the subnetwork")
 		}
-		s.subnetworks[name] = &subnetworkRecord{
+		s.subnetworks[regionalKey(region, name)] = &subnetworkRecord{
 			Name: name, Description: provider.Text(body[keyDescription]), Network: network, Region: region,
 			IPCIDRRange: cidr, Gateway: defaultGateway(cidr),
 			PrivateAccess: boolOf(body["privateIpGoogleAccess"], false),
@@ -288,41 +299,42 @@ func (p *Provider) createSubnetwork(request *gateway.RESTRequest, scope state.Sc
 	}
 	if overlap != "" {
 		return p.failedOperation(scope, "region", region, "insert", target, &operationError{
-			Code: "INVALID_USAGE",
-			Message: "Invalid IPCidrRange: " + cidr + " conflicts with existing subnetwork '" +
-				overlap + "' in region '" + region + "'.",
+			Code:    "INVALID_USAGE",
+			Message: "Invalid IPCidrRange: " + cidr + " conflicts with existing subnetwork " + overlap + ".",
 		})
 	}
 	return p.newOperation(scope, "region", region, "insert", target)
 }
 
-// overlappingSubnet names a subnetwork of the network whose range overlaps cidr.
+// overlappingSubnet names, with its region, a subnetwork of the network in
+// any region whose range overlaps cidr: ranges are unique across a network.
 func (s *scopeState) overlappingSubnet(network, cidr string) string {
 	_, candidate, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return ""
 	}
-	for _, name := range sortedKeys(s.subnetworks) {
-		subnet := s.subnetworks[name]
+	for _, key := range sortedKeys(s.subnetworks) {
+		subnet := s.subnetworks[key]
 		_, existing, parseErr := net.ParseCIDR(subnet.IPCIDRRange)
 		if subnet.Network != network || parseErr != nil {
 			continue
 		}
 		if existing.Contains(candidate.IP) || candidate.Contains(existing.IP) {
-			return name
+			return "'" + subnet.Name + "' in region '" + subnet.Region + "'"
 		}
 	}
 	return ""
 }
 
 func (p *Provider) getSubnetwork(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	return getRecord(p, scope, kindSubnetwork, request.Path["subnetwork"], func(s *scopeState) map[string]*subnetworkRecord { return s.subnetworks }, subnetworkDocument)
+	return getRecord(p, scope, kindSubnetwork, regionalKey(request.Path["region"], request.Path["subnetwork"]),
+		func(s *scopeState) map[string]*subnetworkRecord { return s.subnetworks }, subnetworkDocument)
 }
 
-// listSubnetworks returns the scope's subnetworks.
-func (p *Provider) listSubnetworks(scope state.Scope) (*gateway.RESTResponse, error) {
-	return listRecords(p, scope, "compute#subnetworkList", func(s *scopeState) map[string]*subnetworkRecord { return s.subnetworks }, nil,
-		inProject(scope, subnetworkDocument))
+// listSubnetworks returns the region's subnetworks.
+func (p *Provider) listSubnetworks(region string, scope state.Scope) (*gateway.RESTResponse, error) {
+	return listRecords(p, scope, "compute#subnetworkList", func(s *scopeState) map[string]*subnetworkRecord { return s.subnetworks },
+		func(record *subnetworkRecord) bool { return record.Region == region }, inProject(scope, subnetworkDocument))
 }
 
 // inProject adapts a document renderer that needs only the project.
@@ -336,11 +348,11 @@ func (p *Provider) deleteSubnetwork(request *gateway.RESTRequest, scope state.Sc
 	name, region := request.Path["subnetwork"], request.Path["region"]
 	target := regionalSelfLink(scope.Project, region, "subnetworks", name)
 	found, user, err := p.removeUnlessUsed(scope, regionalName(scope.Project, region, kindSubnetwork, name),
-		func(s *scopeState) bool { return s.subnetworks[name] != nil },
+		func(s *scopeState) bool { return s.subnetworks[regionalKey(region, name)] != nil },
 		func(s *scopeState) string {
-			return s.instanceUser(func(r *instanceRecord) bool { return r.Subnetwork == name })
+			return s.instanceUser(func(r *instanceRecord) bool { return r.Region == region && r.Subnetwork == name })
 		},
-		func(s *scopeState) { delete(s.subnetworks, name) })
+		func(s *scopeState) { delete(s.subnetworks, regionalKey(region, name)) })
 	if err != nil {
 		return nil, err
 	}
@@ -354,45 +366,6 @@ func (p *Provider) deleteSubnetwork(request *gateway.RESTRequest, scope state.Sc
 		})
 	}
 	return p.newOperation(scope, "region", region, "delete", target)
-}
-
-// removeRegionResource deletes one regional resource, unregisters it, and
-// returns the delete operation. The closures are per kind because the scope
-// state maps differ.
-func (p *Provider) removeRegionResource(request *gateway.RESTRequest, scope state.Scope, plural, kind string,
-	remove func(*scopeState, string),
-	exists func(*scopeState, string) bool,
-) (*gateway.RESTResponse, error) {
-	project, name, region := scope.Project, request.Path[requestPath(plural)], request.Path["region"]
-	found := false
-	if err := p.scopes.With(scope, func(s *scopeState) error {
-		if found = exists(s, name); !found {
-			return nil
-		}
-		if err := p.unindex(scope, regionalName(project, region, kind, name)); err != nil {
-			return err
-		}
-		remove(s, name)
-		return nil
-	}); err != nil {
-		return nil, err //nolint:wrapcheck // unindex already wraps
-	}
-	if !found {
-		return nil, provider.NotFound(kind, name)
-	}
-	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, plural, name))
-}
-
-// requestPath maps a resource plural to its path segment name.
-func requestPath(plural string) string {
-	switch plural {
-	case "routers":
-		return "router"
-	case "subnetworks":
-		return "subnetwork"
-	default:
-		return strings.TrimSuffix(plural, "s")
-	}
 }
 
 // networkName strips a full network self-link or name into the plain name.
@@ -643,7 +616,7 @@ func (p *Provider) executeRouters(call gateway.Call, request *gateway.RESTReques
 	case methodRoutersGet:
 		return p.getRouter(request, scope)
 	case methodRoutersList:
-		return p.listRouters(scope)
+		return p.listRouters(request.Path["region"], scope)
 	default:
 		return p.deleteRouter(request, scope)
 	}
@@ -663,16 +636,16 @@ func (p *Provider) createRouter(request *gateway.RESTRequest, scope state.Scope)
 	if !p.networkExists(scope, network) {
 		return nil, missingReference()
 	}
-	nats, natErr := p.parseNATs(body["nats"], scope)
+	region := request.Path["region"]
+	nats, natErr := p.parseNATs(body["nats"], region, scope)
 	if natErr != nil {
 		return nil, natErr
 	}
-	region := request.Path["region"]
 	err = p.scopes.With(scope, func(s *scopeState) error {
-		if !s.referencesExist(network, nats) {
+		if !s.referencesExist(network, region, nats) {
 			return missingReference()
 		}
-		if s.routers[name] != nil {
+		if s.routers[regionalKey(region, name)] != nil {
 			return errAlreadyExists
 		}
 		if err := p.index.Put(serviceName, state.Resource{
@@ -682,7 +655,7 @@ func (p *Provider) createRouter(request *gateway.RESTRequest, scope state.Scope)
 		}); err != nil {
 			return gap("index the router")
 		}
-		s.routers[name] = &routerRecord{
+		s.routers[regionalKey(region, name)] = &routerRecord{
 			Name: name, Region: region, Network: network,
 			NATs: nats, Generation: 1, CreatedAt: p.clock(),
 		}
@@ -696,13 +669,13 @@ func (p *Provider) createRouter(request *gateway.RESTRequest, scope state.Scope)
 
 // referencesExist re-checks, under the scope lock, the network and NAT
 // subnetworks a router names, so a concurrent delete cannot leave it dangling.
-func (s *scopeState) referencesExist(network string, nats []natRecord) bool {
+func (s *scopeState) referencesExist(network, region string, nats []natRecord) bool {
 	if s.networks[network] == nil {
 		return false
 	}
 	for _, nat := range nats {
 		for _, subnet := range nat.Subnetworks {
-			if s.subnetworks[subnet] == nil {
+			if s.subnetworks[regionalKey(region, subnet)] == nil {
 				return false
 			}
 		}
@@ -714,14 +687,14 @@ func (s *scopeState) referencesExist(network string, nats []natRecord) bool {
 const allSubnetworks = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 
 // parseNATs validates the NAT gateways of one router body.
-func (p *Provider) parseNATs(raw any, scope state.Scope) ([]natRecord, error) {
+func (p *Provider) parseNATs(raw any, region string, scope state.Scope) ([]natRecord, error) {
 	items, ok := raw.([]any)
 	if !ok || len(items) == 0 {
 		return nil, provider.Invalid("A router requires at least one NAT gateway")
 	}
 	nats := make([]natRecord, 0, len(items))
 	for _, item := range items {
-		nat, err := p.parseNAT(item, scope)
+		nat, err := p.parseNAT(item, region, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -740,7 +713,7 @@ const (
 // v1 shape: sourceSubnetworkIpRangesToNat, and for LIST_OF_SUBNETWORKS the
 // subnetworks[].name references. Manually allocated NAT addresses are not
 // modeled.
-func (p *Provider) parseNAT(raw any, scope state.Scope) (natRecord, error) {
+func (p *Provider) parseNAT(raw any, region string, scope state.Scope) (natRecord, error) {
 	gateway, ok := raw.(map[string]any)
 	if !ok {
 		return natRecord{}, provider.Invalid("Invalid NAT gateway entry")
@@ -756,8 +729,8 @@ func (p *Provider) parseNAT(raw any, scope state.Scope) (natRecord, error) {
 		return natRecord{}, gap("NAT gateways with manually allocated addresses are not modeled")
 	}
 	for _, entry := range provider.MapList(gateway["subnetworks"]) {
-		subnet := subnetName(provider.Text(entry["name"]))
-		if !p.subnetworkExists(scope, subnet) {
+		subnetRegion, subnet := subnetReference(provider.Text(entry["name"]))
+		if (subnetRegion != "" && subnetRegion != region) || !p.subnetworkExists(scope, region, subnet) {
 			return natRecord{}, missingReference()
 		}
 		record.Subnetworks = append(record.Subnetworks, subnet)
@@ -768,36 +741,52 @@ func (p *Provider) parseNAT(raw any, scope state.Scope) (natRecord, error) {
 	return record, nil
 }
 
-// subnetName strips a subnetwork self-link or name into the plain name.
-func subnetName(value string) string {
-	if index := strings.LastIndex(value, "/subnetworks/"); index >= 0 {
-		return value[index+len("/subnetworks/"):]
+// subnetReference splits a subnetwork self-link, partial URL, or plain name
+// into the region it names, if any, and the plain name.
+func subnetReference(value string) (string, string) {
+	index := strings.LastIndex(value, "/subnetworks/")
+	if index < 0 {
+		return "", value
 	}
-	return value
+	name, prefix := value[index+len("/subnetworks/"):], value[:index]
+	if at := strings.LastIndex(prefix, "regions/"); at >= 0 {
+		return prefix[at+len("regions/"):], name
+	}
+	return "", name
 }
 
-// subnetworkExists reports whether the named subnetwork exists in the scope.
-func (p *Provider) subnetworkExists(scope state.Scope, name string) bool {
+// subnetworkExists reports whether the region's named subnetwork exists.
+func (p *Provider) subnetworkExists(scope state.Scope, region, name string) bool {
 	var found bool
-	_ = p.scopes.With(scope, func(s *scopeState) error { found = s.subnetworks[name] != nil; return nil })
+	_ = p.scopes.With(scope, func(s *scopeState) error { found = s.subnetworks[regionalKey(region, name)] != nil; return nil })
 	return found
 }
 
 func (p *Provider) getRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	return getRecord(p, scope, kindRouter, request.Path["router"], func(s *scopeState) map[string]*routerRecord { return s.routers }, routerDocument)
+	return getRecord(p, scope, kindRouter, regionalKey(request.Path["region"], request.Path["router"]),
+		func(s *scopeState) map[string]*routerRecord { return s.routers }, routerDocument)
 }
 
-// listRouters returns the scope's routers.
-func (p *Provider) listRouters(scope state.Scope) (*gateway.RESTResponse, error) {
-	return listRecords(p, scope, "compute#routerList", func(s *scopeState) map[string]*routerRecord { return s.routers }, nil,
-		inProject(scope, routerDocument))
+// listRouters returns the region's routers.
+func (p *Provider) listRouters(region string, scope state.Scope) (*gateway.RESTResponse, error) {
+	return listRecords(p, scope, "compute#routerList", func(s *scopeState) map[string]*routerRecord { return s.routers },
+		func(record *routerRecord) bool { return record.Region == region }, inProject(scope, routerDocument))
 }
 
+// deleteRouter removes one router of the request's region.
 func (p *Provider) deleteRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	return p.removeRegionResource(request, scope, "routers", kindRouter,
-		func(s *scopeState, name string) { delete(s.routers, name) },
-		func(s *scopeState, name string) bool { return s.routers[name] != nil },
-	)
+	name, region := request.Path["router"], request.Path["region"]
+	found, _, err := p.removeUnlessUsed(scope, regionalName(scope.Project, region, kindRouter, name),
+		func(s *scopeState) bool { return s.routers[regionalKey(region, name)] != nil },
+		func(*scopeState) string { return "" },
+		func(s *scopeState) { delete(s.routers, regionalKey(region, name)) })
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, provider.NotFound(kindRouter, name)
+	}
+	return p.newOperation(scope, "region", region, "delete", regionalSelfLink(scope.Project, region, "routers", name))
 }
 
 // subnetworkIam reads or writes the subnetwork's stored IAM policy.

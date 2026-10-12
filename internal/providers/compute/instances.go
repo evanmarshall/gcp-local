@@ -64,9 +64,10 @@ func zoneLink(project, zone string) string {
 	return wireHost + "/projects/" + url.PathEscape(project) + "/zones/" + url.PathEscape(zone)
 }
 
-// instanceInterface is the requested network attachment of an instance.
+// instanceInterface is the requested network attachment of an instance;
+// subnetRegion is the region a subnetwork URL names, if any.
 type instanceInterface struct {
-	network, subnetwork, address string
+	network, subnetwork, subnetRegion, address string
 }
 
 // parseInstance validates an instance insert body. A second interface or
@@ -92,8 +93,9 @@ func parseInstance(body map[string]any) (instanceInterface, string, error) {
 			return instanceInterface{}, "", gap("instance " + field + " (external, IPv6, or alias addresses) are not modeled")
 		}
 	}
+	subnetRegion, subnet := subnetReference(provider.Text(nic["subnetwork"]))
 	return instanceInterface{
-		network: networkName(provider.Text(nic[keyNetwork])), subnetwork: subnetName(provider.Text(nic["subnetwork"])),
+		network: networkName(provider.Text(nic[keyNetwork])), subnetwork: subnet, subnetRegion: subnetRegion,
 		address: provider.Text(nic["networkIP"]),
 	}, machineType[strings.LastIndex(machineType, "/")+1:], nil
 }
@@ -177,6 +179,9 @@ func (s *scopeState) addInstance(record *instanceRecord, nic instanceInterface, 
 	if s.instances[key] != nil {
 		return errAlreadyExists
 	}
+	if nic.subnetRegion != "" && nic.subnetRegion != record.Region {
+		return errWrongRegion
+	}
 	subnet := s.attachSubnet(nic, record.Region)
 	if subnet == nil {
 		return errMissing
@@ -197,14 +202,15 @@ func (s *scopeState) addInstance(record *instanceRecord, nic instanceInterface, 
 	return nil
 }
 
-// attachSubnet resolves the interface's subnetwork: the named one, or the
-// network's only subnetwork in the region when just a network is given.
+// attachSubnet resolves the interface's subnetwork in the instance's region:
+// the named one, or the network's first subnetwork there when just a network
+// is given.
 func (s *scopeState) attachSubnet(nic instanceInterface, region string) *subnetworkRecord {
 	if nic.subnetwork != "" {
-		return s.subnetworks[nic.subnetwork]
+		return s.subnetworks[regionalKey(region, nic.subnetwork)]
 	}
-	for _, name := range sortedKeys(s.subnetworks) {
-		if subnet := s.subnetworks[name]; subnet.Network == nic.network && subnet.Region == region {
+	for _, key := range sortedKeys(s.subnetworks) {
+		if subnet := s.subnetworks[key]; subnet.Network == nic.network && subnet.Region == region {
 			return subnet
 		}
 	}

@@ -212,8 +212,8 @@ func (s *scopeState) analyzeAddresses(spec flow) analysis {
 // sourceSubnet finds the subnetwork that contains the source address, within
 // the named source network when one is given.
 func (s *scopeState) sourceSubnet(spec flow) *subnetworkRecord {
-	for _, name := range sortedKeys(s.subnetworks) {
-		subnet := s.subnetworks[name]
+	for _, key := range sortedKeys(s.subnetworks) {
+		subnet := s.subnetworks[key]
 		if spec.sourceNetwork != "" && subnet.Network != spec.sourceNetwork {
 			continue
 		}
@@ -226,8 +226,8 @@ func (s *scopeState) sourceSubnet(spec flow) *subnetworkRecord {
 
 // subnetContaining finds the network's subnetwork whose range contains ip.
 func (s *scopeState) subnetContaining(network string, ip net.IP) *subnetworkRecord {
-	for _, name := range sortedKeys(s.subnetworks) {
-		if subnet := s.subnetworks[name]; subnet.Network == network && cidrContains(subnet.IPCIDRRange, ip) {
+	for _, key := range sortedKeys(s.subnetworks) {
+		if subnet := s.subnetworks[key]; subnet.Network == network && cidrContains(subnet.IPCIDRRange, ip) {
 			return subnet
 		}
 	}
@@ -536,7 +536,7 @@ func (s *scopeState) toInternet(spec flow, source *instanceRecord, steps []map[s
 	if !recordedInternet(spec.destIP) {
 		return analysis{gap: "Instance flows to addresses other than the recorded internet destination 8.8.8.8 are not modeled"}
 	}
-	if subnet := s.subnetworks[source.Subnetwork]; subnet == nil || subnet.PrivateAccess {
+	if subnet := s.subnetworks[regionalKey(source.Region, source.Subnetwork)]; subnet == nil || subnet.PrivateAccess {
 		return analysis{gap: "Internet egress from a subnetwork with Private Google Access is not recorded"}
 	}
 	steps = append(steps, defaultRouteStep(spec.project, source.Network))
@@ -566,8 +566,8 @@ func recordedInternet(ip net.IP) bool {
 // and region cover it. Only ALL_SUBNETWORKS_ALL_IP_RANGES is recorded.
 func (s *scopeState) natCoverage(source *instanceRecord) natCoverage {
 	coverage := natAbsent
-	for _, name := range sortedKeys(s.routers) {
-		router := s.routers[name]
+	for _, key := range sortedKeys(s.routers) {
+		router := s.routers[key]
 		if router.Network != source.Network || router.Region != source.Region {
 			continue
 		}
@@ -612,7 +612,7 @@ func (s *scopeState) toInstance(spec flow, source, dest *instanceRecord, steps [
 // instanceRoute returns the route step toward the destination instance, nil
 // for an unpeered network (the default route applies), or a gap reason.
 func (s *scopeState) instanceRoute(spec flow, source, dest *instanceRecord) (map[string]any, string) {
-	subnet := s.subnetworks[dest.Subnetwork]
+	subnet := s.subnetworks[regionalKey(dest.Region, dest.Subnetwork)]
 	if subnet == nil {
 		return nil, "The destination instance's subnetwork is not modeled"
 	}

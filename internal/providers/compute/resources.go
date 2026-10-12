@@ -94,9 +94,9 @@ func setText(document map[string]any, key, value string) {
 // caller holds the scope lock.
 func (s *scopeState) subnetworksOf(project, network string) []any {
 	links := []any{}
-	for _, name := range sortedKeys(s.subnetworks) {
-		if record := s.subnetworks[name]; record.Network == network {
-			links = append(links, regionalSelfLink(project, record.Region, "subnetworks", name))
+	for _, key := range sortedKeys(s.subnetworks) {
+		if record := s.subnetworks[key]; record.Network == network {
+			links = append(links, regionalSelfLink(project, record.Region, "subnetworks", record.Name))
 		}
 	}
 	return links

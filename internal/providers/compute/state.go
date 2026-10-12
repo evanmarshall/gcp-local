@@ -119,10 +119,10 @@ type routerRecord struct {
 type scopeState struct {
 	connectivity map[string]*namedTest
 	networks     map[string]*networkRecord
-	subnetworks  map[string]*subnetworkRecord
+	subnetworks  map[string]*subnetworkRecord // keyed by region/name
 	firewalls    map[string]*firewallRecord
 	routes       map[string]*routeRecord
-	routers      map[string]*routerRecord
+	routers      map[string]*routerRecord   // keyed by region/name
 	instances    map[string]*instanceRecord // keyed by zone/name
 	operations   map[string]*operationRecord
 	generation   int64

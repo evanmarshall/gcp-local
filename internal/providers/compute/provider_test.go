@@ -814,3 +814,44 @@ func TestListsAreOrderedByName(t *testing.T) {
 		}
 	}
 }
+
+// Subnetworks and routers are regional: a name exists once per region, and
+// reads, lists, and deletes see only the request's region (recorded:
+// vm-firewall-service-accounts reads a us-central1 subnetwork through us-east1).
+func TestSubnetworksAndRoutersAreRegional(t *testing.T) {
+	h := newHarness(t)
+	const central, east = "/compute/v1/projects/demo-net/regions/us-central1", "/compute/v1/projects/demo-net/regions/us-east1"
+	h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{keyName: testNetwork, keyAutoSubnets: false}, 200)
+	h.expectCode(http.MethodPost, central+"/subnetworks", map[string]any{keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: "10.1.0.0/24"}, 200)
+	h.expectCode(http.MethodGet, east+"/subnetworks/"+testSubnetOne, nil, 404)
+	if names := h.listNames(east + "/subnetworks"); len(names) != 0 {
+		t.Fatalf("us-east1 subnetworks = %v", names)
+	}
+	status, errs := operationErrors(t, h.expectCode(http.MethodPost, east+"/subnetworks", map[string]any{
+		keyName: testSubnetOne, keyNetwork: testNetwork, keyIPCIDR: "10.2.0.0/24",
+	}, 200))
+	if status != "DONE" || len(errs) != 0 {
+		t.Fatalf("same name in another region = %s %v", status, errs)
+	}
+	body := decode(t, h.expectCode(http.MethodGet, east+"/subnetworks/"+testSubnetOne, nil, 200))
+	if body[keyIPCIDR] != "10.2.0.0/24" {
+		t.Fatalf("us-east1 subnetwork = %v", body)
+	}
+	router := func(region string) map[string]any {
+		return map[string]any{keyName: "router-1", keyNetwork: testNetwork, "nats": []any{map[string]any{
+			keyName: "nat-1", "sourceSubnetworkIpRangesToNat": listOfSubnetworks,
+			"subnetworks": []any{map[string]any{keyName: "regions/" + region + "/subnetworks/" + testSubnetOne}},
+		}}}
+	}
+	h.expectCode(http.MethodPost, central+"/routers", router("us-central1"), 200)
+	h.expectCode(http.MethodGet, east+"/routers/router-1", nil, 404)
+	h.expectCode(http.MethodPost, east+"/routers", router("us-central1"), 400) // a NAT names its own region's subnetworks
+	h.expectCode(http.MethodPost, east+"/routers", router("us-east1"), 200)
+	h.expectCode(http.MethodDelete, east+"/routers/router-1", nil, 200)
+	h.expectCode(http.MethodGet, central+"/routers/router-1", nil, 200)
+	h.expectCode(http.MethodDelete, east+"/subnetworks/"+testSubnetOne, nil, 200)
+	body = decode(t, h.expectCode(http.MethodGet, central+"/subnetworks/"+testSubnetOne, nil, 200))
+	if body[keyIPCIDR] != "10.1.0.0/24" {
+		t.Fatalf("us-central1 subnetwork after the us-east1 delete = %v", body)
+	}
+}
