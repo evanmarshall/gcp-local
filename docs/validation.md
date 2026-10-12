@@ -2,6 +2,14 @@
 
 Conformance scenarios run once against a real GCP sandbox to record behavior, then run against gcp-local in CI to check it still matches. The runner is a pytest plugin in `gcp_validation/` built on `localstack-snapshot`. Recordings live in `tests/conformance/recordings/<id>/`; [coverage](coverage.md) lists them per service.
 
+## What a recording proves
+
+- **It compares a projection, not the full response.** Each scenario records the fields it selects: mostly HTTP and gRPC status codes, allow/deny outcomes, sorted field-name lists, and a few chosen values. Error messages are compared only for Storage. A match means the emulator returns the same codes, decisions, and selected fields for those requests; other response content is unchecked.
+- **It covers only the requests it sends.** Other options, clients, and call orders are unverified until a scenario sends them ([client compatibility](coverage.md#client-compatibility) shows which clients are tested).
+- **Provenance is integrity, not authenticity.** `provenance.json` hashes prove a recording wasn't changed after review, not that it came from GCP. Most recordings were made from a developer machine; only the Storage scenarios have a CI recording workflow (`cloud-conformance.yml`).
+- **No drift check.** Recordings aren't re-run against GCP on a schedule, so a GCP behavior change goes unnoticed until someone revalidates.
+- **Permission discovery is thin.** One conclusive probe exists ([permission discovery](permission-discovery.md)). Most Terraform cases are local adaptations, not upstream acceptance tests ([Terraform](terraform-compatibility.md)).
+
 ## Modes
 
 | Mode | Required flags | What it does |

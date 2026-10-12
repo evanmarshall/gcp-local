@@ -2,7 +2,7 @@
 
 **A local Google Cloud emulator that enforces IAM.** It runs Cloud Storage, Pub/Sub, Firestore, Spanner, BigQuery, Cloud SQL, Cloud Run, Cloud Logging, Vertex AI, and more on your machine. Use the real client libraries and Terraform, and get the same permission errors as production.
 
-gcp-local issues local credentials and evaluates IAM policies on every request. Each service's behavior is checked against recordings from real Google Cloud.
+gcp-local issues local credentials and evaluates IAM policies on every request. Selected parts of each service's behavior (status codes, allow/deny decisions, and chosen response fields) are checked against scenarios recorded from real Google Cloud; [what that proves and doesn't](docs/validation.md#what-a-recording-proves).
 
 > **Status: pre-1.0.** Nothing is published to PyPI or a container registry yet; run it from source. Each service implements part of its API ([coverage](docs/coverage.md)).
 

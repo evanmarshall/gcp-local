@@ -145,6 +145,69 @@ GO_FUNCTION = re.compile(r"^func (\w+)\(([^)]*)\)([^{\n]*)\{\n(.*?)^\}", re.MULT
 DISTINCT_PER_PROVIDER = {"driverOf": "asserts the package's own driver interface"}
 
 
+# Tracked top-level entries. Keep the root for project entry points; put
+# everything else in a directory. Shrink these lists; never grow them casually.
+ROOT_FILES = {
+    ".dockerignore",
+    ".editorconfig",
+    ".env.example",
+    ".gitignore",
+    ".gitmessage",
+    ".golangci.yml",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "Dockerfile",
+    "LICENSE",
+    "README.md",
+    "compose.build.yaml",
+    "compose.run.yaml",
+    "compose.yaml",
+    "conftest.py",
+    "go.mod",
+    "go.sum",
+    "moo.toml",
+    "pyproject.toml",
+    "pytest.ini",
+    "requirements-cloud.txt",
+    "requirements-pubsub.txt",
+    "requirements-sdk.txt",
+    "requirements-services.txt",
+    "requirements-tools.txt",
+    "ruff.toml",
+}
+ROOT_DIRS = {
+    ".agents",
+    ".githooks",
+    ".github",
+    "api",
+    "cmd",
+    "docs",
+    "examples",
+    "gcp_local",
+    "gcp_validation",
+    "internal",
+    "packaging",
+    "quality",
+    "scripts",
+    "skills",
+    "tests",
+    "third_party",
+    "toolchains",
+    "tools",
+}
+
+
+def check_root_layout(errors: list[str], paths: list[Path]) -> None:
+    """Fail when a tracked file or directory is added at the repository root."""
+    for path in paths:
+        relative = path.relative_to(ROOT)
+        top = relative.parts[0]
+        if len(relative.parts) == 1 and top not in ROOT_FILES:
+            errors.append(f"{top}: new root file; put it in a directory (see ROOT_FILES)")
+        elif len(relative.parts) > 1 and top not in ROOT_DIRS:
+            errors.append(f"{top}/: new root directory; use an existing one (see ROOT_DIRS)")
+
+
 def check_tracked_files(errors: list[str], paths: list[Path]) -> None:
     """Reject committed binaries, non-script executables, and large files."""
     modes = subprocess.check_output([GIT, "ls-files", "-s"], cwd=ROOT).decode().splitlines()
@@ -227,6 +290,7 @@ def main() -> int:
     paths = [ROOT / name for name in sorted(set(files)) if name]
     check_documents(errors, paths)
     check_tracked_files(errors, paths)
+    check_root_layout(errors, [path for path in paths if path.exists()])
     check_provider_duplicates(errors)
     check_coverage(errors)
     check_tooling_index(errors)
