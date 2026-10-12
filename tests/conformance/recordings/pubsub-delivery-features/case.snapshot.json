@@ -1,0 +1,87 @@
+{
+  "pubsub-delivery-features": {
+    "recorded-date": "12-10-2026, 06:14:43",
+    "recorded-content": {
+      "subscriptions": {
+        "dead-lettered": {
+          "dead_letter_policy": {
+            "dead_letter_topic": "<topic:dead-letters>",
+            "max_delivery_attempts": 5
+          },
+          "enable_exactly_once_delivery": false,
+          "enable_message_ordering": false,
+          "filter": "attributes.kind = \"poison\""
+        },
+        "exact": {
+          "enable_exactly_once_delivery": true,
+          "enable_message_ordering": false,
+          "filter": ""
+        },
+        "filtered": {
+          "enable_exactly_once_delivery": false,
+          "enable_message_ordering": false,
+          "filter": "attributes.kind = \"match\""
+        },
+        "ordered": {
+          "enable_exactly_once_delivery": false,
+          "enable_message_ordering": true,
+          "filter": ""
+        }
+      },
+      "denied-pull": {
+        "grpc_status": "PERMISSION_DENIED"
+      },
+      "ordered-delivery": {
+        "first_delivery_starts_with": [
+          "1"
+        ],
+        "key_order": [
+          "1",
+          "2",
+          "3"
+        ],
+        "redelivered_first": [
+          "1"
+        ]
+      },
+      "filtered-delivery": {
+        "delivered": [
+          "match"
+        ]
+      },
+      "invalid-filter": {
+        "grpc_status": "INVALID_ARGUMENT"
+      },
+      "exactly-once-second-ack": {
+        "grpc_status": "OK"
+      },
+      "dead-letter-ungranted": {
+        "delivery_attempts": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "forwarded": false,
+        "redelivered_past_limit": true
+      },
+      "dead-letter-granted": {
+        "attribute_names": [
+          "CloudPubSubDeadLetterSourceDeliveryCount",
+          "CloudPubSubDeadLetterSourceSubscription",
+          "CloudPubSubDeadLetterSourceSubscriptionProject",
+          "CloudPubSubDeadLetterSourceTopicPublishTime"
+        ],
+        "data": "poison-granted",
+        "first_attempt": 1,
+        "source_delivery_count": "5"
+      },
+      "cleanup": {
+        "owned_resources_absent": true
+      }
+    }
+  }
+}
