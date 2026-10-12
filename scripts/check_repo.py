@@ -27,7 +27,6 @@ def check_documents(errors: list[str], paths: list[Path]) -> None:
             "README.md",
             "CONTRIBUTING.md",
             "docs/design.md",
-            "docs/roadmap.md",
         )
         if not (ROOT / relative).is_file()
     )

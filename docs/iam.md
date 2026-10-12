@@ -1,24 +1,36 @@
-# Baseline IAM evaluator
+# IAM engine
 
-The evaluator supplies the permission layer for Storage and the initial [Pub/Sub provider](pubsub.md). Its unit tests exercise inheritance, cross-project grants, revocation, composed checks, and diagnostics. The [Storage provider](storage.md) also passes recorded authorization, cross-project, and replacement scenarios through actual backend operations. Pub/Sub has local tests but no cloud-recorded permission baseline yet.
+`internal/iam` authorizes every provider request. Providers register a permission plan per method, resolve the request's target and features, and call `Authorize` before any mutation. Engine unit tests cover the evaluator; only recorded scenarios establish that a service's IAM matches GCP ([coverage](coverage.md)).
 
-## Permission plans and policies
+## Permission plans
 
-Storage registers each supported method's baseline permissions in `internal/providers/storage/permissions.go`. Object insertion additionally requires an explicitly resolved `object_exists` feature; replacement adds `storage.objects.delete` to `storage.objects.create`. An omitted feature is a coverage error, not an assumption that an object is new. Baseline preflight can authorize internal state resolution, but reports `complete: false`; providers must complete `Authorize` before mutation. Additional checks cannot remove baseline checks. Request-shape validation and service-specific error precedence remain provider responsibilities.
+Each provider registers its plans with `Engine.Register` when it starts (Storage and Pub/Sub keep them in `permissions.go`).
 
-The shared resource index supplies ownership and ancestry. Evaluation walks the target resource or its validated bucket anchor through project, folder, and organization. Storage objects remain in the backend rather than being duplicated into the index. A caller's project is separate from the resource project: a role granted in the caller's project does not grant access to a foreign bucket, while an explicit binding for that foreign caller can. Missing parents, cycles, conflicting project ownership, and unverified target shapes fail closed.
+- A plan has baseline permissions plus permissions added by named features. Example: Storage object insert requires the `object_exists` feature, and replacement adds `storage.objects.delete` to `storage.objects.create`.
+- An omitted feature is a coverage error, not an assumption.
+- `Baseline` can authorize internal state resolution but reports `complete: false`. Providers must call `Authorize` before mutation.
+- Extra checks can't remove baseline checks. Request validation and service-specific error precedence stay in the provider.
+- `sh scripts/go.sh run ./tools/permission-plans -service secretmanager` exports registered plans as JSON. Secret Manager is the only service it supports.
 
-The first policy set supports unconditional version-1 allow bindings for exact user/service-account members, `allUsers`, and `allAuthenticatedUsers`. No absent credential becomes an administrator; unknown/expired credentials remain unauthenticated. A public binding is an explicit grant and still needs the provider's public-access controls; the Pub/Sub slice requires named callers. Cloud-platform covers both current providers; Storage full-control and Pub/Sub scopes are restricted to their respective permission plans. Other narrower-scope enforcement is explicitly unverified and fails rather than being treated as full access.
+## Evaluation
 
-The engine stores each policy once, with its owning service/scope, returns copies, and checks supplied etags on replacement. Storage API handlers own authorization and wire-format validation around policy operations. Service reset removes that service's resource policies/coverage markers for the selected scope while retaining project/organization policy configuration. Persistence remains unsupported.
+- The engine walks the target (or its validated anchor, such as a bucket) through the resource index to project, folder, and organization, and unions allow bindings.
+- Caller project and resource project are separate. A role in the caller's project doesn't grant access to a foreign resource.
+- Missing parents, cycles, conflicting ownership, and unverified target shapes fail closed.
+- Members: exact `user:` and `serviceAccount:`, `allUsers`, `allAuthenticatedUsers`. Absent credentials never become an administrator; unknown or expired tokens stay unauthenticated.
+- OAuth scopes: `cloud-platform` covers every plan. `devstorage.full_control` and `pubsub` cover plans whose permissions are all in that service. Other scopes are refused.
+- IAM conditions (CEL) see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers pass resource attributes through `iam.Target.Attributes`; only Storage and Cloud SQL do, so conditions elsewhere fail closed. Storage conditions are recorded (`storage-iam-conditions`).
+- Deny rules (deny overrides allow) and principal access boundary policies are modeled locally and not recorded. Recording deny policies needs `roles/iam.denyAdmin`, which is grantable only at an organization.
+- `MarkUnsupported` stores known advanced configuration as a fail-closed marker; a matching allow can't bypass it.
+- Not supported: groups, custom roles, roles without a committed snapshot.
 
-IAM conditions are cloud-recorded for Storage: `storage-iam-conditions` (2026-10-11) covers a version-3 conditional `objectViewer` binding scoped by `resource.name.startsWith(...)`, the 400 for a conditional binding in a version-1 policy and for an uncompilable expression, version-1 reads of a conditional policy (200), prefix-scoped allow/deny, and an expired `request.time < timestamp(...)` grant. Conditions see `resource.name`, `resource.type`, `resource.service`, and `request.time` (a timestamp); providers supply the resource attributes through `iam.Target.Attributes`, and today only Storage does, so conditions elsewhere fail closed. Deny rules (v3, deny-overrides-allow) and principal access boundary policies remain local-modeled and unrecorded: real deny policies are a separate IAM v2 resource that needs `roles/iam.denyAdmin`, which can only be granted at the organization, so recording them needs an owner decision. Groups, custom roles, and unpinned roles remain unsupported. `MarkUnsupported` retains known advanced configuration as a fail-closed marker; even an otherwise matching allow cannot bypass it. The absence of such a local marker models absence in this local configuration, not proof that a real project's policies are absent.
+Policies are stored once per owning service and scope, returned as copies, and replaced only with a matching etag. A service reset clears that service's resource policies for the scope and keeps project and organization policy.
 
 ## Role snapshots
 
-All 50 committed predefined roles were read from GCP on 2026-10-11 with `roles.get` (full view), replacing earlier Cloud Run, Compute, Secret Manager, Cloud Tasks, Network Management, KMS, Firestore, BigQuery, Bigtable, Spanner, Artifact Registry, service-account, and Resource Manager files that had been hand-authored with invented contents. The ten Storage, Pub/Sub, and identity roles recorded on 2026-10-05 were byte-identical on re-read. `internal/iam/roles/manifest.json` records the source and hashes, verified when the evaluator loads; GA and BETA roles load, other launch stages are rejected. Role permissions are data; they do not expand the registered method/request coverage. Ordinary builds/tests never fetch roles or credentials. The recorder defaults to Storage; repeat `--service` to record several sets into one manifest. The latest read, on 2026-10-12 UTC, covers all 63 committed roles: it added `roles/aiplatform.user` and `viewer` and `roles/logging.admin`, `logWriter`, and `viewer`, and every earlier snapshot was byte-identical.
+`internal/iam/roles/` holds 62 predefined roles read from GCP with `roles.get` (full view), last on 2026-10-12 UTC. `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. Builds and tests never fetch roles.
 
-To propose a later read-only refresh under an authorized account/quota project:
+To propose a refresh (read-only; needs an authorized account and quota project):
 
 ```sh
 python3 scripts/record_iam_roles.py --allow-live \
@@ -27,13 +39,18 @@ python3 scripts/record_iam_roles.py --allow-live \
   --service storage --service pubsub  # repeat for every committed set
 ```
 
-Inspect the candidate and its permission changes before replacing committed files and updating affected conformance evidence. The recorder never changes project IAM or grants permissions.
+Review permission changes before replacing committed files, and revalidate affected recordings. [Permission discovery](permission-discovery.md) minimizes a method's permissions from these snapshots.
 
-The offline-tested [permission discovery runner](permission-discovery.md) minimizes one method's permission set from these snapshots in a sandbox. Its drift report compares the result with registered plans and snapshots and proposes changes; it never edits them. No live probe has run yet.
+## Bootstrap config
 
-## Bootstrap and diagnostics
+`-iam-config` loads an explicit owner-only (`0600`) JSON file:
 
-`-iam-config` loads an explicit owner-only JSON file. It contains `resources` (canonical resource-manager organization/folder/project references with `service`, `kind`, `parent`, and `scope`), `policies` keyed by resource name, and optional `unsupported` feature markers. A project may be an explicit local hierarchy root. Optional `service_accounts` explicitly declares local account email, project, and numeric unique ID for [push token authorization](pubsub.md); duplicate IDs and mismatched ownership are rejected. This is synthetic bootstrap data, not a cloud import or service-account credential. Other service resources are published by their providers after backend success. A failed load discards the entire new model. Example single-project bootstrap:
+- `resources`: organization, folder, and project references with `service`, `kind`, `parent`, `number`, and `scope`. A project can be the root.
+- `policies`: allow policies keyed by resource name.
+- `unsupported`: optional fail-closed feature markers.
+- `service_accounts`: optional local account email, project, and numeric unique ID, used for [Pub/Sub push](pubsub.md) tokens.
+
+Providers publish their own resources after backend success. A failed load discards the whole file.
 
 ```json
 {
@@ -53,6 +70,14 @@ The offline-tested [permission discovery runner](permission-discovery.md) minimi
 }
 ```
 
-Each evaluation records a random decision ID distinct from the client-supplied trace ID. Records include principal state/subject, method, target, every check, considered policies, and the deciding role/binding. No bearer or subject credentials are stored. The most recent 1,000 records remain in memory; unsupported/incomplete evaluations are distinguishable from allow and deny.
+## Decision records
 
-The runtime serves `GET /_local/iam/decisions/ID` when IAM is configured. Retrieve one with `bin/gcp-local why-denied -endpoint http://127.0.0.1:4566 ID`. The command accepts only a numeric loopback HTTP endpoint and never follows redirects or uses ambient proxies. Storage returns `X-Gcp-Local-Decision-Id` with supported API responses. Without an implemented provider, an unimplemented API request does not fabricate an IAM decision.
+Each evaluation gets a random decision ID, separate from the trace ID. The record lists principal, method, target, every check, considered policies, and the deciding binding; it never stores credentials. The last 1,000 stay in memory. Unsupported and incomplete evaluations are distinct from allow and deny.
+
+Providers return the ID in `X-Gcp-Local-Decision-Id`. Look one up:
+
+```sh
+bin/gcp-local why-denied -endpoint http://127.0.0.1:4566 DECISION_ID
+```
+
+The command accepts only a numeric loopback endpoint and ignores proxies and redirects.

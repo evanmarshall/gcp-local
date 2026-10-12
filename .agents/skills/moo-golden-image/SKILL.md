@@ -5,18 +5,19 @@ description: "Install or repair the moo host prerequisites and provision a crede
 
 # Provision the gcp-local baseline
 
-Use [the moo guide](../../../docs/moo.md) and the repository scripts. Install the host tool only when setup is part of the user's task. An existing healthy installation is reused; a failed doctor check needs diagnosis, not automatic replacement of active machines.
+Install the host tool only when setup is part of the task. Reuse a healthy installation; a failed `moo doctor` needs diagnosis, not replacement of active machines. Details are in [the moo guide](../../../docs/moo.md).
 
 ```sh
 sh scripts/setup_moo.sh
 ```
 
-This checks or installs the reviewed moo release, creates the repository-scoped `base` machine, runs the guest provisioner, checks the tooling, and saves the baseline. The image contains Git, Python, and pinned contributor dependencies. It does not choose the emulator language or configure live GCP.
+This checks or installs the reviewed moo release, creates the `base` machine, runs the provisioner and tooling tests, and saves the baseline.
 
-Change `moo.toml`, `scripts/provision_moo.sh`, and the relevant dependency lockfiles when requirements change. Recipe identity includes the provisioner and tooling requirements. Existing named machines do not automatically acquire a new recipe: provision a distinct replacement such as `sh scripts/setup_moo.sh base-v2`, validate it, then tell contributors which baseline to fork. Do not destroy an existing baseline to force an update.
+- When requirements change, edit `moo.toml`, `scripts/provision_moo.sh`, and the lockfiles. Existing machines don't pick up a new recipe: provision a new name (`sh scripts/setup_moo.sh base-v2`), validate it, then tell contributors to fork it. Don't destroy the old baseline.
+- Never put real credentials or application data in a baseline. Keep setup idempotent and Git edits on the host.
+- After the setup commit, `moo save base` (or the new name).
+- The guest's Docker default bridge doesn't work; a healthy VM doesn't establish container or network claims.
 
-Never seed real credentials or application data into a shared baseline. Keep setup idempotent, run guest commands through moo, and keep source/Git edits on the host. After the setup commit, run `moo save base` (or the replacement name) to associate the tested state with that revision.
-
-Report the actual checks and remaining gaps. Docker backend and gRPC conformance require the later runtime; a healthy VM does not establish those claims.
+Report the checks actually run and remaining gaps.
 
 Adapted from [moo v0.3.1](https://github.com/heyito/moo/blob/6ca60ffd23564c740c39d8f21d612bbe6cb63ae9/skills/moo-golden-image/SKILL.md); [MIT notice](../../../third_party/moo/LICENSE).

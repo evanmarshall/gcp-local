@@ -1,38 +1,43 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRPC dispatch, scoped state/lifecycle, local identity, and an IAM engine in front of 18 service providers. [Service coverage](docs/coverage.md) is the source of truth for what each provider serves, what applications can use, and which recordings verify it. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator: one Go process with REST/gRPC dispatch, local identity, an IAM engine, scoped state, and service providers in front of reusable backends. [Service coverage](docs/coverage.md) is the only source of truth for what works. Don't describe planned services as working.
 
 ## Start here
 
-- Read [the design](docs/design.md), [the LocalStack comparison](docs/localstack-comparison.md), and the issue being implemented. GitHub issues track scope and dependencies.
-- Follow LocalStack's gateway, generated API, provider, scoped-store, and reusable-backend patterns. The reference checkout is optional at `../localstack`, pinned to `8b9a79f05846835cf4dff63ab7eefdde9df83783`; the comparison links to the same source online. Do not edit or vendor that checkout as part of ordinary gcp-local work.
-- Implement the smallest useful behavior covered by the issue. A new framework, service rewrite, or runtime dependency needs a concrete benefit over the existing approach. Use Go for the runtime and Python/pytest for conformance; see [the runtime decision](docs/decisions/0001-runtime.md).
+- Read [the design](docs/design.md) and the issue. Issues track scope; [#1](https://github.com/evanmarshall/gcp-local/issues/1) is the roadmap.
+- Implement the smallest behavior the issue's acceptance criteria need. A new framework, rewrite, or runtime dependency needs a concrete benefit. Runtime is Go, conformance is Python/pytest ([decision](docs/decisions/0001-runtime.md)).
+- Follow LocalStack's patterns. A new abstraction needs a source analogue in [the LocalStack mapping](docs/localstack-comparison.md) or a documented GCP requirement. The optional `../localstack` checkout is pinned to `8b9a79f05846835cf4dff63ab7eefdde9df83783`; don't edit or vendor it.
 
 ## Skills
 
-- Use [gcp-provider](.agents/skills/gcp-provider/SKILL.md) for API providers, emulator integration, state ownership, or service execution.
-- Use [gcp-conformance](.agents/skills/gcp-conformance/SKILL.md) for recorded GCP behavior, permission probes, Terraform compatibility, or fidelity claims.
-- Use [gcp-docs](.agents/skills/gcp-docs/SKILL.md) when a change affects what a service supports or how it is verified, and [concise-and-blunt](.agents/skills/concise-and-blunt/SKILL.md) for all documentation writing.
-- Use [moo-code](.agents/skills/moo-code/SKILL.md) for development in isolated machines and [moo-golden-image](.agents/skills/moo-golden-image/SKILL.md) for baseline setup. Give concurrent tasks separate worktrees and machines; follow [the moo guide](docs/moo.md).
-- Skills live in `.agents/skills/`; keep descriptions specific and instructions concise. Do not copy this entire file into each skill.
-- The portable application-onboarding bundle lives in `skills/gcp-local-setup/`. See [its installer guide](docs/agent-setup.md); do not copy emulator-contributor instructions into application repositories.
+Skills live in `.agents/skills/`.
 
-## Working agreements
+- [gcp-provider](.agents/skills/gcp-provider/SKILL.md): providers, backends, state ownership, background work.
+- [gcp-conformance](.agents/skills/gcp-conformance/SKILL.md): recordings, permission probes, Terraform cases, fidelity claims.
+- [gcp-code-quality](.agents/skills/gcp-code-quality/SKILL.md): the lint and dead-code gate, and new abstractions.
+- [gcp-docs](.agents/skills/gcp-docs/SKILL.md): any change to what a service supports or how it's verified.
+- [concise-and-blunt](.agents/skills/concise-and-blunt/SKILL.md): all documentation.
+- [moo-code](.agents/skills/moo-code/SKILL.md) and [moo-golden-image](.agents/skills/moo-golden-image/SKILL.md): isolated machines ([moo guide](docs/moo.md)). One worktree and one machine per concurrent task.
 
-- Start from the issue's acceptance criteria and identify the provider, backend, and state owner. Preserve the established architecture unless evidence supports a change.
-- Authenticate and authorize before side effects. Unsupported authorization decisions must not silently become allowed requests. Functional support, IAM verification, and analytical reachability are separate claims.
-- Keep generated API contracts separate from handwritten provider semantics. Fix the generator or input definition when generated output is wrong. See [the contract guide](api/README.md); `sh scripts/go.sh run ./tools/genapi -check` verifies committed outputs.
-- Use [the baseline IAM evaluator](docs/iam.md) for provider permission plans. Resolve every required state feature, retain baseline checks, and complete authorization before mutation. Evaluator unit tests do not establish service conformance.
-- Use [local ADC/metadata identity](docs/local-identity.md) for local SDK setup. Runtime identity configuration is explicit and private; never load the real-cloud `.env` or ambient ADC into an emulator.
-- Use [scoped state and lifecycle hooks](docs/state-and-backends.md). Run provider/backend mutations inside `Manager.Use` after authorization; publish index changes after backend success and clear state only after backend reset succeeds.
-- Use deterministic local tests for normal development. Real-GCP recording requires an authorized sandbox and explicit live-cloud scope; permission to edit a provider does not authorize cloud spending. Never fall back to real GCP when local emulation is missing.
-- Preserve observed cloud fixtures; update them through the recorder rather than editing expected results to match the emulator. Keep credentials and sensitive payloads out of fixtures, logs, and Git.
-- Never use an emulator's anonymous SDK mode (`PUBSUB_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST`) or a test-only credential adapter to claim IAM support.
-- Update [service coverage](docs/coverage.md) when adding behavior. Run the checks for the area you changed and report what was actually verified.
+`skills/gcp-local-setup/` is the portable bundle for application repositories ([agent setup](docs/agent-setup.md)). Don't copy contributor rules into it.
+
+## Rules
+
+- **Authorize before side effects.** Authenticate and authorize before any mutation or backend call. An unsupported authorization decision fails closed; it never becomes an allow. Workers act as their service agent, never as an implicit administrator.
+- **Use the IAM engine** ([IAM](docs/iam.md)). Resolve every required state feature, keep baseline checks, and complete `Authorize` before mutation.
+- **Use scoped state** ([state and backends](docs/state-and-backends.md)). Mutate inside `Manager.Use` after authorization. Publish index changes after backend success. Clear state only after backend reset succeeds. Never let state leak across projects or locations.
+- **Generated contracts are outputs.** Fix wrong output in `tools/genapi` or its inputs, never by hand ([api/README.md](api/README.md)). `sh scripts/go.sh run ./tools/genapi -check` must pass.
+- **Local identity only** ([local identity](docs/local-identity.md)). Runtime identity config is explicit and private. Never load the real-cloud `.env`, gcloud config, or ambient ADC into the emulator.
+- **No anonymous shortcuts.** Never use an emulator's anonymous SDK mode (`PUBSUB_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST`) or the test-only credential adapter to claim IAM support.
+- **Recordings are evidence.** Update them only through the recorder; never edit expected values to match the emulator. Changing a scenario's `contract_files` invalidates its recording. Keep credentials and sensitive payloads out of fixtures, logs, and Git.
+- **Cloud spending needs explicit scope.** Normal development is local and deterministic. Live recording needs an authorized sandbox and cost scope; permission to edit code isn't that. Never fall back to real GCP when local emulation is missing.
+- **Separate claims.** Functional support, IAM verification, and analytical reachability are different claims. Report only the checks you ran.
+- **Quality gate.** Never add new Go or Python findings to the `quality/` baselines; fix or delete the code.
+- **Update [coverage](docs/coverage.md)** when behavior changes.
 
 ## Commands
 
-[CONTRIBUTING.md](CONTRIBUTING.md#checks) lists every check, what it verifies, where it runs, and what to install first. The host checks:
+[CONTRIBUTING.md](CONTRIBUTING.md#checks) lists every check, where it runs, and what to install. Host checks:
 
 ```sh
 sh scripts/setup_git.sh
@@ -46,15 +51,15 @@ python3 scripts/install_quality_tools.py
 .venv-tools/bin/python -m pytest
 ```
 
-Format with `sh scripts/go.sh fmt ./...`; run focused tests with `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`. Use the pinned worktree toolchain, not an ambient Go. Run the Linux checks in a moo task machine; run the repository and history checks on the host, because moo does not sync `.git`. Read [the validation guide](docs/validation.md) before writing a scenario.
+Format with `sh scripts/go.sh fmt ./...`; focused tests with `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`. Use the pinned toolchain, not an ambient Go. Run Linux checks in moo or CI; run `check_repo.py` and `check_history.py` on the host because moo doesn't sync `.git`. Read [validation](docs/validation.md) before writing a scenario.
 
 ## Git and GitHub
 
-- Keep commit messages short: one or two summary sentences followed by concise bullet points when there are details to capture. Use concrete changes and relevant validation; avoid long narratives. See `.gitmessage`.
-- Fast-forward-only integration: `git merge --ff-only`, followed by a normal push. No merge commits, squash merges, or GitHub Rebase and merge. If branches diverge, update the feature work on the current base and rerun checks; do not force-push `main` or rewrite another contributor's history.
-- Keep issue and PR descriptions short and reviewable: behavior, scope, acceptance criteria, dependencies, and validation. Link the issue. Do not claim an issue is complete until its acceptance criteria are met.
-- These files do not grant permission to publish, merge, create issues, or contact others beyond the user's current authorization.
+- Commit messages: one or two summary sentences, then concise bullets ([.gitmessage](.gitmessage)).
+- Fast-forward only: `git merge --ff-only`, then a normal push. No merge commits, squash merges, GitHub "Rebase and merge", or force-pushing `main`. If branches diverge, update the feature branch and rerun checks.
+- Issues and PRs: behavior, scope, acceptance criteria, dependencies, validation, and a link to the issue. Don't call an issue done until its criteria are met.
+- These files don't authorize publishing, merging, creating issues, or contacting anyone beyond what the user authorized.
 
-## Code Review Rules
+## Code review
 
-Flag authorization bypasses, backend access that skips the provider, shared state that leaks across projects or locations, fabricated conformance evidence, and asynchronous actions running under the wrong principal. Check that a claimed LocalStack-inspired abstraction has an actual source analogue or a documented GCP requirement.
+Flag authorization bypasses, backend access that skips the provider, state leaking across projects or locations, fabricated conformance evidence, and asynchronous work running under the wrong principal. Check that each claimed LocalStack-inspired abstraction has a source analogue or a documented GCP requirement.

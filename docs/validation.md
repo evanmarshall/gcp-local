@@ -1,80 +1,38 @@
-# Validation runners
+# Validation
 
-The foundation uses pytest and the same snapshot package pinned by archived LocalStack. Python is the test toolchain; Go is the runtime. Seven Storage scenarios were recorded and revalidated against real GCP on 2026-10-05 UTC, then matched by the actual emulator without egress. The Pub/Sub `pubsub-pull-authorization` scenario was recorded and revalidated the same way on 2026-10-09 UTC. See [Storage evidence](storage.md) and the [authorization matrix](authorization-baseline.md) for the exact scope. Ordinary offline harness checks do not execute those scenarios and cannot count as service coverage.
+Conformance scenarios run once against a real GCP sandbox to record behavior, then run against gcp-local in CI to check it still matches. The runner is a pytest plugin in `gcp_validation/` built on `localstack-snapshot`. Recordings live in `tests/conformance/recordings/<id>/`; [coverage](coverage.md) lists them per service.
 
-## Run offline checks
+## Modes
+
+| Mode | Required flags | What it does |
+| --- | --- | --- |
+| `offline` (default) | None | Runs harness tests only. Cloud scenarios don't execute. Python sockets are blocked except in `harness_loopback` tests. |
+| `local` | `--gcp-project`, `--gcp-endpoint` | Runs scenarios against a loopback endpoint and compares with the reviewed recording. Fails if the recording is missing or stale. Accepts no real credentials. |
+| `record` | `--gcp-profile` (or `--gcp-project`, `--gcp-credentials-file`, `--gcp-live-scope`), `--gcp-allow-live` | Runs against real GCP and writes an unreviewed candidate after tests and cleanup succeed. |
+| `revalidate` | Same as `record` | Runs against real GCP and compares with the reviewed recording. Never rewrites it. |
+
+Live modes need an authorized sandbox and cost scope ([sandbox setup](gcp-sandbox.md)). `--gcp-allow-live` is not a spending cap. Credentials are selected explicitly; the runner never reads ambient ADC, environment project settings, or `.env` on its own.
+
+## Run
+
+Offline harness:
 
 ```sh
-python3 -m venv .venv-tools
-.venv-tools/bin/python -m pip install -r requirements-tools.txt -r requirements-sdk.txt
 .venv-tools/bin/python -m pytest
 ```
 
-Inside an existing moo task machine, run the dependency install and pytest commands from `/srv/app`. The host owns source edits and Git checks. New dependencies need installing in existing machines; they do not update from a changed lockfile automatically.
-
-Results are written to `.artifacts/validation/junit.xml` and `coverage.json`. Use `--gcp-artifacts PATH` for separate concurrent runs. The JSON report separates harness tests from conformance, retains each outcome, and counts only reviewed GCP comparisons as verified. It includes current scenario SDK/provider/backend declarations and recorded baseline versions. Statuses are pass, divergence, unsupported, unverified, skipped, inconclusive, and error. Unknown behavior, skips, expected failures, and fresh recording candidates never become verified passes.
-
-## Explicit execution modes
-
-| Mode | Required target configuration | Behavior |
-| --- | --- | --- |
-| `offline` (default) | None | Run harness checks; cloud scenarios are unverified and do not execute. Python sockets are disabled except explicitly marked synthetic loopback tests. |
-| `local` | `--gcp-project`, `--gcp-endpoint` | Permit loopback TCP targets only; compare against reviewed GCP evidence and fail if it is absent or stale. No real credentials accepted. |
-| `record` | `--gcp-project`, `--gcp-credentials-file`, `--gcp-live-scope`, `--gcp-allow-live` | Allow an explicitly authorized live scenario; write a new, unreviewed candidate only after all tests and cleanup succeed. |
-| `revalidate` | Same explicit live inputs | Compare against a reviewed recording; report a successful cloud validation date without silently rewriting the baseline. |
-
-The live credential file is selected explicitly. The Storage adapter loads only the identities in the selected sandbox profile. No project or credential discovery uses environment variables or metadata services. `.env` is for [sandbox setup inputs](gcp-sandbox.md), not an automatic mode switch. The Storage adapter selects the fixed Google Storage endpoint in live modes and the explicit loopback endpoint in local mode. GitHub WIF and reusable project provisioning remain in #21.
-
-Example local invocation, once a matching service and baseline exist:
+Local comparison against the recordings, inside a Linux network namespace with only loopback:
 
 ```sh
-.venv-tools/bin/python -m pytest tests/conformance/test_storage*.py \
-  --gcp-mode local --gcp-project gcp-local-test \
-  --gcp-endpoint http://127.0.0.1:4566
+sh scripts/check_storage.sh          # Storage scenarios and the Storage SDK slice
+sh scripts/check_rest_recordings.sh  # every other REST recording
 ```
 
-Select scenarios for the service and transport at the chosen endpoint. The Storage runner selects only `test_storage*.py`; the separate [Pub/Sub recorder](pubsub-validation.md) uses its own gRPC endpoint and explicit identities. Collecting the entire conformance tree against a single service is not a valid comparison.
+Both build `tools/storage-conformance`, a test-only binary that maps the runner's synthetic `gcp-local-test:fixture`, `:allowed`, and `:denied` bearer tokens to principals. Everything else in it is the production gateway, IAM, provider, and backend. The production binary rejects those tokens. Pub/Sub has its own runner ([Pub/Sub](pubsub.md)).
 
-Live invocations add `--gcp-mode record` or `revalidate`, the dedicated sandbox project, an explicit ADC file, a description of the approved resource/cost scope, and `--gcp-allow-live`. A flag is not a spending cap. Do not run live until the sandbox scope is authorized. Credentials stay out of the moo baseline, test parameters, logs, and Git.
+Results go to `.artifacts/validation/junit.xml` and `coverage.json`; use `--gcp-artifacts PATH` to separate concurrent runs. Outcomes are pass, divergence, unsupported, unverified, skipped, inconclusive, and error. Only a reviewed GCP comparison counts as verified.
 
-`pytest-socket` guards Python socket use, including collection and test setup, in this runner. It is not a security sandbox: subprocesses, Go programs, native networking, and containers require their own egress isolation before upstream suites are enabled. Restrict live recording jobs to trusted code. Network override flags/markers are rejected; `harness_loopback` is only for synthetic harness tests.
-
-## Write a scenario
-
-Mark cloud scenarios with `gcp_scenario(id=..., service=..., transport=..., versions=...)`. Supply `versions` with `sdk`, `provider`, and `backend` string values; use `not-applicable` where appropriate. IDs are unique lowercase hyphenated names. The runner hashes the source module and any repository-relative `contract_files` as the scenario revision, so changed adapter/normalization behavior requires a reviewed baseline.
-
-Use `gcp_target` to configure the service client explicitly. Send selected public fields to `gcp_snapshot.match("operation-name", observation)`. Assert lifecycle, etag, and side effects in the test as well. Model resource setup/cleanup with pytest fixtures; service fixtures should depend on `gcp_snapshot` when they need the evidence preflight. The plugin compares or persists only after every teardown succeeds. Do not call snapshot finalization yourself.
-
-Do not pass whole SDK/HTTP objects or raw request/response dumps. The adapter accepts JSON values and rejects common credential fields, bearer tokens, private keys, and nonfinite numbers before buffering them. This check supplements scenario-specific field selection; it is not a general sensitive-data classifier. Request-shape normalization and service-specific redaction belong in the recorder (#9).
-
-Reviewed baselines live under `tests/conformance/recordings/SCENARIO_ID/` with `case.snapshot.json` and `provenance.json`. Recording produces unique candidate directories in the artifacts folder, with `reviewed: false`, source, versions, time, cleanup status, and a snapshot hash. After inspecting the observed behavior and sanitization, copy the pair to the baseline directory and set only the review flag. Never edit expected response values to make a local implementation pass. The adapter rejects synthetic evidence in cloud scenarios and does not honor upstream `SNAPSHOT_UPDATE`/`SNAPSHOT_RAW` environment flags.
-
-Raise `Unsupported`, `Unverified`, or `Inconclusive` from `gcp_validation.evidence` when those outcomes apply. They fail an explicitly selected suite and retain their classification in the report. Snapshot mismatches raise `Divergence`. Failed cleanup is an error and publishes no candidate. Synthetic fixture tests always label their provenance `source: synthetic` and cannot establish real-cloud verification.
-
-Permission minimization probes use a separate runner and report format; see [permission discovery](permission-discovery.md).
-
-## Open-source components and next adapters
-
-| Component | Use and license | Status |
-| --- | --- | --- |
-| [pytest](https://github.com/pytest-dev/pytest) 9.0.2 | Test lifecycle and JUnit; MIT | Installed |
-| [localstack-snapshot](https://github.com/localstack/localstack-snapshot) 0.3.3 | Snapshot comparison/persistence; Apache-2.0 | Installed through a small adapter, without its AWS-oriented pytest plugin |
-| [pytest-socket](https://github.com/miketheman/pytest-socket) 0.8.1 | Python network guards; MIT | Installed |
-| [Google SDK suites](https://github.com/googleapis/python-storage/tree/main/tests/system) | Selected client/transport tests; Apache-2.0 | Allowlist and pin source in [#23](https://github.com/evanmarshall/gcp-local/issues/23) |
-| [terraform-provider-google](https://github.com/hashicorp/terraform-provider-google) | Existing Go acceptance runner; MPL-2.0 | Pin source/provider/test IDs in [#10](https://github.com/evanmarshall/gcp-local/issues/10) |
-| [Terratest](https://github.com/gruntwork-io/terratest) | Optional cross-service orchestration; Apache-2.0 | Evaluate for #14 when orchestration is needed |
-| [Schemathesis](https://github.com/schemathesis/schemathesis) | Local REST property tests; MIT | Deferred until a supported OpenAPI contract exists; not a Discovery/gRPC/IAM oracle |
-
-All installed dependencies, including transitives, are pinned in `requirements-cloud.txt`. Transitive licenses: cachebox, deepdiff, iniconfig, orderly-set, and pluggy are MIT; jsonpath-ng is Apache-2.0; packaging is Apache-2.0 OR BSD-2-Clause; Pygments is BSD-2-Clause. PyYAML in the contributor requirements is MIT. No upstream suite is vendored or claimed as running yet.
-
-The runner versions follow [the archived LocalStack dependency list](https://github.com/localstack/localstack/blob/8b9a79f05846835cf4dff63ab7eefdde9df83783/requirements-test.txt). Update pins in reviewed changes, run dependency checks and the complete synthetic harness on Python 3.11/3.12, and explicitly review the private SnapshotSession methods used by the adapter. Keep GCP baselines unchanged during dependency upgrades; revalidation is a separate live task.
-
-
-## Bounded Storage lifecycle
-
-The scenario in `tests/conformance/test_storage.py` creates one private, regional Standard bucket with soft delete and versioning disabled. A separate fixture identity manages the bucket and grants Object User to the allowed caller. The scenario uploads a fixed synthetic payload, reads and lists it, checks a failed conditional overwrite preserves content/generation/etag, checks a denied upload leaves the object list unchanged, deletes the object, and verifies absence. Cleanup removes the owned bucket even when the scenario fails.
-
-Install the optional, pinned Google authentication dependencies for live runs:
+Record and revalidate, after authorization:
 
 ```sh
 .venv-tools/bin/python -m pip install -r requirements-cloud.txt
@@ -84,31 +42,52 @@ Install the optional, pinned Google authentication dependencies for live runs:
   --gcp-artifacts .artifacts/storage-record
 ```
 
-`--gcp-profile` supplies the explicit project, allowed credential path, and owner-provided scope; conflicting target overrides fail before resource creation. The initial local profile contract requires separate fixture, allowed, and denied ADC files from the dedicated project. Region and resource bounds are recorded in provenance, together with source-file and snapshot integrity hashes. The free-text authorization description and actual project/identity names are not persisted in snapshots.
+Repeat with `--gcp-mode revalidate` and a fresh artifacts directory.
 
-Inspect the new candidate pair before promoting it using the review procedure above. Then run the same command with `--gcp-mode revalidate` and a separate artifacts directory. Revalidation compares the same contract without rewriting the baseline. Local comparison uses the earlier local-mode command and the committed recording; it cannot load the live profile, use ambient proxies, or follow redirects to cloud endpoints.
+## Network isolation
 
-The initial local adapter sends explicit synthetic `gcp-local-test:fixture`, `:allowed`, and `:denied` bearer identities. Offline harness tests recognize these identities. The build-tagged `tools/storage-conformance` credential adapter now maps them to named principals while using the production gateway/IAM/Storage/backend; the production binary separately verifies opaque local ADC credentials and rejects the fixed fixture tokens. See [Storage verification](storage.md). The controlled-server recordings are always labeled synthetic and never count as GCP evidence.
+`scripts/run_isolated.py` runs a server and a test command in a Linux network namespace with only loopback. It waits up to 20 seconds for the readiness URL, enforces a deadline, kills both process groups, and strips cloud credential and proxy variables. Missing local methods fail; nothing falls back to Google. It needs Linux, `unshare`, `iproute2`, and root or namespace permission. On macOS use moo. `pytest-socket` alone is not isolation: subprocesses, Go programs, and containers bypass it.
 
-Each live scenario holds a per-project process lock and rejects an already occupied sandbox before creating another bucket. An owner-readable manifest is written under `~/.local/state/gcp-local/PROJECT_ID/` before mutations. Normal cleanup verifies both the numeric project and unique bucket ownership label. For an interrupted run, explicitly select its manifest:
+## Write a scenario
+
+1. Mark the test `gcp_scenario(id=..., service=..., transport=..., versions={"sdk": ..., "provider": ..., "backend": ...})`. IDs are unique, lowercase, and hyphenated. Use `not-applicable` for versions that don't apply.
+2. List repository files that shape the request or normalization in `contract_files`. The runner hashes them with the test module; changing either invalidates the recording.
+3. Configure the client from `gcp_target`. Model setup and cleanup as fixtures that depend on `gcp_snapshot`.
+4. Pass selected public fields, as JSON values, to `gcp_snapshot.match("operation-name", observation)`. Never pass whole SDK or HTTP objects. The adapter rejects credential fields, bearer tokens, and private keys, but it is not a sensitive-data classifier.
+5. Assert etags, lifecycle, and side effects in the test too; normalization must not hide them.
+6. Raise `Unsupported`, `Unverified`, or `Inconclusive` from `gcp_validation.evidence` when they apply. A mismatch raises `Divergence`. Failed cleanup is an error and publishes no candidate.
+
+The plugin compares or persists only after every teardown succeeds. Don't call snapshot finalization yourself. It ignores the upstream `SNAPSHOT_UPDATE` and `SNAPSHOT_RAW` flags.
+
+## Promote a recording
+
+A `record` run writes `case.snapshot.json` and `provenance.json` with `"reviewed": false` under the artifacts directory. Inspect the behavior and sanitization, copy both files to `tests/conformance/recordings/<id>/`, and set only `reviewed` to `true`. Never edit expected values to make the emulator pass. Synthetic evidence is labeled `source: synthetic` and never counts.
+
+## Interrupted live runs
+
+Each live Storage scenario takes a per-project lock and writes an owner-readable manifest under `~/.local/state/gcp-local/PROJECT_ID/` before it mutates anything. To clean up after a killed run:
 
 ```sh
 .venv-tools/bin/python -m gcp_validation.storage cleanup \
   --profile /absolute/path/to/.env --manifest /absolute/path/to/RUN_ID.json --allow-live
 ```
 
-Cleanup only visits manifest-owned object names in the matching bucket. It does not sweep unrelated buckets or repair ownership mismatches. A failed cleanup leaves the manifest pending and prevents candidate publication. Different developer machines must still coordinate use of the one-bucket sandbox; the local process lock is not a distributed lock.
+Cleanup touches only resources named in the manifest. The lock is per host; coordinate the one-bucket sandbox across machines yourself.
 
-The authentication lane reuses [google-auth](https://github.com/googleapis/google-auth-library-python) 2.56.2 (Apache-2.0), with all transitive versions pinned in `requirements-cloud.txt`. Its additional dependency licenses are: Requests Apache-2.0; urllib3 and charset-normalizer MIT; cffi MIT-0; cryptography Apache-2.0 OR BSD-3-Clause; certifi MPL-2.0; idna BSD-3-Clause; pyasn1 and pyasn1-modules BSD-2-Clause; pycparser BSD-3-Clause. Update these pins with the offline suite and explicit live revalidation. Cloud CLI bundles are not imported by the repository runner.
+## Storage SDK slice
 
+`tests/conformance/test_storage_sdk.py` runs three upstream tests from `google-cloud-storage==3.10.1` at [revision fce6a6b](https://github.com/googleapis/python-storage/tree/fce6a6bf4561eabc939c972bb92282be86fb6aec). The [vendored manifest](../third_party/python-storage/manifest.json) pins file hashes and lists fixture adaptations.
 
-The first reviewed [Storage recording](../tests/conformance/recordings/storage-object-lifecycle/provenance.json) was revalidated successfully on 2026-10-03 UTC. It covers only this JSON API lifecycle and one denied-create case. Subsequent [Storage coverage](storage.md) adds actual emulator, selected SDK, replacement, and authorization/isolation evidence; Terraform and broader IAM remain separate. The controlled-server comparison is a runner test, even when it matches the GCP baseline; its temporary report is not published as emulator coverage.
+| Upstream ID (`tests/system/test_blob.py::`) | Behavior |
+| --- | --- |
+| `test_blob_direct_write_and_read_into_file` | Multipart upload, metadata reload, download |
+| `test_blob_download_w_generation_match` | Generation preconditions |
+| `test_blob_crud_w_etag_match` | Etag match and not-match (412, 304) |
 
+The wrapper also lists with page size one and deletes with generation guards. `requirements-sdk.txt` is a contract file for this recording; changing it invalidates the recording. Other languages, resumable uploads, retries, ACLs, and retention are not covered.
 
-## Selected upstream SDK suite
+## Limits
 
-Install `requirements-sdk.txt` to run the pinned Google Python Storage slice; see [SDK compatibility](sdk-compatibility.md) for the source pin, exact upstream IDs, fixture adaptations, and coverage limits. The default harness CI installs these dependencies. Real SDK execution selects `tests/conformance/test_storage_sdk.py` through the same explicit profile and live flag as other scenarios. It uses the same owned Storage fixture and resource limits.
-
-Local upstream tests require process-level network isolation. Run the future provider and its tests together in the Linux namespace launcher described in that guide. A Python socket guard alone is not accepted for local SDK conformance. This also isolates helper subprocesses. No fallback to a networked runner or real GCP exists when local methods are absent.
-
-The [Terraform acceptance suite](terraform-compatibility.md) executes three adapted upstream Google provider cases and a failing-metadata negative control inside Linux isolation. It verifies create/read/update/refresh/import/destroy and unchanged plans for the selected Storage slice; it does not execute Terraform against GCP.
+- The manual cloud workflow (`cloud-conformance.yml`) runs only `test_storage.py` and `test_storage_authorization.py`. Run other live scenarios by hand.
+- Permission minimization uses a separate runner ([permission discovery](permission-discovery.md)).
+- Keep recordings unchanged during dependency upgrades; revalidation is a separate live task.

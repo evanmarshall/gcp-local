@@ -1,34 +1,31 @@
 # Core runtime
 
-The core process serves health/diagnostics and the [REST/gRPC dispatch layer](gateway.md). Enable [Storage](storage.md), [Pub/Sub](pubsub.md), or both with `-services storage,pubsub` and explicit local identity/IAM configuration. Pub/Sub additionally requires absolute Java and pinned emulator JAR paths. Unregistered methods return `501 UNIMPLEMENTED` or the corresponding gRPC status.
+`bin/gcp-local` is the single core process: gateway, identity, IAM, providers, and backend lifecycle ([design](design.md)). It builds with a Go toolchain pinned inside the checkout.
 
 ## Build and run
-
-Python 3.11+ installs the checksum-pinned Go toolchain into this checkout on macOS arm64 or Linux arm64/amd64. No global Go installation or cloud credentials are needed. [Local identity setup](local-identity.md) supplies optional private ADC and workload metadata configuration. Race-enabled tests require a C compiler: Xcode Command Line Tools on macOS, or `build-essential` on Debian/Ubuntu.
 
 ```sh
 python3 scripts/install_go.py
 sh scripts/check_go.sh
 bin/gcp-local -listen 127.0.0.1:4566 -grpc-listen 127.0.0.1:4567
-```
-
-From another terminal:
-
-```sh
 curl --fail http://127.0.0.1:4566/_local/health
-curl --fail http://127.0.0.1:4566/_local/diagnostics
 ```
 
-Health reports process readiness, registered providers, and observed backend states. The default process has no service providers or backend instances. Diagnostics reports Go/platform versions and never forwards to a backend. SIGINT or SIGTERM closes the API listeners and any configured metadata listener, drains active HTTP requests and gRPC calls, and exits successfully. `-shutdown-timeout` defaults to ten seconds; expiration forces connections closed and reports a nonzero exit. A bind failure on either listener also exits nonzero. Logs are JSON on stdout and omit request credentials. The default listener is loopback; binding another interface explicitly exposes the local process on that interface.
+- `install_go.py` installs the checksum-pinned Go from `toolchains/go.json` into `.tools/go` (macOS arm64, Linux arm64/amd64). `scripts/go.sh` runs it with `GOTOOLCHAIN=local`. Don't use an ambient Go.
+- Race tests need a C compiler: Xcode Command Line Tools or `build-essential`.
+- `check_go.sh` runs gofmt, `genapi -check`, vet, race tests, a build, and a process start/SIGTERM smoke.
+- Focused loop: `sh scripts/go.sh fmt ./...` and `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`.
+- Release builds set the version with `-ldflags '-X main.version=VERSION'`; the default is `dev`.
 
-For focused development, run `sh scripts/go.sh fmt ./...` and `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`. `check_go.sh` checks formatting, vets, runs race-enabled tests, builds, and exercises actual process startup/SIGTERM. CI runs it on Linux amd64; moo development runs it on Linux arm64. Toolchain and dependency choices are recorded in [the runtime decision](decisions/0001-runtime.md). The binary defaults to version `dev`; release builds can set `-ldflags '-X main.version=VERSION'`.
+## Flags
 
-## Moo
+- With no `-services`, no provider is registered and every API method returns `UNIMPLEMENTED` (HTTP 501). `-services` takes comma-separated keys; `SERVICE_FLAG` in `gcp_local/bootstrap.py` is the full list. `bin/gcp-local -h` lists every flag.
+- `-identity-config` and `-iam-config` take explicit owner-only files ([local identity](local-identity.md), [IAM](iam.md)).
+- Emulator-backed providers need absolute backend paths (`-pubsub-java`, `-pubsub-jar`, `-firestore-jar`, `-spanner-emulator`, `-redis-server`, `-cloudsql-postgres`). The [packaged environment](quickstart.md) sets all of them.
 
-In the task worktree, use the machine setup in [moo.md](moo.md), then:
+## Behavior
 
-```sh
-moo run task-name -- 'cd /srv/app && python3 scripts/install_go.py && sh scripts/check_go.sh'
-```
-
-For an existing baseline created before the runtime, install `build-essential` inside the task machine first (`moo run task-name -- 'apt-get update && apt-get install -y --no-install-recommends build-essential'`). Build outputs and the Go toolchain stay inside the guest. Tests use ephemeral loopback ports. To use the existing moo HTTP forwarding interactively, start `bin/gcp-local -listen 0.0.0.0:8080` inside that machine and use its configured host port. Host-forwarded gRPC remains unverified; current Pub/Sub transport tests use loopback inside the guest. The core owns [scoped backend lifecycle hooks](state-and-backends.md). The [packaged environment](quickstart.md) selects every implemented provider.
+- `/_local/health` reports readiness, registered providers, and backend states. `/_local/diagnostics` reports Go and platform versions. Neither calls a backend.
+- SIGINT or SIGTERM drains HTTP and gRPC calls, then stops backends. `-shutdown-timeout` (default 10s) forces close and exits nonzero when it expires. A bind failure exits nonzero.
+- Logs are JSON on stdout and omit credentials.
+- Listeners default to loopback. Binding another interface exposes the process there.

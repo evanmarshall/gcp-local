@@ -1,11 +1,21 @@
-# Runtime: Go
+# Decision: Go runtime, Python conformance
 
-Select Go for the emulator process and retain Python/pytest for conformance. Keep LocalStack's gateway → generated contracts → provider → scoped store/backend structure. This is an implementation-language choice, not a new orchestration framework or an AWS-runtime fork.
+The emulator process is Go. Conformance runners and repository tooling are Python with pytest.
 
-Go has maintained [gRPC streaming/cancellation support](https://github.com/grpc/grpc-go), [generated protobuf bindings](https://protobuf.dev/reference/go/go-generated/), and [Google's CEL implementation](https://github.com/google/cel-go). Its standard HTTP/JSON/context/process libraries cover the first REST gateway and backend lifecycle without a web framework. The selected Terraform provider's acceptance suite also uses Go. Local ADC/STS and metadata endpoints can use standard HTTP with SDK-driven conformance tests; container execution will use a pinned Docker API/CLI adapter when #13 needs it. Backends remain independent processes or containers; their implementation language does not select their authority over resources.
+## Why Go
 
-Python would align with LocalStack's source and the existing test runner, and supports HTTP/gRPC. However, the AWS-specific runtime is not reusable as a GCP server, and Go provides a direct path to the selected CEL/gRPC toolchain without bridging runtimes. Java also offers mature protobuf/gRPC/CEL libraries but would add a JVM distribution to this repository without a current requirement. Rust remains an option for a measured bottleneck; adopting another protocol/policy integration stack has no benefit established by the current scenarios. No performance claim is implied by this decision.
+- Maintained [gRPC with streaming and cancellation](https://github.com/grpc/grpc-go), [generated protobuf bindings](https://protobuf.dev/reference/go/go-generated/), and Google's [CEL implementation](https://github.com/google/cel-go) for IAM conditions.
+- The standard library covers HTTP, JSON, contexts, and child processes, so the gateway needs no web framework.
+- The Terraform google provider's acceptance suite is Go.
 
-Start with Go 1.26.8, pinned with per-platform checksums in `toolchains/go.json` from the [official release feed](https://go.dev/dl/?mode=json). Install into `.tools/go` inside each worktree/machine; do not replace a developer's global Go. The wrapper sets `GOTOOLCHAIN=local`, so build/test commands never silently fetch a different toolchain. Commit `go.mod`/`go.sum` for runtime dependencies and pin generators and their source inputs separately. Add gRPC/protobuf when #4 needs them and CEL when supported IAM conditions need it, rather than preinstalling unused frameworks.
+## Alternatives
 
-One process owns dispatch, identity, IAM, provider state, and lifecycle orchestration. Start only an HTTP health endpoint in #3; unknown API paths explicitly report unimplemented behavior. Subsequent issues add actual service contracts, and diagnostics never forward to a backend. Provider workers retain responsibility for their asynchronous operations; no general workflow engine is introduced.
+- **Python** matches LocalStack and the test runner, but LocalStack's AWS runtime isn't reusable for GCP, and Go reaches the gRPC and CEL toolchain without a bridge.
+- **Java** has the same libraries but would add a JVM to the core for no current need.
+- **Rust** stays an option for a measured bottleneck. No performance claim is made.
+
+## Rules that follow
+
+- Go is pinned with per-platform checksums in `toolchains/go.json` and installed into `.tools/go` per worktree. `scripts/go.sh` sets `GOTOOLCHAIN=local`.
+- Commit `go.mod` and `go.sum`. Add a dependency only when a provider needs it.
+- One process owns dispatch, identity, IAM, provider state, and lifecycle. Backends are separate processes or embedded libraries. There is no general workflow engine.
