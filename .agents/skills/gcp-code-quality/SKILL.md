@@ -26,7 +26,7 @@ Never widen a baseline or add an allowlist entry to make a change pass. Pick one
 2. **Fix it.** Refactor until the linter passes without a suppression.
 3. **Record why it's deliberate.** A disable in `quality/golangci.yml`, a `per-file-ignores` entry in `pyproject.toml`, or a line in `quality/dead-code-go.txt` must name the contract that requires the code. Disable a linter only when it can't find a defect here.
 
-Use `--update-baseline` only after a change removes findings. Baselines only shrink.
+Use `--update-baseline` only after a change removes findings. Baselines only shrink: `--update-baseline` refuses to raise any rule's total, and the gate fails when a committed baseline has more findings per rule than in the previous commit. Moving code between files is fine.
 
 ## Questions before adding structure
 

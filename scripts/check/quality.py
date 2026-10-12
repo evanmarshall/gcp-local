@@ -172,6 +172,73 @@ def compare(
     return failures
 
 
+def rule_totals(counts: collections.Counter[tuple[str, str]]) -> collections.Counter[str]:
+    """Sum findings per rule, so moving code between files doesn't count as growth."""
+    totals: collections.Counter[str] = collections.Counter()
+    for (rule, _), count in counts.items():
+        totals[rule] += count
+    return totals
+
+
+def previous_baseline(path: Path) -> collections.Counter[tuple[str, str]] | None:
+    """Read a baseline as committed in HEAD's parent, or None without that history."""
+    result = run(["git", "show", f"HEAD~1:{path.relative_to(ROOT).as_posix()}"])
+    if result.returncode != 0:
+        return None
+    counts = collections.Counter()
+    for line in result.stdout.splitlines():
+        if line.strip() and not line.startswith("#"):
+            count, rule, name = line.split(None, 2)
+            counts[(rule, name)] = int(count)
+    return counts
+
+
+def growth(
+    candidate: collections.Counter[tuple[str, str]],
+    reference: collections.Counter[tuple[str, str]],
+) -> list[str]:
+    """Return the rules whose total in candidate exceeds reference."""
+    before, after = rule_totals(reference), rule_totals(candidate)
+    return [
+        f"{rule}: {before.get(rule, 0)} -> {count}"
+        for rule, count in sorted(after.items())
+        if count > before.get(rule, 0)
+    ]
+
+
+def update_baselines(
+    go: collections.Counter[tuple[str, str]], python: collections.Counter[tuple[str, str]]
+) -> int:
+    """Rewrite the baselines from current findings, refusing any growth."""
+    grown = growth(go, read_counts(GO_BASELINE)) + growth(python, read_counts(PYTHON_BASELINE))
+    if grown:
+        print(
+            "Refusing to grow a baseline; fix the findings instead: " + "; ".join(grown),
+            file=sys.stderr,
+        )
+        return 1
+    write_counts(GO_BASELINE, go)
+    write_counts(PYTHON_BASELINE, python)
+    print(
+        f"Baseline rewritten: {sum(go.values())} Go and {sum(python.values())} Python finding(s)."
+    )
+    return 0
+
+
+def baselines_grew() -> bool:
+    """Fail when a committed baseline gained findings since the previous commit."""
+    failed = False
+    for path in (GO_BASELINE, PYTHON_BASELINE):
+        previous = previous_baseline(path)
+        grown = growth(read_counts(path), previous) if previous is not None else []
+        if grown:
+            print(
+                f"{path.name} grew since the previous commit: " + "; ".join(grown), file=sys.stderr
+            )
+            failed = True
+    return failed
+
+
 def summarize(counts: collections.Counter[tuple[str, str]], label: str, rules: int = 6) -> None:
     """Format the top findings of one language for the quality report."""
     print(
@@ -200,16 +267,11 @@ def main() -> int:
     unused = python_dead_code()
 
     if arguments.update_baseline:
-        write_counts(GO_BASELINE, go)
-        write_counts(PYTHON_BASELINE, python)
-        print(
-            f"Baseline rewritten: {sum(go.values())} Go and "
-            f"{sum(python.values())} Python finding(s)."
-        )
-        return 0
+        return update_baselines(go, python)
 
     failures = compare(go, read_counts(GO_BASELINE), "Go")
     failures |= compare(python, read_counts(PYTHON_BASELINE), "Python")
+    failures |= baselines_grew()
 
     allowed = {entry for entry, _ in read_reasons(GO_DEAD_ALLOWLIST)}
     for entry, reason in read_reasons(GO_DEAD_ALLOWLIST):
