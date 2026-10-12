@@ -21,11 +21,8 @@ from google.api_core.exceptions import Forbidden, PreconditionFailed
 from google.auth.transport.requests import AuthorizedSession, Request
 from google.cloud import storage
 
-
-def private_json(path: Path, value: object) -> None:
-    """Write a value as private JSON for a synthetic credential file."""
-    path.write_text(json.dumps(value))
-    path.chmod(0o600)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from gcp_local.bootstrap import private_json
 
 
 def write_identity_configs(directory: Path) -> list[dict[str, str]]:
@@ -69,8 +66,8 @@ def build_clients(
     principals: list[dict[str, str]],
     endpoint: str,
     transport_session: "requests.Session",
-) -> tuple[list, list, list]:
-    """Build one authenticated Storage client per principal over the local endpoint."""
+) -> tuple[list[storage.Client], list[AuthorizedSession]]:
+    """Build one authenticated Storage client and session per principal."""
     clients, sessions = [], []
     transport = Request(session=transport_session)
     for principal in principals:
@@ -108,7 +105,7 @@ def build_clients(
                 client_options={"api_endpoint": endpoint},
             )
         )
-    return clients, sessions, [credentials]
+    return clients, sessions
 
 
 def object_lifecycle(clients: list, principals: list[dict[str, str]]) -> None:
@@ -163,7 +160,7 @@ def expect_precondition(action: Callable[[], object]) -> None:
     raise AssertionError("Stale precondition succeeded")
 
 
-def main() -> int:
+def main() -> None:
     """Exercise the storage runner end to end against the local emulator."""
     assert sys.platform == "linux"
     assert os.environ.get("GCP_LOCAL_ISOLATED") == "1"
@@ -221,10 +218,10 @@ def main() -> int:
 
             transport_session = LocalSession()
             sessions.append(transport_session)
-            clients, _sessions, _creds = build_clients(
+            clients, principal_sessions = build_clients(
                 directory, principals, endpoint, transport_session
             )
-            sessions.extend(_sessions)
+            sessions.extend(principal_sessions)
             object_lifecycle(clients, principals)
             # A raw bearer token is not an identity: it must be rejected.
             assert (
@@ -255,7 +252,6 @@ def main() -> int:
         "Production binary: local ADC, SDK bucket/object CRUD, "
         "replacement, revocation, and cleanup passed."
     )
-    return 0
 
 
 if __name__ == "__main__":

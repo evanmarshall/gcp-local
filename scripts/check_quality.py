@@ -158,7 +158,7 @@ def compare(
     return failures
 
 
-def summarize(counts: collections.Counter[tuple[str, str]], label: str, rules: int = 6) -> str:
+def summarize(counts: collections.Counter[tuple[str, str]], label: str, rules: int = 6) -> None:
     """Format the top findings of one language for the quality report."""
     print(
         f"{label}: {sum(counts.values())} baselined finding(s) in {len(counts)} rule/file pair(s)"

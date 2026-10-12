@@ -4,6 +4,7 @@
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable
 
 GIT = shutil.which("git") or "git"
 
@@ -28,7 +29,7 @@ def is_zero(oid: str) -> bool:
     return bool(oid) and set(oid) == {"0"}
 
 
-def check_push(lines: list[str]) -> None:
+def check_push(lines: Iterable[str]) -> None:
     """Validate the commits that a push would publish."""
     for line in lines:
         fields = line.split()

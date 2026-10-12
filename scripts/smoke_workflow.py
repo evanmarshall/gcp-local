@@ -21,7 +21,6 @@ and ``down`` must remove the environment's containers.
 import argparse
 import json
 import os
-import secrets
 import shutil
 import stat
 import subprocess
@@ -41,6 +40,9 @@ from google.cloud import pubsub_v1
 from google.pubsub_v1.services.publisher.transports.grpc import PublisherGrpcTransport
 from smoke_cloudrun import start_core
 from smoke_support import free_ports
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from gcp_local import bootstrap
 
 REPO = Path(__file__).resolve().parents[1]
 SERVE_SOCKET = 9298
@@ -74,17 +76,8 @@ PACKAGED_WORKER = "/usr/local/bin/python3 -I /opt/gcp-local/workflow/worker.py"
 REFUSAL_WINDOW = 8.0
 
 
-def private_file(directory: Path, name: str, content: str) -> Path:
-    """Write one owner-only file in an owner-only directory."""
-    directory.chmod(stat.S_IRWXU)
-    path = directory / name
-    path.write_text(content)
-    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    return path
-
-
 def write_iam(directory: Path) -> Path:
-    """Grant the developer the project roles the Terraform apply needs."""
+    """Grant the developer only the project roles the Terraform apply needs."""
     resource = "//cloudresourcemanager.googleapis.com/projects/" + PROJECT
     roles = ["roles/storage.admin", "roles/pubsub.admin", "roles/run.admin",
              "roles/iam.serviceAccountAdmin", "roles/iam.serviceAccountUser"]
@@ -95,35 +88,22 @@ def write_iam(directory: Path) -> Path:
         "policies": {resource: {"bindings": [
             {"role": role, "members": [DEVELOPER]} for role in roles]}},
     }
-    return private_file(directory, "iam.json", json.dumps(iam))
+    path = directory / "iam.json"
+    bootstrap.private_json(path, iam)
+    return path
 
 
 def write_identity(directory: Path) -> tuple[Path, Path, Path]:
-    """Enroll the developer and the worker; return server, SDK ADC, and Terraform ADC."""
-    developer_token = "gls." + secrets.token_urlsafe(32)
-    principals = [
-        {"subject": DEVELOPER, "project": PROJECT, "subject_token": developer_token},
-        # The worker's metadata enrollment: the run provider serves its tokens
-        # to the revision; Terraform creates the matching account record.
-        {"subject": "serviceAccount:" + WORKER_EMAIL, "project": PROJECT,
-         "subject_token": "gls." + secrets.token_urlsafe(32)},
-    ]
-    server = private_file(directory, "server.json", json.dumps(
-        {"token_lifetime_seconds": 3600, "principals": principals}))
-    subject = private_file(directory, "subject.txt", developer_token)
-    adc = {
-        "type": "external_account",
-        "audience": "//gcp-local/identity",
-        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
-        "token_url": BASE + "/v1/token",
-        "credential_source": {"file": str(subject)},
-    }
-    sdk_adc = private_file(directory, "adc.json", json.dumps(adc))
-    # The google provider refuses a universe_domain override unless the
-    # credential names the same universe; the Python SDKs compare it against
-    # their own default instead, so they keep the unmarked file.
-    adc["universe_domain"] = "gcp-local.invalid"
-    return server, sdk_adc, private_file(directory, "terraform-adc.json", json.dumps(adc))
+    """Enroll the developer and the worker; return server, SDK ADC, and Terraform ADC.
+
+    The worker's enrollment backs its Cloud Run metadata tokens; Terraform
+    creates the matching account record.
+    """
+    identity = directory / "identity"
+    bootstrap.write_identity(
+        identity, project=PROJECT, principal=DEVELOPER, endpoint=BASE, workloads=[WORKER_EMAIL]
+    )
+    return identity / "server.json", identity / "adc.json", identity / "terraform-adc.json"
 
 
 class Local(NamedTuple):

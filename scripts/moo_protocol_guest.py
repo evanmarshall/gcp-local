@@ -18,8 +18,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def process_start(pid: int) -> float:
-    """Find the start time of a process by pid."""
+def process_start(pid: int) -> str:
+    """Return the process start time field, which distinguishes a reused pid."""
     # The final ')' ends comm, which can itself contain spaces or parentheses.
     return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
 

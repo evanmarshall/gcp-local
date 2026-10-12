@@ -3,10 +3,12 @@
 import hashlib
 import json
 from collections import Counter
+from collections.abc import Generator
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import pluggy
 import pytest
 import pytest_socket
 
@@ -238,7 +240,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
-def pytest_runtest_teardown(item: pytest.Item) -> None:
+def pytest_runtest_teardown(item: pytest.Item) -> Generator[None, object, None]:
     """Restore the default socket guard after each test."""
     yield
     network_policy(item.config)
@@ -319,7 +321,9 @@ def status_of(
 
 
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
-def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[object]) -> None:
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[object]
+) -> Generator[None, pluggy.Result[pytest.TestReport], None]:
     """Record per-phase outcomes and finalize the evidence case on teardown."""
     outcome = yield
     report = outcome.get_result()

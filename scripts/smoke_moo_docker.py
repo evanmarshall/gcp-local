@@ -37,7 +37,7 @@ print(json.dumps({'local_token_exchange':True,'storage_write_read':True,'network
 """
 
 
-def main() -> int:
+def main() -> None:
     """Probe the native arm64 core and Storage in a task-guest container."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -52,7 +52,14 @@ def main() -> int:
         or not args.docker_host.startswith("unix:///")
     ):
         parser.error("Run in an arm64 Moo task guest with an explicit Unix Docker socket")
-    image = (ROOT / "Dockerfile").read_text().splitlines()[0].split()[1]
+    # The first stage's base image, skipping flags such as --platform.
+    image = next(
+        word
+        for line in (ROOT / "Dockerfile").read_text().splitlines()
+        if line.startswith("FROM ")
+        for word in line.split()[1:]
+        if not word.startswith("--")
+    )
     if "@sha256:" not in image:
         raise ValueError("The diagnostic base image must be digest pinned")
     run_id = uuid4().hex

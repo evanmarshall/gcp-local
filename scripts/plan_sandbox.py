@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import shlex
+from typing import Any
 
 APIS = (
     "serviceusage.googleapis.com",
@@ -28,8 +29,8 @@ def plan(
     repository: str,
     repository_id: str,
     owner_id: str,
-) -> list[str]:
-    """Return the gcloud sequence that provisions a dedicated sandbox project."""
+) -> dict[str, Any]:
+    """Return the checked gcloud steps that provision a dedicated sandbox project."""
     for value, pattern in (
         (project, r"[a-z][a-z0-9-]{4,28}[a-z0-9]"),
         (project_number, r"[0-9]{6,20}"),
@@ -65,7 +66,10 @@ def plan(
     steps = []
 
     def add(
-        label: str, command: str, check: str | None = None, expected: str | None = None
+        label: str,
+        command: list[str],
+        check: list[str] | None = None,
+        expected: dict[str, object] | None = None,
     ) -> None:
         """Record one command and the output it must produce."""
         steps.append(
@@ -186,8 +190,8 @@ def plan(
     }
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Print or execute the sandbox provisioning plan."""
+def main(argv: list[str] | None = None) -> None:
+    """Print the sandbox provisioning plan as JSON or as reviewable shell commands."""
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in (
         "project",

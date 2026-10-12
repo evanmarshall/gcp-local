@@ -61,7 +61,7 @@ ROLES = {
 }
 
 
-def main() -> int:
+def main() -> None:
     """Record a candidate of allowlisted predefined service roles (read-only)."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--account", required=True)

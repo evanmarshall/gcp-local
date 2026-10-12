@@ -89,44 +89,44 @@ def build_image(tag: str, *, dockerless: bool) -> tuple[str, str]:
     if dockerless:
         # The process runtime runs the same server file directly.
         return tag, command
-    build = subprocess.run(
-        [DOCKER, "build", "-t", tag, str(context)], check=True, capture_output=True
-    )
-    assert build.returncode == 0
+    subprocess.run([DOCKER, "build", "-t", tag, str(context)], check=True, capture_output=True)
     return tag, ""
 
 
-def write_configs(project: str = "demo-run", extra_roles: list[str] | None = None,
-                  accounts: list[str] | None = None) -> Path:
-    """Write an owner-only IAM configuration and return its directory."""
-    roles = extra_roles or []
+def write_configs() -> Path:
+    """Write an owner-only IAM configuration and return its path."""
     directory = Path(tempfile.mkdtemp())
     directory.chmod(stat.S_IRWXU)
-    project = "demo-run"
-    resource = "//cloudresourcemanager.googleapis.com/projects/" + project
+    resource = "//cloudresourcemanager.googleapis.com/projects/demo-run"
     iam = {
         "resources": [{"name": resource, "service": "resourcemanager", "kind": "project",
                        # A real-shaped numeric project number: the push
                        # contract requires one without leading zeros.
                        "number": "123456789012",
-                       "scope": {"project": project, "location": "global"}}],
+                       "scope": {"project": "demo-run", "location": "global"}}],
         # The smoke drives the control plane without a local identity mount,
         # so its fixture principal is allUsers; the invoker contract under test
         # is enforced per service, not here.
         "policies": {resource: {"bindings": [
             {"role": "roles/run.admin", "members": ["allUsers"]},
-        ] + [{"role": role, "members": ["allUsers"]} for role in roles]}},
+        ]}},
     }
-    if accounts:
-        iam["service_accounts"] = [
-            {"project": project, "email": email,
-             "unique_id": str(10**15 + (sum(map(ord, email)) % (10**15 - 1)))}
-            for email in accounts
-        ]
     path = directory / "iam.json"
     path.write_text(json.dumps(iam))
     path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     return path
+
+
+def answers(port: int) -> bool:
+    """Report whether anything serves the loopback health URL, even with an error."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:" + str(port) + "/_local/health", timeout=1):
+            pass
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+    return True
 
 
 def start_core(
@@ -137,13 +137,8 @@ def start_core(
     """Start the core with the selected providers and revision runtime."""
     # A stale server from an earlier crashed run would answer health checks
     # with a different identity config and poison the run; fail loudly here.
-    try:
-        urllib.request.urlopen("http://127.0.0.1:" + str(port) + "/_local/health", timeout=1)
+    if answers(port):
         raise RuntimeError("Port " + str(port) + " is already served by an earlier run")
-    except urllib.error.HTTPError as error:
-        raise RuntimeError("Port " + str(port) + " is already served by an earlier run") from error
-    except (urllib.error.URLError, TimeoutError, OSError):
-        pass
     logs = Path(tempfile.gettempdir()) / ("gcp-local-core-" + str(port) + ".log")
     log_handle = logs.open("w")
     process = subprocess.Popen(
@@ -160,9 +155,8 @@ def start_core(
             *(("--pubsub-jar", pubsub_jar) if pubsub_jar else ()),
             "--services",
             services,
-            *(("--run-docker-socket", "/var/run/docker.sock") if not any(
-                flag == "--run-process" for flag in extra_flags
-            ) else ()),
+            *(("--run-docker-socket", "/var/run/docker.sock")
+              if "--run-process" not in extra_flags else ()),
             *extra_flags,
         ],
         # File-backed logs: a chatty child (the Java emulator) must never
@@ -185,8 +179,7 @@ def start_core(
         except (urllib.error.URLError, TimeoutError, OSError):
             time.sleep(0.3)
     process.terminate()
-    stderr = process.stderr.read() if process.stderr else ""
-    raise AssertionError("The core did not become ready: " + stderr)
+    raise AssertionError("The core did not become ready; see " + str(logs))
 
 
 def invoke(host: str, headers: dict[str, str] | None = None, timeout: int = 15) -> tuple[int, str]:
@@ -260,10 +253,9 @@ def containers_before(*, dockerless: bool) -> str:
 
 def main() -> int:
     """Build the core and the acceptance image, then run the sequence."""
-    build = subprocess.run(
+    subprocess.run(
         [sys.executable, "scripts/install_go.py"], check=True, capture_output=True, text=True
     )
-    assert build.returncode == 0, build.stdout + build.stderr
     binary = REPO / "bin" / "gcp-local"
     subprocess.run(
         ["/bin/sh", str(REPO / "scripts/go.sh"), "build", "-o", str(binary), "./cmd/gcp-local"],
@@ -272,7 +264,7 @@ def main() -> int:
     )
     dockerless = shutil.which(DOCKER) is None
     image, process_command = build_image(IMAGE, dockerless=dockerless)
-    extra = () if not dockerless else ("--run-process", image + "=" + process_command)
+    extra = ("--run-process", image + "=" + process_command) if dockerless else ()
     before = containers_before(dockerless=dockerless)
     iam_path = write_configs()
     core = start_core(binary, iam_path, extra_flags=extra)

@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 
-def main() -> int:
+def main() -> None:
     """Install the checksum-pinned Go toolchain inside this checkout."""
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / "toolchains/go.json").read_text())

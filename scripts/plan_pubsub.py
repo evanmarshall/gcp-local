@@ -6,13 +6,14 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gcp_validation.pubsub_scope import LIMITS, private_json
 from gcp_validation.sandbox import Sandbox
 
 
-def plan(profile: str, setup_account: str) -> list[str]:
+def plan(profile: Sandbox, setup_account: str) -> dict[str, Any]:
     """Return the offline Pub/Sub setup and recording command plan."""
     if not re.fullmatch(r"[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", setup_account):
         raise ValueError("Select an explicit setup account")
@@ -80,7 +81,7 @@ def plan(profile: str, setup_account: str) -> list[str]:
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> None:
     """Print the plan; never run gcloud or approve it."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True)

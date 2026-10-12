@@ -68,7 +68,7 @@ def install_go_module(name: str, config: dict[str, object]) -> None:
     print(f"{name} {config['version']}")
 
 
-def main() -> int:
+def main() -> None:
     """Install every pinned quality tool with verified checksums."""
     config = json.loads((ROOT / "toolchains/quality.json").read_text())
     DESTINATION.mkdir(parents=True, exist_ok=True)

@@ -255,8 +255,8 @@ def inspect(root: Path) -> dict[str, object]:
     }
 
 
-def doctor(report: dict, endpoint: str) -> None:
-    """Probe a local runtime endpoint and record the service profile."""
+def doctor(report: dict, endpoint: str) -> bool:
+    """Probe a local runtime, record its profile, and report whether every service is served."""
     parsed = urlsplit(endpoint)
     try:
         local = ipaddress.ip_address(parsed.hostname or "").is_loopback and parsed.port
@@ -340,9 +340,9 @@ def read_health(profile: dict) -> tuple[dict, list]:
     return value, providers
 
 
-def write_report(root: Path, relative: str, report: dict) -> None:
+def write_report(root: Path, output: str, report: dict) -> None:
     """Write the report to a repository-relative JSON path, refusing takeovers."""
-    relative = Path(relative)
+    relative = Path(output)
     if relative.is_absolute() or ".." in relative.parts or relative.suffix != ".json":
         raise ValueError("Report output must be a repository-relative JSON path")
     path = root

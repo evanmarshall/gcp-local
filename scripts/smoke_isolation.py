@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 
-def probe() -> int:
+def probe() -> None:
     """Prove loopback works and external routes are absent."""
     assert {name for _, name in socket.if_nameindex()} == {"lo"}
     for family, address in (
@@ -32,7 +32,7 @@ def probe() -> int:
     )
 
 
-def main() -> int:
+def main() -> None:
     """Run the isolation probe inside the isolated child process."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--child", action="store_true")

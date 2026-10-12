@@ -153,7 +153,7 @@ def create(client: storage.Client) -> storage.Bucket:
     return client.create_bucket(bucket, location="us-central1", retry=None, timeout=5)
 
 
-def verify_isolation(configuration: dict[str, object], probe_image: str) -> None:
+def verify_isolation(configuration: dict[str, Any], probe_image: str) -> None:
     """Require a loopback-only network, read-only root filesystem, and unprivileged user."""
     network = subprocess.check_output(
         [DOCKER, "network", "inspect", configuration["compose_project"] + "_backend"], text=True
@@ -249,42 +249,64 @@ def verify_doctor(directory: Path, temporary: Path) -> None:
 
 
 def local_call(
-    endpoint: str, method: str, path: str, body: bytes | None = None, **headers: str
+    endpoint: str,
+    method: str,
+    path: str,
+    body: bytes | None = None,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: int = 90,
 ) -> tuple[int, bytes]:
-    """Issue one loopback request without proxies or redirects."""
+    """Issue one loopback request without proxies; return the status and raw reply."""
     if body is None and method == "POST":
         body = b"{}"
     # The endpoint is the environment's own numeric loopback base from env.
-    request = HTTPRequest(endpoint + path, data=body, method=method, headers=headers)  # noqa: S310
+    request = HTTPRequest(endpoint + path, data=body, method=method, headers=headers or {})  # noqa: S310
     try:
-        with build_opener(ProxyHandler({})).open(request, timeout=90) as response:
+        with build_opener(ProxyHandler({})).open(request, timeout=timeout) as response:
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
 
 
-def verify_services(directory: Path) -> None:
-    """Require every packaged service to allow the developer and refuse an ungranted identity."""
+def bearer(token: str) -> dict[str, str]:
+    """Return the authorization header for one access token."""
+    return {"Authorization": "Bearer " + token}
+
+
+def json_headers(token: str) -> dict[str, str]:
+    """Return the headers of an authenticated JSON request."""
+    return {**bearer(token), "Content-Type": "application/json"}
+
+
+def environment_tokens(directory: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """Return the environment settings and an access token per enrolled account name."""
     env = json.loads(cli(directory, "env").stdout)
-    endpoint, project = env["GCP_LOCAL_ENDPOINT"], env["GOOGLE_CLOUD_PROJECT"]
     principals = json.loads((directory / "identity/server.json").read_text())["principals"]
     tokens = {
         principal["subject"].split(":", 1)[1].split("@", 1)[0]: exchange(
-            endpoint, principal["subject_token"]
+            env["GCP_LOCAL_ENDPOINT"], principal["subject_token"]
         )
         for principal in principals
     }
+    return env, tokens
+
+
+def verify_services(directory: Path) -> None:
+    """Require every packaged service to allow the developer and refuse an ungranted identity."""
+    env, tokens = environment_tokens(directory)
+    endpoint, project = env["GCP_LOCAL_ENDPOINT"], env["GOOGLE_CLOUD_PROJECT"]
     assert set(tokens) == {"developer", UNGRANTED}
     covered = set()
     for service, method, template in SERVICE_PROBES:
         path = template.format(project=project)
         request = PROBE_BODIES.get(service)
         allowed, body = local_call(
-            endpoint, method, path, request, Authorization="Bearer " + tokens["developer"]
+            endpoint, method, path, request, headers=bearer(tokens["developer"])
         )
         assert allowed == 200, f"{service} refused the developer: {allowed} {body[:200]!r}"
         denied, body = local_call(
-            endpoint, method, path, request, Authorization="Bearer " + tokens[UNGRANTED]
+            endpoint, method, path, request, headers=bearer(tokens[UNGRANTED])
         )
         assert denied == 403, f"{service} did not refuse an ungranted caller: {denied}"
         anonymous, _ = local_call(endpoint, method, path, request)
@@ -414,28 +436,19 @@ def expect_closed(port: int, probe: bytes) -> None:
 
 def developer_token(directory: Path) -> tuple[str, str, str]:
     """Return the endpoint, project, and a developer access token for one environment."""
-    env = json.loads(cli(directory, "env").stdout)
-    endpoint = env["GCP_LOCAL_ENDPOINT"]
-    principals = json.loads((directory / "identity/server.json").read_text())["principals"]
-    developer = next(p for p in principals if p["subject"].startswith("serviceAccount:developer@"))
-    return endpoint, env["GOOGLE_CLOUD_PROJECT"], exchange(endpoint, developer["subject_token"])
+    env, tokens = environment_tokens(directory)
+    return env["GCP_LOCAL_ENDPOINT"], env["GOOGLE_CLOUD_PROJECT"], tokens["developer"]
 
 
 def api(endpoint: str, token: str, method: str, path: str, body: object = None) -> dict:
     """Call the local API as the developer and require success."""
     data = None if body is None else json.dumps(body).encode()
-    request = HTTPRequest(  # noqa: S310 -- the environment's loopback endpoint
-        endpoint + path,
-        data=data,
-        method=method,
-        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+    status, reply = local_call(
+        endpoint, method, path, data, headers=json_headers(token), timeout=180
     )
-    try:
-        with build_opener(ProxyHandler({})).open(request, timeout=180) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as error:
-        message = f"{method} {path}: {error.code} {error.read()[:500]!r}"
-        raise AssertionError(message) from None
+    if not 200 <= status < 300:
+        raise AssertionError(f"{method} {path}: {status} {reply[:500]!r}")
+    return json.loads(reply)
 
 
 def verify_redis(directory: Path, *, auth: bool = True) -> None:
@@ -510,15 +523,9 @@ def verify_cloudsql(directory: Path) -> None:
 
 def json_call(endpoint: str, method: str, path: str, token: str, body: object) -> tuple[int, Any]:
     """Issue one authenticated loopback JSON request and decode the reply."""
-    request = HTTPRequest(  # noqa: S310 -- the environment's own numeric loopback base
-        endpoint + path, data=json.dumps(body).encode(), method=method,
-        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
-    )  # fmt: skip
-    try:
-        with build_opener(ProxyHandler({})).open(request, timeout=90) as response:
-            return response.status, json.loads(response.read() or b"{}")
-    except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read() or b"{}")
+    data = json.dumps(body).encode()
+    status, reply = local_call(endpoint, method, path, data, headers=json_headers(token))
+    return status, json.loads(reply or b"{}")
 
 
 def varint(value: int) -> bytes:
@@ -536,20 +543,6 @@ def field(number: int, value: bytes | int) -> bytes:
     if isinstance(value, int):
         return varint(number << 3) + varint(value)
     return varint(number << 3 | 2) + varint(len(value)) + value
-
-
-def developer_tokens(directory: Path) -> tuple[dict[str, str], str, str]:
-    """Return the environment settings and the developer and ungranted access tokens."""
-    env = json.loads(cli(directory, "env").stdout)
-    endpoint = env["GCP_LOCAL_ENDPOINT"]
-    principals = json.loads((directory / "identity/server.json").read_text())["principals"]
-    tokens = {
-        principal["subject"].split(":", 1)[1].split("@", 1)[0]: exchange(
-            endpoint, principal["subject_token"]
-        )
-        for principal in principals
-    }
-    return env, tokens["developer"], tokens[UNGRANTED]
 
 
 def spanner_rows(env: dict[str, str], developer: str, ungranted: str) -> str:
@@ -619,7 +612,8 @@ def grpc_status(
 
 def verify_dataplane(directory: Path) -> None:
     """Write and read Spanner and Bigtable rows through the packaged gateway, IAM enforced."""
-    env, developer, ungranted = developer_tokens(directory)
+    env, tokens = environment_tokens(directory)
+    developer, ungranted = tokens["developer"], tokens[UNGRANTED]
     session = spanner_rows(env, developer, ungranted)
     table = bigtable_table(env, developer).encode()
     set_cell = field(1, b"cf") + field(2, b"c") + field(3, 1000) + field(4, b"v")
@@ -696,29 +690,12 @@ def teardown(directories: Sequence[Path]) -> None:
             failures.append(str(directory))
         if (directory / "environment.json").exists():
             project = json.loads((directory / "environment.json").read_text())["compose_project"]
-            remaining = subprocess.check_output(
-                [
-                    DOCKER,
-                    "ps",
-                    "-aq",
-                    "--filter",
-                    "label=com.docker.compose.project=" + project,
-                ],
-                text=True,
-            )
-            assert remaining.strip() == "", "Packaged teardown left an owned container"
-            networks = subprocess.check_output(
-                [
-                    DOCKER,
-                    "network",
-                    "ls",
-                    "-q",
-                    "--filter",
-                    "label=com.docker.compose.project=" + project,
-                ],
-                text=True,
-            )
-            assert networks.strip() == "", "Packaged teardown left an owned network"
+            owned = "label=com.docker.compose.project=" + project
+            for kind, listing in (("container", "ps -aq"), ("network", "network ls -q")):
+                remaining = subprocess.check_output(
+                    [DOCKER, *listing.split(), "--filter", owned], text=True
+                )
+                assert remaining.strip() == "", "Packaged teardown left an owned " + kind
     assert not failures, "Teardown failed for: " + ", ".join(failures)
 
 

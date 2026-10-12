@@ -15,8 +15,8 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(command: str, timeout: int = 60) -> str:
-    """Run a multipass command in the guest machine."""
+def run(command: list[str], timeout: int = 60) -> str:
+    """Run a host command from the checkout and return its stdout, raising on failure."""
     result = subprocess.run(
         command, cwd=ROOT, capture_output=True, text=True, timeout=timeout, check=False
     )
@@ -25,7 +25,21 @@ def run(command: str, timeout: int = 60) -> str:
     return result.stdout
 
 
-def main() -> int:
+def half_close(port: int) -> str:
+    """Send one payload, close the send half, and classify what the forwarder returns."""
+    payload = b"gcp-local-moo-half-close"
+    with socket.create_connection(("127.0.0.1", port), timeout=3) as connection:
+        connection.settimeout(3)
+        connection.sendall(payload)
+        connection.shutdown(socket.SHUT_WR)
+        try:
+            received = connection.recv(1024)
+        except TimeoutError:
+            return "timeout-waiting-for-response"
+    return "response-after-fin" if received == b"ACK:" + payload else "closed-before-response"
+
+
+def main() -> None:
     """Check gRPC forwarding and TCP send-half-close behavior."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -65,7 +79,7 @@ def main() -> int:
         command = shlex.join(
             ["python3", "/srv/app/scripts/moo_protocol_guest.py", action, "--run", identifier]
         )
-        return run(["moo", "run", args.machine, "--", command])
+        run(["moo", "run", args.machine, "--", command])
 
     checks = []
     for restart in (False, True):
@@ -81,20 +95,7 @@ def main() -> int:
     identifier = uuid4().hex
     try:
         guest("start-tcp", identifier)
-        payload = b"gcp-local-moo-half-close"
-        with socket.create_connection(("127.0.0.1", ports[0]), timeout=3) as connection:
-            connection.settimeout(3)
-            connection.sendall(payload)
-            connection.shutdown(socket.SHUT_WR)
-            try:
-                received = connection.recv(1024)
-                tcp = (
-                    "response-after-fin"
-                    if received == b"ACK:" + payload
-                    else "closed-before-response"
-                )
-            except TimeoutError:
-                tcp = "timeout-waiting-for-response"
+        tcp = half_close(ports[0])
     finally:
         guest("stop", identifier)
     # Preserve the stronger loopback-only test as a distinct result.

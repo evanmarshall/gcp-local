@@ -23,7 +23,7 @@ BUCKET_IAM_MEMBER_HCL = (
 )
 
 
-def main() -> int:
+def main() -> None:
     """Reproduce the pinned acceptance slice and its local adaptations."""
     root = Path(__file__).resolve().parents[1]
     source = root / "third_party/terraform-provider-google"

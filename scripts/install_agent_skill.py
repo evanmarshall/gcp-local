@@ -26,7 +26,7 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def safe_path(root: Path, relative: str) -> Path:
+def safe_path(root: Path, relative: Path) -> Path:
     """Resolve a path inside the skill bundle, refusing escapes."""
     if relative.is_absolute() or ".." in relative.parts:
         raise ValueError("Installation paths must stay inside the application repository")
@@ -156,7 +156,7 @@ def install(repository: Path, *, apply: bool = False) -> dict[str, object]:
     return plan
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> None:
     """Install or verify the agent skill from this repository."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True)
