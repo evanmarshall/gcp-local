@@ -94,4 +94,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and the [issue tracker](https://github.co
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Vendored Google API discovery documents under `api/discovery/` keep their Apache-2.0 license.

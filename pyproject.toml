@@ -11,7 +11,7 @@ dynamic = ["version"]
 description = "Start, reset, and stop a private local GCP emulator environment with local ADC and IAM."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "Apache-2.0"
+license = "MIT"
 license-files = ["LICENSE"]
 dependencies = []
 classifiers = [
