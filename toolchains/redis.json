@@ -1,0 +1,16 @@
+{
+  "name": "Redis server (official source release)",
+  "version": "7.2.16",
+  "retrieved_at": "2026-10-11",
+  "url": "https://download.redis.io/releases/redis-7.2.16.tar.gz",
+  "size": 3410977,
+  "sha256": "960a8ec15e34ff40e57ff16837b26b33bd81f2da6d24497bb63de532a323a18e",
+  "hash_source": "https://github.com/redis/redis-hashes/blob/master/README",
+  "license": "BSD-3-Clause (COPYING in the 7.2 source release; later Redis lines changed license)",
+  "memorystore_version": "REDIS_7_2",
+  "platforms": ["linux/amd64", "linux/arm64"],
+  "make_arguments": ["BUILD_TLS=no", "USE_SYSTEMD=no"],
+  "build_requirements": "a C compiler and make; the build uses only the bundled dependencies (jemalloc, lua, hiredis, linenoise, hdr_histogram, fpconv)",
+  "outputs": ["redis-server", "redis-cli"],
+  "distribution": "Source is downloaded and built locally; no binaries are vendored. Compiled outputs are not byte-reproducible across compilers, so the pin is the source checksum plus the reported server version."
+}

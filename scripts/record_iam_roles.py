@@ -54,6 +54,7 @@ ROLES = {
         "iam.serviceAccountAdmin", "iam.serviceAccountKeyAdmin", "iam.serviceAccountViewer",
     ),
     "resourcemanager": ("resourcemanager.projectIamAdmin",),
+    "redis": ("redis.admin", "redis.editor", "redis.viewer"),
 }
 
 

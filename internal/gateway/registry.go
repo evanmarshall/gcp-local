@@ -93,6 +93,7 @@ func (r *Registry) registerRoutes() {
 		{generated.IAMRoutes, "iam"},
 		{generated.CloudTasksRoutes, "cloudtasks"},
 		{generated.PubSubRestRoutes, servicePubsub},
+		{generated.RedisRoutes, "redis"},
 	}
 	for _, table := range tables {
 		for _, route := range table.routes {

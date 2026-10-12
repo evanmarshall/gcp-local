@@ -1,0 +1,9 @@
+{
+  "source": "https://raw.githubusercontent.com/googleapis/discovery-artifact-manager/216801337c83bb5a81d5e31ec2e62850910c8fd5/discoveries/redis.v1.json",
+  "revision": "20260812",
+  "retrieved_at": "2026-10-11",
+  "sha256": "780a2f82bb108bebe8488855bab0ea9070ff9ae37e71239562d1303db22802eb",
+  "license": "Apache-2.0",
+  "scope": "Memorystore for Redis v1 REST route descriptors; generation selects an explicit method allowlist and makes no claim of provider support",
+  "commit": "216801337c83bb5a81d5e31ec2e62850910c8fd5"
+}

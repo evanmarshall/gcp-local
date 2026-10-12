@@ -27,6 +27,7 @@ import (
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/iam"
+	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
@@ -108,6 +109,7 @@ type serveOptions struct {
 	services, pubsubJava, pubsubJAR    string
 	firestoreJava, firestoreJAR        string
 	spannerEmulator, spannerLibraries  string
+	redisServer                        string
 	metadataPrincipal                  string
 	showVersion                        bool
 }
@@ -128,6 +130,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.firestoreJAR, "firestore-jar", "", "absolute checksum-pinned Firestore emulator JAR")
 	flags.StringVar(&options.spannerEmulator, "spanner-emulator", "", "absolute checksum-pinned Spanner emulator_main binary (Linux only)")
 	flags.StringVar(&options.spannerLibraries, "spanner-libraries", "", "absolute directory holding the emulator's pinned libstdc++.so.6")
+	flags.StringVar(&options.redisServer, "redis-server", "", "absolute redis-server built by scripts/install_redis.py (Memorystore)")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
 	flags.StringVar(&options.runSocket, "run-docker-socket", "", "Docker engine socket for Cloud Run containers; empty refuses launch")
 	flags.Var(processMap{&options.runProcess}, "run-process", "dockerless revision launch: image=command; repeatable; commands run as local processes")
@@ -285,6 +288,9 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleSpanner(ctx, options, selected, registry, server, index, engine); err != nil {
 		return err
 	}
+	if err := assembleMemorystore(ctx, options, selected, registry, server, index, engine); err != nil {
+		return err
+	}
 	for _, assemble := range []struct {
 		service  string
 		register func(context.Context, map[string]bool, *gateway.Registry, *core.Server, *state.Index, *iam.Engine) error
@@ -389,6 +395,18 @@ func assembleSpanner(ctx context.Context, options serveOptions, selected map[str
 	config := spannerprovider.Config{Emulator: options.spannerEmulator, Libraries: options.spannerLibraries}
 	if _, err := spannerprovider.New(ctx, registry, server.Backends, index, engine, config); err != nil {
 		return fmt.Errorf("register the Spanner provider: %w", err)
+	}
+	return nil
+}
+
+// assembleMemorystore registers the Memorystore for Redis provider ("redis").
+func assembleMemorystore(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["redis"] {
+		return nil
+	}
+	config := memorystoreprovider.Config{Server: options.redisServer}
+	if _, err := memorystoreprovider.New(ctx, registry, server.Backends, index, engine, config); err != nil {
+		return fmt.Errorf("register the Memorystore provider: %w", err)
 	}
 	return nil
 }
