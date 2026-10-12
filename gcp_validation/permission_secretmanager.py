@@ -184,6 +184,12 @@ def numbered(name: str, project: str, number: str) -> set[str]:
 def query_testable(transport: Transport, full_resource_name: str) -> dict[str, str]:
     """Map each testable permission on a resource to its custom-role support level."""
     levels, token = {}, None
+    # Observed live: service resources (secrets) must name the project by number
+    # here, or the call is 400 INVALID_ARGUMENT; project resources accept the ID.
+    if full_resource_name.startswith('//secretmanager.googleapis.com/projects/'):
+        project = full_resource_name.split('/')[4]
+        full_resource_name = full_resource_name.replace(
+            f'/projects/{project}/', f'/projects/{transport.number}/', 1)
     for _ in range(MAX_TESTABLE_PAGES):
         body = {'fullResourceName': full_resource_name, 'pageSize': 1000}
         if token:

@@ -101,7 +101,22 @@ sh scripts/go.sh run ./tools/permission-plans -service secretmanager > /tmp/plan
   --out .artifacts/permission-drift/RUN
 ```
 
-## Live plan (prepared, not executed)
+## First live result
+
+Executed against the sandbox on 2026-10-12 (UTC) with the plan below and the secret attachment.
+Result: **conclusive**, minimal set `{secretmanager.versions.access}` over 11 trials (control,
+baseline, six removals, a restoration after the required permission was removed, and the final
+confirmation); `secretmanager.secrets.get`, `secrets.getIamPolicy`, `secrets.listEffectiveTags`,
+`secrets.listTagBindings`, `versions.get`, and `versions.list` were proven unnecessary for this
+request. Five candidates were excluded as `NOT_APPLICABLE` at a secret attachment. Cleanup passed,
+the temporary fixture grants were revoked, and the drift report shows **no drift** against the
+local Secret Manager plan. Evidence: `tests/permission/recordings/secretmanager-versions-access/`.
+
+The first attempt stopped inconclusive before any trial: `queryTestablePermissions` returns 400
+INVALID_ARGUMENT for a secret named with the project ID and only accepts the project-number form
+(project resources accept the ID). The runner now sends the number form.
+
+## Live plan
 
 Expected result, a hypothesis rather than evidence: `{secretmanager.versions.access}`. This
 follows Google's Secret Manager access-control documentation and the recorded
@@ -150,7 +165,8 @@ Steps for the owner's operator, with `requirements-cloud.txt` installed:
 # 6. Offline: drift as above; review before changing anything.
 ```
 
-Not yet verified: the permissions `queryTestablePermissions` needs (assumed none beyond
+Verified by the first run: `queryTestablePermissions` worked with the fixture identity; it needs
+the project-number resource form for secrets. Still unverified: the permissions it needs (assumed none beyond
 authentication) and the support levels it returns for these candidates; whether every
 secret-testable candidate is accepted by the secret's `testIamPermissions`; real
 grant/revocation propagation times against the 420-second bound; and the response shape of

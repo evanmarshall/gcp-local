@@ -1,0 +1,442 @@
+{
+  "claim": "Scenario-scoped: one acting identity, one request shape, one initial state, and one grant location. A minimal set found by greedy removal is one sufficient set, not proof of every authorization path.",
+  "cleanup": "passed",
+  "excluded": {
+    "resourcemanager.projects.get": "NOT_APPLICABLE",
+    "resourcemanager.projects.list": "NOT_APPLICABLE",
+    "secretmanager.locations.get": "NOT_APPLICABLE",
+    "secretmanager.locations.list": "NOT_APPLICABLE",
+    "secretmanager.secrets.list": "NOT_APPLICABLE"
+  },
+  "executed_at": "2026-10-12T00:27:17.429243+00:00",
+  "grant": {
+    "attachment": "secret",
+    "attachment_resource": "//secretmanager.googleapis.com/projects/<project>/secrets/gcp-local-probe-<run>",
+    "grantor": "fixture",
+    "mechanism": "custom-role",
+    "member": "serviceAccount:<allowed>",
+    "role": "projects/<project>/roles/gcp_local_probe_<run>",
+    "role_level": "project"
+  },
+  "kind": "gcp-local-permission-probe",
+  "limits": {
+    "max_custom_roles": 1,
+    "max_operation_seconds": 60,
+    "max_propagation_seconds": 420,
+    "max_requests": 800,
+    "max_role_updates": 12,
+    "max_run_seconds": 7200,
+    "max_secrets": 1,
+    "max_trials": 16,
+    "poll_interval_seconds": 15,
+    "removal_confirmations": 3
+  },
+  "result": {
+    "conclusive_findings": {
+      "not_required": [
+        "secretmanager.secrets.get",
+        "secretmanager.secrets.getIamPolicy",
+        "secretmanager.secrets.listEffectiveTags",
+        "secretmanager.secrets.listTagBindings",
+        "secretmanager.versions.get",
+        "secretmanager.versions.list"
+      ],
+      "required": [
+        "secretmanager.versions.access"
+      ]
+    },
+    "inconclusive": {
+      "permissions": [],
+      "trials": [],
+      "unconfirmed_not_required": []
+    },
+    "minimal_permissions": [
+      "secretmanager.versions.access"
+    ],
+    "status": "conclusive",
+    "stopped": null
+  },
+  "reviewed": true,
+  "scenario": {
+    "acting_identity": "allowed",
+    "api_version": "v1",
+    "check_target": "//secretmanager.googleapis.com/projects/<project>/secrets/gcp-local-probe-<run>",
+    "method": "secretmanager.versions.access",
+    "preconditions": {
+      "caller_quota_project": "Service Usage Consumer on the sandbox",
+      "grantor": "fixture",
+      "secret_policy": "probe binding only",
+      "secret_replication": "automatic",
+      "version_state": "ENABLED",
+      "versions": 1
+    },
+    "request_features": {
+      "features": {},
+      "http_method": "GET",
+      "path": "/v1/projects/{project}/secrets/{secret}/versions/{version}:access",
+      "version_reference": "numeric"
+    },
+    "service": "secretmanager"
+  },
+  "schema": 1,
+  "seed": {
+    "permissions": [
+      "resourcemanager.projects.get",
+      "resourcemanager.projects.list",
+      "secretmanager.locations.get",
+      "secretmanager.locations.list",
+      "secretmanager.secrets.get",
+      "secretmanager.secrets.getIamPolicy",
+      "secretmanager.secrets.list",
+      "secretmanager.secrets.listEffectiveTags",
+      "secretmanager.secrets.listTagBindings",
+      "secretmanager.versions.access",
+      "secretmanager.versions.get",
+      "secretmanager.versions.list"
+    ],
+    "sources": {
+      "roles/secretmanager.secretAccessor": "9e8af4dabe272fe68689c9a2d9efb44e671e7e9d1c5ef1bb0d7b261ab4f634d8",
+      "roles/secretmanager.viewer": "0a3ead573662c0bf3a51a754bcf8b1dece30a3fb46f7b1723310a6fb7c1dc450"
+    }
+  },
+  "source": "gcp",
+  "spent": {
+    "custom_role": 1,
+    "request": 167,
+    "role_update": 8,
+    "secret": 1,
+    "trial": 11
+  },
+  "trials": [
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": false,
+      "granted": [],
+      "http_status": 403,
+      "index": 0,
+      "kind": "control",
+      "outcome": "denied",
+      "propagation": {
+        "attempts": 1,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 1
+      },
+      "reason": "IAM_PERMISSION_DENIED",
+      "removed": null,
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.secrets.get",
+        "secretmanager.secrets.getIamPolicy",
+        "secretmanager.secrets.listEffectiveTags",
+        "secretmanager.secrets.listTagBindings",
+        "secretmanager.versions.access",
+        "secretmanager.versions.get",
+        "secretmanager.versions.list"
+      ],
+      "http_status": 200,
+      "index": 1,
+      "kind": "baseline",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 1,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 1
+      },
+      "reason": null,
+      "removed": null,
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.secrets.getIamPolicy",
+        "secretmanager.secrets.listEffectiveTags",
+        "secretmanager.secrets.listTagBindings",
+        "secretmanager.versions.access",
+        "secretmanager.versions.get",
+        "secretmanager.versions.list"
+      ],
+      "http_status": 200,
+      "index": 2,
+      "kind": "removal",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 3,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 31
+      },
+      "reason": null,
+      "removed": "secretmanager.secrets.get",
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.secrets.listEffectiveTags",
+        "secretmanager.secrets.listTagBindings",
+        "secretmanager.versions.access",
+        "secretmanager.versions.get",
+        "secretmanager.versions.list"
+      ],
+      "http_status": 200,
+      "index": 3,
+      "kind": "removal",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 3,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 31
+      },
+      "reason": null,
+      "removed": "secretmanager.secrets.getIamPolicy",
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.secrets.listTagBindings",
+        "secretmanager.versions.access",
+        "secretmanager.versions.get",
+        "secretmanager.versions.list"
+      ],
+      "http_status": 200,
+      "index": 4,
+      "kind": "removal",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 3,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 108
+      },
+      "reason": null,
+      "removed": "secretmanager.secrets.listEffectiveTags",
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.versions.access",
+        "secretmanager.versions.get",
+        "secretmanager.versions.list"
+      ],
+      "http_status": 200,
+      "index": 5,
+      "kind": "removal",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 3,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 123
+      },
+      "reason": null,
+      "removed": "secretmanager.secrets.listTagBindings",
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.versions.get",
+        "secretmanager.versions.list"
+      ],
+      "http_status": 403,
+      "index": 6,
+      "kind": "removal",
+      "outcome": "denied",
+      "propagation": {
+        "attempts": 1,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 92
+      },
+      "reason": "IAM_PERMISSION_DENIED",
+      "removed": "secretmanager.versions.access",
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.versions.access",
+        "secretmanager.versions.get",
+        "secretmanager.versions.list"
+      ],
+      "http_status": 200,
+      "index": 7,
+      "kind": "restoration",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 1,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 1
+      },
+      "reason": null,
+      "removed": null,
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.versions.access",
+        "secretmanager.versions.list"
+      ],
+      "http_status": 200,
+      "index": 8,
+      "kind": "removal",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 3,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 108
+      },
+      "reason": null,
+      "removed": "secretmanager.versions.get",
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": true,
+      "granted": [
+        "secretmanager.versions.access"
+      ],
+      "http_status": 200,
+      "index": 9,
+      "kind": "removal",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 3,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 108
+      },
+      "reason": null,
+      "removed": "secretmanager.versions.list",
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    },
+    {
+      "acting_identity": "allowed",
+      "conclusive": true,
+      "detail": null,
+      "grant_changed": false,
+      "granted": [
+        "secretmanager.versions.access"
+      ],
+      "http_status": 200,
+      "index": 10,
+      "kind": "confirmation",
+      "outcome": "allowed",
+      "propagation": {
+        "attempts": 22,
+        "hint": "converged",
+        "max_seconds": 420,
+        "operation": null,
+        "poll_seconds": 15,
+        "waited_seconds": 320
+      },
+      "reason": null,
+      "removed": null,
+      "state": {
+        "after_matches_initial": true,
+        "before_matches_initial": true
+      },
+      "status": null
+    }
+  ]
+}
