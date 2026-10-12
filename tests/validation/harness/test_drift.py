@@ -26,7 +26,7 @@ def test_plan_names_existing_tests_and_scopes() -> None:
 
 @pytest.mark.parametrize("path", scopes(), ids=lambda path: path.stem)
 def test_scope_is_scheduled_and_revalidate_only(path: Path) -> None:
-    """A drift scope authorizes revalidate and refuses record and cleanup."""
+    """A drift scope authorizes revalidate and cleanup and refuses record."""
     value = json.loads(path.read_text())
     assert value["scheduled_runs"] is True
     fields = {
@@ -37,9 +37,9 @@ def test_scope_is_scheduled_and_revalidate_only(path: Path) -> None:
         "label": path.stem,
     }
     check_scope(value, mode="revalidate", **fields)
-    for mode in ("record", "cleanup"):
-        with pytest.raises(ValueError, match="only revalidate"):
-            check_scope(value, mode=mode, **fields)
+    check_scope(value, mode="cleanup", **fields)
+    with pytest.raises(ValueError, match="never authorizes record"):
+        check_scope(value, mode="record", **fields)
 
 
 def test_workflow_is_main_only_pinned_and_keeps_credentials_out_of_artifacts() -> None:

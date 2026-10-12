@@ -32,14 +32,14 @@ def test_unscheduled_scope_authorizes_record_revalidate_and_cleanup():
         check(approved(), mode)
 
 
-def test_scheduled_scope_authorizes_revalidate():
-    check(approved(scheduled_runs=True), "revalidate")
-
-
-@pytest.mark.parametrize("mode", ["record", "cleanup"])
-def test_scheduled_scope_never_authorizes_record_or_cleanup(mode):
-    with pytest.raises(ValueError, match="only revalidate"):
+def test_scheduled_scope_authorizes_revalidate_and_cleanup():
+    for mode in ("revalidate", "cleanup"):
         check(approved(scheduled_runs=True), mode)
+
+
+def test_scheduled_scope_never_authorizes_record():
+    with pytest.raises(ValueError, match="never authorizes record"):
+        check(approved(scheduled_runs=True), "record")
 
 
 @pytest.mark.parametrize("value", [1, 0, "true", None])
@@ -100,6 +100,6 @@ def test_load_scope_file_requires_a_file_and_a_sandbox(tmp_path):
     path.write_text(json.dumps(approved(scheduled_runs=True)))
     assert load_scope_file(path, SANDBOX, service="thing", limits=LIMITS, mode="revalidate",
                            label="Thing", option="--scope")["scheduled_runs"] is True
-    with pytest.raises(ValueError, match="only revalidate"):
+    with pytest.raises(ValueError, match="never authorizes record"):
         load_scope_file(path, SANDBOX, service="thing", limits=LIMITS, mode="record",
                         label="Thing", option="--scope")

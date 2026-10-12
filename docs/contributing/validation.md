@@ -21,7 +21,7 @@ Recordings are integration tests. Each conformance scenario runs once against a 
 
 Live modes need an authorized sandbox and cost scope ([sandbox setup](gcp-sandbox.md)). `--gcp-allow-live` is not a spending cap. Credentials are selected explicitly; the runner never reads ambient ADC, environment project settings, or `.env` on its own.
 
-Each service's scope file is checked by one contract (`gcp_validation/scope.py`): `approved: true`, the sandbox project and number, the scenario's exact limits, and `cleanup_required: true`. `scheduled_runs` is a bool; `true` marks a scope for the scheduled drift job and authorizes only `revalidate`, never `record` or a manual cleanup.
+Each service's scope file is checked by one contract (`gcp_validation/scope.py`): `approved: true`, the sandbox project and number, the scenario's exact limits, and `cleanup_required: true`. `scheduled_runs` is a bool; `true` marks a scope for the scheduled drift job and authorizes `revalidate` and the manifest-owned cleanup after an interruption, never `record`.
 
 ## Run
 

@@ -2,8 +2,8 @@
 
 A scope file names one service, the sandbox project and number, fixed limits,
 and the cleanup contract. ``scheduled_runs: true`` marks a scope for the
-scheduled drift job; it authorizes only ``revalidate`` runs, never ``record``
-or a manual cleanup.
+scheduled drift job; it authorizes ``revalidate`` runs and the manifest-owned
+``cleanup`` after an interruption, never ``record``.
 """
 
 import json
@@ -68,8 +68,8 @@ def check_scope(
         raise ValueError(
             f"{label} scope must match the approved project, fixed limits, and cleanup contract"
         )
-    if value["scheduled_runs"] and mode != "revalidate":
-        raise ValueError(f"A scheduled {label} scope authorizes only revalidate runs, not {mode}")
+    if value["scheduled_runs"] and mode == "record":
+        raise ValueError(f"A scheduled {label} scope never authorizes record runs")
 
 
 def load_scope_file(
