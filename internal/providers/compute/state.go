@@ -105,8 +105,13 @@ type instanceRecord struct {
 	Subnetwork  string
 	IP          string
 	Labels      map[string]string
-	Generation  int64
-	CreatedAt   time.Time
+	// The instance's network tags and the email of the service account it
+	// runs as ("" for none); firewall rules can be scoped to either.
+	Tags           []string
+	ServiceAccount string
+	Scopes         []string
+	Generation     int64
+	CreatedAt      time.Time
 }
 
 // routerRecord is one stored Cloud Router with its NAT gateways.

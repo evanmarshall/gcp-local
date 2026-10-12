@@ -49,7 +49,11 @@ def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
     names = {key: [entry.name for entry in members] for key, members in lanes.items()}
     assert len(names["storage"]) >= 10
     assert len(names["cloudsql"]) == 2
-    compute = {"compute-networking-test_networking", "compute-vmconnectivity-test_vmconnectivity"}
+    compute = {
+        "compute-networking-test_networking",
+        "compute-vmconnectivity-test_vmconnectivity",
+        "compute-vmserviceaccounts-test_vmserviceaccounts",
+    }
     assert set(names["compute"]) == compute
     assert [entry.name for entry in alone] == ["security-resourcemanager-test_policy"]
     assert all("resourcemanager" not in name for members in names.values() for name in members)

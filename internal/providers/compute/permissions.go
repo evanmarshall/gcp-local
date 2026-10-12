@@ -47,6 +47,7 @@ var permissions = map[string]string{
 	methodInstancesList:         "compute.instances.list",
 	methodInstancesDelete:       "compute.instances.delete",
 	methodZoneOperationsGet:     "compute.zoneOperations.get",
+	methodInstancesActAs:        "iam.serviceAccounts.actAs",
 }
 
 // extraPermissions are the documented additional checks of a method: creating

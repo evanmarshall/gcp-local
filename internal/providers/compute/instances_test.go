@@ -1,12 +1,15 @@
 package compute
 
 import (
-	"github.com/evanmarshall/gcp-local/internal/providers/provider"
-
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
 // Names of the VM connectivity topology, mirroring the recorded scenario.
@@ -238,15 +241,15 @@ func TestInstanceEndpointsKeepAddressPathsHonest(t *testing.T) {
 	if verdict := h.analyzeFlow("10.10.0.9", "10.10.0.50", 8080); verdict.Result != verdictUnknown {
 		t.Fatalf("unowned address = %+v", verdict)
 	}
-	// A tagged ingress rule that could decide the flow is an explicit gap.
+	// A rule scoped to tags or service accounts that could decide an
+	// IP-address flow is an explicit gap: scoped rules need instance endpoints.
 	h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
-		keyName: "tagged", keyNetwork: "projects/demo-net/global/networks/" + vmNetA, keyDirection: directionIngress,
-		"targetTags": []any{"web"}, "allowed": []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"9090"}}},
+		keyName: "tagged-egress", keyNetwork: "projects/demo-net/global/networks/" + vmNetA, keyDirection: directionEgress,
+		"targetTags": []any{"web"}, "denied": []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{"8080"}}},
 	}, 200)
-	h.expectCode(http.MethodPost, connectivityTests+"?testId=t-tagged", map[string]any{
-		keySource:      map[string]any{kindInstance: instanceRef(vmOne)},
-		keyDestination: map[string]any{kindInstance: instanceRef(vmTwo), keyPort: 9090},
-	}, 501)
+	if verdict := h.analyzeFlow("10.10.0.9", "10.10.0.50", 8080); verdict.Result != verdictUnsupported {
+		t.Fatalf("address flow with a scoped egress rule = %+v", verdict)
+	}
 }
 
 // Names of the service-account scenario, mirroring vm-firewall-service-accounts.
@@ -255,27 +258,189 @@ const (
 	saTag     = "gl-web"
 )
 
+// declareAccount declares a local service account and, when actAs is set,
+// lets the harness principal act as it.
+func (h *harness) declareAccount(email string, actAs bool) {
+	h.t.Helper()
+	account := iam.AccountResource(testProject, email)
+	if err := h.index.Put("iam", state.Resource{
+		Name: account, Service: "iam", Kind: "serviceAccount", Number: "100000000000000000001",
+		Parent: "//cloudresourcemanager.googleapis.com/projects/" + testProject,
+		Scope:  state.Scope{Project: testProject, Location: state.Global},
+	}); err != nil {
+		h.t.Fatalf("declare %s: %v", email, err)
+	}
+	if !actAs {
+		return
+	}
+	if _, err := h.engine.SetPolicy(account, iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:actor@demo-net.iam.gserviceaccount.com"}},
+	}}); err != nil {
+		h.t.Fatalf("grant actAs on %s: %v", email, err)
+	}
+}
+
+// scopedTopology builds the recorded service-account topology: vm2 runs as
+// the account, vm1 carries the tag, and one rule per port is scoped by
+// account or tag (plus an EGRESS deny scoped to the account).
+func (h *harness) scopedTopology() {
+	h.t.Helper()
+	h.declareAccount(saAccount, true)
+	h.topology(vmNetA, vmSubnetA, testRangeA)
+	withAccount := vmBody(vmTwo, vmSubnetA)
+	withAccount["serviceAccounts"] = []any{map[string]any{"email": saAccount, "scopes": []any{"https://www.googleapis.com/auth/cloud-platform"}}}
+	withTag := vmBody(vmOne, vmSubnetA)
+	withTag["tags"] = map[string]any{"items": []any{saTag}}
+	for _, body := range []map[string]any{withAccount, withTag} {
+		if status, errs := operationErrors(h.t, h.invoke(http.MethodPost, zonePath+"/instances", body)); status != "DONE" || len(errs) != 0 {
+			h.t.Fatalf("instance %v operation = %s %v", body[keyName], status, errs)
+		}
+	}
+	ranges := []any{testRangeA}
+	for _, rule := range []map[string]any{
+		{keyName: "fw-target-sa", "sourceRanges": ranges, "targetServiceAccounts": []any{saAccount}, "allowed": tcp("8080")},
+		{keyName: "fw-source-sa", "sourceServiceAccounts": []any{saAccount}, "allowed": tcp("9090")},
+		{keyName: "fw-target-tag", "sourceRanges": ranges, "targetTags": []any{saTag}, "allowed": tcp("7070")},
+		{keyName: "fw-source-tag", "sourceTags": []any{saTag}, "allowed": tcp("6060")},
+		{keyName: "fw-allow-5050", "sourceRanges": ranges, "allowed": tcp("5050")},
+		{keyName: "fw-egress-deny-sa", keyDirection: directionEgress, "destinationRanges": ranges, "targetServiceAccounts": []any{saAccount}, "denied": tcp("5050")},
+	} {
+		rule[keyNetwork] = "projects/demo-net/global/networks/" + vmNetA
+		h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", rule, 200)
+	}
+}
+
 // tcp is one allowed or denied tcp term on a port.
 func tcp(port string) []any {
 	return []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{port}}}
 }
 
-// A rule scoped to a service account used to lose its scope on insert and
-// apply to every instance, so the analyzer answered with a confident verdict.
-// Until scopes are modeled such a rule is an explicit gap.
-func TestServiceAccountScopedRuleIsNeverAppliedToEveryInstance(t *testing.T) {
+// scopedVerdict creates one instance-to-instance test and reads its result,
+// the drop cause, and the names of the firewall rules its trace applied.
+func (h *harness) scopedVerdict(id, source, destination string, port int) (string, string, []string) {
+	h.t.Helper()
+	h.expectCode(http.MethodPost, connectivityTests+"?testId="+id, map[string]any{
+		keySource:      map[string]any{kindInstance: instanceRef(source)},
+		keyDestination: map[string]any{kindInstance: instanceRef(destination), keyPort: port}, keyProtocol: "TCP",
+	}, 200)
+	var test struct {
+		ReachabilityDetails struct {
+			Result string `json:"result"`
+			Traces []struct {
+				Steps []struct {
+					Firewall *struct {
+						DisplayName string `json:"displayName"`
+					} `json:"firewall"`
+					Drop struct {
+						Cause string `json:"cause"`
+					} `json:"drop"`
+				} `json:"steps"`
+			} `json:"traces"`
+		} `json:"reachabilityDetails"`
+	}
+	if err := json.Unmarshal(h.invoke(http.MethodGet, connectivityTests+"/"+id, nil).Body.Bytes(), &test); err != nil {
+		h.t.Fatalf("decode test: %v", err)
+	}
+	var cause string
+	var rules []string
+	for _, step := range test.ReachabilityDetails.Traces[0].Steps {
+		if step.Firewall != nil {
+			rules = append(rules, step.Firewall.DisplayName)
+		}
+		cause = step.Drop.Cause
+	}
+	return test.ReachabilityDetails.Result, cause, rules
+}
+
+// Firewall rules scoped to a service account or a network tag apply only to
+// the instances that run as it or carry it, as targets and as sources
+// (recorded: vm-firewall-service-accounts). Before scoping was modeled, a
+// rule with only targetServiceAccounts applied to every instance.
+func TestScopedFirewallRulesMatchOnlyTheirInstances(t *testing.T) {
+	h := newHarness(t)
+	h.scopedTopology()
+	for _, tc := range []struct {
+		id, source, destination string
+		port                    int
+		result, cause           string
+		rules                   []string
+	}{
+		{"t-target-sa", vmOne, vmTwo, 8080, resultReachable, "", []string{"default-allow-egress", "fw-target-sa"}},
+		{"t-not-target-sa", vmTwo, vmOne, 8080, resultUnreachable, "FIREWALL_RULE", []string{"default-allow-egress", "default-deny-ingress"}},
+		{"t-source-sa", vmTwo, vmOne, 9090, resultReachable, "", []string{"default-allow-egress", "fw-source-sa"}},
+		{"t-not-source-sa", vmOne, vmTwo, 9090, resultUnreachable, "FIREWALL_RULE", []string{"default-allow-egress", "default-deny-ingress"}},
+		{"t-target-tag", vmTwo, vmOne, 7070, resultReachable, "", []string{"default-allow-egress", "fw-target-tag"}},
+		{"t-not-target-tag", vmOne, vmTwo, 7070, resultUnreachable, "FIREWALL_RULE", []string{"default-allow-egress", "default-deny-ingress"}},
+		{"t-source-tag", vmOne, vmTwo, 6060, resultReachable, "", []string{"default-allow-egress", "fw-source-tag"}},
+		{"t-not-source-tag", vmTwo, vmOne, 6060, resultUnreachable, "FIREWALL_RULE", []string{"default-allow-egress", "default-deny-ingress"}},
+		{"t-egress-sa", vmTwo, vmOne, 5050, resultUnreachable, "FIREWALL_RULE", []string{"fw-egress-deny-sa"}},
+		{"t-not-egress-sa", vmOne, vmTwo, 5050, resultReachable, "", []string{"default-allow-egress", "fw-allow-5050"}},
+	} {
+		result, cause, rules := h.scopedVerdict(tc.id, tc.source, tc.destination, tc.port)
+		if result != tc.result || cause != tc.cause || !slices.Equal(rules, tc.rules) {
+			t.Errorf("%s = %s %s %v, want %s %s %v", tc.id, result, cause, rules, tc.result, tc.cause, tc.rules)
+		}
+	}
+}
+
+// A scoped source from a peered network can't be evaluated: unsupported,
+// never a verdict.
+func TestScopedSourceAcrossPeeringIsUnsupported(t *testing.T) {
 	h := newHarness(t)
 	h.vmTopology()
+	h.addPeering(vmNetA, vmNetB, "a-to-b")
+	h.addPeering(vmNetB, vmNetA, "b-to-a")
 	h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
-		keyName: "for-runner", keyNetwork: "projects/demo-net/global/networks/" + vmNetA, "sourceRanges": []any{testRangeA},
-		"targetServiceAccounts": []any{saAccount}, "allowed": tcp("9090"),
+		keyName: "from-tag", keyNetwork: "projects/demo-net/global/networks/" + vmNetB, "sourceTags": []any{saTag}, "allowed": tcp("6060"),
 	}, 200)
-	stored := decode(t, h.expectCode(http.MethodGet, "/compute/v1/projects/demo-net/global/firewalls/for-runner", nil, 200))
-	if mustJSON(t, stored["targetServiceAccounts"]) != `["`+saAccount+`"]` {
-		t.Fatalf("stored rule = %v", stored)
-	}
-	h.expectCode(http.MethodPost, connectivityTests+"?testId=t-runner", map[string]any{
+	h.expectCode(http.MethodPost, connectivityTests+"?testId=t-peer-tag", map[string]any{
 		keySource:      map[string]any{kindInstance: instanceRef(vmOne)},
-		keyDestination: map[string]any{kindInstance: instanceRef(vmTwo), keyPort: 9090}, keyProtocol: "TCP",
+		keyDestination: map[string]any{kindInstance: instanceRef(vmThree), keyPort: 6060}, keyProtocol: "TCP",
 	}, 501)
+}
+
+// Running as a service account needs actAs on it. Compute accepts the insert
+// and fails the operation (recorded); nothing is created.
+func TestInstanceAccountNeedsActAs(t *testing.T) {
+	h := newHarness(t)
+	h.declareAccount(saAccount, false)
+	h.topology(vmNetA, vmSubnetA, testRangeA)
+	body := vmBody(vmTwo, vmSubnetA)
+	body["serviceAccounts"] = []any{map[string]any{"email": saAccount}}
+	recorder := h.expectCode(http.MethodPost, zonePath+"/instances", body, 200)
+	var operation struct {
+		Status string `json:"status"`
+		Error  struct {
+			Errors []struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &operation); err != nil {
+		t.Fatalf("decode operation: %v", err)
+	}
+	want := "The user does not have access to service account '" + saAccount + "'.  User: 'actor@demo-net.iam.gserviceaccount.com'. " +
+		"Ask a project owner to grant you the iam.serviceAccountUser role on the service account."
+	if operation.Status != "DONE" || len(operation.Error.Errors) != 1 || operation.Error.Errors[0].Code != "SERVICE_ACCOUNT_ACCESS_DENIED" ||
+		operation.Error.Errors[0].Message != want {
+		t.Fatalf("operation = %+v", operation)
+	}
+	h.expectCode(http.MethodGet, zonePath+"/instances/"+vmTwo, nil, 404)
+	// An account the emulator doesn't declare is a gap, never an allow.
+	body["serviceAccounts"] = []any{map[string]any{"email": "ghost@demo-net.iam.gserviceaccount.com"}}
+	h.expectCode(http.MethodPost, zonePath+"/instances", body, 501)
+	body["serviceAccounts"] = []any{map[string]any{"email": "default"}}
+	h.expectCode(http.MethodPost, zonePath+"/instances", body, 501)
+	// With actAs the instance runs as the account and renders it.
+	h.declareAccount(saAccount, true)
+	body["serviceAccounts"] = []any{map[string]any{"email": saAccount, "scopes": []any{"https://www.googleapis.com/auth/cloud-platform"}}}
+	if status, errs := operationErrors(t, h.invoke(http.MethodPost, zonePath+"/instances", body)); status != "DONE" || len(errs) != 0 {
+		t.Fatalf("instance with actAs = %s %v", status, errs)
+	}
+	document := decode(t, h.expectCode(http.MethodGet, zonePath+"/instances/"+vmTwo, nil, 200))
+	accounts := mustJSON(t, document["serviceAccounts"])
+	if accounts != `[{"email":"`+saAccount+`","scopes":["https://www.googleapis.com/auth/cloud-platform"]}]` {
+		t.Fatalf("serviceAccounts = %s", accounts)
+	}
 }

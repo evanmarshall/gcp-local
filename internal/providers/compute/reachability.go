@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -187,7 +187,10 @@ func (s *scopeState) analyzeAddresses(spec flow) analysis {
 	}
 	network := source.Network
 	steps := []map[string]any{startStep(spec.project, source)}
-	rule := s.egressRule(network, spec)
+	rule, unmodeled := s.decidingRule(network, directionEgress, spec, endpoints{})
+	if unmodeled != "" {
+		return analysis{gap: unmodeled}
+	}
 	steps = append(steps, firewallStep(spec.project, network, directionEgress, rule))
 	if rule != nil && len(rule.Denied) > 0 {
 		steps = append(steps, finalStep(spec, network, "DROP", "drop", "FIREWALL_RULE"))
@@ -244,42 +247,117 @@ func (s *scopeState) customRoute(network string, ip net.IP) string {
 	return ""
 }
 
-// egressRule returns the deciding enabled EGRESS rule of the network for the
-// flow, or nil when the implied allow-egress rule applies. Rules with target
-// tags never match: tagged endpoints are not modeled. At equal priority a deny
-// rule takes precedence, as in VPC firewall evaluation.
-func (s *scopeState) egressRule(network string, spec flow) *firewallRecord {
-	return s.decidingRule(network, directionEgress, spec, egressMatches)
+// endpoints are the instances at the ends of a flow; nil is an IP address.
+type endpoints struct {
+	source, dest *instanceRecord
 }
 
-// decidingRule returns the highest-priority enabled untagged rule of one
-// direction that matches the flow, deny first at equal priority, or nil.
-func (s *scopeState) decidingRule(network, direction string, spec flow, matches func(*firewallRecord, flow) bool) *firewallRecord {
-	var rules []*firewallRecord
+// Reasons a scoped firewall rule can't be evaluated.
+const (
+	unmodeledScopedTarget = "A firewall rule scoped to network tags or service accounts could decide this flow, " +
+		"but scoped rules are modeled only for instance endpoints"
+	unmodeledScopedSource = "A firewall rule with source tags or source service accounts could decide this flow " +
+		"from another network; scoped sources across networks are not modeled"
+)
+
+// decidingRule returns the enabled rule of the network and direction that
+// decides the flow: the highest priority matching rule, deny first at equal
+// priority, or nil when only the implied rule applies. Following VPC firewall
+// rules, a rule's targets are the destination instance of an INGRESS flow and
+// the source instance of an EGRESS flow: every instance unless targetTags or
+// targetServiceAccounts narrow them. A non-empty reason reports a scoped rule
+// the model can't evaluate, so the caller answers unsupported, not a verdict.
+func (s *scopeState) decidingRule(network, direction string, spec flow, ends endpoints) (*firewallRecord, string) {
+	target := ends.source
+	if direction == directionIngress {
+		target = ends.dest
+	}
+	var best *firewallRecord
 	for _, name := range sortedKeys(s.firewalls) {
-		if rule := s.firewalls[name]; rule.applies(network, direction, false) && matches(rule, spec) {
-			rules = append(rules, rule)
+		rule := s.firewalls[name]
+		if rule.Network != network || rule.Direction != direction || rule.Disabled {
+			continue
+		}
+		decides, reason := rule.covers(spec, target, ends.source)
+		if reason != "" {
+			return nil, reason
+		}
+		if decides && (best == nil || rule.precedes(best)) {
+			best = rule
 		}
 	}
-	sort.SliceStable(rules, func(i, j int) bool {
-		if rules[i].Priority != rules[j].Priority {
-			return rules[i].Priority < rules[j].Priority
-		}
-		return len(rules[i].Denied) > 0 && len(rules[j].Denied) == 0
-	})
-	if len(rules) == 0 {
-		return nil
-	}
-	return rules[0]
+	return best, ""
 }
 
-// applies reports whether an enabled rule of the network and direction is
-// scoped (source or target tags or service accounts) exactly when tagged is
-// set. Scoped rules are not modeled, so the analyzer reports them as gaps.
-func (rule *firewallRecord) applies(network, direction string, tagged bool) bool {
-	hasTags := len(rule.TargetTags) > 0 || len(rule.SourceTags) > 0 ||
-		len(rule.TargetServiceAccounts) > 0 || len(rule.SourceServiceAccounts) > 0
-	return rule.Network == network && rule.Direction == direction && !rule.Disabled && hasTags == tagged
+// precedes reports whether the rule outranks other: a lower priority number,
+// or a deny against an allow at equal priority.
+func (rule *firewallRecord) precedes(other *firewallRecord) bool {
+	if rule.Priority != other.Priority {
+		return rule.Priority < other.Priority
+	}
+	return len(rule.Denied) > 0 && len(other.Denied) == 0
+}
+
+// covers reports whether an enabled rule of the flow's network and direction
+// matches it: terms, destination ranges, targets, and for INGRESS sources. A
+// non-empty reason reports a scoped rule the model can't evaluate.
+func (rule *firewallRecord) covers(spec flow, target, source *instanceRecord) (bool, string) {
+	if (!termsMatch(rule.Allowed, spec) && !termsMatch(rule.Denied, spec)) || !rangesCover(rule.DestinationRanges, spec.destIP) {
+		return false, ""
+	}
+	if rule.scopedTarget() && target == nil {
+		return false, unmodeledScopedTarget
+	}
+	if !rule.targets(target) {
+		return false, ""
+	}
+	if rule.Direction == directionIngress {
+		return rule.admitsSource(spec.sourceIP, source)
+	}
+	return true, ""
+}
+
+// scopedTarget reports whether the rule applies only to tagged or
+// service-account-scoped instances.
+func (rule *firewallRecord) scopedTarget() bool {
+	return len(rule.TargetTags) > 0 || len(rule.TargetServiceAccounts) > 0
+}
+
+// targets reports whether the rule applies to the instance: every instance of
+// the network, or those with one of its target tags, or those running as one
+// of its target service accounts. A rule has at most one kind of target.
+func (rule *firewallRecord) targets(instance *instanceRecord) bool {
+	switch {
+	case len(rule.TargetTags) > 0:
+		return slices.ContainsFunc(instance.Tags, func(tag string) bool { return slices.Contains(rule.TargetTags, tag) })
+	case len(rule.TargetServiceAccounts) > 0:
+		return instance.ServiceAccount != "" && slices.Contains(rule.TargetServiceAccounts, instance.ServiceAccount)
+	default:
+		return true
+	}
+}
+
+// admitsSource reports whether an INGRESS rule's sources cover the flow. With
+// neither ranges, tags, nor service accounts the rule admits every source.
+// Source ranges admit by address; source tags and source service accounts
+// admit an instance of the rule's own network by its tags or service account,
+// and either kind of source suffices. A scoped source from another network is
+// reported as unmodeled.
+func (rule *firewallRecord) admitsSource(ip net.IP, source *instanceRecord) (bool, string) {
+	scoped := len(rule.SourceTags) > 0 || len(rule.SourceServiceAccounts) > 0
+	if !scoped {
+		return rangesCover(rule.SourceRanges, ip), ""
+	}
+	if len(rule.SourceRanges) > 0 && rangesCover(rule.SourceRanges, ip) {
+		return true, ""
+	}
+	if source == nil || source.Network != rule.Network {
+		return false, unmodeledScopedSource
+	}
+	if slices.ContainsFunc(source.Tags, func(tag string) bool { return slices.Contains(rule.SourceTags, tag) }) {
+		return true, ""
+	}
+	return source.ServiceAccount != "" && slices.Contains(rule.SourceServiceAccounts, source.ServiceAccount), ""
 }
 
 // Firewall rule directions.
@@ -287,15 +365,6 @@ const (
 	directionIngress = "INGRESS"
 	directionEgress  = "EGRESS"
 )
-
-// egressMatches reports whether an EGRESS rule covers the flow's destination,
-// protocol, and port. A rule without destination ranges covers every address.
-func egressMatches(rule *firewallRecord, spec flow) bool {
-	if !termsMatch(rule.Allowed, spec) && !termsMatch(rule.Denied, spec) {
-		return false
-	}
-	return rangesCover(rule.DestinationRanges, spec.destIP)
-}
 
 // termsMatch reports whether one allowed/denied term list covers the flow.
 func termsMatch(terms []firewallTerm, spec flow) bool {
@@ -381,6 +450,8 @@ func firewallStep(project, network, direction string, rule *firewallRecord) map[
 			keyDirection: direction, "action": action, keyPriority: rule.Priority,
 			keyNetworkURI: relativeNetwork(project, network), "firewallRuleType": "VPC_FIREWALL_RULE",
 		}
+		setList(info, "targetTags", rule.TargetTags)
+		setList(info, "targetServiceAccounts", rule.TargetServiceAccounts)
 	}
 	return map[string]any{
 		keyState: "APPLY_" + direction + "_FIREWALL_RULE", keyDescription: "Config checking state: verify " + direction + " firewall rule.",
@@ -511,10 +582,10 @@ func (s *scopeState) instanceWithIP(ip net.IP) *instanceRecord {
 
 // instanceFlow applies the source instance's egress rules and routes.
 func (s *scopeState) instanceFlow(spec flow, source, dest *instanceRecord) analysis {
-	if s.taggedRuleMatches(source.Network, directionEgress, spec) {
-		return analysis{gap: "Firewall rules with source or target tags or service accounts are not modeled for instance endpoints"}
+	rule, unmodeled := s.decidingRule(source.Network, directionEgress, spec, endpoints{source, dest})
+	if unmodeled != "" {
+		return analysis{gap: unmodeled}
 	}
-	rule := s.egressRule(source.Network, spec)
 	steps := []map[string]any{
 		instanceStep(spec.project, stepStartInstance, source),
 		firewallStep(spec.project, source.Network, directionEgress, rule),
@@ -594,10 +665,10 @@ func (s *scopeState) toInstance(spec flow, source, dest *instanceRecord, steps [
 		return dropped(spec, source.Network, steps, "PRIVATE_TRAFFIC_TO_INTERNET",
 			"The networks are not peered; the default route sends private traffic to the internet")
 	}
-	if s.taggedRuleMatches(dest.Network, directionIngress, spec) {
-		return analysis{gap: "Firewall rules with source or target tags or service accounts are not modeled for instance endpoints"}
+	rule, unmodeled := s.decidingRule(dest.Network, directionIngress, spec, endpoints{source, dest})
+	if unmodeled != "" {
+		return analysis{gap: unmodeled}
 	}
-	rule := s.decidingRule(dest.Network, directionIngress, spec, ingressMatches)
 	steps = append(steps, route, instanceStep(spec.project, stepArriveInstance, dest),
 		firewallStep(spec.project, dest.Network, directionIngress, rule))
 	if rule == nil {
@@ -651,28 +722,6 @@ func (s *scopeState) peering(network, peer string) *peeringRecord {
 		}
 	}
 	return nil
-}
-
-// taggedRuleMatches reports whether an enabled rule with source or target
-// tags could decide the flow; tags and service accounts are not modeled.
-func (s *scopeState) taggedRuleMatches(network, direction string, spec flow) bool {
-	for _, name := range sortedKeys(s.firewalls) {
-		rule := s.firewalls[name]
-		if rule.applies(network, direction, true) && (termsMatch(rule.Allowed, spec) || termsMatch(rule.Denied, spec)) {
-			return true
-		}
-	}
-	return false
-}
-
-// ingressMatches reports whether an INGRESS rule covers the flow's source,
-// destination, protocol, and port. A rule without source ranges (and, being
-// untagged, without source tags) covers every source, as in GCP.
-func ingressMatches(rule *firewallRecord, spec flow) bool {
-	if !termsMatch(rule.Allowed, spec) && !termsMatch(rule.Denied, spec) {
-		return false
-	}
-	return rangesCover(rule.SourceRanges, spec.sourceIP) && rangesCover(rule.DestinationRanges, spec.destIP)
 }
 
 // rangesCover reports whether any CIDR range contains ip; no ranges cover all.

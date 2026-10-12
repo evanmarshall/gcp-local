@@ -1,0 +1,55 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T23:18:04.805150+00:00",
+  "scenario": {
+    "id": "vm-firewall-service-accounts",
+    "service": "compute",
+    "transport": "rest-v1",
+    "revision": "bc18e22e77110dcff6e7f5051c9342a63cf8cfffee6e9858a3437d23805e6687",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "0e95f72a392c1bc61fc419b54ca60d1cb6e0a43737843cfb9d083a87d5db1f9d",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/compute/vm_service_accounts.py": "ceb9b4b82ce3ebb8575c570c96d8c458ff0fc12b05569681a462e28aa07c889c",
+      "gcp_validation/services/compute/vm_connectivity.py": "33f7c53644f1c614ab1896818956f8ac4a900aff820b6d50a02308709b5cb502",
+      "gcp_validation/services/compute/networking.py": "a17ea6b5766e41d4b63ab7b5ee3fd2509432d6b003d0973083c04dce3dd193c4",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/live_paths.py": "9f6dcf0382d5be6ce5039f0f0bcff07f7c02c9c087deb9f5885f5a9834a5a1d7",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/compute/vmserviceaccounts/conftest.py": "60c57706f8b68f6e23b74751e69753fb6c1d6d3ac528a485f449950e1867459d"
+    },
+    "scope": {
+      "services": [
+        "vmserviceaccounts"
+      ],
+      "location": "global",
+      "limits": {
+        "max_networks": 1,
+        "max_subnetworks": 2,
+        "max_firewalls": 21,
+        "max_instances": 6,
+        "max_service_accounts": 1,
+        "max_connectivity_tests": 10,
+        "max_run_seconds": 2400
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

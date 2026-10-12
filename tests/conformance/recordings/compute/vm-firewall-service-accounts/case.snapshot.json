@@ -1,0 +1,799 @@
+{
+  "vm-firewall-service-accounts": {
+    "recorded-date": "12-10-2026, 23:18:04",
+    "recorded-content": {
+      "network-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "subnetwork-list": {
+        "http_status": 200,
+        "names": [
+          "<prefix>-a0",
+          "<prefix>-a1"
+        ]
+      },
+      "subnetwork-other-region-get": {
+        "code": 404,
+        "detail_types": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "The resource 'projects/<project>/regions/us-east1/subnetworks/<prefix>-a1' was not found",
+            "reason": "notFound"
+          }
+        ],
+        "http_status": 404,
+        "message": "The resource 'projects/<project>/regions/us-east1/subnetworks/<prefix>-a1' was not found",
+        "status": null
+      },
+      "subnetwork-other-region-list": {
+        "http_status": 200,
+        "names": []
+      },
+      "account-created": {
+        "http_status": 200
+      },
+      "firewall-p-target-both": {
+        "code": 400,
+        "detail_types": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.",
+            "reason": "badRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.",
+        "status": null
+      },
+      "firewall-p-source-both": {
+        "code": 400,
+        "detail_types": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.",
+            "reason": "badRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.",
+        "status": null
+      },
+      "firewall-p-source-sa-target-tag": {
+        "code": 400,
+        "detail_types": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.",
+            "reason": "badRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.",
+        "status": null
+      },
+      "firewall-p-source-tag-target-sa": {
+        "code": 400,
+        "detail_types": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.",
+            "reason": "badRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.",
+        "status": null
+      },
+      "firewall-p-egress-source-sa": {
+        "code": 400,
+        "detail_types": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Should not specify source tag or service account for egress direction.",
+            "reason": "badRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Should not specify source tag or service account for egress direction.",
+        "status": null
+      },
+      "firewall-p-egress-source-tag": {
+        "code": 400,
+        "detail_types": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Should not specify source tag or service account for egress direction.",
+            "reason": "badRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Should not specify source tag or service account for egress direction.",
+        "status": null
+      },
+      "firewall-p-priority-text": {
+        "code": 400,
+        "detail_types": [
+          "type.googleapis.com/google.rpc.BadRequest"
+        ],
+        "errors": [
+          {
+            "message": "Invalid value at 'resource.priority' (TYPE_INT32), \"high\"",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'resource.priority' (TYPE_INT32), \"high\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "firewall-p-priority-numeric-text": {
+        "http_status": 200,
+        "operation_errors": [],
+        "operation_status": "DONE",
+        "stored": {
+          "allowed": [
+            {
+              "IPProtocol": "tcp",
+              "ports": [
+                "1111"
+              ]
+            }
+          ],
+          "disabled": false,
+          "fields": [
+            "allowed",
+            "creationTimestamp",
+            "description",
+            "direction",
+            "disabled",
+            "id",
+            "kind",
+            "logConfig",
+            "name",
+            "network",
+            "priority",
+            "selfLink",
+            "sourceRanges"
+          ],
+          "http_status": 200,
+          "priority": 900,
+          "sourceRanges": [
+            "10.10.0.0/24"
+          ],
+          "targetServiceAccounts": null
+        }
+      },
+      "firewall-p-disabled-yes": {
+        "http_status": 200,
+        "operation_errors": [],
+        "operation_status": "DONE",
+        "stored": {
+          "allowed": [
+            {
+              "IPProtocol": "tcp",
+              "ports": [
+                "1111"
+              ]
+            }
+          ],
+          "disabled": true,
+          "fields": [
+            "allowed",
+            "creationTimestamp",
+            "description",
+            "direction",
+            "disabled",
+            "id",
+            "kind",
+            "logConfig",
+            "name",
+            "network",
+            "priority",
+            "selfLink",
+            "sourceRanges"
+          ],
+          "http_status": 200,
+          "priority": 1000,
+          "sourceRanges": [
+            "10.10.0.0/24"
+          ],
+          "targetServiceAccounts": null
+        }
+      },
+      "firewall-p-disabled-no": {
+        "http_status": 200,
+        "operation_errors": [],
+        "operation_status": "DONE",
+        "stored": {
+          "allowed": [
+            {
+              "IPProtocol": "tcp",
+              "ports": [
+                "1111"
+              ]
+            }
+          ],
+          "disabled": false,
+          "fields": [
+            "allowed",
+            "creationTimestamp",
+            "description",
+            "direction",
+            "disabled",
+            "id",
+            "kind",
+            "logConfig",
+            "name",
+            "network",
+            "priority",
+            "selfLink",
+            "sourceRanges"
+          ],
+          "http_status": 200,
+          "priority": 1000,
+          "sourceRanges": [
+            "10.10.0.0/24"
+          ],
+          "targetServiceAccounts": null
+        }
+      },
+      "firewall-p-disabled-false-text": {
+        "http_status": 200,
+        "operation_errors": [],
+        "operation_status": "DONE",
+        "stored": {
+          "allowed": [
+            {
+              "IPProtocol": "tcp",
+              "ports": [
+                "1111"
+              ]
+            }
+          ],
+          "disabled": false,
+          "fields": [
+            "allowed",
+            "creationTimestamp",
+            "description",
+            "direction",
+            "disabled",
+            "id",
+            "kind",
+            "logConfig",
+            "name",
+            "network",
+            "priority",
+            "selfLink",
+            "sourceRanges"
+          ],
+          "http_status": 200,
+          "priority": 1000,
+          "sourceRanges": [
+            "10.10.0.0/24"
+          ],
+          "targetServiceAccounts": null
+        }
+      },
+      "firewall-p-target-sa-text": {
+        "http_status": 200,
+        "operation_errors": [],
+        "operation_status": "DONE",
+        "stored": {
+          "allowed": [
+            {
+              "IPProtocol": "tcp",
+              "ports": [
+                "1111"
+              ]
+            }
+          ],
+          "disabled": false,
+          "fields": [
+            "allowed",
+            "creationTimestamp",
+            "description",
+            "direction",
+            "disabled",
+            "id",
+            "kind",
+            "logConfig",
+            "name",
+            "network",
+            "priority",
+            "selfLink",
+            "sourceRanges",
+            "targetServiceAccounts"
+          ],
+          "http_status": 200,
+          "priority": 1000,
+          "sourceRanges": [
+            "10.10.0.0/24"
+          ],
+          "targetServiceAccounts": [
+            "<account>"
+          ]
+        }
+      },
+      "firewall-p-ranges-object": {
+        "http_status": 200,
+        "operation_errors": [],
+        "operation_status": "DONE",
+        "stored": {
+          "allowed": [
+            {
+              "IPProtocol": "tcp",
+              "ports": [
+                "1111"
+              ]
+            }
+          ],
+          "disabled": false,
+          "fields": [
+            "allowed",
+            "creationTimestamp",
+            "description",
+            "direction",
+            "disabled",
+            "id",
+            "kind",
+            "logConfig",
+            "name",
+            "network",
+            "priority",
+            "selfLink",
+            "sourceRanges"
+          ],
+          "http_status": 200,
+          "priority": 1000,
+          "sourceRanges": [
+            "0.0.0.0/0"
+          ],
+          "targetServiceAccounts": null
+        }
+      },
+      "firewall-p-protocol-number": {
+        "http_status": 200,
+        "operation_errors": [],
+        "operation_status": "DONE",
+        "stored": {
+          "allowed": [
+            {
+              "IPProtocol": "tcp"
+            }
+          ],
+          "disabled": false,
+          "fields": [
+            "allowed",
+            "creationTimestamp",
+            "description",
+            "direction",
+            "disabled",
+            "id",
+            "kind",
+            "logConfig",
+            "name",
+            "network",
+            "priority",
+            "selfLink",
+            "sourceRanges"
+          ],
+          "http_status": 200,
+          "priority": 1000,
+          "sourceRanges": [
+            "10.10.0.0/24"
+          ],
+          "targetServiceAccounts": null
+        }
+      },
+      "firewall-p-unknown-field": {
+        "http_status": 200,
+        "operation_errors": [],
+        "operation_status": "DONE",
+        "stored": {
+          "allowed": [
+            {
+              "IPProtocol": "tcp",
+              "ports": [
+                "1111"
+              ]
+            }
+          ],
+          "disabled": false,
+          "fields": [
+            "allowed",
+            "creationTimestamp",
+            "description",
+            "direction",
+            "disabled",
+            "id",
+            "kind",
+            "logConfig",
+            "name",
+            "network",
+            "priority",
+            "selfLink",
+            "sourceRanges"
+          ],
+          "http_status": 200,
+          "priority": 1000,
+          "sourceRanges": [
+            "10.10.0.0/24"
+          ],
+          "targetServiceAccounts": null
+        }
+      },
+      "instance-labels-text": {
+        "code": 400,
+        "detail_types": [
+          "type.googleapis.com/google.rpc.BadRequest"
+        ],
+        "errors": [
+          {
+            "message": "Invalid value at 'resource.labels' (type.googleapis.com/compute.v1.Instance.LabelsEntry), \"managed-by\"",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'resource.labels' (type.googleapis.com/compute.v1.Instance.LabelsEntry), \"managed-by\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "instance-without-act-as": {
+        "http_status": 200,
+        "operation_errors": [
+          {
+            "code": "SERVICE_ACCOUNT_ACCESS_DENIED",
+            "message": "The user does not have access to service account '<account>'.  User: '<fixture>'. Ask a project owner to grant you the iam.serviceAccountUser role on the service account."
+          }
+        ],
+        "operation_status": "DONE"
+      },
+      "act-as-granted": {
+        "http_status": 200
+      },
+      "instance-with-account": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "instance-with-tag": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "instance-list": {
+        "http_status": 200,
+        "names": [
+          "<prefix>-vm1",
+          "<prefix>-vm2"
+        ]
+      },
+      "instance-vm1": {
+        "serviceAccounts": null,
+        "tags": [
+          "gl-web"
+        ]
+      },
+      "instance-vm2": {
+        "serviceAccounts": [
+          {
+            "email": "<account>",
+            "scopes": [
+              "https://www.googleapis.com/auth/cloud-platform"
+            ]
+          }
+        ],
+        "tags": null
+      },
+      "fw-target-sa-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "fw-source-sa-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "fw-target-tag-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "fw-source-tag-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "fw-allow-5050-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "fw-egress-deny-sa-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "firewall-target-sa": {
+        "allowed": [
+          {
+            "IPProtocol": "tcp",
+            "ports": [
+              "8080"
+            ]
+          }
+        ],
+        "direction": "INGRESS",
+        "fields": [
+          "allowed",
+          "creationTimestamp",
+          "description",
+          "direction",
+          "disabled",
+          "id",
+          "kind",
+          "logConfig",
+          "name",
+          "network",
+          "priority",
+          "selfLink",
+          "sourceRanges",
+          "targetServiceAccounts"
+        ],
+        "http_status": 200,
+        "sourceRanges": [
+          "10.10.0.0/24"
+        ],
+        "targetServiceAccounts": [
+          "<account>"
+        ]
+      },
+      "firewall-list": {
+        "http_status": 200,
+        "names": [
+          "<prefix>-fw-allow-5050",
+          "<prefix>-fw-egress-deny-sa",
+          "<prefix>-fw-source-sa",
+          "<prefix>-fw-source-tag",
+          "<prefix>-fw-target-sa",
+          "<prefix>-fw-target-tag"
+        ]
+      },
+      "t-target-sa": {
+        "abort_cause": null,
+        "drop_cause": null,
+        "final_state": "DELIVER",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "<prefix>-fw-target-sa"
+        ],
+        "http_status": 200,
+        "result": "REACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DELIVER"
+        ],
+        "trace_count": 1
+      },
+      "t-not-target-sa": {
+        "abort_cause": null,
+        "drop_cause": "FIREWALL_RULE",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "default-deny-ingress"
+        ],
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "t-source-sa": {
+        "abort_cause": null,
+        "drop_cause": null,
+        "final_state": "DELIVER",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "<prefix>-fw-source-sa"
+        ],
+        "http_status": 200,
+        "result": "REACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DELIVER"
+        ],
+        "trace_count": 1
+      },
+      "t-not-source-sa": {
+        "abort_cause": null,
+        "drop_cause": "FIREWALL_RULE",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "default-deny-ingress"
+        ],
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "t-target-tag": {
+        "abort_cause": null,
+        "drop_cause": null,
+        "final_state": "DELIVER",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "<prefix>-fw-target-tag"
+        ],
+        "http_status": 200,
+        "result": "REACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DELIVER"
+        ],
+        "trace_count": 1
+      },
+      "t-not-target-tag": {
+        "abort_cause": null,
+        "drop_cause": "FIREWALL_RULE",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "default-deny-ingress"
+        ],
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "t-source-tag": {
+        "abort_cause": null,
+        "drop_cause": null,
+        "final_state": "DELIVER",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "<prefix>-fw-source-tag"
+        ],
+        "http_status": 200,
+        "result": "REACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DELIVER"
+        ],
+        "trace_count": 1
+      },
+      "t-not-source-tag": {
+        "abort_cause": null,
+        "drop_cause": "FIREWALL_RULE",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "default-deny-ingress"
+        ],
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "t-egress-sa": {
+        "abort_cause": null,
+        "drop_cause": "FIREWALL_RULE",
+        "final_state": "DROP",
+        "firewall": "<prefix>-fw-egress-deny-sa",
+        "firewalls": [
+          "<prefix>-fw-egress-deny-sa"
+        ],
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "t-not-egress-sa": {
+        "abort_cause": null,
+        "drop_cause": null,
+        "final_state": "DELIVER",
+        "firewall": "default-allow-egress",
+        "firewalls": [
+          "default-allow-egress",
+          "<prefix>-fw-allow-5050"
+        ],
+        "http_status": 200,
+        "result": "REACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DELIVER"
+        ],
+        "trace_count": 1
+      },
+      "cleanup": {
+        "owned_resources_absent": true
+      }
+    }
+  }
+}

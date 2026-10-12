@@ -28,7 +28,7 @@ What each service supports and how it is verified. Every service authenticates c
 | `artifactregistry` | [Artifact Registry](services/artifactregistry.md) | gcp-local | 7 | — | No: repositories only; no image push or pull | artifactregistry-repository-lifecycle | TestLocalArtifactRegistryRepository |
 | `iam` | [IAM service accounts](services/security/serviceaccounts.md) | gcp-local | 12 | — | Partial: accounts, policies, keys and `signBlob` that sign Storage URLs; keys mint no tokens; keys and `signBlob` not recorded | serviceaccount-lifecycle-authorization | TestLocalServiceAccount |
 | `resourcemanager` | [Project IAM](services/security/project-iam.md) | gcp-local | 2 | — | Yes: project IAM policy | project-iam-policy-binding | TestLocalProjectIamPolicy |
-| `compute` | [VPC networking and Connectivity Tests](services/networking.md) | gcp-local | 38 | — | Analysis only: verdicts, no real traffic | vpc-firewall-connectivity, vm-connectivity-nat-peering | TestLocalComputeNetworkAndSubnetwork |
+| `compute` | [VPC networking and Connectivity Tests](services/networking.md) | gcp-local | 38 | — | Analysis only: verdicts, no real traffic | vpc-firewall-connectivity, vm-connectivity-nat-peering, vm-firewall-service-accounts | TestLocalComputeNetworkAndSubnetwork |
 | `run` | [Cloud Run](services/cloudrun.md) | Local processes or Docker | 13 | — | Partial: your own images with `--cloud-run-docker`, workload identity, ID-token invocation; no egress, jobs, or volumes | none | TestLocalCloudRunV2Service |
 | `vertexai` | [Vertex AI](services/vertexai.md) | Deterministic stub or Ollama | 5 | — | Partial: generate, stream, count tokens, embed; answers come from the stub or Ollama, not Gemini | vertexai-inference-authorization | none |
 

@@ -3,13 +3,16 @@ package compute
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"maps"
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
@@ -37,7 +40,7 @@ var (
 func (p *Provider) executeInstances(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodInstancesInsert:
-		return p.createInstance(request, scope)
+		return p.createInstance(call, request, scope)
 	case methodInstancesGet:
 		return p.getInstance(request, scope)
 	case methodInstancesList:
@@ -91,8 +94,10 @@ func parseInstance(body *instanceBody) (instanceInterface, string, error) {
 }
 
 // createInstance validates and stores one instance, assigning its internal
-// address from the subnetwork, then reports the zonal operation.
-func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+// address from the subnetwork, then reports the zonal operation. Running as a
+// service account needs iam.serviceAccounts.actAs on it; Compute accepts the
+// insert and fails the operation without it (recorded).
+func (p *Provider) createInstance(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	zone := request.Path[keyZone]
 	region, ok := zoneRegion(zone)
 	if !ok {
@@ -114,10 +119,16 @@ func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scop
 		Name: name, Zone: zone, Region: region, Description: body.Description,
 		MachineType: machineType, Labels: body.Labels, CreatedAt: p.clock(),
 	}
-	if len(body.ServiceAccounts) > 0 || (body.Tags != nil && len(body.Tags.Items) > 0) {
-		return nil, gap("instance service accounts and network tags are not modeled")
+	if body.Tags != nil {
+		record.Tags = body.Tags.Items
 	}
 	link := instanceLink(scope.Project, zone, name)
+	if refusal := p.runAs(call, record, body.ServiceAccounts); refusal != nil {
+		if refusal.Code == "" {
+			return nil, refusal.err
+		}
+		return p.failedOperation(scope, keyZone, zone, "insert", link, &refusal.operationError)
+	}
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		return s.addInstance(record, nic, func() error {
 			if err := p.index.Put(serviceName, state.Resource{
@@ -132,6 +143,71 @@ func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scop
 		return nil, instanceError(err, zonalRef(scope.Project, zone, "instances", record.Name))
 	}
 	return p.newOperation(scope, keyZone, zone, "insert", link)
+}
+
+// accountRefusal is why an instance can't run as its service account: a
+// failed operation Compute reports, or a coverage gap or engine error.
+type accountRefusal struct {
+	operationError
+	err error
+}
+
+// runAs sets the instance's service account when the caller may act as it.
+func (p *Provider) runAs(call gateway.Call, record *instanceRecord, accounts []accountBody) *accountRefusal {
+	if len(accounts) == 0 {
+		return nil
+	}
+	account := accounts[0]
+	allowed, err := p.mayActAs(call, account.Email)
+	switch {
+	case err != nil:
+		return &accountRefusal{err: err}
+	case !allowed:
+		return &accountRefusal{operationError: operationError{
+			Code: "SERVICE_ACCOUNT_ACCESS_DENIED",
+			Message: "The user does not have access to service account '" + account.Email + "'.  User: '" +
+				principalEmail(call.Principal) + "'. Ask a project owner to grant you the iam.serviceAccountUser role on the service account.",
+		}}
+	}
+	record.ServiceAccount, record.Scopes = account.Email, account.Scopes
+	return nil
+}
+
+// methodInstancesActAs is the engine-only plan for the caller's act on the
+// service account an instance runs as; it has no route. Cloud Run, Cloud
+// Tasks, and Pub/Sub push check the same permission the same way.
+const methodInstancesActAs = "compute.instances.actAs"
+
+// mayActAs reports whether the caller holds iam.serviceAccounts.actAs on a
+// declared service account. The project's default compute account ("default")
+// and accounts the emulator doesn't declare are gaps, never an allow.
+func (p *Provider) mayActAs(call gateway.Call, email string) (bool, error) {
+	_, domain, found := strings.Cut(email, "@")
+	if !found || !strings.HasSuffix(domain, ".iam.gserviceaccount.com") {
+		return false, gap("instances running as a service account other than a user-managed one are not modeled")
+	}
+	account := iam.AccountResource(strings.TrimSuffix(domain, ".iam.gserviceaccount.com"), email)
+	call.Method, call.Resource = methodInstancesActAs, account
+	_, err := p.engine.Authorize(call, iam.Target{Name: account}, nil)
+	switch status.Code(err) {
+	case codes.OK:
+		return true, nil
+	case codes.PermissionDenied, codes.Unauthenticated:
+		return false, nil
+	case codes.Unimplemented:
+		return false, gap("instances running as a service account the emulator doesn't declare are not modeled")
+	default:
+		return false, fmt.Errorf("authorize the instance service account: %w", err)
+	}
+}
+
+// principalEmail is the caller's email as Compute's messages name it.
+func principalEmail(principal gateway.Principal) string {
+	_, email, found := strings.Cut(principal.Subject, ":")
+	if !found {
+		return principal.Subject
+	}
+	return email
 }
 
 // instanceError maps an instance placement failure onto its status.
@@ -327,6 +403,12 @@ func instanceDocument(project string, record *instanceRecord) map[string]any {
 	setText(document, keyDescription, record.Description)
 	if len(record.Labels) > 0 {
 		document["labels"] = maps.Clone(record.Labels)
+	}
+	if len(record.Tags) > 0 {
+		document["tags"] = map[string]any{"items": slices.Clone(record.Tags), keyFingerprint: fingerprint(record.Name+"/tags", record.Generation)}
+	}
+	if record.ServiceAccount != "" {
+		document["serviceAccounts"] = []any{map[string]any{"email": record.ServiceAccount, "scopes": slices.Clone(record.Scopes)}}
 	}
 	return document
 }

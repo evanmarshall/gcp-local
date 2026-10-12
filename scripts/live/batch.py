@@ -36,6 +36,8 @@ _spec.loader.exec_module(replay)
 # These rewrite the project IAM policy; concurrent policy writes from other
 # scenarios' temporary grants would fail on the policy etag.
 EXCLUSIVE = frozenset({"tests/conformance/security/resourcemanager/test_policy.py"})
+# Scope services of the compute scenarios, which share one lane.
+COMPUTE_SCOPES = frozenset({"networking", "vmconnectivity", "vmserviceaccounts"})
 # The scope option each scenario directory's conftest reads, most specific first.
 OPTIONS = ("gcp_pubsub_scope", "gcp_secretmanager_scope", "gcp_live_scope_file")
 
@@ -137,8 +139,8 @@ def lane(entry: Entry, scopes: Path) -> str:
         return "storage"
     if entry.option == "--gcp-live-scope-file":
         service = json.loads(scope_file(entry, scopes).read_text())["services"][0]
-        # Both compute scenarios create VPC networks; together they'd exceed the quota.
-        return "compute" if service in {"networking", "vmconnectivity"} else service
+        # The compute scenarios create VPC networks; together they'd exceed the quota.
+        return "compute" if service in COMPUTE_SCOPES else service
     return entry.name
 
 
