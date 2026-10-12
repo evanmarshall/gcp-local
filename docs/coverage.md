@@ -130,8 +130,8 @@ Untested: Java clients, `gsutil`, the Node.js and gcloud clients of Cloud Run, a
 | --- | --- |
 | Local credentials (ADC, STS, metadata server) | Supported ([local identity](local-identity.md)) |
 | IAM allow policies with predefined roles recorded from Google Cloud | Supported on every service ([IAM](iam.md)) |
-| IAM conditions (`resource.name`, `resource.type`, `request.time`) | Recorded for Storage; elsewhere a conditional binding grants nothing |
-| IAM deny policies, principal access boundaries | Local model only, not recorded |
+| IAM conditions (`resource.name`, `resource.type`, `request.time`) | Evaluated where the provider supplies attributes (Storage, Cloud SQL); recorded for Storage. A condition that reads a missing attribute grants nothing ([IAM](iam.md)) |
+| IAM deny policies, principal access boundaries | Enforced locally (per-rule exceptions, conditions, public principals; boundaries for service accounts); not recorded, because recording needs organization-level setup ([IAM](iam.md)) |
 | Organization policy, VPC Service Controls | Dry-run signals only, not recorded |
 | Permission discovery against real Google Cloud | One conclusive probe: `secretmanager-versions-access` ([permission discovery](permission-discovery.md)) |
 | Persistence across restarts | Not supported; state is in memory |
