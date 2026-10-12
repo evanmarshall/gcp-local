@@ -13,6 +13,7 @@ sh scripts/setup_moo.sh
 
 This checks or installs the reviewed moo release, creates the `base` machine, runs the provisioner and tooling tests, and saves the baseline.
 
+- **Keep the baseline complete.** When a check gains a dependency (a package, installer, toolchain, or requirements file), add it to `scripts/provision_moo.sh` and `moo.toml`'s lockfiles in the same change. Never install it only in your own clone. Every Linux check must run in a fresh fork of the baseline without setup.
 - When requirements change, edit `moo.toml`, `scripts/provision_moo.sh`, and the lockfiles. Existing machines don't pick up a new recipe: provision a new name (`sh scripts/setup_moo.sh base-v2`), validate it, then tell contributors to fork it. Don't destroy the old baseline.
 - Never put real credentials or application data in a baseline. Keep setup idempotent and Git edits on the host.
 - After the setup commit, `moo save base` (or the new name).
