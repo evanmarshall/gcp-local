@@ -14,7 +14,11 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
-func TestBoundedRecorderThroughProductionLocalADC(t *testing.T) {
+// recorderRun starts the provider with the scenario's fixture, allowed, and
+// denied identities and writes their local ADC bundle. Only fixture is a
+// project-level Pub/Sub admin.
+func recorderRun(t *testing.T) (*integration, string, string) {
+	t.Helper()
 	var enrollments []identity.Enrollment
 	for _, actor := range []string{"fixture", "allowed", "denied"} {
 		enrollments = append(enrollments, identity.Enrollment{Subject: "serviceAccount:" + actor + "@project-a.iam.gserviceaccount.com", Project: "project-a", SubjectToken: subjectSecret + "-recorder-" + actor})
@@ -40,13 +44,31 @@ func TestBoundedRecorderThroughProductionLocalADC(t *testing.T) {
 	must(t, err)
 	path := filepath.Join(directory, "identities.json")
 	must(t, os.WriteFile(path, raw, 0600))
+	return f, path, directory
+}
+
+// runScenarioScript runs one scenario driver from testdata with the repository on PYTHONPATH.
+func runScenarioScript(t *testing.T, f *integration, script string, args ...string) {
+	t.Helper()
 	root, err := filepath.Abs("../../..")
 	must(t, err)
-	command := exec.CommandContext(f.owner, os.Getenv("GCP_LOCAL_TEST_PYTHON"), "testdata/recording.py", "http://"+f.endpoint, path, filepath.Join(directory, "state"))
+	command := exec.CommandContext(f.owner, os.Getenv("GCP_LOCAL_TEST_PYTHON"), append([]string{script, "http://" + f.endpoint}, args...)...)
 	command.Env = []string{"PATH=/usr/bin:/bin", "PYTHONPATH=" + root, "GCP_LOCAL_ISOLATED=1", "GOOGLE_API_USE_CLIENT_CERTIFICATE=false", "GOOGLE_API_USE_MTLS_ENDPOINT=never"}
 	output, err := command.CombinedOutput()
 	if err != nil {
-		t.Fatalf("Bounded Pub/Sub recorder: %v\n%s", err, output)
+		t.Fatalf("%s: %v\n%s", script, err, output)
 	}
 	t.Log(string(output))
+}
+
+func TestBoundedRecorderThroughProductionLocalADC(t *testing.T) {
+	f, identities, directory := recorderRun(t)
+	runScenarioScript(t, f, "testdata/recording.py", identities, filepath.Join(directory, "state"))
+}
+
+// TestDeliveryScenarioThroughProductionLocalADC prepares the unrecorded
+// pubsub-delivery-features scenario locally; it makes no cloud claim.
+func TestDeliveryScenarioThroughProductionLocalADC(t *testing.T) {
+	f, identities, directory := recorderRun(t)
+	runScenarioScript(t, f, "testdata/delivery_recording.py", identities, filepath.Join(directory, "state"), "123456")
 }

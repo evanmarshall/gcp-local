@@ -93,6 +93,9 @@ func (p *Provider) relayStream(session context.Context, call gateway.Call, downs
 	if err != nil {
 		return err
 	}
+	if err := p.syncDeadLetter(session, b, call, first.GetSubscription()); err != nil {
+		return err
+	}
 	upstream, err := pb.NewSubscriberClient(b.client()).StreamingPull(upstreamCtx)
 	if err != nil {
 		return fmt.Errorf("open the upstream stream: %w", err)
@@ -102,7 +105,7 @@ func (p *Provider) relayStream(session context.Context, call gateway.Call, downs
 	}
 	_ = grpc.SendHeader(call.Context, nil) //nolint:contextcheck // the session context is this request's context by design
 	failures := make(chan error, 2)
-	go p.relayDownstream(call, downstream, upstream, failures)
+	go p.relayDownstream(call, b, first.GetSubscription(), downstream, upstream, failures)
 	go p.relayUpstream(call, upstream, downstream, failures, first)
 	// Returning releases gRPC's blocked downstream Recv/Send calls. Neither
 	// relay mutates provider state; the cancelled upstream context terminates
@@ -119,7 +122,8 @@ func (p *Provider) relayStream(session context.Context, call gateway.Call, downs
 }
 
 // relayDownstream forwards client requests upstream until the client half-closes.
-func (p *Provider) relayDownstream(call gateway.Call, downstream gateway.Stream, upstream pb.Subscriber_StreamingPullClient, failures chan<- error) {
+// Stream nacks take the provider's delivery deadline, as unary nacks do.
+func (p *Provider) relayDownstream(call gateway.Call, b driver, subscription string, downstream gateway.Stream, upstream pb.Subscriber_StreamingPullClient, failures chan<- error) {
 	for {
 		request := &pb.StreamingPullRequest{}
 		if err := downstream.Recv(request); err != nil {
@@ -135,6 +139,14 @@ func (p *Provider) relayDownstream(call gateway.Call, downstream gateway.Stream,
 			failures <- err
 			return
 		}
+		if len(request.GetModifyDeadlineAckIds()) > 0 {
+			if err := p.syncDeadLetter(call.Context, b, call, subscription); err != nil {
+				failures <- err
+				return
+			}
+			request.ModifyDeadlineSeconds = p.rewriteNacks(subscription, request.GetModifyDeadlineAckIds(), request.GetModifyDeadlineSeconds())
+		}
+		p.acknowledged(subscription, request.GetAckIds())
 		if err := upstream.Send(request); err != nil {
 			failures <- err
 			return
@@ -167,6 +179,7 @@ func (p *Provider) relayUpstream(call gateway.Call, upstream pb.Subscriber_Strea
 			failures <- err
 			return
 		}
+		p.track(first.GetSubscription(), response.GetReceivedMessages())
 		if err := downstream.Send(response); err != nil {
 			failures <- err
 			return

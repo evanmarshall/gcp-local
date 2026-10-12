@@ -234,22 +234,10 @@ func TestPythonSDKKeepsADCOnLocalGRPC(t *testing.T) {
 		t.Fatal("Explicit pinned Python environment is required")
 	}
 	directory := t.TempDir()
-	secret := filepath.Join(directory, "subject.txt")
-	must(t, os.WriteFile(secret, []byte(subjectSecret), 0600))
-	profile := map[string]any{"type": "external_account", "audience": identity.Audience, "subject_token_type": identity.AccessTokenType, "token_url": f.http + "/v1/token", "credential_source": map[string]string{"file": secret}}
-	raw, err := json.Marshal(profile)
-	must(t, err)
-	adc := filepath.Join(directory, "adc.json")
-	must(t, os.WriteFile(adc, raw, 0600))
-	peerSecret := filepath.Join(directory, "peer-subject.txt")
-	must(t, os.WriteFile(peerSecret, []byte(subjectSecret+"-peer"), 0600))
-	profile["credential_source"] = map[string]string{"file": peerSecret}
-	peerRaw, err := json.Marshal(profile)
-	must(t, err)
-	peerADC := filepath.Join(directory, "peer-adc.json")
-	must(t, os.WriteFile(peerADC, peerRaw, 0600))
+	adc := localADC(t, f, directory, "owner", subjectSecret)
+	peerADC := localADC(t, f, directory, "peer", subjectSecret+"-peer")
 	command := exec.CommandContext(f.owner, python, "testdata/sdk.py", f.endpoint)
-	command.Env = []string{"PATH=/usr/bin:/bin", "GOOGLE_APPLICATION_CREDENTIALS=" + adc, "GCP_LOCAL_DENIED_ADC=" + peerADC, "GOOGLE_CLOUD_PROJECT=project-a", "CLOUDSDK_CONFIG=" + filepath.Join(directory, "empty-cloudsdk"), "GOOGLE_API_USE_CLIENT_CERTIFICATE=false", "GOOGLE_API_USE_MTLS_ENDPOINT=never", "GCP_LOCAL_ISOLATED=1"}
+	command.Env = sdkEnvironment(directory, adc, "GCP_LOCAL_DENIED_ADC="+peerADC)
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Python Pub/Sub SDK: %v\n%s", err, output)
@@ -263,6 +251,47 @@ func TestPythonSDKKeepsADCOnLocalGRPC(t *testing.T) {
 	_, err = pb.NewSubscriberClient(f.connection).GetSubscription(f.owner, &pb.GetSubscriptionRequest{Subscription: "projects/project-a/subscriptions/python-sdk"})
 	if status.Code(err) != codes.NotFound {
 		t.Fatal("SDK left subscription behind", err)
+	}
+}
+
+// localADC writes an owner-only local ADC profile for one enrolled subject.
+func localADC(t *testing.T, f *integration, directory, label, subject string) string {
+	t.Helper()
+	secret := filepath.Join(directory, label+"-subject.txt")
+	must(t, os.WriteFile(secret, []byte(subject), 0600))
+	profile := map[string]any{"type": "external_account", "audience": identity.Audience, "subject_token_type": identity.AccessTokenType, "token_url": f.http + "/v1/token", "credential_source": map[string]string{"file": secret}}
+	raw, err := json.Marshal(profile)
+	must(t, err)
+	adc := filepath.Join(directory, label+"-adc.json")
+	must(t, os.WriteFile(adc, raw, 0600))
+	return adc
+}
+
+// sdkEnvironment is the isolated environment for a Python SDK script.
+func sdkEnvironment(directory, adc string, extra ...string) []string {
+	return append([]string{"PATH=/usr/bin:/bin", "GOOGLE_APPLICATION_CREDENTIALS=" + adc, "GOOGLE_CLOUD_PROJECT=project-a", "CLOUDSDK_CONFIG=" + filepath.Join(directory, "empty-cloudsdk"), "GOOGLE_API_USE_CLIENT_CERTIFICATE=false", "GOOGLE_API_USE_MTLS_ENDPOINT=never", "GCP_LOCAL_ISOLATED=1"}, extra...)
+}
+
+// TestPythonSDKDeliveryFeatures drives ordering, resume_publish, dead-letter
+// grants, filters, and exactly-once results through google-cloud-pubsub.
+func TestPythonSDKDeliveryFeatures(t *testing.T) {
+	f := running(t)
+	python := os.Getenv("GCP_LOCAL_TEST_PYTHON")
+	if python == "" {
+		t.Fatal("Explicit pinned Python environment is required")
+	}
+	directory := t.TempDir()
+	command := exec.CommandContext(f.owner, python, "testdata/sdk_delivery.py", f.endpoint, "123456")
+	command.Env = sdkEnvironment(directory, localADC(t, f, directory, "owner", subjectSecret))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Python Pub/Sub delivery SDK: %v\n%s", err, output)
+	}
+	t.Log(string(output))
+	listed, err := pb.NewPublisherClient(f.connection).ListTopics(f.owner, &pb.ListTopicsRequest{Project: "projects/project-a"})
+	must(t, err)
+	if len(listed.GetTopics()) != 0 {
+		t.Fatalf("SDK left topics behind: %v", listed.GetTopics())
 	}
 }
 

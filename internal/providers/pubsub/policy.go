@@ -49,6 +49,9 @@ func (p *Provider) policy(call gateway.Call, raw any) (any, error) {
 // engine policy. The call method is renamed to the resolved IAM operation.
 func (p *Provider) policyUpdate(call *gateway.Call, request proto.Message) (*iam.Policy, error) {
 	kind := strings.Split(call.Resource, "/")[2]
+	if kind == "snapshots" {
+		return nil, gap("snapshot IAM policies")
+	}
 	switch r := request.(type) {
 	case *iampb.GetIamPolicyRequest:
 		if err := fields(r, "resource", "options"); err != nil {

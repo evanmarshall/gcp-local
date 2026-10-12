@@ -52,7 +52,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | Service | Backend | Application use |
 | --- | --- | --- |
 | [Cloud Storage](docs/storage.md) | fake-gcs-server | Objects: read, write, list, delete, copy; resumable uploads; V4 signed URLs |
-| [Pub/Sub](docs/pubsub.md) | Official Google emulator | Publish, pull, streaming pull, push |
+| [Pub/Sub](docs/pubsub.md) | Official Google emulator | Publish, pull, streaming pull, push, ordering, filters, dead-letter topics, retry backoff, exactly-once, snapshots and seek |
 | [Secret Manager](docs/secretmanager.md) | gcp-local | Secret versions and access over REST and gRPC |
 | [Cloud KMS](docs/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt, asymmetric sign and decrypt, HMAC |
 | [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries over REST and gRPC |

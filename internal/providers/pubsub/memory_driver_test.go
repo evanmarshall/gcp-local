@@ -49,6 +49,9 @@ type memoryPubSub struct {
 	queues        map[string][]*pb.PubsubMessage
 	outstanding   map[string]*pb.PubsubMessage
 	acked         []string
+	snapshots     map[string]*pb.Snapshot
+	modacks       []*pb.ModifyAckDeadlineRequest
+	updates       []*pb.UpdateSubscriptionRequest
 	nextID        int
 	starts        int
 	fault         func(method string) error
@@ -56,7 +59,7 @@ type memoryPubSub struct {
 }
 
 func newMemoryPubSub() *memoryPubSub {
-	return &memoryPubSub{topics: map[string]*pb.Topic{}, subscriptions: map[string]*pb.Subscription{}, queues: map[string][]*pb.PubsubMessage{}, outstanding: map[string]*pb.PubsubMessage{}}
+	return &memoryPubSub{topics: map[string]*pb.Topic{}, subscriptions: map[string]*pb.Subscription{}, queues: map[string][]*pb.PubsubMessage{}, outstanding: map[string]*pb.PubsubMessage{}, snapshots: map[string]*pb.Snapshot{}}
 }
 
 func (m *memoryPubSub) Start(context.Context) error {
@@ -72,6 +75,7 @@ func (m *memoryPubSub) Reset(context.Context) error {
 	defer m.mu.Unlock()
 	m.topics, m.subscriptions = map[string]*pb.Topic{}, map[string]*pb.Subscription{}
 	m.queues, m.outstanding = map[string][]*pb.PubsubMessage{}, map[string]*pb.PubsubMessage{}
+	m.snapshots = map[string]*pb.Snapshot{}
 	return nil
 }
 func (m *memoryPubSub) client() grpc.ClientConnInterface { return m }
@@ -146,6 +150,9 @@ func (m *memoryPubSub) apply(method string, in proto.Message) (proto.Message, er
 	if result, handled, err := m.applyMessages(in); handled {
 		return result, err
 	}
+	if result, handled, err := m.applySnapshot(in); handled {
+		return result, err
+	}
 	return nil, status.Error(codes.Unimplemented, "memory backend does not serve "+method)
 }
 
@@ -204,6 +211,55 @@ func (m *memoryPubSub) applySubscription(in proto.Message) (proto.Message, bool,
 			list.Subscriptions = append(list.Subscriptions, subscription)
 		}
 		return list, true, nil
+	case *pb.UpdateSubscriptionRequest:
+		result, err := m.updateSubscription(r)
+		return result, true, err
+	}
+	return nil, false, nil
+}
+
+// updateSubscription applies the one mask the provider sends: the
+// dead-letter policy it forwards or clears as the service agent's grants change.
+func (m *memoryPubSub) updateSubscription(r *pb.UpdateSubscriptionRequest) (proto.Message, error) {
+	stored, found := m.subscriptions[r.GetSubscription().GetName()]
+	if !found {
+		return nil, status.Error(codes.NotFound, "Subscription not found")
+	}
+	if paths := r.GetUpdateMask().GetPaths(); len(paths) != 1 || paths[0] != "dead_letter_policy" {
+		return nil, status.Error(codes.Internal, "unexpected update mask")
+	}
+	m.updates = append(m.updates, proto.CloneOf(r))
+	stored.DeadLetterPolicy = proto.CloneOf(r.GetSubscription().GetDeadLetterPolicy())
+	return stored, nil
+}
+
+// applySnapshot serves snapshots and seek. Like the emulator, it drops labels.
+func (m *memoryPubSub) applySnapshot(in proto.Message) (proto.Message, bool, error) {
+	switch r := in.(type) {
+	case *pb.CreateSnapshotRequest:
+		source, found := m.subscriptions[r.GetSubscription()]
+		if !found {
+			return nil, true, status.Error(codes.NotFound, "Subscription does not exist")
+		}
+		snapshot := &pb.Snapshot{Name: r.GetName(), Topic: source.GetTopic()}
+		m.snapshots[r.GetName()] = snapshot
+		return snapshot, true, nil
+	case *pb.GetSnapshotRequest:
+		if snapshot, found := m.snapshots[r.GetSnapshot()]; found {
+			return snapshot, true, nil
+		}
+		return nil, true, status.Error(codes.NotFound, "Snapshot does not exist")
+	case *pb.ListSnapshotsRequest:
+		list := &pb.ListSnapshotsResponse{}
+		for _, snapshot := range m.snapshots {
+			list.Snapshots = append(list.Snapshots, snapshot)
+		}
+		return list, true, nil
+	case *pb.DeleteSnapshotRequest:
+		delete(m.snapshots, r.GetSnapshot())
+		return &emptypb.Empty{}, true, nil
+	case *pb.SeekRequest:
+		return &pb.SeekResponse{}, true, nil
 	}
 	return nil, false, nil
 }
@@ -213,6 +269,9 @@ func (m *memoryPubSub) applySubscription(in proto.Message) (proto.Message, bool,
 func (m *memoryPubSub) createSubscription(r *pb.Subscription) (proto.Message, error) {
 	if r.GetPushConfig() != nil {
 		return nil, status.Error(codes.Internal, "push config reached the backend")
+	}
+	if r.GetFilter() == "unparsable" {
+		return nil, status.Error(codes.Unknown, "Application error processing RPC")
 	}
 	if _, found := m.subscriptions[r.GetName()]; found {
 		return nil, status.Error(codes.AlreadyExists, "Subscription already exists")
@@ -242,6 +301,7 @@ func (m *memoryPubSub) applyMessages(in proto.Message) (proto.Message, bool, err
 		}
 		return &emptypb.Empty{}, true, nil
 	case *pb.ModifyAckDeadlineRequest:
+		m.modacks = append(m.modacks, proto.CloneOf(r))
 		if r.GetAckDeadlineSeconds() == 0 {
 			m.requeue(r.GetSubscription(), r.GetAckIds())
 		}

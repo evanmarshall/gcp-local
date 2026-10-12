@@ -13,7 +13,7 @@ What each service supports and how it is verified. Every service authenticates c
 | Key | Service | Backend | Methods served | API total | Data plane for applications | Recordings | Terraform |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 16 | 88 | Yes: object read, write, list, delete, resumable uploads, V4 signed URLs, rewrite; resumable, signed URLs, rewrite, and XML paths not recorded | storage-authorization, storage-bucket-updates, storage-cross-project, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
-| `pubsub` | [Pub/Sub](pubsub.md) | Official emulator | 13 | 46 | Yes: publish, pull, streaming pull, push | pubsub-pull-authorization | TestAccPubSubTopicAndSubscription |
+| `pubsub` | [Pub/Sub](pubsub.md) | Official emulator | 18 | 46 | Yes: publish, pull, streaming pull, push; ordering, filters, dead-letter topics, retry backoff, exactly-once, snapshots and seek modeled locally, not recorded | pubsub-pull-authorization | TestAccPubSubTopicAndSubscription |
 | `firestore` | [Firestore](firestore.md) | Official emulator | 16 | 60 | Yes: documents, subcollections, queries, aggregations, transactions, batch writes, listeners over REST and gRPC; batch writes and listeners not recorded | firestore-document-lifecycle, firestore-query-transaction | TestAccFirestoreDocument |
 | `spanner` | [Spanner](spanner.md) | Official emulator | 36 | 99 | Yes: sessions, SQL queries, DML, reads, mutations, transactions over gRPC (unary methods also over REST) | spanner-instance-database-admin, spanner-data-plane-rest | TestAccSpannerInstanceAndDatabase |
 | `bigtable` | [Bigtable](bigtable.md) | Official emulator code (bttest) | 24 | 101 | Yes, modeled locally, not recorded: row reads, scans, and mutations over gRPC | bigtable-instance-table-admin | none |
@@ -34,7 +34,7 @@ What each service supports and how it is verified. Every service authenticates c
 Notes on counts:
 
 - API totals use these discovery documents: storage v1, pubsub v1, firestore v1, spanner v1, bigtableadmin v2 plus bigtable v2, sqladmin v1beta4, redis v1, bigquery v2, secretmanager v1, cloudkms v1, cloudtasks v2beta3, artifactregistry v1, iam v1, cloudresourcemanager v1, compute v1 plus networkmanagement v1, run v2, logging v2, aiplatform v1.
-- Pub/Sub counts gRPC methods; the same operations are also served over 12 REST routes.
+- Pub/Sub counts gRPC methods. 12 REST routes serve topic and subscription create, get, list, delete, and IAM policy; snapshots and seek are gRPC only.
 - Spanner: 21 admin and 15 data-plane session methods.
 - Bigtable: 17 admin methods (bigtableadmin v2) and 7 data methods (bigtable v2, gRPC).
 - Firestore: 14 document methods (all on gRPC; all but Listen on REST) and 2 Admin field methods on REST.
@@ -53,6 +53,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | storage | Python `google-cloud-storage` 3.10.1: resumable upload, V4 signed URLs | JSON REST, XML | `scripts/smoke_storage.py` |
 | storage | Go `cloud.google.com/go/storage` 1.65.0, default settings: bucket and object CRUD, resumable upload, XML reads, copy, signed URLs | JSON REST, XML | `internal/providers/storage/sdk_test.go` |
 | pubsub | Python `google-cloud-pubsub` 2.42.0 | gRPC | `internal/providers/pubsub/testdata/sdk.py` |
+| pubsub (ordering, `resume_publish`, dead-letter, filters, exactly-once) | Python `google-cloud-pubsub` 2.42.0 | gRPC | `internal/providers/pubsub/testdata/sdk_delivery.py` |
 | firestore | Python `google-cloud-firestore` 2.34.1 | gRPC | `internal/providers/firestore/testdata/sdk.py` |
 | spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | `internal/providers/spanner/data_integration_test.go` |
 | bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 | gRPC | `internal/providers/bigtable/data_test.go` |

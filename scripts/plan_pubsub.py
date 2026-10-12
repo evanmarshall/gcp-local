@@ -9,17 +9,18 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from gcp_validation.pubsub_delivery import DELIVERY_LIMITS, delivery_scope
 from gcp_validation.pubsub_scope import LIMITS, private_json
 from gcp_validation.sandbox import Sandbox
 
 
-def plan(profile: Sandbox, setup_account: str) -> dict[str, Any]:
+def plan(profile: Sandbox, setup_account: str, scenario: str = "pull") -> dict[str, Any]:
     """Return the offline Pub/Sub setup and recording command plan."""
     if not re.fullmatch(r"[A-Za-z0-9._+%-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", setup_account):
         raise ValueError("Select an explicit setup account")
     flags = ["--project=" + profile.project, "--account=" + setup_account, "--quiet"]
     member = "serviceAccount:" + profile.identities["fixture"].email
-    return {
+    result = {
         "status": "proposed-not-authorized",
         "scope": {
             "schema": 1,
@@ -79,6 +80,24 @@ def plan(profile: Sandbox, setup_account: str) -> dict[str, Any]:
         "limits_note": "Resource/time bounds reduce exposure; they are not a billing cap. "
         "API enablement persists.",
     }
+    if scenario == "delivery":
+        agent = f"service-{profile.project_number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+        result["scope"] = delivery_scope(profile.project, profile.project_number, approved=False)
+        result["resource_grants"] = {
+            "dead-letter topic": {"role": "roles/pubsub.publisher", "identity": agent},
+            "dead-lettered subscription": {"role": "roles/pubsub.subscriber", "identity": agent},
+        }
+        result["execution"] = [
+            "One record run followed by one revalidation run, serially",
+            f"At most {DELIVERY_LIMITS['max_topics']} topics, "
+            f"{DELIVERY_LIMITS['max_subscriptions']} subscriptions, and "
+            f"{DELIVERY_LIMITS['max_messages']} 1 KiB publish attempts per run",
+            f"At most {DELIVERY_LIMITS['max_run_seconds']} seconds of scenario work, "
+            "then bounded cleanup",
+            "The scenario grants the Pub/Sub service agent roles only on resources it owns",
+            "Review and promote sanitized recordings only after successful cleanup",
+        ]
+    return result
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -87,12 +106,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--profile", required=True)
     parser.add_argument("--setup-account", required=True)
     parser.add_argument(
+        "--scenario",
+        choices=["pull", "delivery"],
+        default="pull",
+        help="pull: pubsub-pull-authorization; delivery: pubsub-delivery-features",
+    )
+    parser.add_argument(
         "--scope-output",
         type=Path,
         help="Create an unapproved private scope file; refuses overwrites",
     )
     args = parser.parse_args(argv)
-    result = plan(Sandbox.load(args.profile), args.setup_account)
+    result = plan(Sandbox.load(args.profile), args.setup_account, args.scenario)
     if args.scope_output:
         path = args.scope_output.expanduser().absolute()
         if path.exists() or path.is_symlink():

@@ -157,30 +157,51 @@ func (p *Provider) resetPush(scope state.Scope) error {
 	})
 	return result
 }
+
+// restorePush puts provider-owned configuration back into backend responses:
+// push config, labels, and the requested dead-letter policy, which the emulator
+// holds only while the service agent's grants allow forwarding.
 func (p *Provider) restorePush(response proto.Message) {
-	decorate := func(subscription *pb.Subscription) {
-		if subscription == nil {
-			return
-		}
-		if value, ok := p.pushes.Load(canonical(subscription.GetName())); ok {
-			if worker, ok := pushWorker(value); ok {
-				subscription.PushConfig, _ = cloneMessage(worker.config)
-			}
-		}
-		if labels, ok := p.labels.Load(canonical(subscription.GetName())); ok {
-			if stored, ok := labels.(map[string]string); ok {
-				subscription.Labels = stored
-			}
-		}
-	}
 	switch response := response.(type) {
 	case *pb.Subscription:
-		decorate(response)
+		p.decorateSubscription(response)
 	case *pb.ListSubscriptionsResponse:
 		for _, subscription := range response.GetSubscriptions() {
-			decorate(subscription)
+			p.decorateSubscription(subscription)
+		}
+	case *pb.Snapshot:
+		response.Labels = p.storedLabels(response.GetName(), response.GetLabels())
+	case *pb.ListSnapshotsResponse:
+		for _, snapshot := range response.GetSnapshots() {
+			snapshot.Labels = p.storedLabels(snapshot.GetName(), snapshot.GetLabels())
 		}
 	}
+}
+
+// decorateSubscription restores one subscription's provider-owned fields.
+func (p *Provider) decorateSubscription(subscription *pb.Subscription) {
+	if subscription == nil {
+		return
+	}
+	if value, ok := p.pushes.Load(canonical(subscription.GetName())); ok {
+		if worker, ok := pushWorker(value); ok {
+			subscription.PushConfig, _ = cloneMessage(worker.config)
+		}
+	}
+	subscription.Labels = p.storedLabels(subscription.GetName(), subscription.GetLabels())
+	if d := p.deliveryOf(subscription.GetName()); d != nil && d.deadLetter != nil {
+		subscription.DeadLetterPolicy = proto.CloneOf(d.deadLetter)
+	}
+}
+
+// storedLabels returns the provider-owned labels of a resource, or fallback.
+func (p *Provider) storedLabels(name string, fallback map[string]string) map[string]string {
+	if labels, ok := p.labels.Load(canonical(name)); ok {
+		if stored, ok := labels.(map[string]string); ok {
+			return stored
+		}
+	}
+	return fallback
 }
 
 func (p *Provider) pushToken(ctx context.Context, call gateway.Call, config *pb.PushConfig) (string, error) {
@@ -207,7 +228,11 @@ func (p *Provider) pushToken(ctx context.Context, call gateway.Call, config *pb.
 func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, config *pb.PushConfig) {
 	client := pushClient(config.GetPushEndpoint())
 	for ctx.Err() == nil {
+		if p.syncDeadLetter(ctx, b, call, call.Resource) != nil && !pauseFor(ctx, time.Second) {
+			return
+		}
 		messages, retry := p.pullForDelivery(ctx, b, call, config)
+		p.track(call.Resource, messages)
 		if retry && !pauseFor(ctx, time.Second) {
 			return
 		}
@@ -215,7 +240,7 @@ func (p *Provider) deliver(ctx context.Context, b driver, call gateway.Call, con
 			if ctx.Err() != nil {
 				return
 			}
-			accepted := p.pushMessage(ctx, call, config, client, message.GetMessage())
+			accepted := p.pushMessage(ctx, call, config, client, message)
 			if !p.settleDelivery(ctx, b, call, message.GetAckId(), accepted) {
 				return
 			}
@@ -271,13 +296,19 @@ func (p *Provider) pullForDelivery(ctx context.Context, b driver, call gateway.C
 	return pulled.GetReceivedMessages(), true
 }
 
-// pushBody encodes the Pub/Sub push envelope or reports why it cannot.
-func pushBody(subscription string, message *pb.PubsubMessage) ([]byte, bool) {
-	encoded, err := protojson.Marshal(message)
+// pushBody encodes the Pub/Sub push envelope or reports why it cannot. The
+// envelope carries deliveryAttempt only when a dead-letter policy counts
+// attempts (dead-letter topics guide).
+func pushBody(subscription string, received *pb.ReceivedMessage) ([]byte, bool) {
+	encoded, err := protojson.Marshal(received.GetMessage())
 	if err != nil {
 		return nil, false
 	}
-	body, err := json.Marshal(map[string]any{"message": json.RawMessage(encoded), "subscription": subscription})
+	envelope := map[string]any{"message": json.RawMessage(encoded), "subscription": subscription}
+	if attempt := received.GetDeliveryAttempt(); attempt > 0 {
+		envelope["deliveryAttempt"] = attempt
+	}
+	body, err := json.Marshal(envelope)
 	if err != nil {
 		return nil, false
 	}
@@ -286,7 +317,7 @@ func pushBody(subscription string, message *pb.PubsubMessage) ([]byte, bool) {
 
 // pushMessage posts one message to the endpoint and reports whether the
 // endpoint accepted it. Failures are retried by nacking, not logged.
-func (p *Provider) pushMessage(ctx context.Context, call gateway.Call, config *pb.PushConfig, client *http.Client, message *pb.PubsubMessage) bool {
+func (p *Provider) pushMessage(ctx context.Context, call gateway.Call, config *pb.PushConfig, client *http.Client, message *pb.ReceivedMessage) bool {
 	token, err := p.pushToken(ctx, call, config)
 	if err != nil {
 		return false
@@ -324,10 +355,12 @@ func (p *Provider) settleDelivery(ctx context.Context, b driver, call gateway.Ca
 	if accepted {
 		_, err := invoke(ackCtx, b, subscriber+"Acknowledge", &pb.AcknowledgeRequest{Subscription: call.Resource, AckIds: []string{ackID}})
 		if err == nil {
+			p.acknowledged(call.Resource, []string{ackID})
 			return true
 		}
 	} else {
-		_, err := invoke(ackCtx, b, subscriber+"ModifyAckDeadline", &pb.ModifyAckDeadlineRequest{Subscription: call.Resource, AckIds: []string{ackID}, AckDeadlineSeconds: 0})
+		deadline := p.nackDeadline(call.Resource, ackID)
+		_, err := invoke(ackCtx, b, subscriber+"ModifyAckDeadline", &pb.ModifyAckDeadlineRequest{Subscription: call.Resource, AckIds: []string{ackID}, AckDeadlineSeconds: deadline})
 		if err == nil {
 			return true
 		}

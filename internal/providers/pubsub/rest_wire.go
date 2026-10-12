@@ -2,7 +2,6 @@ package pubsub
 
 import (
 	"strconv"
-	"time"
 
 	"encoding/json"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -30,10 +30,12 @@ func (p *Provider) buildRestProto(twin, project string, request *gateway.RESTReq
 	switch twin {
 	case publisher + "CreateTopic":
 		// The v2 CreateTopic call takes the Topic message directly.
-		return &pb.Topic{
-			Name:   restTopicName(project, request.Path["topic"]),
-			Labels: restStringMap(request.JSON, "labels"),
-		}, nil
+		topic := &pb.Topic{}
+		if err := restBody(request, topic); err != nil {
+			return nil, err
+		}
+		topic.Name = restTopicName(project, request.Path["topic"])
+		return topic, nil
 	case publisher + "GetTopic":
 		return &pb.GetTopicRequest{Topic: restTopicName(project, request.Path["topic"])}, nil
 	case publisher + "DeleteTopic":
@@ -63,98 +65,40 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	}
 }
 
-// restSubscription is the camelCase REST body of CreateSubscription.
-type restSubscription struct {
-	Topic                    string            `json:"topic"`
-	AckDeadlineSeconds       int32             `json:"ackDeadlineSeconds"`
-	MessageRetentionDuration string            `json:"messageRetentionDuration"`
-	Labels                   map[string]string `json:"labels"`
-	PushConfig               restPushConfig    `json:"pushConfig"`
-}
-
-type restPushConfig struct {
-	PushEndpoint string            `json:"pushEndpoint"`
-	Attributes   map[string]string `json:"attributes"`
-	OidcToken    struct {
-		ServiceAccountEmail string `json:"serviceAccountEmail"`
-		Audience            string `json:"audience"`
-	} `json:"oidcToken"`
+// restBody decodes a REST body with Google's JSON mapping of the proto.
+// Unknown JSON fields are rejected, as GCP does; known fields the provider does
+// not implement are refused afterwards by validate as coverage gaps.
+func restBody(request *gateway.RESTRequest, message proto.Message) error {
+	if len(request.JSON) == 0 {
+		return nil
+	}
+	if err := protojson.Unmarshal(request.JSON, message); err != nil {
+		return status.Error(codes.InvalidArgument, "Invalid request body")
+	}
+	return nil
 }
 
 // subscriptionFromREST converts a REST CreateSubscription body. The v2
-// CreateSubscription call takes the Subscription directly.
+// CreateSubscription call takes the Subscription directly. A bare topic ID is
+// resolved in the request project; the ack deadline defaults to 10 seconds.
 func subscriptionFromREST(project string, request *gateway.RESTRequest) (*pb.Subscription, error) {
-	var body restSubscription
-	if json.Unmarshal(request.JSON, &body) != nil {
+	subscription := &pb.Subscription{}
+	if err := restBody(request, subscription); err != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid subscription body")
 	}
-	topic := body.Topic
-	if !strings.HasPrefix(topic, "projects/") {
-		topic = restTopicName(project, topic)
+	if !strings.HasPrefix(subscription.GetTopic(), "projects/") {
+		subscription.Topic = restTopicName(project, subscription.GetTopic())
 	}
-	deadline := body.AckDeadlineSeconds
-	if deadline == 0 {
-		deadline = 10
+	if subscription.GetAckDeadlineSeconds() == 0 {
+		subscription.AckDeadlineSeconds = 10
 	}
-	return &pb.Subscription{
-		Name:                     restSubscriptionName(project, request.Path["subscription"]),
-		Topic:                    topic,
-		AckDeadlineSeconds:       deadline,
-		MessageRetentionDuration: durationFromSeconds(body.MessageRetentionDuration),
-		Labels:                   body.Labels,
-		PushConfig:               body.PushConfig.proto(),
-	}, nil
-}
-
-// proto decodes the push config manually: the generated protobuf structs carry
-// snake_case json tags, the REST wire is camelCase, and OidcToken is a oneof
-// that a plain decode cannot populate at all. An empty config stays nil.
-func (c restPushConfig) proto() *pb.PushConfig {
-	oidc := c.OidcToken
-	if c.PushEndpoint == "" && len(c.Attributes) == 0 && oidc.ServiceAccountEmail == "" {
-		return nil
-	}
-	push := &pb.PushConfig{PushEndpoint: c.PushEndpoint, Attributes: c.Attributes}
-	if oidc.ServiceAccountEmail != "" || oidc.Audience != "" {
-		push.AuthenticationMethod = &pb.PushConfig_OidcToken_{
-			OidcToken: &pb.PushConfig_OidcToken{ServiceAccountEmail: oidc.ServiceAccountEmail, Audience: oidc.Audience},
-		}
-	}
-	return push
-}
-
-// durationFromSeconds parses one "3600s" duration string; empty stays nil.
-func durationFromSeconds(raw string) *durationpb.Duration {
-	if raw == "" {
-		return nil
-	}
-	parsed, err := time.ParseDuration(raw)
-	if err != nil {
-		return nil
-	}
-	return durationpb.New(parsed)
+	subscription.Name = restSubscriptionName(project, request.Path["subscription"])
+	return subscription, nil
 }
 
 // secondsString renders one protobuf duration in the wire "3600s" shape.
 func secondsString(value *durationpb.Duration) string {
 	return strconv.FormatInt(value.GetSeconds(), 10) + "s"
-}
-
-// restStringMap extracts one string map from a JSON body.
-func restStringMap(raw []byte, key string) map[string]string {
-	var body map[string]json.RawMessage
-	if json.Unmarshal(raw, &body) != nil {
-		return nil
-	}
-	segment, ok := body[key]
-	if !ok {
-		return nil
-	}
-	var labels map[string]string
-	if json.Unmarshal(segment, &labels) != nil {
-		return nil
-	}
-	return labels
 }
 
 // restWire maps the emulator's proto response to the Pub/Sub JSON shape.
@@ -179,6 +123,7 @@ func restWire(_ string, response proto.Message) map[string]any {
 		if push := pushWire(protoMessage.GetPushConfig()); push != nil {
 			wire["pushConfig"] = push
 		}
+		deliveryWire(wire, protoMessage)
 		return wire
 	case *pb.ListTopicsResponse:
 		topics := []any{}
@@ -194,6 +139,26 @@ func restWire(_ string, response proto.Message) map[string]any {
 		return map[string]any{"subscriptions": subs}
 	default:
 		return map[string]any{}
+	}
+}
+
+// deliveryWire adds the delivery settings a subscription carries, in the JSON
+// field names declarative clients read back.
+func deliveryWire(wire map[string]any, subscription *pb.Subscription) {
+	for key, message := range map[string]proto.Message{"deadLetterPolicy": subscription.GetDeadLetterPolicy(), "retryPolicy": subscription.GetRetryPolicy(), "expirationPolicy": subscription.GetExpirationPolicy()} {
+		if message.ProtoReflect().IsValid() {
+			if encoded, err := protojson.Marshal(message); err == nil {
+				wire[key] = json.RawMessage(encoded)
+			}
+		}
+	}
+	for key, value := range map[string]bool{"enableMessageOrdering": subscription.GetEnableMessageOrdering(), "enableExactlyOnceDelivery": subscription.GetEnableExactlyOnceDelivery(), "retainAckedMessages": subscription.GetRetainAckedMessages()} {
+		if value {
+			wire[key] = true
+		}
+	}
+	if filter := subscription.GetFilter(); filter != "" {
+		wire["filter"] = filter
 	}
 }
 

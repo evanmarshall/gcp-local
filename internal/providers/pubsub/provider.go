@@ -37,7 +37,9 @@ type Provider struct {
 	poisoned sync.Map // unresolved control-plane mutations, cleared only on reset
 	tokens   *identity.IDTokens
 	pushes   sync.Map // canonical subscription -> provider-owned immutable config and worker
-	labels   sync.Map // canonical subscription -> provider-owned labels map
+	labels   sync.Map // canonical subscription or snapshot -> provider-owned labels map
+	// canonical subscription -> provider-owned delivery policy (delivery.go)
+	deliveries sync.Map
 }
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, config Config) (*Provider, error) {
@@ -73,6 +75,15 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 func (p *Provider) afterReset(scope state.Scope) error {
 	if err := p.resetPush(scope); err != nil {
 		return err
+	}
+	prefix := canonical("projects/" + scope.Project + "/")
+	for _, owned := range []*sync.Map{&p.labels, &p.deliveries} {
+		owned.Range(func(key, _ any) bool {
+			if name, ok := key.(string); ok && strings.HasPrefix(name, prefix) {
+				owned.Delete(key)
+			}
+			return true
+		})
 	}
 	p.iam.ClearScope(serviceName, scope)
 	p.index.RemoveScope(serviceName, scope)
@@ -128,7 +139,12 @@ func keyOf(call gateway.Call) backend.Key {
 	return backend.Key{Service: serviceName, Scope: scopeOf(call)}
 }
 func projectMethod(method string) bool {
-	return method == publisher+"CreateTopic" || method == subscriber+"CreateSubscription" || method == publisher+"ListTopics" || method == subscriber+"ListSubscriptions"
+	switch method {
+	case publisher + "CreateTopic", subscriber + "CreateSubscription", subscriber + "CreateSnapshot",
+		publisher + "ListTopics", subscriber + "ListSubscriptions", subscriber + "ListSnapshots":
+		return true
+	}
+	return false
 }
 
 // authorize runs every check that gates a Pub/Sub call, in the order that
@@ -143,12 +159,58 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 	if err := p.authorizeCall(call); err != nil {
 		return err
 	}
-	if subscription, ok := request.(*pb.Subscription); ok {
-		if err := p.authorizeAttachment(call, subscription); err != nil {
-			return err
-		}
+	if err := p.authorizeRelated(call, request); err != nil {
+		return err
 	}
 	return p.checkTarget(call)
+}
+
+// authorizeRelated checks the second resource a request names: the topic a
+// subscription attaches to, a snapshot's source subscription, or a seek's
+// snapshot (access-control table).
+func (p *Provider) authorizeRelated(call gateway.Call, request proto.Message) error {
+	switch r := request.(type) {
+	case *pb.Subscription:
+		if err := p.authorizeAttachment(call, r); err != nil {
+			return err
+		}
+		return p.validateDeadLetter(call, r.GetDeadLetterPolicy())
+	case *pb.CreateSnapshotRequest:
+		return p.authorizeOn(call, r.GetSubscription(), "subscription", snapshotSource)
+	case *pb.SeekRequest:
+		if r.GetTime() != nil {
+			return nil
+		}
+		return p.authorizeOn(call, r.GetSnapshot(), "snapshot", snapshotSeek)
+	}
+	return nil
+}
+
+// authorizeOn evaluates one permission key on a same-project resource the
+// provider index holds.
+func (p *Provider) authorizeOn(call gateway.Call, name, kind, method string) error {
+	project, err := resourceName(name, kind+"s")
+	if err != nil {
+		return err
+	}
+	if project != call.Project {
+		return gap("cross-project " + kind + "s")
+	}
+	resource, found := p.index.Get(canonical(name))
+	if !found {
+		return status.Error(codes.NotFound, strings.ToUpper(kind[:1])+kind[1:]+" does not exist")
+	}
+	if resource.Service != serviceName || resource.Kind != kind || resource.Scope != scopeOf(call) {
+		return gap(kind + " ownership disagrees with the index")
+	}
+	related := call
+	related.Method, related.Resource = method, name
+	decision, err := p.iam.Authorize(related, iam.Target{Name: resource.Name}, nil)
+	_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-"+kind+"-decision-id", decision.ID))
+	if err != nil {
+		return fmt.Errorf("authorize %s for %s: %w", kind, call.Method, err)
+	}
+	return nil
 }
 
 // checkTarget rejects pulls from push subscriptions and calls on resources the
@@ -202,19 +264,8 @@ func (p *Provider) authorizeAttachment(call gateway.Call, subscription *pb.Subsc
 	if project != call.Project {
 		return gap("cross-project subscriptions")
 	}
-	topic, found := p.index.Get(canonical(subscription.GetTopic()))
-	if !found {
-		return status.Error(codes.NotFound, "Topic does not exist")
-	}
-	if topic.Service != serviceName || topic.Kind != "topic" || topic.Scope != scopeOf(call) {
-		return gap("topic ownership disagrees with the index")
-	}
-	attachment := call
-	attachment.Method, attachment.Resource = attach, subscription.GetTopic()
-	decision, err := p.iam.Authorize(attachment, iam.Target{Name: topic.Name}, nil)
-	_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-attachment-decision-id", decision.ID))
-	if err != nil {
-		return fmt.Errorf("authorize attachment for %s: %w", call.Method, err)
+	if err := p.authorizeOn(call, subscription.GetTopic(), "topic", attach); err != nil {
+		return err
 	}
 	if subscription.GetPushConfig() == nil {
 		return nil
@@ -265,9 +316,13 @@ func (p *Provider) execute(call gateway.Call, request proto.Message, active back
 	if err != nil {
 		return nil, err
 	}
+	forwarded, err = withoutDeadLetter(forwarded)
+	if err != nil {
+		return nil, err
+	}
 	response, err := p.forward(call, b, request, forwarded)
 	if creating || deleting {
-		return response, p.settleMutation(call.Context, b, call, response, forwarded, push, creating, err)
+		return response, p.settleMutation(call.Context, b, call, response, request, push, creating, err)
 	}
 	if err == nil {
 		p.restorePush(response)
@@ -275,19 +330,68 @@ func (p *Provider) execute(call gateway.Call, request proto.Message, active back
 	return response, err
 }
 
-// forward invokes the backend. A pull re-authorizes afterwards so a grant
-// revoked while the pull blocked does not release messages.
+// forward invokes the backend. Delivery calls first synchronize the
+// dead-letter policy; nacks take the provider's delivery deadline. A pull
+// re-authorizes afterwards so a grant revoked while the pull blocked does not
+// release messages.
 func (p *Provider) forward(call gateway.Call, b driver, request, forwarded proto.Message) (proto.Message, error) {
+	switch r := forwarded.(type) {
+	case *pb.PullRequest:
+		if err := p.syncDeadLetter(call.Context, b, call, r.GetSubscription()); err != nil {
+			return nil, err
+		}
+	case *pb.ModifyAckDeadlineRequest:
+		if err := p.syncDeadLetter(call.Context, b, call, r.GetSubscription()); err != nil {
+			return nil, err
+		}
+		return p.forwardModifyAckDeadline(call.Context, b, r)
+	}
 	response, err := invoke(call.Context, b, call.Method, forwarded)
-	if err != nil || call.Method != subscriber+"Pull" {
+	if subscription, ok := request.(*pb.Subscription); ok && subscription.GetFilter() != "" && status.Code(err) == codes.Unknown {
+		// The emulator answers an unparsable filter with UNKNOWN; GCP rejects it as invalid.
+		return nil, provider.Invalid("Invalid filter expression")
+	}
+	if err != nil {
 		return response, err
 	}
-	return response, p.authorize(call, request)
+	return response, p.afterDelivery(call, request, response)
+}
+
+// afterDelivery records acknowledged and delivered messages for retry backoff
+// and re-authorizes a pull that may have blocked while a grant was revoked.
+func (p *Provider) afterDelivery(call gateway.Call, request, response proto.Message) error {
+	switch r := request.(type) {
+	case *pb.AcknowledgeRequest:
+		p.acknowledged(r.GetSubscription(), r.GetAckIds())
+	case *pb.PullRequest:
+		if err := p.authorize(call, request); err != nil {
+			return err
+		}
+		if pulled, ok := response.(*pb.PullResponse); ok {
+			p.track(r.GetSubscription(), pulled.GetReceivedMessages())
+		}
+	}
+	return nil
+}
+
+// withoutDeadLetter strips the dead-letter policy from a forwarded create; the
+// provider forwards it later, only while the service agent holds its grants.
+func withoutDeadLetter(request proto.Message) (proto.Message, error) {
+	subscription, ok := request.(*pb.Subscription)
+	if !ok || subscription.GetDeadLetterPolicy() == nil {
+		return request, nil
+	}
+	forwarded, err := cloneMessage(subscription)
+	if err != nil {
+		return nil, err
+	}
+	forwarded.DeadLetterPolicy = nil
+	return forwarded, nil
 }
 
 // preflight applies the checks that must run before any backend session opens.
 func (p *Provider) preflight(call gateway.Call, request proto.Message) error {
-	if call.Method != publisher+"ListTopics" && call.Method != subscriber+"ListSubscriptions" {
+	if call.Method != publisher+"ListTopics" && call.Method != subscriber+"ListSubscriptions" && call.Method != subscriber+"ListSnapshots" {
 		project, err := resourceName(call.Resource, "")
 		if err != nil {
 			return err
@@ -304,8 +408,8 @@ func (p *Provider) preflight(call gateway.Call, request proto.Message) error {
 
 // mutationKind classifies a method by whether it changes index-owned state.
 func mutationKind(method string) (bool, bool) {
-	creating := method == publisher+"CreateTopic" || method == subscriber+"CreateSubscription"
-	deleting := method == publisher+"DeleteTopic" || method == subscriber+"DeleteSubscription"
+	creating := method == publisher+"CreateTopic" || method == subscriber+"CreateSubscription" || method == subscriber+"CreateSnapshot"
+	deleting := method == publisher+"DeleteTopic" || method == subscriber+"DeleteSubscription" || method == subscriber+"DeleteSnapshot"
 	return creating, deleting
 }
 
@@ -335,9 +439,9 @@ func (p *Provider) splitPushConfig(call gateway.Call, request proto.Message) (pr
 // settleMutation reconciles the provider index and push worker after a create or
 // delete. An ambiguous backend outcome is resolved by reading the resource back
 // rather than assuming success.
-func (p *Provider) settleMutation(session context.Context, b driver, call gateway.Call, response proto.Message, forwarded proto.Message, push *pb.PushConfig, creating bool, invokeErr error) error {
+func (p *Provider) settleMutation(session context.Context, b driver, call gateway.Call, response proto.Message, request proto.Message, push *pb.PushConfig, creating bool, invokeErr error) error {
 	if invokeErr == nil {
-		return p.commitMutation(session, call, response, forwarded, push, creating)
+		return p.commitMutation(session, call, response, request, push, creating)
 	}
 	if !ambiguous(invokeErr) {
 		return invokeErr
@@ -345,9 +449,10 @@ func (p *Provider) settleMutation(session context.Context, b driver, call gatewa
 	return p.resolveMutation(session, b, call, push, creating, invokeErr)
 }
 
-// commitMutation mirrors a successful create or delete into the provider index
-// and starts the push worker for a created subscription.
-func (p *Provider) commitMutation(session context.Context, call gateway.Call, response proto.Message, forwarded proto.Message, push *pb.PushConfig, creating bool) error {
+// commitMutation mirrors a successful create or delete into the provider index,
+// records provider-owned labels and delivery policy, and starts the push worker
+// for a created subscription.
+func (p *Provider) commitMutation(session context.Context, call gateway.Call, response proto.Message, request proto.Message, push *pb.PushConfig, creating bool) error {
 	if !creating {
 		return p.forget(call)
 	}
@@ -359,10 +464,18 @@ func (p *Provider) commitMutation(session context.Context, call gateway.Call, re
 			return err
 		}
 	}
-	if subscription, ok := forwarded.(*pb.Subscription); ok {
-		if labels := subscription.GetLabels(); len(labels) > 0 {
-			p.labels.Store(canonical(call.Resource), labels)
+	var labels map[string]string
+	switch r := request.(type) {
+	case *pb.Subscription:
+		labels = r.GetLabels()
+		if d := newDelivery(r); d != nil {
+			p.deliveries.Store(canonical(call.Resource), d)
 		}
+	case *pb.CreateSnapshotRequest:
+		labels = r.GetLabels() // The emulator drops snapshot labels.
+	}
+	if len(labels) > 0 {
+		p.labels.Store(canonical(call.Resource), labels)
 	}
 	p.restorePush(response)
 	return nil
@@ -408,6 +521,8 @@ func (p *Provider) publish(call gateway.Call) error {
 	kind := "topic"
 	if strings.Contains(call.Resource, "/subscriptions/") {
 		kind = "subscription"
+	} else if strings.Contains(call.Resource, "/snapshots/") {
+		kind = "snapshot"
 	}
 	if err := p.index.Put(serviceName, state.Resource{Name: canonical(call.Resource), Service: serviceName, Kind: kind, Parent: provider.ProjectResource(call.Project), Scope: scopeOf(call)}); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
@@ -417,6 +532,7 @@ func (p *Provider) publish(call gateway.Call) error {
 }
 func (p *Provider) forget(call gateway.Call) error {
 	p.labels.Delete(canonical(call.Resource))
+	p.deliveries.Delete(canonical(call.Resource))
 	if err := p.stopPush(canonical(call.Resource)); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return err
@@ -442,6 +558,8 @@ func (p *Provider) reconcile(parent context.Context, b driver, call gateway.Call
 	method, request := publisher+"GetTopic", proto.Message(&pb.GetTopicRequest{Topic: call.Resource})
 	if strings.Contains(call.Resource, "/subscriptions/") {
 		method, request = subscriber+"GetSubscription", &pb.GetSubscriptionRequest{Subscription: call.Resource}
+	} else if strings.Contains(call.Resource, "/snapshots/") {
+		method, request = subscriber+"GetSnapshot", &pb.GetSnapshotRequest{Snapshot: call.Resource}
 	}
 	_, err := invoke(ctx, b, method, request)
 	if err == nil {

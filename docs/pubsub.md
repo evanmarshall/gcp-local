@@ -1,6 +1,6 @@
 # Pub/Sub
 
-Topics, subscriptions, publish, pull, StreamingPull, and authenticated local push, with IAM enforced before the call reaches Google's official emulator. One scenario, `pubsub-pull-authorization`, is recorded against GCP; everything else is tested locally. Each project gets its own emulator JVM, started on first use.
+Topics, subscriptions, publish, pull, StreamingPull, authenticated local push, ordering, filters, dead-letter topics, retry backoff, exactly-once delivery, snapshots, and seek, with IAM enforced before the call reaches Google's official emulator. One scenario, `pubsub-pull-authorization`, is recorded against GCP; everything else is tested locally. Each project gets its own emulator JVM, started on first use.
 
 ## Use
 
@@ -43,10 +43,27 @@ Use `SubscriberGrpcTransport(channel=channel)` for subscribers. `local_channel_c
 | Surface | Methods | Notes |
 | --- | --- | --- |
 | Publisher (gRPC) | `CreateTopic`, `GetTopic`, `ListTopics`, `DeleteTopic`, `Publish` | Labels at create; 1 MiB per publish request |
-| Subscriber (gRPC) | `CreateSubscription`, `GetSubscription`, `ListSubscriptions`, `DeleteSubscription`, `Pull`, `Acknowledge`, `ModifyAckDeadline`, `StreamingPull` | Same-project only; labels and ack deadline at create; `ModifyAckDeadline=0` redelivers |
+| Subscriber (gRPC) | `CreateSubscription`, `GetSubscription`, `ListSubscriptions`, `DeleteSubscription`, `Pull`, `Acknowledge`, `ModifyAckDeadline`, `StreamingPull`, `Seek`, `CreateSnapshot`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot` | Same-project only; delivery settings below are fixed at create; `ModifyAckDeadline=0` redelivers |
 | IAMPolicy (gRPC) | `GetIamPolicy`, `SetIamPolicy` | Topics and subscriptions; version-1 policies with etag checks |
-| REST | Topic and subscription `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy` | No REST publish or pull |
+| REST | Topic and subscription `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy` | No REST publish, pull, snapshots, or seek. Unknown body fields return 400; known unsupported fields return 501 |
 | Push | Authenticated HTTP push to a numeric loopback URL | Modeled locally, not recorded |
+
+## Delivery features
+
+All modeled locally, not recorded. Field rules follow the [`Subscription` reference](https://cloud.google.com/pubsub/docs/reference/rpc/google.pubsub.v1#subscription). "Emulator" is what Google's emulator 0.8.36 does on its own; `check_pubsub_backend.sh` fails if that changes.
+
+| Feature | Emulator | gcp-local |
+| --- | --- | --- |
+| Dead-letter topic (`dead_letter_policy`) | Counts `delivery_attempt` and forwards after `max_delivery_attempts` (5 to 100; 0 means 5), adding the `CloudPubSubDeadLetter*` attributes. No IAM | Forwards the policy to the emulator only while the service agent holds both grants (below). Without them, attempts are not counted (`delivery_attempt` 0) and nothing is forwarded, per Google's dead-letter guide. Push bodies carry `deliveryAttempt` |
+| Retry policy (`retry_policy`) | Stored, but redelivers a nack immediately | A nack waits `minimum_backoff`, doubling per consecutive nack of the message up to `maximum_backoff` (defaults 10 s and 600 s). Ack-deadline expiry redelivers with no extra backoff |
+| Ordering (`enable_message_ordering`, `ordering_key`) | Delivers in key order, one batch per key, but re-queues a nacked message behind later ones | A nack on an ordered subscription becomes a 1-second deadline; the emulator's expiry path redelivers that message and every later one for the key, in order |
+| Filter (`filter`) | Filters on attributes; an unparsable filter fails `UNKNOWN` | Returns `INVALID_ARGUMENT` for an unparsable filter; refuses filters over 256 bytes |
+| Exactly-once (`enable_exactly_once_delivery`) | Unary `Acknowledge` and `ModifyAckDeadline` fail with `ErrorInfo` `EXACTLY_ONCE_ACKID_FAILURE` for an acked or unknown ack ID; streams report `exactly_once_delivery_enabled` | Passed through. Refused on push subscriptions |
+| Retention, snapshots, seek (`retain_acked_messages`, `message_retention_duration`) | Seek to a time or snapshot; snapshot create, get, list, delete | Authorizes each call and keeps snapshot labels, which the emulator drops |
+
+### Dead-letter grants
+
+Grant the project's Pub/Sub service agent, `serviceAccount:service-NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com`, `roles/pubsub.publisher` on the dead-letter topic and `roles/pubsub.subscriber` on the source subscription. The provider re-checks both before every pull, nack, stream request, and push delivery, so a grant or revocation takes effect at the next one.
 
 ### Push
 
@@ -73,6 +90,7 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 
 - `pubsub.topics.publish` to publish. `pubsub.subscriptions.consume` for pull, ack, modify-deadline, and StreamingPull.
 - Creating a subscription needs `pubsub.subscriptions.create` on the project and `pubsub.topics.attachSubscription` on the topic.
+- `CreateSnapshot` needs `pubsub.snapshots.create` on the project and `pubsub.subscriptions.consume` on the source. `Seek` needs `pubsub.subscriptions.consume`, plus `pubsub.snapshots.seek` on the snapshot when seeking to one. `GetSnapshot` uses `pubsub.snapshots.get`, which the access-control table omits; the Viewer role carries it.
 - Push creation needs `iam.serviceAccounts.actAs`; each delivery needs the service agent's `iam.serviceAccounts.getOpenIdToken`. Without it messages stay pending.
 - An open stream rechecks access before each delivery and ack, so revoking stops delivery.
 
@@ -82,11 +100,13 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 | --- | --- | --- |
 | `pubsub-pull-authorization` | 2026-10-09 | Topic-scoped Publisher and subscription-scoped Subscriber grants, denied publish and pull, message identity, ack, cleanup |
 
+`pubsub-delivery-features` (`tests/conformance/pubsub_delivery`) observes ordering, filters, exactly-once ack results, and dead-lettering with and without the service agent's grants. It is not recorded: `check_pubsub.sh` runs it locally without comparing to GCP. Recording it needs its own approved scope (`python3 scripts/plan_pubsub.py --scenario delivery ...`).
+
 Run in Linux or moo after installing Java 17, the emulator JAR, and `requirements-services.txt`:
 
 ```sh
-sh scripts/check_pubsub.sh          # provider, SDK, push, and the recording
-sh scripts/check_pubsub_backend.sh  # the bare emulator protocol
+sh scripts/check_pubsub.sh          # provider, SDK, push, delivery features, and the recording
+sh scripts/check_pubsub_backend.sh  # the bare emulator protocol and the delivery behaviors listed above
 ```
 
 To re-record, generate a scope file (it starts `approved: false`; get the owner's approval before setting it), then record and revalidate:
@@ -104,7 +124,11 @@ A run creates one topic and one subscription and makes at most ten publish attem
 
 ## Gaps
 
-- Not recorded: StreamingPull, push, nack redelivery, IAM policy calls.
-- No ordering, exactly-once, filters, dead-letter, retry policies, schemas, KMS, snapshots, seek, or update methods.
+- Not recorded: StreamingPull, push, nack redelivery, IAM policy calls, and every delivery feature above.
+- No schemas (`SchemaService`, topic `schema_settings`), KMS, topic retention, subscription expiration TTL, BigQuery or Cloud Storage export subscriptions, `UpdateTopic`, `UpdateSubscription`, `UpdateSnapshot`, `ModifyPushConfig`, `DetachSubscription`, or `ListTopicSnapshots`/`ListTopicSubscriptions`. Subscriptions never expire.
+- Exactly-once: an ack after the deadline expires still succeeds (GCP rejects it), and acks sent on a stream get no `acknowledge_confirmation`. The Python client acks over unary calls and is unaffected.
+- Retry backoff applies to nacks only; ordered redelivery after a nack waits at least 1 second.
+- The dead-letter grants are re-checked at delivery decisions; an ack-deadline expiry between them uses the last checked state.
+- No snapshot IAM policies, cross-project dead-letter topics, or cross-project snapshots.
 - No `testIamPermissions`, conditional policies, cross-project subscriptions, or anonymous, remote, or HTTPS push.
 - Messages are in memory; restart loses them.

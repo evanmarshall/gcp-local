@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // testProject is the primary fixture project for Pub/Sub provider tests.
@@ -98,7 +99,7 @@ func TestDeniedOrUnsupportedCallsNeverStartOrReachBackend(t *testing.T) {
 		{call(subscriber+"Acknowledge", testSub, other), &pb.AcknowledgeRequest{Subscription: testSub, AckIds: []string{"ack"}}, codes.PermissionDenied},
 		{call(subscriber+"CreateSubscription", testSub, owner), &pb.Subscription{Name: testSub, Topic: testTopic, PushConfig: &pb.PushConfig{PushEndpoint: "https://example.invalid"}}, codes.Unimplemented},
 		{call(publisher+"CreateTopic", "projects/project-a/topics/schema", owner), &pb.Topic{Name: "projects/project-a/topics/schema", KmsKeyName: "unverified"}, codes.Unimplemented},
-		{call(publisher+"Publish", testTopic, owner), &pb.PublishRequest{Topic: testTopic, Messages: []*pb.PubsubMessage{{Data: []byte("ordered"), OrderingKey: "key"}}}, codes.Unimplemented},
+		{call(publisher+"Publish", testTopic, owner), &pb.PublishRequest{Topic: testTopic, Messages: []*pb.PubsubMessage{{Data: []byte("timed"), PublishTime: timestamppb.Now()}}}, codes.Unimplemented},
 	}
 	for _, test := range tests {
 		_, err := registry.Invoke(test.call, test.request)

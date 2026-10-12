@@ -3,6 +3,13 @@ package pubsub
 const publisher = "/google.pubsub.v1.Publisher/"
 const subscriber = "/google.pubsub.v1.Subscriber/"
 const attach = "pubsub.attachSubscription"
+
+// CreateSnapshot also needs consume on the source subscription, and Seek to a
+// snapshot needs snapshots.seek on it (access-control table).
+const (
+	snapshotSource = "pubsub.snapshots.source"
+	snapshotSeek   = "pubsub.snapshots.seekTarget"
+)
 const policyRPC = "/google.iam.v1.IAMPolicy/"
 
 // IAM policy permissions shared by the gRPC policy surface and the REST twins.
@@ -29,14 +36,25 @@ var permissions = map[string]string{
 	subscriber + "Acknowledge":        permissionSubscriptionsConsume,
 	subscriber + "ModifyAckDeadline":  permissionSubscriptionsConsume,
 	subscriber + "StreamingPull":      permissionSubscriptionsConsume,
-	attach:                            "pubsub.topics.attachSubscription",
-	permTopicsGetIam:                  permTopicsGetIam,
-	permTopicsSetIam:                  permTopicsSetIam,
-	permSubscriptionsGetIam:           permSubscriptionsGetIam,
-	permSubscriptionsSetIam:           permSubscriptionsSetIam,
-	"pubsub.push.actAs":               "iam.serviceAccounts.actAs",
-	policyRPC + "GetIamPolicy":        permTopicsGetIam,
-	policyRPC + "SetIamPolicy":        permTopicsSetIam,
+	subscriber + "Seek":               permissionSubscriptionsConsume,
+	subscriber + "CreateSnapshot":     "pubsub.snapshots.create",
+	subscriber + "ListSnapshots":      "pubsub.snapshots.list",
+	subscriber + "DeleteSnapshot":     "pubsub.snapshots.delete",
+	// The access-control table has no GetSnapshot row; this follows the
+	// snapshots.get permission that the Viewer, Editor, and Admin roles carry.
+	subscriber + "GetSnapshot": "pubsub.snapshots.get",
+	snapshotSource:             permissionSubscriptionsConsume,
+	snapshotSeek:               "pubsub.snapshots.seek",
+	deadLetterPublish:          "pubsub.topics.publish",
+	deadLetterAcknowledge:      permissionSubscriptionsConsume,
+	attach:                     "pubsub.topics.attachSubscription",
+	permTopicsGetIam:           permTopicsGetIam,
+	permTopicsSetIam:           permTopicsSetIam,
+	permSubscriptionsGetIam:    permSubscriptionsGetIam,
+	permSubscriptionsSetIam:    permSubscriptionsSetIam,
+	"pubsub.push.actAs":        "iam.serviceAccounts.actAs",
+	policyRPC + "GetIamPolicy": permTopicsGetIam,
+	policyRPC + "SetIamPolicy": permTopicsSetIam,
 }
 
 // permissionSubscriptionsConsume is the single permission that governs every

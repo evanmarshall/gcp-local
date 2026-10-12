@@ -25,7 +25,7 @@ def main() -> int:
         "pubsub",
         str(root / "bin/pubsub-integration"),
         "-test.v=test2json",
-        "-test.timeout=100s",
+        "-test.timeout=160s",
     ]
     result = subprocess.run(
         command, cwd=root / "internal/providers/pubsub", capture_output=True, text=True, check=False
@@ -52,7 +52,7 @@ def main() -> int:
             source.update(path.read_bytes())
     for path in sorted((root / "internal/providers/pubsub/testdata").glob("*.py")):
         source.update(path.read_bytes())
-    for name in ("pubsub.py", "pubsub_scope.py"):
+    for name in ("pubsub.py", "pubsub_scope.py", "pubsub_delivery.py"):
         source.update((root / "gcp_validation" / name).read_bytes())
     versions = subprocess.check_output(
         [
