@@ -6,16 +6,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
+	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // realHarness drives the provider against the pinned official emulator.
@@ -127,4 +132,118 @@ func TestEmulatorLifecycleIsolationAndReset(t *testing.T) {
 	if code, _ := h.invoke(other, http.MethodGet, documentsPath(otherProject)+"/"+testDoc, nil); code != http.StatusOK {
 		t.Fatalf("reset reached another project: %d", code)
 	}
+}
+
+// TestEmulatorRESTQueriesTransactionsAndSubcollections drives the new REST
+// methods against the real emulator.
+func TestEmulatorRESTQueriesTransactionsAndSubcollections(t *testing.T) {
+	h := newRealHarness(t)
+	owner := "actor:" + testProject
+	root := "/v1/projects/" + testProject + "/databases/(default)/documents"
+	name := func(path string) string { return "projects/" + testProject + "/databases/(default)/documents/" + path }
+	population := func(n string) map[string]any {
+		return map[string]any{"fields": map[string]any{"population": map[string]any{"integerValue": n}}}
+	}
+	for id, n := range map[string]string{"sf": "870000", "la": "3900000"} {
+		if code, body := h.invoke(owner, http.MethodPost, root+"/cities?documentId="+id, population(n)); code != http.StatusOK {
+			t.Fatalf("create %s = %d %+v", id, code, body)
+		}
+	}
+	if code, body := h.invoke(owner, http.MethodPost, root+"/cities/sf/landmarks?documentId=ggb", titleBody("bridge")); code != http.StatusOK || body["name"] != name("cities/sf/landmarks/ggb") {
+		t.Fatalf("nested create = %d %+v", code, body)
+	}
+	if code, body := h.invoke(owner, http.MethodGet, root+"/cities/sf/landmarks", nil); code != http.StatusOK || len(body["documents"].([]any)) != 1 {
+		t.Fatalf("nested list = %d %+v", code, body)
+	}
+	if code, body := h.invoke(owner, http.MethodPost, root+"/cities/sf:listCollectionIds", map[string]any{}); code != http.StatusOK || body["collectionIds"].([]any)[0] != "landmarks" {
+		t.Fatalf("collection ids = %d %+v", code, body)
+	}
+	query := map[string]any{"structuredQuery": map[string]any{
+		"from":    []any{map[string]any{"collectionId": "cities"}},
+		"where":   map[string]any{"fieldFilter": map[string]any{"field": map[string]any{"fieldPath": "population"}, "op": "GREATER_THAN", "value": map[string]any{"integerValue": "1000000"}}},
+		"orderBy": []any{map[string]any{"field": map[string]any{"fieldPath": "population"}, "direction": "DESCENDING"}},
+		"limit":   1,
+	}}
+	code, results := h.invokeArray(owner, root+":runQuery", query)
+	if code != http.StatusOK || len(results) != 1 || results[0]["document"].(map[string]any)["name"] != name("cities/la") {
+		t.Fatalf("query = %d %+v", code, results)
+	}
+	code, begun := h.invoke(owner, http.MethodPost, root+":beginTransaction", map[string]any{})
+	if code != http.StatusOK || begun["transaction"] == "" {
+		t.Fatalf("begin = %d %+v", code, begun)
+	}
+	commit := map[string]any{"transaction": begun["transaction"], "writes": []any{
+		map[string]any{"update": map[string]any{"name": name("cities/sf"), "fields": population("1")["fields"]}, "currentDocument": map[string]any{"exists": true}},
+		map[string]any{"delete": name("cities/la")},
+	}}
+	if code, body := h.invoke(owner, http.MethodPost, root+":commit", commit); code != http.StatusOK || body["commitTime"] == nil {
+		t.Fatalf("commit = %d %+v", code, body)
+	}
+	if code, _ := h.invoke(owner, http.MethodGet, root+"/cities/la", nil); code != http.StatusNotFound {
+		t.Fatalf("deleted document read = %d", code)
+	}
+	if code, _ := h.invoke("actor:"+otherProject, http.MethodPost, root+":commit", commit); code != http.StatusForbidden {
+		t.Fatalf("cross-project commit = %d", code)
+	}
+}
+
+// TestEmulatorGRPCListenDeliversDocumentChanges opens a Listen stream through
+// the gateway's gRPC server against the real emulator.
+func TestEmulatorGRPCListenDeliversDocumentChanges(t *testing.T) {
+	h := newRealHarness(t)
+	owner := "actor:" + testProject
+	if code, _ := h.invoke(owner, http.MethodPost, documentsPath(testProject)+"?documentId="+testDoc, titleBody("watched")); code != http.StatusOK {
+		t.Fatalf("create = %d", code)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := h.gate.NewGRPCServer()
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+	connection, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+owner)
+	database := "projects/" + testProject + "/databases/(default)"
+	stream, err := pb.NewFirestoreClient(connection).Listen(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&pb.ListenRequest{Database: database, TargetChange: &pb.ListenRequest_AddTarget{AddTarget: &pb.Target{
+		TargetId: 1, TargetType: &pb.Target_Documents{Documents: &pb.Target_DocumentsTarget{Documents: []string{database + "/documents/" + testCollection + "/" + testDoc}}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		response, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("listen: %v", err)
+		}
+		if change := response.GetDocumentChange(); change != nil {
+			if change.GetDocument().GetFields()["title"].GetStringValue() != "watched" {
+				t.Fatalf("document change = %v", change)
+			}
+			return
+		}
+	}
+}
+
+// invokeArray issues a POST whose response is a JSON array (streamed methods).
+func (h *realHarness) invokeArray(token, path string, body any) (int, []map[string]any) {
+	h.t.Helper()
+	encoded, _ := json.Marshal(body) //nolint:errchkjson // plain map bodies
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, path, bytes.NewReader(encoded))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	h.gate.ServeHTTP(recorder, request)
+	var decoded []map[string]any
+	_ = json.Unmarshal(recorder.Body.Bytes(), &decoded)
+	return recorder.Code, decoded
 }

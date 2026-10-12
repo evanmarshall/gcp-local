@@ -15,6 +15,8 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // The pinned official emulator; toolchains/firestore.json records its source.
@@ -60,10 +62,12 @@ func (c Config) validate() error {
 }
 
 // driver is the provider's view of one scoped document backend: a private
-// loopback base URL that serves the Firestore v1 REST documents surface.
+// loopback base URL that serves the Firestore v1 REST surface, and a gRPC
+// connection to the same port for the Firestore v1 gRPC service.
 type driver interface {
 	backend.Backend
 	baseURL() string
+	client() grpc.ClientConnInterface
 }
 
 // emulator runs the official JVM for one project. It owns document state; the
@@ -71,11 +75,12 @@ type driver interface {
 // or ambient ADC enter the child, and single-project mode rejects any other
 // project ID as a second isolation check.
 type emulator struct {
-	config    Config
-	scope     state.Scope
-	process   *backend.Process
-	endpoint  string
-	directory string
+	config     Config
+	scope      state.Scope
+	process    *backend.Process
+	endpoint   string
+	directory  string
+	connection *grpc.ClientConn
 }
 
 func (b *emulator) Start(ctx context.Context) error {
@@ -87,9 +92,19 @@ func (b *emulator) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen for the emulator port: %w", err)
 	}
-	b.endpoint = "http://" + listener.Addr().String()
-	_, port, _ := net.SplitHostPort(listener.Addr().String())
+	address := listener.Addr().String()
+	b.endpoint = "http://" + address
+	_, port, _ := net.SplitHostPort(address)
 	_ = listener.Close()
+	// The emulator serves gRPC and REST on one port. The connection dials
+	// only that loopback address and carries no caller credentials.
+	b.connection, err = grpc.NewClient("passthrough:///"+address, grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", address)
+		}), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxBackendResponse)))
+	if err != nil {
+		return fmt.Errorf("connect to the emulator: %w", err)
+	}
 	b.directory, err = os.MkdirTemp("", "gcp-local-firestore-")
 	if err != nil {
 		return fmt.Errorf("create the emulator data directory: %w", err)
@@ -127,6 +142,10 @@ func (b *emulator) Ready(ctx context.Context) error {
 }
 
 func (b *emulator) Stop(ctx context.Context) error {
+	if b.connection != nil {
+		_ = b.connection.Close()
+		b.connection = nil
+	}
 	if b.process != nil {
 		if err := b.process.Stop(ctx); err != nil {
 			return fmt.Errorf("stop the emulator process: %w", err)
@@ -145,6 +164,8 @@ func (b *emulator) Stop(ctx context.Context) error {
 func (b *emulator) Reset(ctx context.Context) error { return b.Stop(ctx) }
 
 func (b *emulator) baseURL() string { return b.endpoint }
+
+func (b *emulator) client() grpc.ClientConnInterface { return b.connection }
 
 // backendClient reaches only the private loopback emulator: no proxy, no
 // redirects, and a bounded wait.

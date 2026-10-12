@@ -32,6 +32,7 @@ type compiledRoute struct {
 	contract   generated.Route
 	expression *regexp.Regexp
 	names      []string
+	multi      []bool // a {name=**} variable spans one or more segments
 }
 type Gateway struct {
 	Registry *Registry
@@ -55,6 +56,9 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 		for _, rpc := range table {
 			g.rpcs[rpc.Method] = rpc
 		}
+	}
+	for _, rpc := range generated.FirestoreMethods {
+		g.rpcs[rpc.Method] = rpc
 	}
 	return g
 }
@@ -115,8 +119,14 @@ func compileRoute(contract generated.Route) compiledRoute {
 	last := 0
 	for _, bounds := range variables.FindAllStringSubmatchIndex(contract.Path, -1) {
 		pattern.WriteString(regexp.QuoteMeta(contract.Path[last:bounds[0]]))
-		pattern.WriteString("([^/]+)")
-		compiled.names = append(compiled.names, contract.Path[bounds[2]:bounds[3]])
+		name, multi := strings.CutSuffix(contract.Path[bounds[2]:bounds[3]], "=**")
+		if multi {
+			pattern.WriteString("([^/]+(?:/[^/]+)*)")
+		} else {
+			pattern.WriteString("([^/]+)")
+		}
+		compiled.names = append(compiled.names, name)
+		compiled.multi = append(compiled.multi, multi)
 		last = bounds[1]
 	}
 	pattern.WriteString(regexp.QuoteMeta(contract.Path[last:]))
@@ -147,9 +157,9 @@ func (g *Gateway) restRequest(r *http.Request, route *compiledRoute) (*RESTReque
 	request := &RESTRequest{Path: map[string]string{}, Query: query, Headers: r.Header.Clone()}
 	request.Headers.Del("Authorization")
 	for index, name := range route.names {
-		value, err := url.PathUnescape(matches[index+1])
+		value, err := pathVariable(matches[index+1], route.multi[index])
 		if err != nil {
-			return nil, Call{}, status.Error(codes.InvalidArgument, "Malformed resource path")
+			return nil, Call{}, err
 		}
 		request.Path[name] = value
 	}
@@ -165,6 +175,28 @@ func (g *Gateway) restRequest(r *http.Request, route *compiledRoute) (*RESTReque
 		return nil, Call{}, err
 	}
 	return request, call, nil
+}
+
+// pathVariable unescapes one matched route variable. A multi-segment value is
+// unescaped segment by segment, so an escaped slash cannot forge a segment
+// boundary and dot segments are refused.
+func pathVariable(raw string, multi bool) (string, error) {
+	if !multi {
+		value, err := url.PathUnescape(raw)
+		if err != nil {
+			return "", status.Error(codes.InvalidArgument, "Malformed resource path")
+		}
+		return value, nil
+	}
+	segments := strings.Split(raw, "/")
+	for i, segment := range segments {
+		value, err := url.PathUnescape(segment)
+		if err != nil || value == "" || value == "." || value == ".." || strings.Contains(value, "/") {
+			return "", status.Error(codes.InvalidArgument, "Malformed resource path")
+		}
+		segments[i] = value
+	}
+	return strings.Join(segments, "/"), nil
 }
 
 // restBody attaches the request body the route contract expects: streaming

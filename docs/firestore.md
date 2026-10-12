@@ -1,6 +1,58 @@
 # Firestore (local slice)
 
-Firestore v1 documents: collection-level creates, document upsert/get/list/delete with database-attached IAM (recorded `roles/datastore.*` snapshots pin the baselines; Firestore permission names are the Cloud Datastore ones, and field/TTL configuration checks `datastore.schemas.*`, the current name for `datastore.indexes.*`).
+Firestore v1 documents, subcollections, queries, aggregations, transactions, batch writes, and listeners work over REST and gRPC in the `(default)` database, with IAM checked on every request. Only document create/read/update/delete is recorded against GCP; queries, transactions, batch writes, subcollections, and listeners are modeled locally, not recorded.
+
+## Served methods
+
+| Method | REST | gRPC | Permissions |
+| --- | --- | --- | --- |
+| get | `GET documents/{path}` (even segment count) | `GetDocument` | `datastore.entities.get` |
+| list | `GET documents/{path}` (odd segment count) | `ListDocuments` | `datastore.entities.get`, `datastore.entities.list` |
+| createDocument | `POST documents/{collection path}` | `CreateDocument` | `datastore.entities.create` |
+| patch | `PATCH documents/{path}` | `UpdateDocument` | `datastore.entities.update` |
+| delete | `DELETE documents/{path}` | `DeleteDocument` | `datastore.entities.delete` |
+| batchGet | `POST documents:batchGet` | `BatchGetDocuments` | `datastore.entities.get` |
+| beginTransaction, rollback | `POST documents:beginTransaction`, `:rollback` | `BeginTransaction`, `Rollback` | `datastore.databases.get` |
+| commit, batchWrite | `POST documents:commit`, `:batchWrite` | `Commit`, `BatchWrite` | per write, below |
+| runQuery, runAggregationQuery | `POST documents[/{doc}]:runQuery`, `:runAggregationQuery` | `RunQuery`, `RunAggregationQuery` | `datastore.entities.get`, `datastore.entities.list` |
+| listCollectionIds | `POST documents[/{doc}]:listCollectionIds` | `ListCollectionIds` | `datastore.entities.list` |
+| listen | not routed | `Listen` | `datastore.entities.get`, `datastore.entities.list` |
+| fields.get, fields.patch | `GET`/`PATCH collectionGroups/{c}/fields/{f}` | not routed | `datastore.schemas.get`, `datastore.schemas.update` |
+
+`{path}` spans any depth, so subcollection documents such as `cities/sf/landmarks/ggb` use the same routes. Permissions follow Google's [required permissions table](https://docs.cloud.google.com/firestore/native/docs/security/iam) (read 2026-10-11) and authorize against the project's `(default)` database. Commit and BatchWrite need the permission for each write kind they carry:
+
+| Write | Permissions |
+| --- | --- |
+| update or transform with `exists: false` | `datastore.entities.create` |
+| update or transform with `exists: true` or an `updateTime` precondition | `datastore.entities.update` |
+| update or transform with no precondition (`set()`) | `datastore.entities.create`, `datastore.entities.update` |
+| delete | `datastore.entities.delete` |
+
+A read that starts a transaction (`newTransaction`) also needs `datastore.databases.get`. Local choices where Google's table has no row: Listen uses the query permissions; a commit or batch write with no writes needs `datastore.databases.get`; BatchWrite deletes use the Commit delete row. These plans are not recorded against GCP.
+
+Every document name in a request (batch get, writes, listen targets) must be in the request project's `(default)` database; other names return `INVALID_ARGUMENT`, and a named database returns `UNIMPLEMENTED`. Streaming RPCs authorize before the backend stream opens. Listen also authorizes each later request and each response, so revoking a grant ends delivery.
+
+## Python client
+
+The official `google-cloud-firestore` client (pinned 2.34.1 in `requirements-firestore.txt`) works over the gRPC gateway with local ADC. Keep `FIRESTORE_EMULATOR_HOST` unset: that mode sends the emulator's anonymous `owner` token and bypasses IAM. The client has no public channel argument, so attach an authenticated loopback channel through its private `_firestore_api_internal` attribute:
+
+```python
+import google.auth
+import grpc
+from google.auth.transport.grpc import secure_authorized_channel
+from google.auth.transport.requests import Request
+from google.cloud import firestore
+from google.cloud.firestore_v1.services.firestore import FirestoreClient
+from google.cloud.firestore_v1.services.firestore.transports.grpc import FirestoreGrpcTransport
+
+request = Request()
+credentials, project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"], request=request)
+channel = secure_authorized_channel(credentials, request, "127.0.0.1:4567", ssl_credentials=grpc.local_channel_credentials())
+db = firestore.Client(project=project, credentials=credentials)
+db._firestore_api_internal = FirestoreClient(transport=FirestoreGrpcTransport(channel=channel))
+```
+
+The [SDK test](../internal/providers/firestore/testdata/sdk.py) uses this setup for filtered, ordered, and limited queries, `count()`, `get_all`, a `@transactional` read-modify-write, a rolled-back transaction, `batch()`, `bulk_writer()`, subcollections, `collections()`, collection-group queries, `on_snapshot`, `recursive_delete`, and denial of another project's principal.
 
 ## Backend: the official emulator
 
@@ -10,9 +62,9 @@ Version choice: the current release, 1.22.0 (SDK 588.0.0), and every release sin
 
 The provider remains the authentication and authorization gate:
 
-1. Resolve the project, collection, and document from the route, then authorize against the `(default)` database resource with the IAM engine. A denied or invalid request returns before the backend manager is involved, so it never starts or reaches the emulator.
-2. Run the request inside `Manager.Use` for the project scope. Each resource project gets its own lazily started JVM on a random loopback port (`--single_project_mode_error` rejects any other project ID). The child gets a private temporary directory, a minimal environment (`PATH`, `TMPDIR`, `HOME`), a 256 MiB heap, and no caller credentials, proxy settings, or ambient ADC.
-3. Forward the documents request to the emulator's v1 REST endpoint. The provider rebuilds the path from the route parameters, forwards only documented document query parameters (`documentId`, `mask.fieldPaths`, `updateMask.fieldPaths`, `currentDocument.*`, `pageSize`, `pageToken`, `orderBy`, `showMissing`, `readTime`), and sends the fixed `Bearer owner` header. That header is the emulator's documented administrative bypass of security rules. The IAM decision has already been made, and the caller's token is never forwarded. The emulator's status code and JSON body are returned unchanged. A non-JSON reply becomes an explicit `UNIMPLEMENTED` coverage gap.
+1. Validate every resource name in the request (REST custom-method bodies are decoded strictly into the Firestore protobuf request first), then authorize each permission plan against the `(default)` database resource with the IAM engine. A denied or invalid request returns before the backend manager is involved, so it never starts or reaches the emulator.
+2. Run unary requests inside `Manager.Use` and streaming requests (`BatchGetDocuments`, `RunQuery`, `RunAggregationQuery`, `Listen`) inside `Manager.Session` for the project scope, so reset cancels open streams. Each resource project gets its own lazily started JVM on a random loopback port (`--single_project_mode_error` rejects any other project ID). The child gets a private temporary directory, a minimal environment (`PATH`, `TMPDIR`, `HOME`), a 256 MiB heap, and no caller credentials, proxy settings, or ambient ADC.
+3. Forward REST requests to the emulator's v1 REST endpoint and gRPC requests to its gRPC service on the same port. REST paths are rebuilt from validated route parameters; document methods forward only documented query parameters (`documentId`, `mask.fieldPaths`, `updateMask.fieldPaths`, `currentDocument.*`, `pageSize`, `pageToken`, `orderBy`, `showMissing`, `readTime`). Both transports send the fixed `Bearer owner` credential, the emulator's documented administrative bypass of security rules; gRPC also sends the validated database as `google-cloud-resource-prefix`, which the emulator's Listen requires. The IAM decision has already been made, and the caller's token and metadata are never forwarded. Emulator statuses and bodies return unchanged. A non-JSON REST reply becomes an explicit `UNIMPLEMENTED` coverage gap.
 
 The emulator owns all document state. The provider has no document map and publishes no per-document index entries. The shared index holds only the project's `(default)` database reference that anchors IAM. Reset stops the scope's JVM, which discards its documents, then clears the provider's field configuration, Firestore IAM policies, and index entries for that project only. Other projects keep their emulators. There is no persistence: a restart begins empty.
 
@@ -36,19 +88,26 @@ All emulator responses in this scenario matched the recording. Error messages di
 
 The Terraform acceptance case `TestAccFirestoreDocument` (pinned google 8.5.0 provider) passes against the emulator-backed provider.
 
+## Unrecorded scenario
+
+`firestore-query-transaction` ([recorder](../gcp_validation/firestore_query.py), [scenario](../tests/conformance/firestorequery/test_firestore_query.py)) covers a filtered, ordered, limited query, a count aggregation, a subcollection query and `listCollectionIds`, a transaction read and commit, a rollback, and denied query and commit, in a run-owned collection. It has not run against GCP, so it has no baseline: in local mode pytest reports it `unverified`, and it is not in `check_rest_recordings.sh`. Recording it needs its own live scope file with the limits in the recorder.
+
 ## Verification
 
 ```sh
 python3 scripts/install_firestore.py
+.venv-tools/bin/python -m pip install -r requirements-firestore.txt
 sh scripts/check_firestore.sh
 ```
 
-This runs inside Moo or Linux CI with only loopback available. The race-enabled Go integration test starts the real emulator. It checks that a denied cross-project write starts no backend, verifies create/duplicate/read through the emulator, shows that two projects with the same collection and document ID stay separate, and confirms that reset clears one project's documents without affecting the other. Unit tests use a fake per-scope backend. They verify that denied requests never create a backend, that only allowlisted query parameters and the fixed `owner` bearer reach it, that emulator errors pass through, that each project uses its own instance, and that reset restarts the instance and clears field configuration. These are local tests, not GCP authorization evidence.
+This runs inside Moo or Linux CI with only loopback available. Against the real emulator, the race-enabled Go integration tests check that a denied cross-project write starts no backend, document create/duplicate/read, project isolation, reset, REST queries/transactions/subcollections, and a gRPC Listen through the gateway. The Python SDK test runs the official client with local ADC through the core server's gRPC listener. Unit tests use a fake per-scope backend; they pin every permission plan, deny each commit write kind before the backend, reject names outside the project's database, and confirm that only the `owner` credential reaches the emulator on both transports. These are local tests, not GCP authorization evidence.
 
-Run the server with `-services firestore -firestore-java "$(command -v java)" -firestore-jar "$PWD/.tools/firestore/emulator.jar"`. The packaged image ships the JAR at `/opt/firestore/emulator.jar`, and Compose passes both flags. The packaged `-services` list does not select Firestore yet.
+Run the server with `-services firestore -firestore-java "$(command -v java)" -firestore-jar "$PWD/.tools/firestore/emulator.jar"`. The packaged image ships the JAR at `/opt/firestore/emulator.jar`, and Compose passes both flags.
 
 ## Explicit gaps
 
-- Only the routed documents methods are exposed. runQuery, batch get/write, transactions, listeners, subcollection paths, and the other Admin API surfaces are not routed, even though the emulator implements some of them. They remain unrecorded.
-- Firestore IAM is project/database-level; no per-document grants exist to record.
+- Queries, aggregations, transactions, batch writes, subcollections, and listeners are modeled locally, not recorded.
+- Not served: the `Write` streaming RPC, `PartitionQuery` (the emulator returns `UNIMPLEMENTED`), `ExecutePipeline`, REST `:listen`, named databases, and the Admin API beyond collection-group fields (indexes, databases, backups, import/export).
+- The Python client needs the private `_firestore_api_internal` attribute to use an authenticated local channel.
+- Firestore IAM is project/database-level; no per-document grants exist to record. Security rules are bypassed; IAM is the only gate.
 - Emulator fidelity is limited to what the recording covers; Google documents the emulator as a development tool, not a production-equivalent backend.

@@ -6,6 +6,7 @@ toolchain go1.26.8
 
 require (
 	cloud.google.com/go/bigtable v1.58.0
+	cloud.google.com/go/firestore v1.22.0
 	cloud.google.com/go/iam v1.11.0
 	cloud.google.com/go/longrunning v1.2.0
 	cloud.google.com/go/pubsub/v2 v2.7.0

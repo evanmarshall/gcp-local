@@ -56,7 +56,7 @@ Full, runnable examples are in [`examples/`](examples/), including Pub/Sub over 
 | [Secret Manager](docs/secretmanager.md) | gcp-local | Secret versions and access |
 | [Cloud KMS](docs/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt |
 | [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries |
-| [Firestore](docs/firestore.md) | Official Google emulator | Single documents; no queries or transactions |
+| [Firestore](docs/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners (Python client over gRPC) |
 | [BigQuery](docs/bigquery.md) | gcp-local | Streaming inserts, simple SELECT |
 | [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | PostgreSQL clients on `127.0.0.1` with a user password |
 | [Memorystore for Redis](docs/memorystore.md) | Real Redis | Redis clients on the reported host and port, with AUTH |

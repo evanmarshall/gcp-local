@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/firestore/apiv1/firestorepb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -418,6 +419,45 @@ func TestRegistrationRejectsTyposDuplicatesAndWrongTransport(t *testing.T) {
 	}
 	if got := r.Providers(); len(got) != 1 || got[0] != "storage" {
 		t.Fatal(got)
+	}
+}
+
+// TestMultiSegmentVariablesAndTrailingWildcards covers {name=**} REST
+// variables and trailing ** gRPC resource patterns.
+func TestMultiSegmentVariablesAndTrailingWildcards(t *testing.T) {
+	r := NewRegistry()
+	paths := make(chan string, 4)
+	register(t, r, "firestore.documents.get", func(_ Call, input any) (any, error) {
+		req, ok := input.(*RESTRequest)
+		if !ok {
+			return nil, errBadDecodedRequest
+		}
+		paths <- req.Path["path"]
+		return &RESTResponse{JSON: map[string]any{}}, nil
+	})
+	server := httptest.NewServer(New(r, nil))
+	defer server.Close()
+	base := server.URL + "/v1/projects/p/databases/(default)/documents/"
+	if code, _, _ := request(t, server.Client(), http.MethodGet, base+"a/b/c%20d/e", "", nil); code != 200 || <-paths != "a/b/c d/e" {
+		t.Fatalf("nested path = %d", code)
+	}
+	for _, bad := range []string{"a/b%2Fc", "a/%2E%2E", "a/./b"} {
+		if code, _, _ := request(t, server.Client(), http.MethodGet, base+bad, "", nil); code != http.StatusBadRequest {
+			t.Fatalf("%s = %d", bad, code)
+		}
+	}
+	g := New(r, nil)
+	for resource, ok := range map[string]bool{
+		"projects/p/databases/(default)/documents":         true,
+		"projects/p/databases/(default)/documents/a/b/c/d": true,
+		"projects/p/databases/(default)":                   false,
+		"projects/p/databases/(default)/documents/a//b":    false,
+		"projects/p/databases/(default)/other/a":           false,
+	} {
+		call, err := g.rpcCall(context.Background(), "/google.firestore.v1.Firestore/RunQuery", &firestorepb.RunQueryRequest{Parent: resource})
+		if (err == nil) != ok || (ok && call.Project != "p") {
+			t.Fatalf("%s: %+v %v", resource, call, err)
+		}
 	}
 }
 func wait(t *testing.T, ch <-chan struct{}) {

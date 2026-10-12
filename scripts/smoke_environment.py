@@ -44,6 +44,7 @@ SERVICE_PROBES = [
     ("pubsub", "GET", "/v1/projects/{project}/topics"),
     ("run", "GET", "/v2/projects/{project}/locations/us-central1/services"),
     ("firestore", "GET", "/v1/projects/{project}/databases/(default)/documents/probe"),
+    ("firestore", "POST", "/v1/projects/{project}/databases/(default)/documents:listCollectionIds"),
     ("spanner", "GET", "/v1/projects/{project}/instances"),
     ("bigtable", "GET", "/v2/projects/{project}/instances"),
     ("bigquery", "GET", "/bigquery/v2/projects/{project}/datasets"),

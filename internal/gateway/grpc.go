@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/bigtable/apiv2/bigtablepb"
+	"cloud.google.com/go/firestore/apiv1/firestorepb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
@@ -26,6 +27,7 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	iampb.RegisterIAMPolicyServer(server, &generated.IAMPolicyServer{Dispatch: g})
 	spannerpb.RegisterSpannerServer(server, &generated.SpannerServer{Dispatch: g})
 	bigtablepb.RegisterBigtableServer(server, &generated.BigtableServer{Dispatch: g})
+	firestorepb.RegisterFirestoreServer(server, &generated.FirestoreServer{Dispatch: g})
 	return server
 }
 func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Message) (Call, error) {
@@ -48,6 +50,17 @@ func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Mess
 		for i := range pattern {
 			pattern[i] = "*"
 		}
+	}
+	// A trailing ** matches zero or more further segments, as in Google's
+	// HTTP templates: projects/*/databases/*/documents/** names the database
+	// root and every nested document or collection below it.
+	if last := len(pattern) - 1; last > 0 && pattern[last] == "**" && len(parts) >= last {
+		expanded := make([]string, 0, len(parts))
+		expanded = append(expanded, pattern[:last]...)
+		for len(expanded) < len(parts) {
+			expanded = append(expanded, "*")
+		}
+		pattern = expanded
 	}
 	if len(parts) != len(pattern) {
 		return call, status.Error(codes.InvalidArgument, "Malformed resource name")
@@ -139,13 +152,14 @@ func (g *Gateway) ServerStream(method string, request proto.Message, transport g
 		return err
 	}
 	_ = transport.SetHeader(metadata.Pairs("x-gcp-local-trace-id", call.TraceID))
-	stream := &rpcStream{ServerStream: transport, first: request, requestType: request.ProtoReflect().Descriptor().FullName(), responseType: info.NewResponse().ProtoReflect().Descriptor().FullName()}
+	stream := &rpcStream{ServerStream: transport, first: request, single: true, requestType: request.ProtoReflect().Descriptor().FullName(), responseType: info.NewResponse().ProtoReflect().Descriptor().FullName()}
 	return normalizeError(handler(call, stream))
 }
 
 type rpcStream struct {
 	grpc.ServerStream
 	first                     proto.Message
+	single                    bool // a server stream carries exactly one request
 	requestType, responseType protoreflect.FullName
 }
 
@@ -158,6 +172,9 @@ func (s *rpcStream) Recv(message proto.Message) error {
 		proto.Merge(message, s.first)
 		s.first = nil
 		return nil
+	}
+	if s.single {
+		return io.EOF
 	}
 	return s.RecvMsg(message)
 }

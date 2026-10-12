@@ -22,7 +22,7 @@ jobs:
       - run: python3 scripts/install_redis.py
       - run: python3 scripts/install_postgres.py
       - run: python3 -m venv .venv-tools
-      - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt
+      - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt -r requirements-firestore.txt
       - run: .venv-tools/bin/python -m pip check
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - run: sh scripts/go.sh build -tags=backendprobe -o bin/pubsub-probe ./tools/pubsub-probe
@@ -36,7 +36,7 @@ jobs:
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_pubsub.sh
       - run: sh scripts/go.sh test -c -tags=firestoreintegration -race -o bin/firestore-integration ./internal/providers/firestore
-      - name: Verify Firestore authorization, isolation, and reset against the official emulator
+      - name: Verify Firestore authorization, queries, transactions, and the real Python SDK against the official emulator
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_firestore.sh

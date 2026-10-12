@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ type fakeEmulator struct {
 	mu       sync.Mutex
 	scope    state.Scope
 	server   *httptest.Server
+	rpc      *fakeRPC
 	starts   int
 	stops    int
 	requests []seen
@@ -45,10 +47,13 @@ type fakeEmulator struct {
 	reply    string
 }
 
-func (f *fakeEmulator) Start(context.Context) error {
+func (f *fakeEmulator) Start(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts++
+	if err := f.startGRPC(ctx); err != nil {
+		return err
+	}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
@@ -83,6 +88,7 @@ func (f *fakeEmulator) Stop(context.Context) error {
 		f.server = nil
 		f.stops++
 	}
+	f.stopGRPC()
 	return nil
 }
 func (f *fakeEmulator) Reset(ctx context.Context) error { return f.Stop(ctx) }
@@ -166,6 +172,19 @@ func (h *harness) invoke(token, verb, path string, body any) *httptest.ResponseR
 	return recorder
 }
 
+// invokeRaw issues one REST request with a literal body.
+func (h *harness) invokeRaw(token, verb, path, body string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	request, _ := http.NewRequestWithContext(context.Background(), verb, path, strings.NewReader(body))
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	h.gate.ServeHTTP(recorder, request)
+	return recorder
+}
+
 // started returns the backend instances created so far.
 func (h *harness) started() []*fakeEmulator {
 	h.mu.Lock()
@@ -217,7 +236,7 @@ func TestAllowedRequestIsForwardedWithoutCallerCredentials(t *testing.T) {
 		t.Fatalf("starts = %d", starts)
 	}
 	want := seen{http.MethodPatch, "/v1/projects/" + testProject + "/databases/%28default%29/documents/" + testCollection + "/" + testDoc,
-		"updateMask.fieldPaths=title", "Bearer owner", `{"fields":{"title":{"stringValue":"fog"}}}`}
+		"updateMask.fieldPaths=title", ownerBearer, `{"fields":{"title":{"stringValue":"fog"}}}`}
 	if len(got) != 1 {
 		t.Fatalf("requests = %+v", got)
 	}

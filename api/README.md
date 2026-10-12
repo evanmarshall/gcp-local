@@ -9,6 +9,8 @@ Pub/Sub input: the protoc-generated wire types and descriptors from `cloud.googl
 
 Spanner and Bigtable data-plane input: the protoc descriptors of `cloud.google.com/go/spanner/apiv1/spannerpb` (v1.95.1) and `cloud.google.com/go/bigtable/apiv2/bigtablepb` (v1.58.0) from `go.mod`. `tools/genapi` emits typed stubs for an explicit method allowlist only (`spanner_dispatch.go`, `bigtable_dispatch.go`); unary and server-streaming methods take their resource selector from the first `google.api.http` path variable, and a client-streaming method fails generation. Server-streaming stubs call `GRPCDispatch.ServerStream` with the single decoded request.
 
+Firestore gRPC input: the published `cloud.google.com/go/firestore/apiv1/firestorepb` bindings, pinned to v1.22.0 in `go.mod`. `firestore_dispatch.go` stubs every `google.firestore.v1.Firestore` method; resource selectors merge each method's root and nested HTTP bindings (`A` and `A/*/**`) into `A/**`, where a trailing `**` matches zero or more segments. Firestore REST routes use `{path=**}` variables that span segments; the gateway unescapes each segment separately and rejects escaped slashes and dot segments.
+
 Generate gcp-local's separate outputs with the pinned Go toolchain:
 
 ```sh

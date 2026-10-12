@@ -4,29 +4,152 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
+	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // execute dispatches one authorized Firestore request inside the scope's
 // backend operation. Documents belong to the emulator; collection-group field
 // configuration is the Admin API, which the emulator does not serve, so the
 // provider keeps it.
-func (p *Provider) execute(ctx context.Context, b driver, call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+func (p *Provider) execute(ctx context.Context, b driver, call gateway.Call, request *gateway.RESTRequest, scope state.Scope, operation restOperation) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodFieldsGet:
 		return p.fieldGet(request, scope)
 	case methodFieldsUpdate:
 		return p.fieldUpdate(request, scope)
 	default:
-		return forward(ctx, b, call.Method, request)
+		return forward(ctx, b, operation, request)
 	}
+}
+
+// restOperation is one validated REST request: its permission plans and the
+// emulator request the provider rebuilds from validated route parameters.
+type restOperation struct {
+	plans       []string
+	verb, path  string
+	body, query bool
+}
+
+// customMessages builds the request message a custom REST method decodes
+// into for name validation and permission planning.
+var customMessages = map[string]func() proto.Message{
+	methodBatchGet:          func() proto.Message { return &pb.BatchGetDocumentsRequest{} },
+	methodBatchWrite:        func() proto.Message { return &pb.BatchWriteRequest{} },
+	methodBeginTransaction:  func() proto.Message { return &pb.BeginTransactionRequest{} },
+	methodCommit:            func() proto.Message { return &pb.CommitRequest{} },
+	methodRollback:          func() proto.Message { return &pb.RollbackRequest{} },
+	methodRunQuery:          func() proto.Message { return &pb.RunQueryRequest{} },
+	methodRunAggregation:    func() proto.Message { return &pb.RunAggregationQueryRequest{} },
+	methodListCollectionIDs: func() proto.Message { return &pb.ListCollectionIdsRequest{} },
+}
+
+// restOperationFor validates one REST request and plans its authorization.
+// The documents routes carry a multi-segment path whose parity selects a
+// document (even) or a collection (odd); GET serves both get and list.
+func restOperationFor(method string, request *gateway.RESTRequest) (restOperation, error) {
+	if method == methodFieldsGet || method == methodFieldsUpdate {
+		return restOperation{plans: []string{method}}, nil
+	}
+	root := "/v1/projects/" + url.PathEscape(request.Path["project"]) + "/databases/(default)/documents"
+	path, nested := request.Path["path"]
+	var segments []string
+	if nested {
+		escaped, err := escapeSegments(path)
+		if err != nil {
+			return restOperation{}, err
+		}
+		root += "/" + escaped
+		segments = strings.Split(path, "/")
+	}
+	if operation, err := documentOperation(method, request, root, len(segments)%2 == 0); !errors.Is(err, errUnmatched) {
+		return operation, err
+	}
+	return customOperation(method, request, root)
+}
+
+// escapeSegments validates and escapes each collection/document segment.
+func escapeSegments(path string) (string, error) {
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		if !validSegment(segment) {
+			return "", status.Errorf(codes.InvalidArgument, "Invalid document path %q", path)
+		}
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/"), nil
+}
+
+// documentOperation plans the document routes; document reports an even
+// segment count.
+func documentOperation(method string, request *gateway.RESTRequest, root string, document bool) (restOperation, error) {
+	path := request.Path["path"]
+	switch method {
+	case methodDocumentsGet:
+		plan := methodDocumentsGet
+		if !document {
+			plan = planDocumentsList
+		}
+		return restOperation{plans: []string{plan}, verb: http.MethodGet, path: root, query: true}, nil
+	case methodDocumentsCreate:
+		if document {
+			return restOperation{}, status.Errorf(codes.InvalidArgument, "Create needs a collection path, not %q", path)
+		}
+		if id := request.Query.Get("documentId"); id != "" && !validSegment(id) {
+			return restOperation{}, status.Errorf(codes.InvalidArgument, "Invalid document id %q", id)
+		}
+		return restOperation{plans: []string{method}, verb: http.MethodPost, path: root, body: true, query: true}, nil
+	case methodDocumentsUpdate, methodDocumentsDelete:
+		if !document {
+			return restOperation{}, status.Errorf(codes.InvalidArgument, "Invalid document name %q", path)
+		}
+		return restOperation{plans: []string{method}, verb: httpVerb(method), path: root, body: method == methodDocumentsUpdate, query: true}, nil
+	default:
+		return restOperation{}, errUnmatched
+	}
+}
+
+// customOperation decodes a custom method's body strictly into its Firestore
+// request message, fills the database or parent from the route, and plans it.
+func customOperation(method string, request *gateway.RESTRequest, root string) (restOperation, error) {
+	newMessage, ok := customMessages[method]
+	if !ok {
+		return restOperation{}, status.Error(codes.Unimplemented, "Firestore coverage gap: this method is not served")
+	}
+	message := newMessage()
+	if err := protojson.Unmarshal(request.JSON, message); err != nil {
+		return restOperation{}, status.Errorf(codes.InvalidArgument, "Invalid %s body: %v", method, err)
+	}
+	// The route names the database or parent; it wins over the body.
+	project := request.Path["project"]
+	parent := databaseName(project) + "/documents"
+	if path, nested := request.Path["path"]; nested {
+		parent += "/" + path
+	}
+	reflected := message.ProtoReflect()
+	if field := reflected.Descriptor().Fields().ByName("database"); field != nil {
+		reflected.Set(field, protoreflect.ValueOfString(databaseName(project)))
+	} else if field := reflected.Descriptor().Fields().ByName("parent"); field != nil {
+		reflected.Set(field, protoreflect.ValueOfString(parent))
+	}
+	planned, err := requestPlans(project, message)
+	if err != nil {
+		return restOperation{}, err
+	}
+	custom := strings.TrimPrefix(method, "firestore.documents.")
+	return restOperation{plans: planned, verb: http.MethodPost, path: root + ":" + custom, body: true}, nil
 }
 
 // forwardedQuery lists the documented documents-API parameters the emulator
@@ -45,16 +168,20 @@ const maxBackendResponse = 32 << 20
 // bearer is the emulator's documented administrative bypass of security rules:
 // the provider has already made the IAM decision, and no caller credential is
 // sent.
-func forward(ctx context.Context, b driver, method string, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+func forward(ctx context.Context, b driver, operation restOperation, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
 	var body io.Reader
-	if method == methodDocumentsCreate || method == methodDocumentsUpdate {
+	if operation.body {
 		body = bytes.NewReader(request.JSON)
 	}
-	outbound, err := http.NewRequestWithContext(ctx, httpVerb(method), b.baseURL()+backendPath(request), body)
+	target := operation.path
+	if operation.query {
+		target += forwardedQueryString(request)
+	}
+	outbound, err := http.NewRequestWithContext(ctx, operation.verb, b.baseURL()+target, body)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Unable to build the emulator request")
 	}
-	outbound.Header.Set("Authorization", "Bearer owner")
+	outbound.Header.Set("Authorization", ownerBearer)
 	if body != nil {
 		outbound.Header.Set("Content-Type", "application/json")
 	}
@@ -69,22 +196,18 @@ func forward(ctx context.Context, b driver, method string, request *gateway.REST
 	return relay(response)
 }
 
-// backendPath rebuilds the documents path and its allowed query parameters.
-func backendPath(request *gateway.RESTRequest) string {
-	path := "/v1/projects/" + url.PathEscape(request.Path["project"]) + "/databases/(default)/documents/" + url.PathEscape(request.Path["collectionId"])
-	if id, ok := request.Path["documentId"]; ok {
-		path += "/" + url.PathEscape(id)
-	}
+// forwardedQueryString keeps only the allowed documents query parameters.
+func forwardedQueryString(request *gateway.RESTRequest) string {
 	query := url.Values{}
 	for key, values := range request.Query {
 		if forwardedQuery[key] {
 			query[key] = values
 		}
 	}
-	if len(query) != 0 {
-		path += "?" + query.Encode()
+	if len(query) == 0 {
+		return ""
 	}
-	return path
+	return "?" + query.Encode()
 }
 
 // relay returns the emulator's status and JSON body unchanged; a non-JSON

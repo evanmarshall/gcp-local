@@ -115,6 +115,11 @@ func (r *Registry) registerPubSub() {
 	for _, rpc := range generated.IAMMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "pubsub"}
 	}
+	// Firestore server-streaming RPCs register as streams like bidirectional
+	// ones; the gateway hands them the decoded request.
+	for _, rpc := range generated.FirestoreMethods {
+		r.contracts[rpc.Method] = methodInfo{service: "firestore", streaming: rpc.Streaming}
+	}
 }
 
 // registerData binds one service's gRPC data-plane contracts.

@@ -3,11 +3,21 @@ package generated
 
 // FirestoreRoutes is the Firestore v1 route table slice.
 var FirestoreRoutes = []Route{
-	{"firestore.documents.create", "POST", "/v1/projects/{project}/databases/(default)/documents/{collectionId}", true, false},
-	{"firestore.documents.update", "PATCH", "/v1/projects/{project}/databases/(default)/documents/{collectionId}/{documentId}", true, false},
-	{"firestore.documents.get", "GET", "/v1/projects/{project}/databases/(default)/documents/{collectionId}/{documentId}", false, false},
-	{"firestore.documents.list", "GET", "/v1/projects/{project}/databases/(default)/documents/{collectionId}", false, false},
-	{"firestore.documents.delete", "DELETE", "/v1/projects/{project}/databases/(default)/documents/{collectionId}/{documentId}", false, false},
+	{"firestore.documents.create", "POST", "/v1/projects/{project}/databases/(default)/documents/{path=**}", true, false},
+	{"firestore.documents.update", "PATCH", "/v1/projects/{project}/databases/(default)/documents/{path=**}", true, false},
+	{"firestore.documents.get", "GET", "/v1/projects/{project}/databases/(default)/documents/{path=**}", false, false},
+	{"firestore.documents.delete", "DELETE", "/v1/projects/{project}/databases/(default)/documents/{path=**}", false, false},
+	{"firestore.documents.batchGet", "POST", "/v1/projects/{project}/databases/(default)/documents:batchGet", true, false},
+	{"firestore.documents.batchWrite", "POST", "/v1/projects/{project}/databases/(default)/documents:batchWrite", true, false},
+	{"firestore.documents.beginTransaction", "POST", "/v1/projects/{project}/databases/(default)/documents:beginTransaction", true, false},
+	{"firestore.documents.commit", "POST", "/v1/projects/{project}/databases/(default)/documents:commit", true, false},
+	{"firestore.documents.rollback", "POST", "/v1/projects/{project}/databases/(default)/documents:rollback", true, false},
+	{"firestore.documents.runQuery", "POST", "/v1/projects/{project}/databases/(default)/documents:runQuery", true, false},
+	{"firestore.documents.runQuery", "POST", "/v1/projects/{project}/databases/(default)/documents/{path=**}:runQuery", true, false},
+	{"firestore.documents.runAggregationQuery", "POST", "/v1/projects/{project}/databases/(default)/documents:runAggregationQuery", true, false},
+	{"firestore.documents.runAggregationQuery", "POST", "/v1/projects/{project}/databases/(default)/documents/{path=**}:runAggregationQuery", true, false},
+	{"firestore.documents.listCollectionIds", "POST", "/v1/projects/{project}/databases/(default)/documents:listCollectionIds", true, false},
+	{"firestore.documents.listCollectionIds", "POST", "/v1/projects/{project}/databases/(default)/documents/{path=**}:listCollectionIds", true, false},
 	{"firestore.fields.get", "GET", "/v1/projects/{project}/databases/(default)/collectionGroups/{collectionId}/fields/{fieldId}", false, false},
 	{"firestore.fields.update", "PATCH", "/v1/projects/{project}/databases/(default)/collectionGroups/{collectionId}/fields/{fieldId}", true, false},
 }
