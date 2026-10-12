@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Fifteen scenarios are recorded against GCP; rewrite, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
+Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Sixteen scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -52,7 +52,7 @@ Versioning and default holds must stay off. Buckets report uniform access under 
 | Objects | `list`, `get` (metadata and `alt=media`), `delete` | Generation, metageneration, and etag preconditions; `softDeleted=true` per [soft delete](#soft-delete) |
 | Objects | `restore` | `generation`, preconditions on the live object |
 | Objects | `patch` | `contentType`, `cacheControl`, `contentDisposition`, `contentEncoding`, `contentLanguage`, `metadata` (merges keys, null removes a key, null removes all); `generation` and the four precondition options; advances metageneration and etag |
-| Objects | `rewrite` | Single call within one project; source metadata copied, body metadata replaces it |
+| Objects | `rewrite` | Single call within one project; source metadata copied, body metadata replaces it. A JSON `null` body (rclone `moveto`) copies the source unchanged |
 | Objects (XML) | `GET`, `PUT /BUCKET/OBJECT` | Bearer token or V4 signature; `x-goog-meta-*`, `Content-MD5`, `response-content-*` |
 | Folders | `insert`/`create`, `get`, `list`, `delete` | Modeled locally, not recorded; deleted with their bucket |
 
@@ -60,7 +60,7 @@ Versioning and default holds must stay off. Buckets report uniform access under 
 - `includeFoldersAsPrefixes=true` (gcloud `ls`) is accepted in a bucket without folders; managed folders are not modeled. In a bucket with [folders](#methods) it returns the 400 gap.
 - Multipart uploads accept the single-quoted boundary gcloud's apitools sends (`boundary='===...=='`).
 - A query option that Google's [discovery document](../../api/discovery/storage-v1.json) does not define for the method is ignored, as GCP ignores it (recorded in `storage-go-client-projection`). A defined option the emulator does not serve, such as `userProject`, `predefinedAcl`, `quotaUser`, or `oauth_token`, returns the 400 gap, and so does `access_token`. The XML API has no discovery document and refuses every option it does not serve.
-- Objects carry `selfLink` and `mediaLink` at the emulator's origin.
+- Objects carry `selfLink` and `mediaLink` at the emulator's origin, with GCP's paths and `mediaLink` query (`?generation=N&alt=media`). GCP's `selfLink` origin is `https://www.googleapis.com`.
 - Resumable sessions: initiate with `uploadType=resumable`, then `PUT` (Python) or `POST` (Go) chunks with `Content-Range` to the returned `Location`. A status query (`bytes */N`) returns 308 with `Range`; `X-GUploader-No-308: yes` gets 200 with `X-Http-Status-Code-Override: 308`. A retried chunk's repeated bytes are skipped. `X-Goog-Hash` on the last chunk is checked. `DELETE` cancels with 499, and every later request to that session also gets 499.
 - Signed URLs: `GOOG4-RSA-SHA256` only. The signature must verify against a key of the signing service account: one created with `serviceAccountKeys.create`, or the account's managed key that `signBlob` uses ([service accounts](security/serviceaccounts.md)). Expired, future-dated, wrongly scoped, tampered, or other-method URLs are refused with XML errors.
 
@@ -114,6 +114,7 @@ All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/
 | `storage-gcloud-bucket-defaults` | 2026-10-12 | gcloud's bucket insert with `enableObjectRetention=False`; a below-minimum retention refused; disabling soft delete; soft-deleted listing refused without a policy |
 | `storage-public-access-enforced` | 2026-10-12 | `allUsers` and `allAuthenticatedUsers` refused under enforced prevention; policy unchanged |
 | `storage-gcloud-object-requests` | 2026-10-12 | gcloud's `storageLayout` read and its denial, apitools multipart upload, `includeFoldersAsPrefixes=True` listing, stat, download, delete |
+| `storage-rclone-object-requests` | 2026-10-12 | rclone's multipart upload, object read with `selfLink` and `mediaLink` paths, download from `mediaLink`, `rewrite` with a JSON `null` body, source delete |
 
 Run in Linux or moo:
 

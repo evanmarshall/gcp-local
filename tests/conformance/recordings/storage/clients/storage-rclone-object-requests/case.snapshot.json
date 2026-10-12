@@ -1,0 +1,92 @@
+{
+  "storage-rclone-object-requests": {
+    "recorded-date": "12-10-2026, 17:58:26",
+    "recorded-content": {
+      "multipart-upload": {
+        "bucket": "<bucket>",
+        "contentType": "text/plain; charset=utf-8",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "t2MRjoOeFD6THGoVvvp6wA==",
+        "metageneration": "<metageneration-1>",
+        "name": "rclone.txt",
+        "size": "18",
+        "status": 200
+      },
+      "object-get": {
+        "bucket": "<bucket>",
+        "contentType": "text/plain; charset=utf-8",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "t2MRjoOeFD6THGoVvvp6wA==",
+        "mediaLink": {
+          "path": "/download/storage/v1/b/<bucket>/o/rclone.txt",
+          "query": [
+            [
+              "generation",
+              "<generation-1>"
+            ],
+            [
+              "alt",
+              "media"
+            ]
+          ]
+        },
+        "metageneration": "<metageneration-1>",
+        "name": "rclone.txt",
+        "selfLink": {
+          "path": "/storage/v1/b/<bucket>/o/rclone.txt",
+          "query": []
+        },
+        "size": "18",
+        "status": 200
+      },
+      "media-link-download": {
+        "bytes": 18,
+        "status": 200
+      },
+      "rewrite-null-body": {
+        "done": true,
+        "has_rewrite_token": false,
+        "kind": "storage#rewriteResponse",
+        "mediaLink": {
+          "path": "/download/storage/v1/b/<bucket>/o/moved.txt",
+          "query": [
+            [
+              "generation",
+              "<generation-2>"
+            ],
+            [
+              "alt",
+              "media"
+            ]
+          ]
+        },
+        "objectSize": "18",
+        "resource": {
+          "bucket": "<bucket>",
+          "contentType": "text/plain; charset=utf-8",
+          "etag": "<etag-2>",
+          "generation": "<generation-2>",
+          "md5Hash": "t2MRjoOeFD6THGoVvvp6wA==",
+          "metageneration": "<metageneration-1>",
+          "name": "moved.txt",
+          "size": "18"
+        },
+        "status": 200,
+        "totalBytesRewritten": "18"
+      },
+      "delete-source": {
+        "status": 204
+      },
+      "read-destination": {
+        "bytes": 18,
+        "status": 200
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

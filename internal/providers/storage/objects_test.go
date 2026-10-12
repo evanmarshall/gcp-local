@@ -67,7 +67,7 @@ func TestMultipartUploadsAndMetadataLimits(t *testing.T) {
 	}
 	// Links name the emulator's public origin, never the backend's.
 	generation, _ := created["generation"].(string)
-	if created["mediaLink"] != "http://example.com/download/storage/v1/b/mp-bucket/o/doc.txt?alt=media&generation="+generation ||
+	if created["mediaLink"] != "http://example.com/download/storage/v1/b/mp-bucket/o/doc.txt?generation="+generation+"&alt=media" ||
 		created["selfLink"] != "http://example.com/storage/v1/b/mp-bucket/o/doc.txt" {
 		t.Fatalf("object links = %v, %v", created["mediaLink"], created["selfLink"])
 	}

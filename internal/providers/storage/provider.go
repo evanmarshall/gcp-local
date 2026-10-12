@@ -346,7 +346,8 @@ func publishLinks(value map[string]any, origin string) {
 		self := "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(name)
 		value["selfLink"] = origin + self
 		generation, _ := value[keyGeneration].(string)
-		value["mediaLink"] = origin + "/download" + self + "?" + url.Values{keyGeneration: {generation}, queryAlt: {altMedia}}.Encode()
+		// GCP orders the query generation first (storage-rclone-object-requests).
+		value["mediaLink"] = origin + "/download" + self + "?" + keyGeneration + "=" + url.QueryEscape(generation) + "&" + queryAlt + "=" + altMedia
 	case "storage#bucket":
 		value["selfLink"] = origin + "/storage/v1/b/" + url.PathEscape(name)
 	}

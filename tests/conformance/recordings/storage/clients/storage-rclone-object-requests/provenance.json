@@ -1,0 +1,49 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T17:58:26.020097+00:00",
+  "scenario": {
+    "id": "storage-rclone-object-requests",
+    "service": "storage",
+    "transport": "rest-json-v1",
+    "revision": "6a496117f96b3130fcea57f69a9ebd46f11faf3cdc821a6b6d417fe4bb0eca99",
+    "versions": {
+      "sdk": "rclone/1.75.2 request shape",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "ca9a3c3ac07f9a0748ab1cf2544b5f0d36ff95b5da280280d85e6d17f0e734fa",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/storage/client.py": "51d69bf56a4ee0dfd955142f2a70ad38db443ee4323437861a924e70ba46f8ad",
+      "gcp_validation/services/storage/normalization.py": "c76208471a34ba5e1995b9d879c7a9af28cf1f3b555644c6380cf815838fd545",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "gcp_validation/federation.py": "addf34416b0231baedb9747942a78952394d1592fc2ec1b2dbc0133d54ae513a",
+      "gcp_validation/services/storage/client_shapes.py": "72cda2892f7c3e966d2f4471477362c15a90f01759d5d165fa206e9d66b0787f",
+      "tests/conformance/storage/conftest.py": "69ae08b00c47a86843aad36f3dba01dbf98928cc0bb31265ce6bfe63d52a71c5"
+    },
+    "scope": {
+      "services": [
+        "storage"
+      ],
+      "region": "us-central1",
+      "max_buckets": 1,
+      "max_objects": 10,
+      "max_object_bytes": 1048576,
+      "cleanup_required": true,
+      "identities": [
+        "allowed",
+        "denied",
+        "fixture",
+        "peer"
+      ]
+    }
+  }
+}
