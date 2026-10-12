@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -709,5 +711,40 @@ func TestFloatCells(t *testing.T) {
 		if got := floatCell(value); got != text {
 			t.Errorf("floatCell(%v) = %s, want %s", value, got, text)
 		}
+	}
+}
+
+// generatedJobID is the shape of the ids newJobID assigns.
+var generatedJobID = regexp.MustCompile(`^job_[A-Za-z0-9_-]{28}$`)
+
+// TestJobIDsAreUnique runs jobs.query and id-less jobs.insert calls in one
+// clock tick: each job gets its own id, so none replaces another's results.
+func TestJobIDsAreUnique(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	tick := time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)
+	h.bq.clock = func() time.Time { return tick }
+	idOf := func(recorder *httptest.ResponseRecorder) string {
+		var job struct {
+			JobReference struct {
+				JobID string `json:"jobId"`
+			} `json:"jobReference"`
+		}
+		decode(t, recorder, &job)
+		return job.JobReference.JobID
+	}
+	results := map[string]string{}
+	for _, name := range []string{"ada", "grace"} {
+		queried := idOf(h.queryAs(testToken, "SELECT name FROM shop.people WHERE name = '"+name+"'", nil))
+		inserted := idOf(h.expect(http.MethodPost, testJobs, jobBody("", "SELECT '"+name+"-job'", nil), 200))
+		for id, want := range map[string]string{queried: name, inserted: name + "-job"} {
+			if !generatedJobID.MatchString(id) || results[id] != "" {
+				t.Fatalf("job id %q is malformed or reused: %v", id, results)
+			}
+			results[id] = want
+		}
+	}
+	for id, name := range results {
+		h.rowsAre("results of "+id, h.invoke(http.MethodGet, testQueries+"/"+id, nil), name)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -196,7 +197,7 @@ func (p *Provider) jobsInsert(call gateway.Call, request *gateway.RESTRequest, s
 	if err != nil {
 		return nil, err
 	}
-	id := cmp.Or(body.JobReference.JobID, "job_"+strconv.FormatInt(p.clock().UnixNano(), 10))
+	id := cmp.Or(body.JobReference.JobID, newJobID())
 	if !body.Configuration.DryRun && p.jobCopy(scope, id) != nil {
 		return nil, status.Errorf(codes.AlreadyExists, "Already Exists: Job %s:%s.%s", scope.Project, cmp.Or(body.JobReference.Location, "US"), id)
 	}
@@ -219,6 +220,15 @@ func (p *Provider) jobsInsert(call gateway.Call, request *gateway.RESTRequest, s
 		return nil, fmt.Errorf("store the query job: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: partial(request.Query, jobWire(scope.Project, job, false))}, nil
+}
+
+// newJobID draws a random id for a job that names none: "job_", as GCP's
+// assigned ids start, and 28 URL-safe base64 characters (not recorded). Its 168
+// random bits keep jobs created in the same clock tick from colliding.
+func newJobID() string {
+	raw := make([]byte, 21)
+	_, _ = rand.Read(raw) // crypto/rand.Read never returns an error.
+	return "job_" + base64.RawURLEncoding.EncodeToString(raw)
 }
 
 // queryRequest is the jobs.query body.
@@ -283,7 +293,7 @@ func (p *Provider) jobsQuery(call gateway.Call, request *gateway.RESTRequest, sc
 	if err != nil || denied != nil {
 		return denied, err
 	}
-	job.ID = "job_" + strconv.FormatInt(job.CreatedAt.UnixNano(), 10)
+	job.ID = newJobID()
 	job.Labels = body.Labels
 	if body.DryRun {
 		return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, true, 0, 0, false)}, nil
