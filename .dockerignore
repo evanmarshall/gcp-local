@@ -11,7 +11,9 @@
 !toolchains/pubsub.json
 !toolchains/firestore.json
 !scripts/install_spanner.py
+!scripts/install_redis.py
 !toolchains/spanner.json
+!toolchains/redis.json
 !api
 !api/**
 !cmd

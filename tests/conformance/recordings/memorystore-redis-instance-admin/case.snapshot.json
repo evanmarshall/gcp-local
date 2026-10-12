@@ -1,0 +1,266 @@
+{
+  "memorystore-redis-instance-admin": {
+    "recorded-date": "12-10-2026, 01:32:25",
+    "recorded-content": {
+      "instance-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.cloud.redis.v1.OperationMetadata",
+        "response_fields": [
+          "@type",
+          "authEnabled",
+          "authorizedNetwork",
+          "connectMode",
+          "createTime",
+          "currentLocationId",
+          "displayName",
+          "host",
+          "labels",
+          "locationId",
+          "maintenanceVersion",
+          "memorySizeGb",
+          "name",
+          "nodes",
+          "persistenceConfig",
+          "persistenceIamIdentity",
+          "port",
+          "readReplicasMode",
+          "redisVersion",
+          "reservedIpRange",
+          "state",
+          "tier",
+          "transitEncryptionMode"
+        ],
+        "response_type": "type.googleapis.com/google.cloud.redis.v1.Instance",
+        "verb": "create"
+      },
+      "instance-read": {
+        "authEnabled": true,
+        "authorizedNetwork": "projects/<project>/global/networks/<instance>-net",
+        "connectMode": "DIRECT_PEERING",
+        "displayName": "gcp-local conformance",
+        "fields": [
+          "authEnabled",
+          "authorizedNetwork",
+          "connectMode",
+          "createTime",
+          "currentLocationId",
+          "displayName",
+          "host",
+          "labels",
+          "locationId",
+          "maintenanceVersion",
+          "memorySizeGb",
+          "name",
+          "nodes",
+          "persistenceConfig",
+          "persistenceIamIdentity",
+          "port",
+          "readReplicasMode",
+          "redisVersion",
+          "reservedIpRange",
+          "state",
+          "tier",
+          "transitEncryptionMode"
+        ],
+        "host_present": true,
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "locationId": "us-central1-a",
+        "memorySizeGb": 1,
+        "name": "projects/<project>/locations/us-central1/instances/<instance>",
+        "port_present": true,
+        "redisVersion": "REDIS_7_2",
+        "state": "READY",
+        "tier": "BASIC",
+        "transitEncryptionMode": "DISABLED"
+      },
+      "instance-list": {
+        "http_status": 200,
+        "owned": 1
+      },
+      "auth-string": {
+        "fields": [
+          "authString"
+        ],
+        "http_status": 200,
+        "uuid_shaped": true
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-auth-string": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-delete": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "update-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.cloud.redis.v1.OperationMetadata",
+        "response_fields": [
+          "@type",
+          "authEnabled",
+          "authorizedNetwork",
+          "connectMode",
+          "createTime",
+          "currentLocationId",
+          "displayName",
+          "host",
+          "labels",
+          "locationId",
+          "maintenanceVersion",
+          "memorySizeGb",
+          "name",
+          "nodes",
+          "persistenceConfig",
+          "persistenceIamIdentity",
+          "port",
+          "readReplicasMode",
+          "redisVersion",
+          "reservedIpRange",
+          "state",
+          "tier",
+          "transitEncryptionMode"
+        ],
+        "response_type": "type.googleapis.com/google.cloud.redis.v1.Instance",
+        "verb": "update"
+      },
+      "after-update": {
+        "displayName": "gcp-local renamed",
+        "fields": [
+          "authEnabled",
+          "authorizedNetwork",
+          "connectMode",
+          "createTime",
+          "currentLocationId",
+          "displayName",
+          "host",
+          "labels",
+          "locationId",
+          "maintenanceVersion",
+          "memorySizeGb",
+          "name",
+          "nodes",
+          "persistenceConfig",
+          "persistenceIamIdentity",
+          "port",
+          "readReplicasMode",
+          "redisVersion",
+          "reservedIpRange",
+          "state",
+          "tier",
+          "transitEncryptionMode"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local",
+          "stage": "patched"
+        }
+      },
+      "operation-read": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.cloud.redis.v1.OperationMetadata",
+        "response_fields": [
+          "@type",
+          "authEnabled",
+          "authorizedNetwork",
+          "connectMode",
+          "createTime",
+          "currentLocationId",
+          "displayName",
+          "host",
+          "labels",
+          "locationId",
+          "maintenanceVersion",
+          "memorySizeGb",
+          "name",
+          "nodes",
+          "persistenceConfig",
+          "persistenceIamIdentity",
+          "port",
+          "readReplicasMode",
+          "redisVersion",
+          "reservedIpRange",
+          "state",
+          "tier",
+          "transitEncryptionMode"
+        ],
+        "response_type": "type.googleapis.com/google.cloud.redis.v1.Instance",
+        "verb": "create"
+      },
+      "operations-list": {
+        "has_operations": true,
+        "http_status": 200
+      },
+      "missing-update-mask": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "duplicate-instance": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "delete-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.cloud.redis.v1.OperationMetadata",
+        "response_fields": [
+          "@type"
+        ],
+        "response_type": "type.googleapis.com/google.protobuf.Empty",
+        "verb": "delete"
+      },
+      "instance-absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "instance_absent": true
+      }
+    }
+  }
+}

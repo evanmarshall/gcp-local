@@ -14,6 +14,7 @@ from pathlib import Path
 from .config import Target
 from .evidence import Inconclusive, SnapshotCase, now
 from .live_rest import LiveScope, Observations, OwnedRun, Response, RestClient
+from .networking import COMPUTE, ComputeClient
 from .sandbox import Sandbox
 
 SERVICE = 'redis'
@@ -44,6 +45,20 @@ class InstanceFixture(OwnedRun):
         self.parent = f'/v1/projects/{self.project}/locations/{REGION}'
         self.base = self.parent + '/instances'
         self.labels = {'managed-by': 'gcp-local', 'gcp-local-run': self.manifest['run_id']}
+        # The sandbox has no default VPC, so the run owns the authorized network.
+        self.network = self.instance + '-net'
+        self.compute = ComputeClient(client.target, COMPUTE, sandbox=client.sandbox, scope=client.scope)
+        self.network_path = f'/compute/v1/projects/{self.project}/global/networks/{self.network}'
+
+    def compute_wait(self, response: Response) -> Response:
+        """Poll one compute operation until DONE."""
+        value = response.json()
+        while response.status == 200 and value.get('status') != 'DONE':
+            self.pause()
+            path = '/compute/v1/' + value['selfLink'].split('/compute/v1/', 1)[1]
+            response = self.compute.request('fixture', 'GET', path, timeout=self.remaining())
+            value = response.json()
+        return response
 
     def call(self, method: str, suffix: str = '', *, actor: str = 'fixture',
              body: dict | None = None, query: dict | None = None) -> Response:
@@ -56,7 +71,10 @@ class InstanceFixture(OwnedRun):
         body = {'tier': 'BASIC', 'memorySizeGb': LIMITS['max_memory_gb'],
                 'redisVersion': 'REDIS_7_2', 'authEnabled': True,
                 'transitEncryptionMode': 'DISABLED', 'displayName': 'gcp-local conformance',
-                'labels': self.labels}
+                'labels': self.labels,
+                'authorizedNetwork': f'projects/{self.project}/global/networks/{self.network}',
+                # GCP picks a zone when none is given, which made revalidation diverge.
+                'locationId': 'us-central1-a'}
         return self.client.request('fixture', 'POST', self.base, body=body,
                                    query={'instanceId': self.instance}, timeout=self.remaining())
 
@@ -101,6 +119,11 @@ class InstanceFixture(OwnedRun):
                                'refusing to add billable capacity')
         self.manifest['attempted'] = True
         self.save()  # Creation may succeed even if the response is lost.
+        network = self.compute_wait(self.compute.request('fixture', 'POST', self.network_path.rsplit('/', 1)[0],
+                                                         body={'name': self.network, 'autoCreateSubnetworks': False},
+                                                         timeout=self.remaining()))
+        if network.status != 200 or network.json().get('error'):
+            raise Inconclusive(f'Authorized network create returned HTTP {network.status}')
         return self.create_instance()
 
     def cleanup(self) -> None:
@@ -118,10 +141,25 @@ class InstanceFixture(OwnedRun):
             elif current.status != 404:
                 raise ValueError(f'Owned instance read returned HTTP {current.status}')
             self.wait_absent()
+            self.delete_network()
             self.manifest.update(cleanup='passed', finished_at=now())
             self.save()
         finally:
             self.release()
+
+    def delete_network(self) -> None:
+        """Delete the run's network; Google's service peering can hold it briefly."""
+        deadline = time.monotonic() + (600 if self.client.sandbox else 0)
+        while True:
+            deleted = self.compute.request('fixture', 'DELETE', self.network_path)
+            if deleted.status == 404:
+                return
+            done = self.compute_wait(deleted) if deleted.status == 200 else deleted
+            if done.status == 200 and not done.json().get('error'):
+                return
+            if time.monotonic() >= deadline:
+                raise ValueError('Owned authorized network remains after cleanup')
+            self.pause()
 
     def delete_owned(self, path: str, instance: dict) -> None:
         """Delete an existing instance after checking the ownership labels."""

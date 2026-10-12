@@ -48,6 +48,7 @@ SERVICE_PROBES = [
     ("artifactregistry", "GET", "/v1/projects/{project}/locations/us-central1/repositories"),
     ("iam", "GET", "/v1/projects/{project}/serviceAccounts"),
     ("resourcemanager", "POST", "/v1/projects/{project}:getIamPolicy"),
+    ("redis", "GET", "/v1/projects/{project}/locations/us-central1/instances"),
     ("compute", "GET", "/compute/v1/projects/{project}/global/networks"),
     ("compute", "GET", "/v1/projects/{project}/locations/global/connectivityTests"),
 ]

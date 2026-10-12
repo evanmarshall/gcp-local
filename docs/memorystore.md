@@ -84,3 +84,19 @@ The `memorystore-redis-instance-admin` scenario ([gcp_validation/memorystore.py]
 1. Record `roles/redis.admin`, `roles/redis.editor`, and `roles/redis.viewer` with `scripts/record_iam_roles.py --service redis` (the owner's authorized, read-only step) and merge them into `internal/iam/roles/manifest.json`.
 2. Grant `roles/redis.admin` to the fixture identity in `tools/storage-conformance`, record the scenario under an approved live scope, and add `tests/conformance/memorystore` to `check_rest_recordings.sh`.
 3. Add a pinned `google_redis_instance` Terraform acceptance case.
+
+## Recorded scenario
+
+`memorystore-redis-instance-admin` was recorded and revalidated against real GCP on 2026-10-12 with
+one Basic Tier 1 GB REDIS_7_2 instance in us-central1-a, on a run-owned VPC, deleted with the network
+at the end of each run. The local provider matches it in comparison mode
+(`sh scripts/check_rest_recordings.sh`). It covers create/get/list/patch/delete operations and their
+`google.cloud.redis.v1` metadata, the instance field set, the AUTH string shape (never its value),
+denied read/getAuthString/delete (403), a duplicate (409), a patch without an update mask (400), and
+404 after delete. The first revalidation diverged because GCP chooses the zone when none is given;
+the recorder now pins `locationId`. Values of service-managed fields the local model fills
+(`maintenanceVersion`, `nodes`, `persistenceConfig`, `persistenceIamIdentity`, `readReplicasMode`,
+`reservedIpRange`) are stand-ins; only their presence is recorded.
+
+The packaged environment includes `redis`; each instance's server listens on loopback inside the core
+container, so host clients can drive the admin API but not the Redis protocol port yet.

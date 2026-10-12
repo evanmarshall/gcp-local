@@ -50,6 +50,8 @@ SOURCE_FILES = (
     "toolchains/firestore.json",
     "scripts/install_spanner.py",
     "toolchains/spanner.json",
+    "scripts/install_redis.py",
+    "toolchains/redis.json",
     "examples/workflow/worker.py",
 )
 SOURCE_DIRECTORIES = ("api", "cmd", "internal", "gcp_local")

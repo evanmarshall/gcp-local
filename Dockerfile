@@ -37,6 +37,16 @@ COPY scripts/install_spanner.py scripts/install_spanner.py
 COPY toolchains/spanner.json toolchains/spanner.json
 RUN python3 scripts/install_spanner.py
 
+# Builds the official Redis 7.2.16 source (checksum-pinned by install_redis.py)
+# on the runtime base so the binary links against the same glibc. The compiler
+# packages are build-only and absent from the final image.
+FROM eclipse-temurin:17-jre-jammy@sha256:8993f1aed8b25fcea7a7047a7949c1866fa558fc6830d938c22c4f13b26be9d7 AS redis
+RUN apt-get update && apt-get install -y --no-install-recommends gcc make libc6-dev python3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY scripts/install_redis.py scripts/install_redis.py
+COPY toolchains/redis.json toolchains/redis.json
+RUN python3 scripts/install_redis.py
+
 # The launcher (gcp_local/container.py) and the bundled workflow worker need
 # Python. The interpreter and standard library come from the same digest-pinned
 # image as the build stage and link against the runtime base's glibc and
@@ -58,6 +68,8 @@ COPY --from=firestore /src/.tools/firestore/emulator.jar /opt/firestore/emulator
 # The Spanner emulator (selected with -services=...,spanner) uses the base image's
 # glibc 2.35, libm, and libgcc_s with its own pinned libstdc++ under /opt/spanner/lib.
 COPY --from=spanner /src/.tools/spanner /opt/spanner
+# Memorystore starts one redis-server per instance on loopback inside the core.
+COPY --from=redis /src/.tools/redis/bin/redis-server /opt/redis/redis-server
 COPY --from=python /usr/local/lib/ /usr/local/lib/
 COPY --from=python /usr/local/bin/python3.12 /usr/local/bin/python3
 COPY gcp_local /usr/local/lib/python3.12/site-packages/gcp_local

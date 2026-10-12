@@ -1,162 +1,22 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
-  "recorded_at": "2026-10-11T17:48:11.901559+00:00",
-  "scope": "Read-only predefined storage, pubsub, identity, run, compute, secretmanager, cloudtasks, networkmanagement, kms, firestore, bigquery, bigtable, spanner, artifactregistry, serviceaccounts, resourcemanager role definitions; no resource mutation or grant",
+  "recorded_at": "2026-10-12T00:56:12.762277+00:00",
+  "scope": "Read-only predefined artifactregistry, bigquery, bigtable, cloudtasks, compute, firestore, identity, kms, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
   "roles": [
     {
-      "file": "storage.admin.json",
-      "name": "roles/storage.admin",
-      "sha256": "dfe4cc58d8e989889be3210e0c5fe691ee15cdb7f57acb0f4eb956c29f92fa84"
+      "file": "artifactregistry.admin.json",
+      "name": "roles/artifactregistry.admin",
+      "sha256": "2316ee06aa5421761f1e02fe1ad178a7279db195229643d6557f2980053c6dba"
     },
     {
-      "file": "storage.objectUser.json",
-      "name": "roles/storage.objectUser",
-      "sha256": "e9155375d0b7739a436e79ac192f621001a2c04e752022e42a03a920c6258eee"
+      "file": "artifactregistry.repoAdmin.json",
+      "name": "roles/artifactregistry.repoAdmin",
+      "sha256": "92ffd587884c77d6c5660b6756cc0dbe674e849ba414c03a7b2cc86617f34419"
     },
     {
-      "file": "storage.objectViewer.json",
-      "name": "roles/storage.objectViewer",
-      "sha256": "469367b5c8f0dbdc39bdfe23838ce33423ec473ca32db3565fa8cab611a0cca6"
-    },
-    {
-      "file": "storage.objectCreator.json",
-      "name": "roles/storage.objectCreator",
-      "sha256": "513fff80b0a597719850b948d5e33d5970f027d1db2fd34ac7d6028f6c243d1c"
-    },
-    {
-      "file": "pubsub.admin.json",
-      "name": "roles/pubsub.admin",
-      "sha256": "3a938305bb99c1ca1b70b7c93183f15bbed3f43dcc987279c73447a73f0cb6a7"
-    },
-    {
-      "file": "pubsub.publisher.json",
-      "name": "roles/pubsub.publisher",
-      "sha256": "9a6d023589cc824dd059d3b3899c3447b91d0737b39dd5de11432064daba61ab"
-    },
-    {
-      "file": "pubsub.subscriber.json",
-      "name": "roles/pubsub.subscriber",
-      "sha256": "6de29ead3b21468492b39620d0f5e3d51e44938197436bc818743917157e7eb2"
-    },
-    {
-      "file": "pubsub.viewer.json",
-      "name": "roles/pubsub.viewer",
-      "sha256": "ff3decd54fae7f9e17ddd08dcfedbcf146cb660b18a68032c790df8517608400"
-    },
-    {
-      "file": "iam.serviceAccountUser.json",
-      "name": "roles/iam.serviceAccountUser",
-      "sha256": "d3a8433206951eb861c3c4740685dd37e996b6af325daf27f29e24274624523e"
-    },
-    {
-      "file": "iam.serviceAccountTokenCreator.json",
-      "name": "roles/iam.serviceAccountTokenCreator",
-      "sha256": "64dc45c85e756f2f0bd4f90ae12b342ca845c4a4d33b0a153e5b56c36fc284e9"
-    },
-    {
-      "file": "run.admin.json",
-      "name": "roles/run.admin",
-      "sha256": "e5ea7f0af28487fa9ba133a683309c7f5226b8446e3f6b360b2908eb1233086f"
-    },
-    {
-      "file": "run.developer.json",
-      "name": "roles/run.developer",
-      "sha256": "0456a6fca89421599628a258ef9548a13262da485d278b944cac496f991bd67a"
-    },
-    {
-      "file": "run.invoker.json",
-      "name": "roles/run.invoker",
-      "sha256": "4876e0a8a69a84b388cd585ec0c75f7ebd61cd3ef98749dee310660fa2ad5ef0"
-    },
-    {
-      "file": "run.viewer.json",
-      "name": "roles/run.viewer",
-      "sha256": "8963eba9834d57bd39d14c7f821c8a871c98062d83164092d41de5481073061b"
-    },
-    {
-      "file": "compute.admin.json",
-      "name": "roles/compute.admin",
-      "sha256": "a1f1b572d8f998dbb051ffb7db4128df6c6a0406c307e3f9db4c30e57a84bbce"
-    },
-    {
-      "file": "compute.networkAdmin.json",
-      "name": "roles/compute.networkAdmin",
-      "sha256": "9ed3b1f7df8400f2b03f8841a96b51088307db55d032e81de7492ec0915a4892"
-    },
-    {
-      "file": "compute.viewer.json",
-      "name": "roles/compute.viewer",
-      "sha256": "9c4cc90423e20f8bebd6a89c26ac002bb983aeb5880f352d1f2a41dc9e6dd449"
-    },
-    {
-      "file": "secretmanager.admin.json",
-      "name": "roles/secretmanager.admin",
-      "sha256": "5a08411516530d6ab848c61683052ab42ce62bc6f54db14858a464cd86615316"
-    },
-    {
-      "file": "secretmanager.secretAccessor.json",
-      "name": "roles/secretmanager.secretAccessor",
-      "sha256": "9e8af4dabe272fe68689c9a2d9efb44e671e7e9d1c5ef1bb0d7b261ab4f634d8"
-    },
-    {
-      "file": "secretmanager.viewer.json",
-      "name": "roles/secretmanager.viewer",
-      "sha256": "0a3ead573662c0bf3a51a754bcf8b1dece30a3fb46f7b1723310a6fb7c1dc450"
-    },
-    {
-      "file": "cloudtasks.admin.json",
-      "name": "roles/cloudtasks.admin",
-      "sha256": "d72725250d888a1738073c56c19c7f38407321cc923c5dad3b04447d47180d15"
-    },
-    {
-      "file": "cloudtasks.enqueuer.json",
-      "name": "roles/cloudtasks.enqueuer",
-      "sha256": "f0b09d1ffdd24d8005e810914db5a22831a52d4811293235bb3d727752374061"
-    },
-    {
-      "file": "networkmanagement.admin.json",
-      "name": "roles/networkmanagement.admin",
-      "sha256": "1df78b4bec78443606441e90f241049649bc8b274ed9fe59e7f3474122df35cf"
-    },
-    {
-      "file": "networkmanagement.viewer.json",
-      "name": "roles/networkmanagement.viewer",
-      "sha256": "265220301a8bf97576995132719312609ecebae858f12d074146dc158840c194"
-    },
-    {
-      "file": "cloudkms.admin.json",
-      "name": "roles/cloudkms.admin",
-      "sha256": "daeaeaac13c159d98791f3078406305afe6e30876e48d856aa70f0323017e72b"
-    },
-    {
-      "file": "cloudkms.cryptoKeyEncrypter.json",
-      "name": "roles/cloudkms.cryptoKeyEncrypter",
-      "sha256": "037031fc8d2785e39dc7d5391ae60fc1709645ef03b802d7bee243cfbcad017c"
-    },
-    {
-      "file": "cloudkms.cryptoKeyEncrypterDecrypter.json",
-      "name": "roles/cloudkms.cryptoKeyEncrypterDecrypter",
-      "sha256": "9751767e6c4581fce5ce4018f6b98e54d07e9482c08ee1bbfa25ea1509ed2d43"
-    },
-    {
-      "file": "cloudkms.viewer.json",
-      "name": "roles/cloudkms.viewer",
-      "sha256": "6255aeb7d81965ef82a5ccba31734938cf41e2f365d1b1a1441edcd9fa48ab92"
-    },
-    {
-      "file": "datastore.indexAdmin.json",
-      "name": "roles/datastore.indexAdmin",
-      "sha256": "fbe8fb6af8b442c7f32d8b9f8d95faabc38a1fec9da0d7b2a7525d2014981e4b"
-    },
-    {
-      "file": "datastore.user.json",
-      "name": "roles/datastore.user",
-      "sha256": "83b2c667a80902101c337b586bfecdef0ade5f91f512e0bc869318ad449d5fce"
-    },
-    {
-      "file": "datastore.viewer.json",
-      "name": "roles/datastore.viewer",
-      "sha256": "8a391d956379862c7d968a1cb27c2355ec845dfa0e98ec6a0cc6dfe4c17dbd15"
+      "file": "artifactregistry.reader.json",
+      "name": "roles/artifactregistry.reader",
+      "sha256": "7fc2c872a02430b542a0333883286bd747d6ebc917db2b70d3fd4df5474055e8"
     },
     {
       "file": "bigquery.admin.json",
@@ -204,34 +64,159 @@
       "sha256": "9895added05b9280d0cdbafb565b8d7f4b60de587777a0c3d022cdccc4664812"
     },
     {
-      "file": "spanner.admin.json",
-      "name": "roles/spanner.admin",
-      "sha256": "cbf5ca11dfc378ae7b225e9dc7d12b9efad06be6cce11920489860164b3eb886"
+      "file": "cloudtasks.admin.json",
+      "name": "roles/cloudtasks.admin",
+      "sha256": "d72725250d888a1738073c56c19c7f38407321cc923c5dad3b04447d47180d15"
     },
     {
-      "file": "spanner.databaseAdmin.json",
-      "name": "roles/spanner.databaseAdmin",
-      "sha256": "56cd86cbd0bfea54fdd93bb1260128da18ff2530a1b8a7551740fa34a0b12d13"
+      "file": "cloudtasks.enqueuer.json",
+      "name": "roles/cloudtasks.enqueuer",
+      "sha256": "f0b09d1ffdd24d8005e810914db5a22831a52d4811293235bb3d727752374061"
     },
     {
-      "file": "spanner.viewer.json",
-      "name": "roles/spanner.viewer",
-      "sha256": "03bc7101c4f0feb0a267730cdc08a90264c2b041f09d7a009ced9c1f3d3ca606"
+      "file": "compute.admin.json",
+      "name": "roles/compute.admin",
+      "sha256": "a1f1b572d8f998dbb051ffb7db4128df6c6a0406c307e3f9db4c30e57a84bbce"
     },
     {
-      "file": "artifactregistry.admin.json",
-      "name": "roles/artifactregistry.admin",
-      "sha256": "2316ee06aa5421761f1e02fe1ad178a7279db195229643d6557f2980053c6dba"
+      "file": "compute.networkAdmin.json",
+      "name": "roles/compute.networkAdmin",
+      "sha256": "9ed3b1f7df8400f2b03f8841a96b51088307db55d032e81de7492ec0915a4892"
     },
     {
-      "file": "artifactregistry.repoAdmin.json",
-      "name": "roles/artifactregistry.repoAdmin",
-      "sha256": "92ffd587884c77d6c5660b6756cc0dbe674e849ba414c03a7b2cc86617f34419"
+      "file": "compute.viewer.json",
+      "name": "roles/compute.viewer",
+      "sha256": "9c4cc90423e20f8bebd6a89c26ac002bb983aeb5880f352d1f2a41dc9e6dd449"
     },
     {
-      "file": "artifactregistry.reader.json",
-      "name": "roles/artifactregistry.reader",
-      "sha256": "7fc2c872a02430b542a0333883286bd747d6ebc917db2b70d3fd4df5474055e8"
+      "file": "datastore.indexAdmin.json",
+      "name": "roles/datastore.indexAdmin",
+      "sha256": "fbe8fb6af8b442c7f32d8b9f8d95faabc38a1fec9da0d7b2a7525d2014981e4b"
+    },
+    {
+      "file": "datastore.user.json",
+      "name": "roles/datastore.user",
+      "sha256": "83b2c667a80902101c337b586bfecdef0ade5f91f512e0bc869318ad449d5fce"
+    },
+    {
+      "file": "datastore.viewer.json",
+      "name": "roles/datastore.viewer",
+      "sha256": "8a391d956379862c7d968a1cb27c2355ec845dfa0e98ec6a0cc6dfe4c17dbd15"
+    },
+    {
+      "file": "iam.serviceAccountUser.json",
+      "name": "roles/iam.serviceAccountUser",
+      "sha256": "d3a8433206951eb861c3c4740685dd37e996b6af325daf27f29e24274624523e"
+    },
+    {
+      "file": "iam.serviceAccountTokenCreator.json",
+      "name": "roles/iam.serviceAccountTokenCreator",
+      "sha256": "64dc45c85e756f2f0bd4f90ae12b342ca845c4a4d33b0a153e5b56c36fc284e9"
+    },
+    {
+      "file": "cloudkms.admin.json",
+      "name": "roles/cloudkms.admin",
+      "sha256": "daeaeaac13c159d98791f3078406305afe6e30876e48d856aa70f0323017e72b"
+    },
+    {
+      "file": "cloudkms.cryptoKeyEncrypter.json",
+      "name": "roles/cloudkms.cryptoKeyEncrypter",
+      "sha256": "037031fc8d2785e39dc7d5391ae60fc1709645ef03b802d7bee243cfbcad017c"
+    },
+    {
+      "file": "cloudkms.cryptoKeyEncrypterDecrypter.json",
+      "name": "roles/cloudkms.cryptoKeyEncrypterDecrypter",
+      "sha256": "9751767e6c4581fce5ce4018f6b98e54d07e9482c08ee1bbfa25ea1509ed2d43"
+    },
+    {
+      "file": "cloudkms.viewer.json",
+      "name": "roles/cloudkms.viewer",
+      "sha256": "6255aeb7d81965ef82a5ccba31734938cf41e2f365d1b1a1441edcd9fa48ab92"
+    },
+    {
+      "file": "networkmanagement.admin.json",
+      "name": "roles/networkmanagement.admin",
+      "sha256": "1df78b4bec78443606441e90f241049649bc8b274ed9fe59e7f3474122df35cf"
+    },
+    {
+      "file": "networkmanagement.viewer.json",
+      "name": "roles/networkmanagement.viewer",
+      "sha256": "265220301a8bf97576995132719312609ecebae858f12d074146dc158840c194"
+    },
+    {
+      "file": "pubsub.admin.json",
+      "name": "roles/pubsub.admin",
+      "sha256": "3a938305bb99c1ca1b70b7c93183f15bbed3f43dcc987279c73447a73f0cb6a7"
+    },
+    {
+      "file": "pubsub.publisher.json",
+      "name": "roles/pubsub.publisher",
+      "sha256": "9a6d023589cc824dd059d3b3899c3447b91d0737b39dd5de11432064daba61ab"
+    },
+    {
+      "file": "pubsub.subscriber.json",
+      "name": "roles/pubsub.subscriber",
+      "sha256": "6de29ead3b21468492b39620d0f5e3d51e44938197436bc818743917157e7eb2"
+    },
+    {
+      "file": "pubsub.viewer.json",
+      "name": "roles/pubsub.viewer",
+      "sha256": "ff3decd54fae7f9e17ddd08dcfedbcf146cb660b18a68032c790df8517608400"
+    },
+    {
+      "file": "redis.admin.json",
+      "name": "roles/redis.admin",
+      "sha256": "31535a234d9127adcb84eb3709f32e15f824630ef598d2b0f971da8793a6a8b1"
+    },
+    {
+      "file": "redis.editor.json",
+      "name": "roles/redis.editor",
+      "sha256": "3d7baaf51809e49f945c7ea2f6ca5ca3288d6ddcf5f810fd5c6b2724da2d7ac8"
+    },
+    {
+      "file": "redis.viewer.json",
+      "name": "roles/redis.viewer",
+      "sha256": "82c20e870604a78b6cf8cec008544a2b38ce5fd7ebf456eaa0f8e1b0b842aa80"
+    },
+    {
+      "file": "resourcemanager.projectIamAdmin.json",
+      "name": "roles/resourcemanager.projectIamAdmin",
+      "sha256": "4284d7aabd49fc9c9bd283cdf434cafbb65f1a5107096ff396d266b9f97c1385"
+    },
+    {
+      "file": "run.admin.json",
+      "name": "roles/run.admin",
+      "sha256": "e5ea7f0af28487fa9ba133a683309c7f5226b8446e3f6b360b2908eb1233086f"
+    },
+    {
+      "file": "run.developer.json",
+      "name": "roles/run.developer",
+      "sha256": "0456a6fca89421599628a258ef9548a13262da485d278b944cac496f991bd67a"
+    },
+    {
+      "file": "run.invoker.json",
+      "name": "roles/run.invoker",
+      "sha256": "4876e0a8a69a84b388cd585ec0c75f7ebd61cd3ef98749dee310660fa2ad5ef0"
+    },
+    {
+      "file": "run.viewer.json",
+      "name": "roles/run.viewer",
+      "sha256": "8963eba9834d57bd39d14c7f821c8a871c98062d83164092d41de5481073061b"
+    },
+    {
+      "file": "secretmanager.admin.json",
+      "name": "roles/secretmanager.admin",
+      "sha256": "5a08411516530d6ab848c61683052ab42ce62bc6f54db14858a464cd86615316"
+    },
+    {
+      "file": "secretmanager.secretAccessor.json",
+      "name": "roles/secretmanager.secretAccessor",
+      "sha256": "9e8af4dabe272fe68689c9a2d9efb44e671e7e9d1c5ef1bb0d7b261ab4f634d8"
+    },
+    {
+      "file": "secretmanager.viewer.json",
+      "name": "roles/secretmanager.viewer",
+      "sha256": "0a3ead573662c0bf3a51a754bcf8b1dece30a3fb46f7b1723310a6fb7c1dc450"
     },
     {
       "file": "iam.serviceAccountAdmin.json",
@@ -249,9 +234,39 @@
       "sha256": "91243c4bb2e19ae23c202ee34aa46f8419b7e035d4b1820e3a0f5ad8a75b890a"
     },
     {
-      "file": "resourcemanager.projectIamAdmin.json",
-      "name": "roles/resourcemanager.projectIamAdmin",
-      "sha256": "4284d7aabd49fc9c9bd283cdf434cafbb65f1a5107096ff396d266b9f97c1385"
+      "file": "spanner.admin.json",
+      "name": "roles/spanner.admin",
+      "sha256": "cbf5ca11dfc378ae7b225e9dc7d12b9efad06be6cce11920489860164b3eb886"
+    },
+    {
+      "file": "spanner.databaseAdmin.json",
+      "name": "roles/spanner.databaseAdmin",
+      "sha256": "56cd86cbd0bfea54fdd93bb1260128da18ff2530a1b8a7551740fa34a0b12d13"
+    },
+    {
+      "file": "spanner.viewer.json",
+      "name": "roles/spanner.viewer",
+      "sha256": "03bc7101c4f0feb0a267730cdc08a90264c2b041f09d7a009ced9c1f3d3ca606"
+    },
+    {
+      "file": "storage.admin.json",
+      "name": "roles/storage.admin",
+      "sha256": "dfe4cc58d8e989889be3210e0c5fe691ee15cdb7f57acb0f4eb956c29f92fa84"
+    },
+    {
+      "file": "storage.objectUser.json",
+      "name": "roles/storage.objectUser",
+      "sha256": "e9155375d0b7739a436e79ac192f621001a2c04e752022e42a03a920c6258eee"
+    },
+    {
+      "file": "storage.objectViewer.json",
+      "name": "roles/storage.objectViewer",
+      "sha256": "469367b5c8f0dbdc39bdfe23838ce33423ec473ca32db3565fa8cab611a0cca6"
+    },
+    {
+      "file": "storage.objectCreator.json",
+      "name": "roles/storage.objectCreator",
+      "sha256": "513fff80b0a597719850b948d5e33d5970f027d1db2fd34ac7d6028f6c243d1c"
     }
   ]
 }

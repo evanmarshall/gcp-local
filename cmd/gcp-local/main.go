@@ -282,14 +282,14 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleCloudTasks(ctx, selected, registry, server, index, engine, tokens); err != nil {
 		return err
 	}
-	if err := assembleFirestore(ctx, options, selected, registry, server, index, engine); err != nil {
-		return err
-	}
-	if err := assembleSpanner(ctx, options, selected, registry, server, index, engine); err != nil {
-		return err
-	}
-	if err := assembleMemorystore(ctx, options, selected, registry, server, index, engine); err != nil {
-		return err
+	// Providers in front of an official or pinned backend binary take the
+	// backend paths from the serve options.
+	for _, assemble := range []func(context.Context, serveOptions, map[string]bool, *gateway.Registry, *core.Server, *state.Index, *iam.Engine) error{
+		assembleFirestore, assembleSpanner, assembleMemorystore,
+	} {
+		if err := assemble(ctx, options, selected, registry, server, index, engine); err != nil {
+			return err
+		}
 	}
 	for _, assemble := range []struct {
 		service  string

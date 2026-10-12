@@ -30,6 +30,7 @@ import (
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
+	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/iam"
 	pubsubprovider "github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
@@ -77,6 +78,7 @@ func main() {
 			{Role: "roles/networkmanagement.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/artifactregistry.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/bigtable.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/redis.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/resourcemanager.projectIamAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountKeyAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
@@ -128,6 +130,13 @@ func main() {
 	if java == "" || jar == "" {
 		log.Fatal("The conformance fixture needs GCP_LOCAL_JAVA and GCP_LOCAL_PUBSUB_JAR for the Pub/Sub provider")
 	}
+	redisServer := os.Getenv("GCP_LOCAL_REDIS_SERVER")
+	if redisServer == "" {
+		log.Fatal("The conformance fixture needs GCP_LOCAL_REDIS_SERVER for the Memorystore provider")
+	}
+	_, err = memorystoreprovider.New(context.Background(), registry, server.Backends, index, engine,
+		memorystoreprovider.Config{Server: redisServer})
+	must(err)
 	firestoreJAR := os.Getenv("GCP_LOCAL_FIRESTORE_JAR")
 	if firestoreJAR == "" {
 		log.Fatal("The conformance fixture needs GCP_LOCAL_JAVA and GCP_LOCAL_FIRESTORE_JAR for the Firestore provider")

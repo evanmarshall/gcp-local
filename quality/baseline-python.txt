@@ -89,6 +89,7 @@
 1	E501	tests/conformance/cloudtasks/conftest.py
 1	E501	tests/conformance/firestore/conftest.py
 1	E501	tests/conformance/firestore/test_firestore.py
+1	E501	tests/conformance/memorystore/test_memorystore.py
 1	E501	tests/conformance/projectiam/test_policy.py
 1	E501	tests/conformance/pubsub/conftest.py
 1	E501	tests/conformance/pubsub/test_pull.py
@@ -239,6 +240,7 @@
 3	D401	gcp_validation/networking.py
 3	E501	gcp_validation/authorization.py
 3	E501	gcp_validation/live_paths.py
+3	E501	gcp_validation/memorystore.py
 3	E501	gcp_validation/sdk_storage.py
 3	E501	tests/conformance/conftest.py
 3	E501	tests/conformance/test_storage.py

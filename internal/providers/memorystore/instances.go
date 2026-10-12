@@ -56,6 +56,14 @@ func (i instance) wire(scope state.Scope) map[string]any {
 		"authorizedNetwork":     i.Network,
 		"connectMode":           i.ConnectMode,
 		"transitEncryptionMode": i.TransitEncryptionMode,
+		// Recorded (memorystore-redis-instance-admin): GCP always returns these
+		// service-managed fields; the values are local stand-ins, only presence is compared.
+		"maintenanceVersion":     "20260801_00_00",
+		"nodes":                  []any{map[string]any{"id": "node-0", "zone": i.LocationID}},
+		"persistenceConfig":      map[string]any{"persistenceMode": "DISABLED"},
+		"persistenceIamIdentity": "serviceAccount:service-" + scope.Project + "@cloud-redis.iam.gserviceaccount.com",
+		"readReplicasMode":       "READ_REPLICAS_DISABLED",
+		"reservedIpRange":        "127.0.0.0/29",
 	}
 	if i.DisplayName != "" {
 		body[fieldDisplayName] = i.DisplayName

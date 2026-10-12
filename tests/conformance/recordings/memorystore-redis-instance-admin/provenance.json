@@ -1,0 +1,50 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T01:32:25.146061+00:00",
+  "scenario": {
+    "id": "memorystore-redis-instance-admin",
+    "service": "redis",
+    "transport": "rest-v1",
+    "revision": "64df7e74fdffeb8a8fdd19b45e0929dc62196fb845f3df833b8bbea5e04c471a",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "4d11fab2a5cbf1b5dfcc1f1214e46043b7f5435c205b56d732bed8f6ecca2241",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/memorystore.py": "619c2b454150dbce0ebeda5fb5a9b5f33e89e0c4762c4fa8fc7498dc1707f860",
+      "gcp_validation/networking.py": "3b633fc57efa342a1bea7616646ea26341b10db6f20fb25143ca4586ad13a5e4",
+      "gcp_validation/live_paths.py": "a958dd5c7db15db268241edb7588fb4aa8e2cc870744d33204b4e023d5e20cf1",
+      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
+      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "tests/conformance/memorystore/conftest.py": "62de7a316ff3e4758b1ab019ac4556a3bd893ea1e38e5c7e400110f198d1959b"
+    },
+    "scope": {
+      "services": [
+        "redis"
+      ],
+      "location": "global",
+      "limits": {
+        "max_instances": 1,
+        "max_memory_gb": 1,
+        "max_run_seconds": 2400
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}
