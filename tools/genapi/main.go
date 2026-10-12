@@ -53,6 +53,7 @@ func main() {
 	check := flag.Bool("check", false, "fail if generated output differs")
 	flag.Parse()
 	write("storage_routes.go", storageRoutes(), *check)
+	write("storage_xml_routes.go", storageXMLRoutes(), *check)
 	write("run_routes.go", runRoutes(), *check)
 	write("compute_routes.go", computeRoutes(), *check)
 	write("secretmanager_routes.go", secretManagerRoutes(), *check)
@@ -121,8 +122,29 @@ func storageMethodRoutes(m method) []route {
 		for _, p := range m.Media.Protocols {
 			routes = append(routes, route{m.ID, m.Verb, p.Path, false, true})
 		}
+		// The resumable protocol continues a session with PUT (chunks and
+		// status queries) and cancels it with DELETE on the session URI,
+		// which is the simple upload path plus upload_id. Discovery
+		// describes the protocol but lists no method for these verbs.
+		if _, resumable := m.Media.Protocols["resumable"]; resumable {
+			for _, verb := range []string{http.MethodPut, http.MethodDelete} {
+				routes = append(routes, route{m.ID, verb, "/upload/storage/v1/" + m.Path, false, true})
+			}
+		}
 	}
 	return routes
+}
+
+// storageXMLRoutes generates the XML API object slice that V4 signed URLs and
+// the Go client's reads address. The path is a catch-all, so the gateway
+// matches it after every other route. The object is the rest of the path,
+// unescaped whole ({object=***}): the Go client escapes "/" in object names.
+func storageXMLRoutes() []byte {
+	rows := []route{
+		{"storage.xml.objects.get", http.MethodGet, "/{bucket}/{object=***}", false, false},
+		{"storage.xml.objects.put", http.MethodPut, "/{bucket}/{object=***}", false, true},
+	}
+	return routeTable("StorageXMLRoutes", "is the Cloud Storage XML API object route table slice.", rows)
 }
 
 // pubsubDispatch generates the Pub/Sub forwarding stubs and resource selectors
@@ -720,6 +742,9 @@ func iamRoutes() []byte {
 		{"iam.serviceAccountKeys.list", http.MethodGet, base + "/{serviceAccount}/keys", false, false},
 		{"iam.serviceAccountKeys.get", http.MethodGet, base + "/{serviceAccount}/keys/{keyId}", false, false}, {"iam.serviceAccountKeys.get", http.MethodGet, base + "/{serviceAccount}/keys/{keyId}", false, false},
 		{"iam.serviceAccountKeys.delete", http.MethodDelete, base + "/{serviceAccount}/keys/{keyId}", false, false},
+		// IAM Service Account Credentials v1 shares the path shape; the ID is
+		// its discovery method ID.
+		{"iamcredentials.projects.serviceAccounts.signBlob", http.MethodPost, base + "/{serviceAccount}:signBlob", true, false},
 	}
 	return routeTable("IAMRoutes", "is the IAM service-account route table slice.", rows)
 }

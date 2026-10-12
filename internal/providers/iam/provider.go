@@ -121,6 +121,12 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 // the account; key and list/create methods inherit via the account or project.
 func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
 	project := request.Path["project"]
+	if call.Method == methodSignBlob && project == "-" {
+		// IAM Credentials names accounts as projects/-/serviceAccounts/EMAIL;
+		// the email's domain carries the owning project.
+		_, domain, _ := strings.Cut(request.Path["serviceAccount"], "@")
+		project = strings.TrimSuffix(domain, ".iam.gserviceaccount.com")
+	}
 	scope := provider.ProjectScope(project)
 	target := iam.Target{Name: provider.ProjectResource(project)}
 	// GCP addresses accounts by email; the provider keys them by account id.
@@ -133,9 +139,20 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	if !uid.MatchString(account) {
 		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", account)
 	}
-	if p.accountLocked(scope, account) == nil {
+	if !p.accountExists(call.Method, scope, account) {
 		return scope, target, provider.NotFound(kindAccount, account)
 	}
 	target.Name = accountResource(project, accountEmail(project, account))
 	return scope, target, nil
+}
+
+// accountExists reports whether a method's account exists. signBlob also signs
+// for accounts declared in the IAM configuration, which only the index holds;
+// the account methods manage only accounts this provider created.
+func (p *Provider) accountExists(method string, scope state.Scope, account string) bool {
+	if method == methodSignBlob {
+		resource, found := p.index.Get(accountResource(scope.Project, accountEmail(scope.Project, account)))
+		return found && resource.Kind == kindAccount && resource.Scope == scope
+	}
+	return p.accountLocked(scope, account) != nil
 }

@@ -79,6 +79,7 @@ type Engine struct {
 	revision    uint64
 	decisions   map[string]Decision
 	order       []string
+	signingKeys map[string]map[string]signingKey
 }
 
 // errPlanExists rejects a second permission plan for one method.
@@ -118,7 +119,7 @@ func New(index *state.Index) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string][]orgPolicyRecord{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}}, nil
+	return &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string][]orgPolicyRecord{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}, nil
 }
 func (e *Engine) Register(method string, plan Rule) error {
 	rule, err := e.validateRule(plan)

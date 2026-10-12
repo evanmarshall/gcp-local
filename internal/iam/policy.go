@@ -265,6 +265,7 @@ func (e *Engine) ClearScope(owner string, scope state.Scope) {
 			delete(e.unsupported, name)
 		}
 	}
+	e.clearSigningKeys(owner, scope)
 }
 
 // Wire renders a policy as GCP returns it: a policy without bindings, deny

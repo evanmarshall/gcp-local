@@ -1,6 +1,6 @@
 # IAM service accounts
 
-IAM v1 service accounts, per-account IAM policy, and synthesized keys over REST. Modeled locally. The scenario `serviceaccount-lifecycle-authorization` is recorded against GCP. For local identity and token minting, see [local identity](local-identity.md).
+IAM v1 service accounts, per-account IAM policy, local RSA keys, and IAM Credentials `signBlob` over REST. Modeled locally. The scenario `serviceaccount-lifecycle-authorization` is recorded against GCP. For local identity and token minting, see [local identity](local-identity.md).
 
 ## Use
 
@@ -12,7 +12,8 @@ Select `-services ...,iam`. Routes are `/v1/projects/{project}/serviceAccounts` 
 | --- | --- | --- |
 | Accounts | `create`, `get`, `list`, `patch`, `delete` | `{accountId, serviceAccount}` create body; `patch` takes `{serviceAccount, updateMask}` and returns `name` plus masked fields |
 | Accounts | `getIamPolicy` (POST), `setIamPolicy` | |
-| Keys | `create`, `get`, `list`, `delete` | `privateKeyData` is synthesized and signs nothing |
+| Keys | `create`, `get`, `list`, `delete` | `create` returns a 2048-bit RSA `TYPE_GOOGLE_CREDENTIALS_FILE` key file whose signatures verify Storage signed URLs; `delete` stops them verifying |
+| IAM Credentials | `signBlob` | `POST /v1/projects/-/serviceAccounts/EMAIL:signBlob`; signs with the account's managed key, also for accounts declared in the IAM configuration. Needs `iam.serviceAccounts.signBlob` (Token Creator), even on itself |
 
 ## IAM
 
@@ -43,5 +44,7 @@ After an interrupted run, `python -m gcp_validation.serviceaccounts cleanup --pr
 
 ## Gaps
 
-- Keys are not recorded; recording them would mint real credentials.
-- No undelete, disable or enable, `signJwt`/`signBlob`, `projects/-` or `uniqueId` addressing, or workload identity federation.
+- Keys and `signBlob` are modeled locally, not recorded; recording keys would mint real credentials.
+- A key file's `token_uri` names this emulator, which does not accept JWT-bearer grants: a key signs but cannot mint access tokens.
+- No `signJwt`, `generateAccessToken`, or `signBlob` delegation chains.
+- No undelete, disable or enable, `projects/-` or `uniqueId` addressing outside `signBlob`, or workload identity federation.

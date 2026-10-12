@@ -2,7 +2,7 @@
 
 What each service supports and how it is verified. Every service authenticates callers and checks IAM on every request.
 
-- **Methods served**: methods that run. All others return `UNIMPLEMENTED`.
+- **Methods served**: methods that run. All others return `UNIMPLEMENTED`, except Storage, which returns 400 ([why](storage.md#gaps)).
 - **API total**: methods in Google's discovery document for that API version.
 - **Data plane**: what an application can do with a resource once it exists.
 - **Recordings**: scenarios recorded against real Google Cloud that the emulator matches ([validation](validation.md)). Each covers only its own steps.
@@ -12,7 +12,7 @@ What each service supports and how it is verified. Every service authenticates c
 
 | Key | Service | Backend | Methods served | API total | Data plane for applications | Recordings | Terraform |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 15 | 88 | Yes: object read, write, list, delete | storage-authorization, storage-bucket-updates, storage-cross-project, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
+| `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 16 | 88 | Yes: object read, write, list, delete, resumable uploads, V4 signed URLs, rewrite; resumable, signed URLs, rewrite, and XML paths not recorded | storage-authorization, storage-bucket-updates, storage-cross-project, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
 | `pubsub` | [Pub/Sub](pubsub.md) | Official emulator | 13 | 46 | Yes: publish, pull, streaming pull, push | pubsub-pull-authorization | TestAccPubSubTopicAndSubscription |
 | `firestore` | [Firestore](firestore.md) | Official emulator | 16 | 60 | Yes: documents, subcollections, queries, aggregations, transactions, batch writes, listeners over REST and gRPC; batch writes and listeners not recorded | firestore-document-lifecycle, firestore-query-transaction | TestAccFirestoreDocument |
 | `spanner` | [Spanner](spanner.md) | Official emulator | 36 | 99 | Yes: sessions, SQL queries, DML, reads, mutations, transactions over gRPC (unary methods also over REST) | spanner-instance-database-admin, spanner-data-plane-rest | TestAccSpannerInstanceAndDatabase |
@@ -25,7 +25,7 @@ What each service supports and how it is verified. Every service authenticates c
 | `cloudtasks` | [Cloud Tasks](cloudtasks.md) | gcp-local | 16 | 24 | Yes: HTTP-target dispatch with OIDC and retries | cloudtasks-dispatch-retry | TestAccCloudTasksQueueLifecycle |
 | `logging` | [Cloud Logging](logging.md) | gcp-local | 4 | 254 | Yes: write, filter, page, and delete log entries | logging-entries-lifecycle | none |
 | `artifactregistry` | [Artifact Registry](artifactregistry.md) | gcp-local | 7 | 69 | No: repositories only; no image push or pull | artifactregistry-repository-lifecycle | TestAccArtifactRegistryRepository |
-| `iam` | [IAM service accounts](serviceaccounts.md) | gcp-local | 11 | 137 | Partial: accounts and policies; keys are synthesized and sign nothing | serviceaccount-lifecycle-authorization | TestAccServiceAccount |
+| `iam` | [IAM service accounts](serviceaccounts.md) | gcp-local | 12 | 137 | Partial: accounts, policies, keys and `signBlob` that sign Storage URLs; keys mint no tokens; keys and `signBlob` not recorded | serviceaccount-lifecycle-authorization | TestAccServiceAccount |
 | `resourcemanager` | [Project IAM](project-iam.md) | gcp-local | 2 | 38 | Yes: project IAM policy | project-iam-policy-binding | TestAccProjectIamPolicy |
 | `compute` | [VPC networking and Connectivity Tests](networking.md) | gcp-local | 38 | 1066 | Analysis only: verdicts, no real traffic | vpc-firewall-connectivity, vm-connectivity-nat-peering | TestAccComputeNetworkAndSubnetwork |
 | `run` | [Cloud Run](cloudrun.md) | Local processes or Docker | 13 | 59 | Partial: your own images with `--cloud-run-docker`, workload identity, ID-token invocation; no egress, jobs, or volumes | none | TestAccCloudRunV2Service |
@@ -39,6 +39,7 @@ Notes on counts:
 - Bigtable: 17 admin methods (bigtableadmin v2) and 7 data methods (bigtable v2, gRPC).
 - Firestore: 14 document methods (all on gRPC; all but Listen on REST) and 2 Admin field methods on REST.
 - Logging serves its 4 methods over both REST and gRPC.
+- IAM counts `signBlob` from IAM Service Account Credentials v1 with the 11 IAM v1 methods.
 
 ## Client compatibility
 
@@ -47,6 +48,8 @@ A recording proves only the requests it sends. This table lists the real clients
 | Service | Client | Transport | Test |
 | --- | --- | --- | --- |
 | storage | Python `google-cloud-storage` 3.10.1 | JSON REST | `tests/conformance/test_storage_sdk.py` |
+| storage | Python `google-cloud-storage` 3.10.1: resumable upload, V4 signed URLs | JSON REST, XML | `scripts/smoke_storage.py` |
+| storage | Go `cloud.google.com/go/storage` 1.65.0, default settings: bucket and object CRUD, resumable upload, XML reads, copy, signed URLs | JSON REST, XML | `internal/providers/storage/sdk_test.go` |
 | pubsub | Python `google-cloud-pubsub` 2.42.0 | gRPC | `internal/providers/pubsub/testdata/sdk.py` |
 | firestore | Python `google-cloud-firestore` 2.34.1 | gRPC | `internal/providers/firestore/testdata/sdk.py` |
 | spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | `internal/providers/spanner/data_integration_test.go` |
@@ -56,7 +59,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | identity | Python `google-auth` 2.56.2 (ADC, metadata) | HTTP | `internal/identity/testdata/sdk.py` |
 | Terraform cases above | `hashicorp/google` 8.5.0 | REST | `tests/terraform/runner` |
 
-Untested: the Go, Node, and Java client libraries for every service not listed above, `gcloud`, `gsutil`, and `rclone`. Secret Manager, Cloud KMS, Cloud Tasks, BigQuery, Artifact Registry, IAM, Cloud SQL, Memorystore, and Cloud Run are exercised only through raw REST, Terraform, or their wire protocols.
+Untested: the Go, Node, and Java client libraries for every service not listed above, `gcloud`, `gsutil`, and `rclone` (its Storage requests, `mediaLink` download and a null-body rewrite, are tested in Go). Secret Manager, Cloud KMS, Cloud Tasks, BigQuery, Artifact Registry, IAM, Cloud SQL, Memorystore, and Cloud Run are exercised only through raw REST, Terraform, or their wire protocols.
 
 ## Cross-service behavior
 

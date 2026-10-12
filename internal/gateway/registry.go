@@ -82,6 +82,7 @@ func (r *Registry) registerRoutes() {
 		service string
 	}{
 		{generated.StorageRoutes, "storage"},
+		{generated.StorageXMLRoutes, "storage"},
 		{generated.RunRoutes, "run"},
 		{generated.ComputeRoutes, "compute"},
 		{generated.SecretManagerRoutes, "secretmanager"},

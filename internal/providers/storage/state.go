@@ -17,6 +17,9 @@ type Bucket struct{ Name, Location, Metadata string }
 type projectState struct {
 	Buckets map[string]Bucket
 	Folders map[string]Folder
+	// Uploads holds resumable sessions by upload ID until their final chunk
+	// commits the object to the backend.
+	Uploads map[string]*uploadSession
 }
 type Catalog struct {
 	// Serialize publication/reset across provider store and shared index. Backend
@@ -28,7 +31,7 @@ type Catalog struct {
 
 func NewCatalog(index *state.Index) *Catalog {
 	return &Catalog{store: state.NewStore(func() projectState {
-		return projectState{Buckets: map[string]Bucket{}, Folders: map[string]Folder{}}
+		return projectState{Buckets: map[string]Bucket{}, Folders: map[string]Folder{}, Uploads: map[string]*uploadSession{}}
 	}, state.GlobalScope), index: index}
 }
 func BucketResource(name string) string { return "//storage.googleapis.com/projects/_/buckets/" + name }
@@ -103,6 +106,7 @@ func (c *Catalog) ForgetBucket(scope state.Scope, name string) error {
 		}
 		delete(value.Buckets, name)
 		maps.DeleteFunc(value.Folders, func(_ string, folder Folder) bool { return folder.Bucket == name })
+		maps.DeleteFunc(value.Uploads, func(_ string, upload *uploadSession) bool { return upload.bucket == name })
 		return nil
 	}); err != nil {
 		return fmt.Errorf("delete bucket %s: %w", name, err)
@@ -190,4 +194,44 @@ func (c *Catalog) Folders(scope state.Scope, bucket string) ([]Folder, error) {
 		return nil, fmt.Errorf("list folders of %s: %w", bucket, err)
 	}
 	return items, nil
+}
+
+// publishUpload records a resumable session after its initiation is authorized.
+func (c *Catalog) publishUpload(scope state.Scope, id string, upload *uploadSession) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.store.With(scope, func(value *projectState) error {
+		if _, ok := value.Buckets[upload.bucket]; !ok {
+			return errBucketAbsent
+		}
+		value.Uploads[id] = upload
+		return nil
+	}); err != nil {
+		return fmt.Errorf("publish upload %s: %w", id, err)
+	}
+	return nil
+}
+
+// upload returns one resumable session of a bucket, or nil.
+func (c *Catalog) upload(scope state.Scope, bucket, id string) *uploadSession {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var found *uploadSession
+	_ = c.store.With(scope, func(value *projectState) error {
+		if upload := value.Uploads[id]; upload != nil && upload.bucket == bucket {
+			found = upload
+		}
+		return nil
+	})
+	return found
+}
+
+// forgetUpload removes a cancelled, refused, or failed session.
+func (c *Catalog) forgetUpload(scope state.Scope, id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_ = c.store.With(scope, func(value *projectState) error {
+		delete(value.Uploads, id)
+		return nil
+	})
 }

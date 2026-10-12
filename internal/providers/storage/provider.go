@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
+	"github.com/evanmarshall/gcp-local/api/generated"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -39,6 +41,7 @@ var registeredMethods = []string{
 	MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy,
 	MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete,
 	MethodFoldersInsert, MethodFoldersGet, MethodFoldersList, MethodFoldersDelete,
+	MethodXMLGet, MethodXMLPut, MethodObjectsRewrite,
 }
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
@@ -62,15 +65,42 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 	}); err != nil {
 		return nil, fmt.Errorf("register the storage backend: %w", err)
 	}
-	for _, method := range registeredMethods {
-		if err := registry.Register(method, p.handle); err != nil {
-			return nil, fmt.Errorf("register %s: %w", method, err)
-		}
+	if err := p.registerRoutes(registry); err != nil {
+		return nil, err
 	}
 	return p, nil
 }
+
+// registerRoutes binds the served methods to handle and every other generated
+// Storage method to an explicit 4xx gap.
+func (p *Provider) registerRoutes(registry *gateway.Registry) error {
+	handlers := map[string]gateway.Handler{}
+	for _, route := range generated.StorageRoutes {
+		handlers[route.Method] = unsupported
+	}
+	for _, method := range registeredMethods {
+		handlers[method] = p.handle
+	}
+	for method, handler := range handlers {
+		if err := registry.Register(method, handler); err != nil {
+			return fmt.Errorf("register %s: %w", method, err)
+		}
+	}
+	return nil
+}
+
+// gap refuses an unimplemented Storage feature with 400, not UNIMPLEMENTED:
+// the Go client retries every 5xx without an attempt limit, so a 501 hangs it.
+// This is a deliberate exception to the gateway's UNIMPLEMENTED convention.
 func gap(message string) error {
-	return status.Error(codes.Unimplemented, "Storage coverage gap: "+message)
+	return status.Error(codes.InvalidArgument, storageGap+message)
+}
+
+const storageGap = "Storage coverage gap: "
+
+// unsupported answers every generated Storage route this provider does not serve.
+func unsupported(call gateway.Call, _ any) (any, error) {
+	return nil, gap(call.Method + " is not implemented")
 }
 
 // wireError renders the Storage JSON API body, which carries an errors[] reason
@@ -96,6 +126,10 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 		return nil, d.ID, nil
 	}
 	code := status.Code(err)
+	if code == codes.Unimplemented {
+		// An unsupported authorization decision fails closed, as a 4xx gap.
+		return nil, d.ID, gap(status.Convert(err).Message())
+	}
 	if code != codes.PermissionDenied && code != codes.Unauthenticated {
 		return nil, d.ID, fmt.Errorf("authorize %s: %w", call.Method, err)
 	}
@@ -124,7 +158,7 @@ func renderDenial(call gateway.Call, target iam.Target, decisionID, permission s
 	response := wireError(httpCode, reason, message)
 	response.Headers = http.Header{"X-Gcp-Local-Decision-Id": {decisionID}}
 	if call.Method == MethodObjectsInsert && permission != MethodObjectsDelete {
-		response.Headers.Set("Content-Type", "text/html")
+		response.Headers.Set(headerContentType, "text/html")
 	}
 	return response
 }
@@ -156,6 +190,9 @@ type request struct {
 	bucket string
 	object string
 	upload *uploadRequest
+	// xml marks an XML API request; it authorizes as objects.get or
+	// objects.insert and answers in the XML API's shapes.
+	xml bool
 }
 
 func isProjectMethod(method string) bool {
@@ -165,10 +202,37 @@ func isProjectMethod(method string) bool {
 func isFolderMethod(method string) bool { return strings.HasPrefix(method, "storage.folders.") }
 
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
-	req, refused, err := p.newRequest(call, raw)
+	r, ok := raw.(*gateway.RESTRequest)
+	if !ok {
+		return nil, status.Error(codes.Internal, "Invalid Storage request")
+	}
+	switch {
+	// Python sends chunks with PUT, the Go client with POST; both carry upload_id.
+	case call.Method == MethodObjectsInsert && (r.Verb != http.MethodPost || r.Query.Has("upload_id")):
+		return p.continueUpload(call, r)
+	case call.Method == MethodObjectsRewrite:
+		return p.rewrite(call, r)
+	case call.Method == MethodXMLGet || call.Method == MethodXMLPut:
+		return p.handleRequest(call, r, p.newXMLRequest)
+	}
+	return p.handleRequest(call, r, p.newRequest)
+}
+
+// handleRequest validates, preflights, and serves one single-target request.
+func (p *Provider) handleRequest(call gateway.Call, r *gateway.RESTRequest, newRequest func(gateway.Call, *gateway.RESTRequest) (request, *gateway.RESTResponse, error)) (any, error) {
+	req, refused, err := newRequest(call, r)
 	if refused != nil || err != nil {
 		return refused, err
 	}
+	response, err := p.run(req)
+	if req.xml && response != nil {
+		response = xmlResult(response)
+	}
+	return response, err
+}
+
+// run preflights one request, then serves it under the backend gate.
+func (p *Provider) run(req request) (*gateway.RESTResponse, error) {
 	// This preflight permits lazy startup/state resolution only. Every operation
 	// reauthorizes under the backend gate before data access or mutation.
 	denied, _, err := p.authorize(req.call, req.target, nil, false)
@@ -183,22 +247,18 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return serveErr
 	})
 	if err != nil {
-		return response, fmt.Errorf("forward %s: %w", call.Method, err)
+		return response, fmt.Errorf("forward %s: %w", req.call.Method, err)
 	}
 	return response, nil
 }
 
 // newRequest validates the REST input and resolves the IAM target and backend
 // scope. A refusal is a wire response; an error is a gateway status.
-func (p *Provider) newRequest(call gateway.Call, raw any) (request, *gateway.RESTResponse, error) {
-	r, ok := raw.(*gateway.RESTRequest)
-	if !ok {
-		return request{}, nil, status.Error(codes.Internal, "Invalid Storage request")
-	}
+func (p *Provider) newRequest(call gateway.Call, r *gateway.RESTRequest) (request, *gateway.RESTResponse, error) {
 	if err := validateQuery(call.Method, r); err != nil {
 		return request{}, nil, err
 	}
-	req := request{call: call, rest: r, bucket: r.Path["bucket"], object: r.Path["object"]}
+	req := request{call: call, rest: r, bucket: r.Path[keyBucket], object: r.Path["object"]}
 	if call.Method == MethodObjectsInsert {
 		upload, err := parseUpload(r)
 		if err != nil {
@@ -206,7 +266,12 @@ func (p *Provider) newRequest(call gateway.Call, raw any) (request, *gateway.RES
 		}
 		req.upload, req.object = upload, upload.name
 	}
-	target, scope, refused, err := p.resolveTarget(call, req.bucket, req.object)
+	return p.resolveRequest(req)
+}
+
+// resolveRequest fills the IAM target and backend scope of a validated request.
+func (p *Provider) resolveRequest(req request) (request, *gateway.RESTResponse, error) {
+	target, scope, refused, err := p.resolveTarget(req.call, req.bucket, req.object)
 	if refused != nil || err != nil {
 		return request{}, refused, err
 	}
@@ -240,13 +305,51 @@ func (p *Provider) serve(ctx context.Context, driver backend.Backend, req reques
 		return denied, nil
 	}
 	response, err := p.execute(ctx, b, req, current)
-	if response != nil {
-		if response.Headers == nil {
-			response.Headers = http.Header{}
-		}
-		response.Headers.Set("X-Gcp-Local-Decision-Id", id)
-	}
+	finishResponse(response, id, req.rest.Host)
 	return response, err
+}
+
+// finishResponse attaches the decision ID and publishes resource links.
+func finishResponse(response *gateway.RESTResponse, decision, host string) {
+	if response == nil {
+		return
+	}
+	if response.Headers == nil {
+		response.Headers = http.Header{}
+	}
+	response.Headers.Set("X-Gcp-Local-Decision-Id", decision)
+	if document, ok := response.JSON.(map[string]any); ok && response.Status < 300 {
+		publishLinks(document, "http://"+host)
+	}
+}
+
+// publishLinks sets selfLink and mediaLink on every bucket and object in a
+// response, at the emulator's public origin. GCP returns both, and clients
+// such as rclone download from mediaLink instead of deriving a URL.
+func publishLinks(value map[string]any, origin string) {
+	bucket, _ := value[keyBucket].(string)
+	name, _ := value[keyName].(string)
+	switch value["kind"] {
+	case "storage#object":
+		self := "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(name)
+		value["selfLink"] = origin + self
+		generation, _ := value[keyGeneration].(string)
+		value["mediaLink"] = origin + "/download" + self + "?" + url.Values{keyGeneration: {generation}, queryAlt: {altMedia}}.Encode()
+	case "storage#bucket":
+		value["selfLink"] = origin + "/storage/v1/b/" + url.PathEscape(name)
+	}
+	for _, key := range []string{"items", "resource"} {
+		switch nested := value[key].(type) {
+		case []any:
+			for _, item := range nested {
+				if document, ok := item.(map[string]any); ok {
+					publishLinks(document, origin)
+				}
+			}
+		case map[string]any:
+			publishLinks(nested, origin)
+		}
+	}
 }
 
 // resolveTarget derives the IAM target and backend scope for one request. A
@@ -362,7 +465,7 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 	if err != nil {
 		return nil, fmt.Errorf("build backend request: %w", err)
 	}
-	for _, key := range []string{"Content-Type", "Range", "Accept-Encoding"} {
+	for _, key := range []string{headerContentType, "Range", "Accept-Encoding"} {
 		if value := headers.Get(key); value != "" {
 			req.Header.Set(key, value)
 		}
@@ -378,11 +481,13 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 	}
 	response := &gateway.RESTResponse{Status: result.StatusCode, Headers: result.Header.Clone()}
 	response.Headers.Del("Content-Length")
-	if strings.Contains(result.Header.Get("Content-Type"), "application/json") && (result.StatusCode >= 300 || query.Get("alt") != altMedia) {
+	if strings.Contains(result.Header.Get(headerContentType), "application/json") && (result.StatusCode >= 300 || query.Get(queryAlt) != altMedia) {
 		decodeBackendJSON(payload, response)
 		return response, nil
 	}
 	response.Body = bytes.NewReader(payload)
+	// Media is read whole, so its length is known; the Go client checks it.
+	response.Headers.Set("Content-Length", strconv.Itoa(len(payload)))
 	if generation := response.Headers.Get("X-Goog-Generation"); generation != "" {
 		response.Headers.Set("ETag", `"`+objectETag(generation, "1")+`"`)
 		response.Headers.Set("X-Goog-Metageneration", "1")
@@ -402,14 +507,14 @@ func readBackendPayload(body io.Reader) ([]byte, error) {
 	return payload, nil
 }
 
-// Upstream links use its private origin. SDKs derive their URLs from the
-// configured endpoint when these optional fields are absent.
+// Upstream links use its private origin; serve republishes them at the
+// emulator's origin with publishLinks.
 func removeBackendLinks(value map[string]any) {
 	delete(value, "mediaLink")
 	delete(value, "selfLink")
 	delete(value, "acl")
 	delete(value, "defaultObjectAcl")
-	if generation, ok := value["generation"].(string); ok {
+	if generation, ok := value[keyGeneration].(string); ok {
 		metageneration, _ := value["metageneration"].(string)
 		value["etag"] = objectETag(generation, metageneration)
 	}
@@ -450,11 +555,18 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, c
 	case MethodBucketsDelete:
 		return p.deleteBucket(ctx, b, req.rest, req.scope, path, req.bucket)
 	}
-	return executeObject(ctx, b, req, current)
+	return p.executeObject(ctx, b, req, current)
 }
 
-// executeObject serves the object methods.
-func executeObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
+// executeObject serves the object methods, including the XML API's and a
+// resumable initiation.
+func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
+	switch {
+	case req.xml:
+		return executeXML(ctx, b, req, current)
+	case req.call.Method == MethodObjectsInsert && req.upload.resumable:
+		return p.startUpload(req, current)
+	}
 	switch req.call.Method {
 	case MethodObjectsList:
 		return b.forward(ctx, "GET", "/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", req.rest.Query, nil, nil)
@@ -484,7 +596,7 @@ func readOrDeleteObject(ctx context.Context, b *memoryBackend, req request) (*ga
 	if response, err := preconditions(req.rest, current, req.call.Method); response != nil || err != nil {
 		return response, err
 	}
-	if generation := req.rest.Query.Get("generation"); generation != "" && current["generation"] != generation {
+	if generation := req.rest.Query.Get(keyGeneration); generation != "" && current[keyGeneration] != generation {
 		return notFound(req.bucket, req.object), nil
 	}
 	if req.call.Method == MethodObjectsGet {
@@ -657,7 +769,7 @@ func (p *Provider) executeFolder(method string, r *gateway.RESTRequest, scope st
 
 // folderDocument is the wire shape of one folder.
 func folderDocument(folder Folder) map[string]any {
-	return map[string]any{keyName: folder.Name, "bucket": folder.Bucket}
+	return map[string]any{keyName: folder.Name, keyBucket: folder.Bucket}
 }
 
 // folderErrorBody is the Storage Control error body, which has no errors[] list.

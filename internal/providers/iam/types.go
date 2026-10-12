@@ -1,9 +1,11 @@
 // Package iam implements the IAM service-account control plane: service
-// accounts with their per-resource IAM and key records. Key material is
-// synthesized locally; token minting lives in the identity service.
+// accounts with their per-resource IAM and key records, and signBlob. Keys are
+// real local RSA keys that verify Storage signed URLs; token minting lives in
+// the identity service.
 package iam
 
 import (
+	"crypto/rsa"
 	"errors"
 	"regexp"
 	"time"
@@ -25,6 +27,7 @@ const (
 	methodKeysList       = "iam.serviceAccountKeys.list"
 	methodKeysDelete     = "iam.serviceAccountKeys.delete"
 	methodKeysGet        = "iam.serviceAccountKeys.get"
+	methodSignBlob       = "iamcredentials.projects.serviceAccounts.signBlob"
 )
 
 // permissions follows the documented access-control rows.
@@ -40,6 +43,7 @@ var permissions = map[string]string{
 	methodKeysList:       "iam.serviceAccountKeys.list",
 	methodKeysDelete:     "iam.serviceAccountKeys.delete",
 	methodKeysGet:        "iam.serviceAccountKeys.get",
+	methodSignBlob:       "iam.serviceAccounts.signBlob",
 }
 
 // uid is the shared resource-name matcher.
@@ -52,7 +56,8 @@ const (
 	kindKey     = "serviceAccountKey"
 )
 
-// keyRecord is one synthesized key of a service account.
+// keyRecord is one user-managed key of a service account. The private key
+// leaves only in the create response; the public half lives in the IAM engine.
 type keyRecord struct {
 	ID        string
 	CreatedAt time.Time
@@ -69,17 +74,26 @@ type accountRecord struct {
 	Revision    int
 }
 
+// systemKey is the Google-managed key signBlob signs with, keyed by account
+// email. Its public half is published to the IAM engine for verifiers.
+type systemKey struct {
+	ID      string
+	Private *rsa.PrivateKey
+}
+
 // scopeState is one project slice of provider state.
 type scopeState struct {
-	accounts map[string]*accountRecord
+	accounts   map[string]*accountRecord
+	systemKeys map[string]*systemKey
 }
 
 func newScopeState() scopeState {
-	return scopeState{accounts: map[string]*accountRecord{}}
+	return scopeState{accounts: map[string]*accountRecord{}, systemKeys: map[string]*systemKey{}}
 }
 
 func (s *scopeState) reset() {
 	s.accounts = map[string]*accountRecord{}
+	s.systemKeys = map[string]*systemKey{}
 }
 
 // errProviderShape rejects an incomplete provider construction.

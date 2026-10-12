@@ -23,6 +23,11 @@ const (
 	MethodObjectsList         = "storage.objects.list"
 	MethodObjectsGet          = "storage.objects.get"
 	MethodObjectsDelete       = "storage.objects.delete"
+	MethodObjectsRewrite      = "storage.objects.rewrite"
+	// MethodXMLGet and MethodXMLPut are the XML API object methods; they
+	// authorize as objects.get and objects.insert.
+	MethodXMLGet = "storage.xml.objects.get"
+	MethodXMLPut = "storage.xml.objects.put"
 )
 
 // Permission names used by the UBLA baseline plans.
@@ -45,6 +50,19 @@ const (
 	objectExistsCondition = "object_exists"
 	kindBucket            = "bucket"
 	altMedia              = "media"
+	uploadResumable       = "resumable"
+	keyBucket             = "bucket"
+	keyGeneration         = "generation"
+	keyCacheControl       = "cacheControl"
+	keyDisposition        = "contentDisposition"
+	keyContentType        = "contentType"
+	keyLanguage           = "contentLanguage"
+	queryAlt              = "alt"
+	queryUploadType       = "uploadType"
+	valueFalse            = "false"
+	headerContentType     = "Content-Type"
+	headerPayloadHash     = "x-goog-content-sha256"
+	paramSignature        = "X-Goog-Signature"
 	storageClassStandard  = "STANDARD"
 	// keyName is the name key shared by query options, upload metadata, and
 	// bucket/folder documents.

@@ -71,6 +71,6 @@ Go, Java, and Node SDKs are not verified.
 ## Limits
 
 - Metadata ID tokens return 501.
-- No service-account keys, impersonation or signing APIs, or JWT/SAML federation validation.
+- Service-account keys and `signBlob` sign ([service accounts](serviceaccounts.md)) but mint no tokens. No impersonation, `signJwt`, or JWT/SAML federation validation.
 - One metadata listener per core; account binding is not network isolation.
 - [Pub/Sub push](pubsub.md) mints locally signed ID tokens internally. Their public certificates are at `/_local/identity/certs`; there is no public ID-token endpoint.

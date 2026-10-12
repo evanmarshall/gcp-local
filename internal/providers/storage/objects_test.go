@@ -56,8 +56,14 @@ func TestMultipartUploadsAndMetadataLimits(t *testing.T) {
 	if created["name"] != "doc.txt" {
 		t.Fatalf("multipart create = %v", created)
 	}
-	if _, found := created["mediaLink"]; found {
-		t.Fatal("backend links leaked to the caller")
+	// Links name the emulator's public origin, never the backend's.
+	generation, _ := created["generation"].(string)
+	if created["mediaLink"] != "http://example.com/download/storage/v1/b/mp-bucket/o/doc.txt?alt=media&generation="+generation ||
+		created["selfLink"] != "http://example.com/storage/v1/b/mp-bucket/o/doc.txt" {
+		t.Fatalf("object links = %v, %v", created["mediaLink"], created["selfLink"])
+	}
+	if f.request(admin, "GET", "/download/storage/v1/b/mp-bucket/o/doc.txt?alt=media&generation="+generation, nil, 200).Body.String() != "multipart media" {
+		t.Fatal("mediaLink did not download the object")
 	}
 	if f.request(admin, "GET", "/storage/v1/b/mp-bucket/o/doc.txt?alt=media", nil, 200).Body.String() != "multipart media" {
 		t.Fatal("multipart media did not round-trip")
@@ -70,8 +76,8 @@ func TestMultipartUploadsAndMetadataLimits(t *testing.T) {
 		body                    []byte
 		want                    int
 	}{
-		{"unsupported metadata", upload, multipartType, multipartBody(`{"name":"a","acl":[]}`, "x"), 501},
-		{"storage class", upload, multipartType, multipartBody(`{"name":"a","storageClass":"COLDLINE"}`, "x"), 501},
+		{"unsupported metadata", upload, multipartType, multipartBody(`{"name":"a","acl":[]}`, "x"), 400},
+		{"storage class", upload, multipartType, multipartBody(`{"name":"a","storageClass":"COLDLINE"}`, "x"), 400},
 		{"bucket mismatch", upload, multipartType, multipartBody(`{"name":"a","bucket":"other"}`, "x"), 400},
 		{"names disagree", upload + "&name=b", multipartType, multipartBody(`{"name":"a"}`, "x"), 400},
 		{"name type", upload, multipartType, multipartBody(`{"name":1}`, "x"), 400},
@@ -87,7 +93,7 @@ func TestMultipartUploadsAndMetadataLimits(t *testing.T) {
 	for _, test := range tests {
 		f.rawRequest("POST", test.path, test.contentType, nil, test.body, test.want)
 	}
-	f.rawRequest("POST", "/upload/storage/v1/b/mp-bucket/o?uploadType=media&name=enc", "text/plain", map[string]string{"X-Goog-Encryption-Key": "k"}, []byte("x"), 501)
+	f.rawRequest("POST", "/upload/storage/v1/b/mp-bucket/o?uploadType=media&name=enc", "text/plain", map[string]string{"X-Goog-Encryption-Key": "k"}, []byte("x"), 400)
 	listed := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/mp-bucket/o", nil, 200).Body.Bytes())
 	if items, _ := listed["items"].([]any); len(items) != 2 {
 		t.Fatalf("rejected uploads reached the backend: %v", listed)

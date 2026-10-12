@@ -2,7 +2,6 @@ package iam
 
 import (
 	"cmp"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -34,6 +33,8 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.setIam(request, target)
 	case methodKeysList, methodKeysGet, methodKeysCreate, methodKeysDelete:
 		return p.executeKey(call.Method, request, scope)
+	case methodSignBlob:
+		return p.signBlob(request, scope)
 	default:
 		return p.accountsDelete(request, scope)
 	}
@@ -202,6 +203,9 @@ func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scop
 	var indexErr error
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		delete(s.accounts, account)
+		email := accountEmail(scope.Project, account)
+		delete(s.systemKeys, email)
+		p.engine.ForgetSigningKeys(email, "")
 		indexErr = p.index.Remove(serviceName, scope, accountResource(scope.Project, accountEmail(scope.Project, account)))
 		return nil
 	})
@@ -211,7 +215,7 @@ func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scop
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
-// keysList returns the account's synthesized keys.
+// keysList returns the account's user-managed keys.
 func (p *Provider) keysList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
@@ -224,26 +228,37 @@ func (p *Provider) keysList(request *gateway.RESTRequest, scope state.Scope) (*g
 	return &gateway.RESTResponse{JSON: map[string]any{"keys": items}}, nil
 }
 
-// keysCreate synthesizes one key record for the account.
+// keysCreate generates one user-managed RSA key, publishes its public half for
+// signature verification, and returns the private key file once.
 func (p *Provider) keysCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
 		return nil, provider.NotFound(kindAccount, request.Path["serviceAccount"])
 	}
-	buffer := make([]byte, 24)
-	if _, err := rand.Read(buffer); err != nil {
-		return nil, status.Errorf(codes.Internal, "generate the key id: %v", err)
+	id, err := newKeyID()
+	if err != nil {
+		return nil, err
+	}
+	private, err := newRSAKey()
+	if err != nil {
+		return nil, err
+	}
+	document, err := keyFile(record, id, private, request.Host)
+	if err != nil {
+		return nil, err
 	}
 	key := &keyRecord{
-		ID:        "projects/" + record.Project + "/serviceAccounts/" + record.ID + "/keys/" + base64.RawURLEncoding.EncodeToString(buffer[:12]),
+		ID:        "projects/" + record.Project + "/serviceAccounts/" + record.ID + "/keys/" + id,
 		CreatedAt: p.clock(),
 	}
 	_ = p.scopes.With(scope, func(_ *scopeState) error {
 		record.Keys[key.ID] = key
+		p.engine.PublishSigningKey(serviceName, scope, accountEmail(record.Project, record.ID), key.ID, &private.PublicKey)
 		return nil
 	})
 	response := keyWire(record, key)
-	response["privateKeyData"] = base64.StdEncoding.EncodeToString(buffer)
+	response["privateKeyType"] = "TYPE_GOOGLE_CREDENTIALS_FILE"
+	response["privateKeyData"] = base64.StdEncoding.EncodeToString(document)
 	return &gateway.RESTResponse{JSON: response}, nil
 }
 
@@ -258,7 +273,7 @@ func keyWire(_ *accountRecord, key *keyRecord) map[string]any {
 	}
 }
 
-// keysGet returns one synthesized key.
+// keysGet returns one user-managed key.
 func (p *Provider) keysGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
@@ -272,7 +287,7 @@ func (p *Provider) keysGet(request *gateway.RESTRequest, scope state.Scope) (*ga
 	return &gateway.RESTResponse{JSON: keyWire(record, key)}, nil
 }
 
-// keysDelete removes one synthesized key.
+// keysDelete removes one user-managed key; signatures made with it stop verifying.
 func (p *Provider) keysDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	record := p.accountLocked(scope, request.Path["serviceAccount"])
 	if record == nil {
@@ -284,6 +299,7 @@ func (p *Provider) keysDelete(request *gateway.RESTRequest, scope state.Scope) (
 	}
 	_ = p.scopes.With(scope, func(_ *scopeState) error {
 		delete(record.Keys, keyID)
+		p.engine.ForgetSigningKeys(accountEmail(record.Project, record.ID), keyID)
 		return nil
 	})
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil

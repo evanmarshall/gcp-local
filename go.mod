@@ -12,6 +12,7 @@ require (
 	cloud.google.com/go/longrunning v1.2.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/spanner v1.95.1
+	cloud.google.com/go/storage v1.65.0
 	github.com/fsouza/fake-gcs-server v1.56.1
 	github.com/google/cel-go v0.26.1
 	google.golang.org/api v0.293.0
@@ -29,7 +30,6 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/monitoring v1.29.0 // indirect
-	cloud.google.com/go/storage v1.65.0 // indirect
 	github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.34.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.57.0 // indirect

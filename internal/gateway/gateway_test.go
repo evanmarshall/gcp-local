@@ -140,7 +140,7 @@ func TestRESTValidationBeforeDispatchAndExplicitGaps(t *testing.T) {
 		code       int
 	}{
 		{"/storage/v1/b?project=synthetic-project", `{"name":"bucket"}`, nil, 201},
-		{bucketCollectionPath, `{`, nil, 400}, {bucketCollectionPath, `[]`, nil, 400}, {bucketCollectionPath, `null`, nil, 400},
+		{bucketCollectionPath, `{`, nil, 400}, {bucketCollectionPath, `[]`, nil, 400}, {bucketCollectionPath, `"text"`, nil, 400},
 		{"/storage/v1/b?invalid=%zz", `{}`, nil, 400},
 		{bucketCollectionPath, `{}`, http.Header{authorizationHeader: {"Bearer one", "Bearer two"}}, 401},
 		{bucketCollectionPath, `{}`, http.Header{authorizationHeader: {"Basic one"}}, 401},
@@ -168,9 +168,11 @@ func TestRESTEmptyBodyIsTheEmptyMessage(t *testing.T) {
 	})
 	server := httptest.NewServer(New(r, nil))
 	defer server.Close()
-	code, body, _ := request(t, server.Client(), "POST", server.URL+bucketCollectionPath+"?project=synthetic-project", "", nil)
-	if code != 200 {
-		t.Fatalf("empty body: %d %v", code, body)
+	for _, payload := range []string{"", "null", " null\n"} {
+		code, body, _ := request(t, server.Client(), "POST", server.URL+bucketCollectionPath+"?project=synthetic-project", payload, nil)
+		if code != 200 {
+			t.Fatalf("body %q: %d %v", payload, code, body)
+		}
 	}
 }
 func TestDefaultIdentityNeverAuthenticatesPresentedToken(t *testing.T) {

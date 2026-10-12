@@ -105,6 +105,13 @@ func main() {
 			Scope:  state.Scope{Project: "gcp-local-test", Location: state.Global},
 		}))
 	}
+	// The resumable and signed URL scenario signs as the allowed identity with
+	// signBlob, which needs Token Creator on the account itself, as in GCP.
+	allowed := "allowed@gcp-local-test.iam.gserviceaccount.com"
+	_, err = engine.SetPolicy(iam.AccountResource("gcp-local-test", allowed), iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/iam.serviceAccountTokenCreator", Members: []string{"serviceAccount:" + allowed}},
+	}})
+	must(err)
 	resolver := func(ctx context.Context, token string) (gateway.Principal, error) {
 		for _, actor := range []string{"fixture", "allowed", "denied", "peer"} {
 			if token == "gcp-local-test:"+actor {

@@ -23,7 +23,7 @@ Skills live in `.agents/skills/`.
 
 ## Rules
 
-- **Authorize before side effects.** Authenticate and authorize before any mutation or backend call. An unsupported authorization decision fails closed; it never becomes an allow. Workers act as their service agent, never as an implicit administrator.
+- **Authorize before side effects.** Authenticate and authorize before any mutation or backend call. An unsupported authorization decision fails closed; it never becomes an allow. Unsupported calls return `UNIMPLEMENTED`, except Storage gaps, which return 400 because the Go client retries 5xx without limit ([Storage](docs/storage.md#gaps)). Workers act as their service agent, never as an implicit administrator.
 - **Use the IAM engine** ([IAM](docs/iam.md)). Resolve every required state feature, keep baseline checks, and complete `Authorize` before mutation.
 - **Use scoped state** ([state and backends](docs/state-and-backends.md)). Mutate inside `Manager.Use` after authorization. Publish index changes after backend success. Clear state only after backend reset succeeds. Never let state leak across projects or locations.
 - **Generated contracts are outputs.** Fix wrong output in `tools/genapi` or its inputs, never by hand ([api/README.md](api/README.md)). `sh scripts/go.sh run ./tools/genapi -check` must pass.

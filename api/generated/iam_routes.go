@@ -15,4 +15,5 @@ var IAMRoutes = []Route{
 	{"iam.serviceAccountKeys.get", "GET", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys/{keyId}", false, false},
 	{"iam.serviceAccountKeys.get", "GET", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys/{keyId}", false, false},
 	{"iam.serviceAccountKeys.delete", "DELETE", "/v1/projects/{project}/serviceAccounts/{serviceAccount}/keys/{keyId}", false, false},
+	{"iamcredentials.projects.serviceAccounts.signBlob", "POST", "/v1/projects/{project}/serviceAccounts/{serviceAccount}:signBlob", true, false},
 }

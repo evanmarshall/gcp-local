@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"maps"
@@ -21,6 +22,10 @@ type RESTRequest struct {
 	Headers http.Header
 	JSON    json.RawMessage
 	Media   io.Reader
+	// Verb, Host, and RawPath are the request line as received. Storage needs
+	// them to continue resumable sessions and to verify V4 signatures, which
+	// sign the method, the Host header, and the escaped path.
+	Verb, Host, RawPath string
 }
 type RESTResponse struct {
 	Status  int
@@ -33,6 +38,9 @@ type compiledRoute struct {
 	expression *regexp.Regexp
 	names      []string
 	multi      []bool // a {name=**} variable spans one or more segments
+	// whole marks a {name=***} variable: the rest of the path, unescaped as
+	// one value, so an escaped slash belongs to it (a Storage object name).
+	whole []bool
 }
 type Gateway struct {
 	Registry *Registry
@@ -110,7 +118,9 @@ func contracts() []generated.Route {
 		left, right := strings.Contains(routes[i].Path, ":"), strings.Contains(routes[j].Path, ":")
 		return left && !right
 	})
-	return routes
+	// The XML API's /{bucket}/{object} shape matches almost any path, so it
+	// is tried only after every service route.
+	return append(routes, generated.StorageXMLRoutes...)
 }
 
 // variables is the REST path template variable shape.
@@ -124,14 +134,16 @@ func compileRoute(contract generated.Route) compiledRoute {
 	last := 0
 	for _, bounds := range variables.FindAllStringSubmatchIndex(contract.Path, -1) {
 		pattern.WriteString(regexp.QuoteMeta(contract.Path[last:bounds[0]]))
-		name, multi := strings.CutSuffix(contract.Path[bounds[2]:bounds[3]], "=**")
-		if multi {
+		name, whole := strings.CutSuffix(contract.Path[bounds[2]:bounds[3]], "=***")
+		name, multi := strings.CutSuffix(name, "=**")
+		if multi || whole {
 			pattern.WriteString("([^/]+(?:/[^/]+)*)")
 		} else {
 			pattern.WriteString("([^/]+)")
 		}
 		compiled.names = append(compiled.names, name)
 		compiled.multi = append(compiled.multi, multi)
+		compiled.whole = append(compiled.whole, whole)
 		last = bounds[1]
 	}
 	pattern.WriteString(regexp.QuoteMeta(contract.Path[last:]))
@@ -159,10 +171,11 @@ func (g *Gateway) restRequest(r *http.Request, route *compiledRoute) (*RESTReque
 	if err != nil {
 		return nil, Call{}, status.Error(codes.InvalidArgument, "Malformed query string")
 	}
-	request := &RESTRequest{Path: map[string]string{}, Query: query, Headers: r.Header.Clone()}
+	request := &RESTRequest{Path: map[string]string{}, Query: query, Headers: r.Header.Clone(),
+		Verb: r.Method, Host: r.Host, RawPath: r.URL.EscapedPath()}
 	request.Headers.Del("Authorization")
 	for index, name := range route.names {
-		value, err := pathVariable(matches[index+1], route.multi[index])
+		value, err := pathVariable(matches[index+1], route.multi[index] && !route.whole[index])
 		if err != nil {
 			return nil, Call{}, err
 		}
@@ -222,9 +235,11 @@ func restBody(r *http.Request, route *compiledRoute, request *RESTRequest) error
 	if len(body) > maxJSON {
 		return status.Error(codes.ResourceExhausted, "JSON request exceeds two MiB")
 	}
-	if len(body) == 0 {
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || string(trimmed) == "null" {
 		// Google's front end reads an absent body as the empty request
-		// message; clients send none for methods like getIamPolicy.
+		// message; clients send none for methods like getIamPolicy. The
+		// generated Go API clients send a JSON null for a nil request object
+		// (objects.rewrite without metadata), which it reads the same way.
 		body = []byte("{}")
 	}
 	var object map[string]json.RawMessage

@@ -152,16 +152,21 @@ func assertResetClearsOnlyProjectA(t *testing.T, f *fixture, upload string) {
 func TestProviderFailsClosedForUnsupportedFeatures(t *testing.T) {
 	f := setup(t)
 	f.bucket(testProject, "owned-bucket", 200)
-	for _, path := range []string{"/_internal/healthcheck", "/storage/v1/b/owned-bucket/notificationConfigs", "/storage/v1/b/owned-bucket/acl"} {
-		f.request("admin@project-a.test", "GET", path, nil, 501)
+	// A path no route claims stays UNIMPLEMENTED; a Storage route this
+	// provider does not serve is a 400 gap, which clients do not retry.
+	f.request("admin@project-a.test", "GET", "/_internal/healthcheck", nil, 501)
+	for _, path := range []string{"/storage/v1/b/owned-bucket/notificationConfigs", "/storage/v1/b/owned-bucket/acl"} {
+		if body := f.request("admin@project-a.test", "GET", path, nil, 400).Body.String(); !strings.Contains(body, "Storage coverage gap") {
+			t.Fatalf("%s: %s", path, body)
+		}
 	}
-	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=resumable&name=a", []byte(`{}`), 501)
-	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=a&predefinedAcl=publicRead", []byte("x"), 501)
+	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=chunked&name=a", []byte(`{}`), 400)
+	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=a&predefinedAcl=publicRead", []byte("x"), 400)
 	f.request("admin@project-a.test", "PUT", "/storage/v1/b/owned-bucket/iam", []byte(`{"bindings":[{"role":"roles/storage.objectViewer","members":["allUsers"]}]}`), 412)
 	if err := f.p.iam.MarkUnsupported(provider.ProjectResource(testProject), []string{"deny"}); err != nil {
 		t.Fatal(err)
 	}
-	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=a", []byte("x"), 501)
+	f.request("admin@project-a.test", "POST", "/upload/storage/v1/b/owned-bucket/o?uploadType=media&name=a", []byte("x"), 400)
 	if err := f.p.iam.MarkUnsupported(provider.ProjectResource(testProject), nil); err != nil {
 		t.Fatal(err)
 	}

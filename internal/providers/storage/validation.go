@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,13 +22,22 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const maxObjectSize = 8 << 20
+// maxObjectSize bounds one object. State is in memory, and each upload is
+// buffered whole before it reaches the backend, so the limit is a memory bound
+// rather than a GCP one (GCP allows 5 TiB). It is above the Python client's
+// 100 MiB default resumable chunk.
+const maxObjectSize = 128 << 20
 
 type uploadRequest struct {
 	name    string
 	query   url.Values
 	headers http.Header
 	body    []byte
+	// resumable marks an initiation, whose media arrives in later requests;
+	// metadata is its object metadata and total is -1 until declared.
+	resumable bool
+	metadata  map[string]json.RawMessage
+	total     int64
 }
 
 // Query parameter names that appear in more than one option list.
@@ -45,29 +55,31 @@ var queryOptions = map[string][]string{
 	MethodBucketsList:         {queryProject, "prefix", "maxResults", "pageToken"},
 	MethodBucketsGetIamPolicy: {"optionsRequestedPolicyVersion"},
 	MethodBucketsPatch:        {queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsInsert:       {"uploadType", keyName, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsGet:          {"generation", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsDelete:       {"generation", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsList:         {"prefix", "delimiter", "maxResults", "pageToken", "startOffset", "endOffset", "versions"},
+	MethodObjectsInsert:       {queryUploadType, keyName, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsGet:          {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsDelete:       {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	// Rewrite preconditions apply to the destination. maxBytesRewrittenPerCall
+	// is accepted and not enforced: every rewrite here finishes in one call.
+	MethodObjectsRewrite: {"sourceGeneration", "maxBytesRewrittenPerCall", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsList:    {"prefix", "delimiter", "maxResults", "pageToken", "startOffset", "endOffset", "versions"},
+}
+
+// defaultOnlyOptions are options accepted only at their documented default,
+// which is the behavior served; any other value is a gap. The Go client sends
+// them on every call (storage/docs/json_api/v1/objects/list, buckets/list).
+var defaultOnlyOptions = map[string]map[string]string{
+	MethodBucketsList: {"returnPartialSuccess": valueFalse},
+	MethodObjectsList: {"matchGlob": "", "includeTrailingDelimiter": valueFalse, "includeFoldersAsPrefixes": valueFalse, "softDeleted": valueFalse},
+	MethodObjectsGet:  {"softDeleted": valueFalse},
 }
 
 // universalQueryOptions apply to every method.
-var universalQueryOptions = []string{"prettyPrint", "fields", "alt", "projection"}
+var universalQueryOptions = []string{"prettyPrint", "fields", queryAlt, "projection"}
 
 func validateQuery(method string, r *gateway.RESTRequest) error {
-	allowed := map[string]bool{}
-	for _, name := range universalQueryOptions {
-		allowed[name] = true
-	}
-	for _, name := range queryOptions[method] {
-		allowed[name] = true
-	}
 	for key, values := range r.Query {
-		if !allowed[key] {
-			return gap("unsupported query option " + key)
-		}
-		if len(values) != 1 {
-			return status.Error(codes.InvalidArgument, "Query options must not repeat")
+		if err := validateOption(method, key, values); err != nil {
+			return err
 		}
 	}
 	if err := validateQueryValues(method, r.Query); err != nil {
@@ -82,9 +94,27 @@ func validateQuery(method string, r *gateway.RESTRequest) error {
 	return nil
 }
 
+// validateOption accepts one query option the method documents, or a
+// default-only option at its default.
+func validateOption(method, key string, values []string) error {
+	if len(values) != 1 {
+		return status.Error(codes.InvalidArgument, "Query options must not repeat")
+	}
+	if fallback, ok := defaultOnlyOptions[method][key]; ok {
+		if value := values[0]; value != fallback && (fallback != valueFalse || value != "") {
+			return gap(key + "=" + value)
+		}
+		return nil
+	}
+	if !slices.Contains(universalQueryOptions, key) && !slices.Contains(queryOptions[method], key) {
+		return gap("unsupported query option " + key)
+	}
+	return nil
+}
+
 // validateQueryValues rejects option values this emulator does not implement.
 func validateQueryValues(method string, query url.Values) error {
-	if alt := query.Get("alt"); alt != "" && alt != "json" && (alt != altMedia || method != MethodObjectsGet) {
+	if alt := query.Get(queryAlt); alt != "" && alt != "json" && (alt != altMedia || method != MethodObjectsGet) {
 		return gap("unsupported response representation")
 	}
 	return validateOptionValues(query)
@@ -95,10 +125,14 @@ func validateOptionValues(query url.Values) error {
 	if v := query.Get("optionsRequestedPolicyVersion"); v != "" && v != "1" && v != "3" {
 		return gap("requested IAM policy version")
 	}
-	if projection := query.Get("projection"); projection != "" && projection != "noAcl" {
-		return gap("only the noAcl projection is supported")
+	// The Go client sends projection=full on bucket and object reads, lists,
+	// patches, and inserts. Every bucket here uses uniform bucket-level
+	// access, which has no ACLs to add, so full returns the noAcl shape
+	// (storage/docs/json_api/v1/buckets/get, "projection").
+	if projection := query.Get("projection"); projection != "" && projection != "noAcl" && projection != "full" {
+		return gap("projection " + projection)
 	}
-	if versions := query.Get("versions"); versions != "" && versions != "true" && versions != "false" {
+	if versions := query.Get("versions"); versions != "" && versions != "true" && versions != valueFalse {
 		return provider.Invalid("versions must be a boolean")
 	}
 	return nil
@@ -107,7 +141,7 @@ func validateOptionValues(query url.Values) error {
 // maxUploadMetadata bounds the multipart metadata part that accompanies an object.
 const maxUploadMetadata = 64 << 10
 
-var errUploadTooLarge = status.Error(codes.ResourceExhausted, "Uploads are limited to eight MiB")
+var errUploadTooLarge = status.Error(codes.ResourceExhausted, "Objects are limited to 128 MiB")
 
 func parseUpload(r *gateway.RESTRequest) (*uploadRequest, error) {
 	if r.Media == nil {
@@ -118,22 +152,65 @@ func parseUpload(r *gateway.RESTRequest) (*uploadRequest, error) {
 		return nil, err
 	}
 	u := &uploadRequest{name: r.Query.Get(keyName), query: r.Query, headers: r.Headers, body: payload}
-	switch r.Query.Get("uploadType") {
-	case altMedia:
-		if len(payload) > maxObjectSize {
-			return nil, errUploadTooLarge
-		}
-	case "multipart":
-		if err := parseMultipart(r, payload, u); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, gap("resumable and other upload protocols")
+	if err := parseUploadBody(r, payload, u); err != nil {
+		return nil, err
 	}
 	if !validObjectName(u.name) {
 		return nil, status.Error(codes.InvalidArgument, "Invalid object name")
 	}
 	return u, nil
+}
+
+// parseUploadBody reads the body of one upload protocol.
+func parseUploadBody(r *gateway.RESTRequest, payload []byte, u *uploadRequest) error {
+	switch r.Query.Get(queryUploadType) {
+	case altMedia:
+		if len(payload) > maxObjectSize {
+			return errUploadTooLarge
+		}
+		return nil
+	case "multipart":
+		return parseMultipart(r, payload, u)
+	case uploadResumable:
+		return parseResumable(r, payload, u)
+	}
+	return gap("upload protocol " + r.Query.Get(queryUploadType))
+}
+
+// parseResumable reads a resumable initiation: optional JSON object metadata
+// plus the declared media type and size. The media arrives in later requests.
+func parseResumable(r *gateway.RESTRequest, payload []byte, u *uploadRequest) error {
+	if len(payload) > maxUploadMetadata {
+		return status.Error(codes.InvalidArgument, "Object metadata exceeds supported size")
+	}
+	value := map[string]json.RawMessage{}
+	if len(bytes.TrimSpace(payload)) > 0 && (json.Unmarshal(payload, &value) != nil || value == nil) {
+		return status.Error(codes.InvalidArgument, "Invalid object metadata")
+	}
+	if err := applyUploadMetadata(r, value, u); err != nil {
+		return err
+	}
+	if kind := r.Headers.Get("X-Upload-Content-Type"); kind != "" && value[keyContentType] == nil {
+		value[keyContentType] = rawString(kind)
+	}
+	total, err := declaredLength(r.Headers.Get("X-Upload-Content-Length"))
+	u.resumable, u.metadata, u.body, u.total = true, value, nil, total
+	return err
+}
+
+// declaredLength parses X-Upload-Content-Length; absent is unknown (-1).
+func declaredLength(header string) (int64, error) {
+	if header == "" {
+		return -1, nil
+	}
+	size, err := strconv.ParseInt(header, 10, 64)
+	if err != nil || size < 0 {
+		return 0, status.Error(codes.InvalidArgument, "X-Upload-Content-Length must be a nonnegative integer")
+	}
+	if size > maxObjectSize {
+		return 0, errUploadTooLarge
+	}
+	return size, nil
 }
 
 // readUpload reads an upload body: at most one object plus its metadata part.
@@ -156,7 +233,7 @@ func validObjectName(name string) bool {
 // media part. Caller-supplied metadata is restricted to fields the provider
 // actually mirrors, and anything else is an explicit coverage gap.
 func parseMultipart(r *gateway.RESTRequest, payload []byte, u *uploadRequest) error {
-	boundary, err := multipartBoundary(r.Headers.Get("Content-Type"))
+	boundary, err := multipartBoundary(r.Headers.Get(headerContentType))
 	if err != nil {
 		return err
 	}
@@ -214,9 +291,9 @@ func readMediaPart(reader *multipart.Reader) error {
 
 // supportedUploadFields lists the metadata keys a multipart upload may carry.
 var supportedUploadFields = map[string]bool{
-	keyName: true, "bucket": true, "storageClass": true, "contentType": true,
-	"metadata": true, "md5Hash": true, "crc32c": true, "cacheControl": true,
-	"contentDisposition": true, "contentLanguage": true,
+	keyName: true, keyBucket: true, "storageClass": true, keyContentType: true,
+	"metadata": true, "md5Hash": true, "crc32c": true, keyCacheControl: true,
+	keyDisposition: true, keyLanguage: true,
 }
 
 // applyUploadMetadata validates a multipart metadata part and records the name.
@@ -250,12 +327,12 @@ func uploadClass(value map[string]json.RawMessage) error {
 
 // uploadBucket keeps caller-supplied bucket names consistent with the target.
 func uploadBucket(r *gateway.RESTRequest, value map[string]json.RawMessage) error {
-	raw, ok := value["bucket"]
+	raw, ok := value[keyBucket]
 	if !ok {
 		return nil
 	}
 	var bucket string
-	if json.Unmarshal(raw, &bucket) != nil || bucket != r.Path["bucket"] {
+	if json.Unmarshal(raw, &bucket) != nil || bucket != r.Path[keyBucket] {
 		return status.Error(codes.InvalidArgument, "Object bucket does not match the upload target")
 	}
 	return nil
@@ -380,7 +457,7 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Unable to encode the bucket request")
 	}
-	response, err := b.forward(ctx, "POST", "/storage/v1/b", r.Query, http.Header{"Content-Type": {"application/json"}}, payload)
+	response, err := b.forward(ctx, "POST", "/storage/v1/b", r.Query, http.Header{headerContentType: {"application/json"}}, payload)
 	if err != nil || response.Status != 200 {
 		return response, err
 	}

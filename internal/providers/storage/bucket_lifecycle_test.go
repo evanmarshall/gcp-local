@@ -56,7 +56,7 @@ func TestBucketLabelPatchAndPreconditions(t *testing.T) {
 	if labels, _ := got["labels"].(map[string]any); labels["team"] != "a" || got["metageneration"] != "3" {
 		t.Fatalf("patch did not persist: %v", got)
 	}
-	f.request(admin, "PATCH", "/storage/v1/b/meta-bucket", []byte(`{"versioning":{"enabled":true}}`), 501)
+	f.request(admin, "PATCH", "/storage/v1/b/meta-bucket", []byte(`{"versioning":{"enabled":true}}`), 400)
 	f.request(admin, "PATCH", "/storage/v1/b/meta-bucket", []byte(`[]`), 400)
 	f.request(admin, "PATCH", "/storage/v1/b/meta-bucket", []byte(`{"labels":{"a":1}}`), 400)
 	f.request("stranger@project-a.test", "PATCH", "/storage/v1/b/meta-bucket", []byte(`{"labels":{}}`), 403)
@@ -108,20 +108,20 @@ func TestBucketCreateRejectsUnsupportedConfiguration(t *testing.T) {
 		name, body string
 		want       int
 	}{
-		{"unknown field", `{"name":"b-unknown",` + base + `,"website":{}}`, 501},
+		{"unknown field", `{"name":"b-unknown",` + base + `,"website":{}}`, 400},
 		{"malformed", `{"name":`, 400},
-		{"no uniform access", `{"name":"b-acl","location":"US","softDeletePolicy":{"retentionDurationSeconds":"0"}}`, 501},
-		{"versioning", `{"name":"b-ver",` + base + `,"versioning":{"enabled":true}}`, 501},
-		{"default hold", `{"name":"b-hold",` + base + `,"defaultEventBasedHold":true}`, 501},
-		{"soft delete effective time", `{"name":"b-soft","location":"US","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0","effectiveTime":"2020-01-01T00:00:00Z"}}`, 501},
-		{"lifecycle rules", `{"name":"b-life",` + base + `,"lifecycle":{"rule":[{}]}}`, 501},
-		{"storage class", `{"name":"b-class",` + base + `,"storageClass":"NEARLINE"}`, 501},
+		{"no uniform access", `{"name":"b-acl","location":"US","softDeletePolicy":{"retentionDurationSeconds":"0"}}`, 400},
+		{"versioning", `{"name":"b-ver",` + base + `,"versioning":{"enabled":true}}`, 400},
+		{"default hold", `{"name":"b-hold",` + base + `,"defaultEventBasedHold":true}`, 400},
+		{"soft delete effective time", `{"name":"b-soft","location":"US","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0","effectiveTime":"2020-01-01T00:00:00Z"}}`, 400},
+		{"lifecycle rules", `{"name":"b-life",` + base + `,"lifecycle":{"rule":[{}]}}`, 400},
+		{"storage class", `{"name":"b-class",` + base + `,"storageClass":"NEARLINE"}`, 400},
 		{"missing location", `{"name":"b-loc","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0"}}`, 400},
 	}
 	for _, test := range tests {
 		f.request(admin, "POST", "/storage/v1/b?project=project-a", []byte(test.body), test.want)
 	}
-	f.request(admin, "POST", "/storage/v1/b?project=project-c", []byte(`{"name":"b-c",`+base+`}`), 501)
+	f.request(admin, "POST", "/storage/v1/b?project=project-c", []byte(`{"name":"b-c",`+base+`}`), 400)
 	f.request(admin, "GET", "/storage/v1/b?project=project-a&project=project-b", nil, 400)
 	scope := state.Scope{Project: testProject, Location: state.Global}
 	for _, name := range []string{"b-unknown", "b-acl", "b-ver", "b-hold", "b-soft", "b-life", "b-class", "b-loc"} {
@@ -140,10 +140,10 @@ func TestRequestOptionValidation(t *testing.T) {
 		path string
 		want int
 	}{
-		{"/storage/v1/b/opt-bucket?userProject=x", 501},
-		{"/storage/v1/b/opt-bucket?alt=media", 501},
-		{"/storage/v1/b/opt-bucket/iam?optionsRequestedPolicyVersion=2", 501},
-		{"/storage/v1/b/opt-bucket?projection=full", 501},
+		{"/storage/v1/b/opt-bucket?userProject=x", 400},
+		{"/storage/v1/b/opt-bucket?alt=media", 400},
+		{"/storage/v1/b/opt-bucket/iam?optionsRequestedPolicyVersion=2", 400},
+		{"/storage/v1/b/opt-bucket?projection=full", 200}, {"/storage/v1/b/opt-bucket?projection=custom", 400},
 		{"/storage/v1/b/opt-bucket/o?versions=maybe", 400},
 		{"/storage/v1/b/opt-bucket?prettyPrint=true&prettyPrint=false", 400},
 	}
