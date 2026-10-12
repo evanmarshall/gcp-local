@@ -40,13 +40,14 @@ gRPC `TestIamPermissions`, `RotateSecret`, `EnableManagedRotation`, and every re
 
 - `secretmanager.versions.access` on the secret reads payloads (`roles/secretmanager.secretAccessor`).
 - An accessor cannot read version metadata or add versions.
+- A caller without permission gets 403 whether or not the secret or version exists; only a permitted caller gets 404. A missing secret is checked on its project.
 - Pinned roles: `roles/secretmanager.admin`, `.secretAccessor`, `.viewer`.
 
 ## Verification
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `secretmanager-access-lifecycle` | 2026-10-12 | Create and addVersion fields, number-form names, denied then granted access, `latest`, 64 KiB limit, disabled and destroyed access, double destroy, delete then 404 |
+| `secretmanager-access-lifecycle` | 2026-10-12 | Create and addVersion fields, number-form names, denied then granted access, a denied caller's 403 on a missing version, `latest`, 64 KiB limit, disabled and destroyed access, double destroy, delete then 404, and a denied caller's 403 on the deleted secret and its `latest` access |
 
 ```sh
 sh scripts/check/recordings.sh

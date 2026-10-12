@@ -61,10 +61,11 @@ var permissions = map[string]string{
 
 // Provider owns the Secret Manager control plane and payload state.
 type Provider struct {
-	index  *state.Index
-	engine *iam.Engine
-	scopes *state.Store[scopeState]
-	clock  func() time.Time
+	index   *state.Index
+	engine  *iam.Engine
+	manager *backend.Manager
+	scopes  *state.Store[scopeState]
+	clock   func() time.Time
 }
 
 // errProviderShape rejects an incomplete provider construction.
@@ -79,7 +80,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 		return nil, fmt.Errorf("secretmanager permissions: %w", err)
 	}
 	p := &Provider{
-		index: index, engine: engine,
+		index: index, engine: engine, manager: manager,
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
@@ -184,28 +185,10 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	}
 }
 
-// withSecret runs use on one secret under the scope lock, or reports it
-// missing. use must not retain the record or anything it points to.
-func (p *Provider) withSecret(scope state.Scope, id string, use func(*scopeState, *secretRecord) error) error {
-	var opened bool
-	err := p.scopes.With(scope, func(s *scopeState) error {
-		opened = true
-		record := s.secrets[id]
-		if record == nil {
-			return provider.NotFound("secrets", id)
-		}
-		return use(s, record)
-	})
-	if err != nil && !opened {
-		return fmt.Errorf("open the secretmanager scope: %w", err)
-	}
-	return err //nolint:wrapcheck // the callback's own error
-}
-
-// handle is the gateway entry point for every Secret Manager method. An
-// addressed secret's existence check and authorization share one scope lock,
-// and delete removes the index entry under that lock, so a request racing a
-// delete sees NOT_FOUND rather than an unverified IAM target.
+// handle is the gateway entry point for every Secret Manager method. Each
+// request runs inside the manager session, which serializes it with a reset,
+// and authorizes, looks up, changes, and renders the secret under one scope
+// lock, so nothing changes between the check and the call.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
 	if !ok {
@@ -215,27 +198,45 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var decision iam.Decision
-	var authorizeErr error
-	authorize := func(*scopeState, *secretRecord) error {
-		decision, authorizeErr = p.engine.Authorize(call, target, nil)
-		return nil
+	var response *gateway.RESTResponse
+	err = p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(ctx context.Context, _ backend.Backend) error {
+		call.Context = ctx //nolint:fatcontext // one request-scoped handoff of the manager session
+		return p.scopes.With(scope, func(s *scopeState) error {
+			var serveErr error
+			response, serveErr = p.serve(call, request, scope, target, id, s)
+			return serveErr
+		})
+	})
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses pass through
 	}
-	if id == "" {
-		_ = authorize(nil, nil)
-	} else if err := p.withSecret(scope, id, authorize); err != nil {
-		return nil, err
+	return response, nil
+}
+
+// serve authorizes one request, then runs it. A secret that does not exist is
+// authorized on its project, so a caller without permission is denied whether
+// or not it exists and only a permitted caller learns it is missing
+// (recorded: secretmanager-access-lifecycle "absent-denied").
+func (p *Provider) serve(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target, id string, s *scopeState) (*gateway.RESTResponse, error) {
+	record := s.secrets[id]
+	missing := id != "" && record == nil
+	checked := target
+	if missing {
+		checked = iam.Target{Name: provider.ProjectResource(scope.Project)}
 	}
-	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
+	decision, err := p.engine.Authorize(call, checked, nil)
+	if err != nil {
+		if provider.Unverified(err) {
+			return nil, fmt.Errorf("authorize %s: %w", call.Method, err)
 		}
 		return p.denied(call, decision, target), nil
 	}
+	if missing {
+		return nil, provider.NotFound("secrets", id)
+	}
 	call.Resource = target.Name
 	call.Location = scope.Location
-	response, err := p.execute(call, request, scope)
+	response, err := p.execute(call, request, scope, s, record)
 	if err != nil {
 		return nil, err
 	}

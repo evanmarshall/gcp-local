@@ -322,6 +322,9 @@ def run_scenario(fixture, snapshot, created):
     snapshot.match('version-added', observe.select(added, ('name', 'state')))
     version = '/versions/1'
     snapshot.match('denied-access', observe.error(fixture.call('GET', version + ':access', actor='denied')))
+    # A caller without permission learns nothing about a version that doesn't exist.
+    snapshot.match('denied-missing-version',
+                   observe.error(fixture.call('GET', '/versions/99:access', actor='denied')))
     granted = fixture.grant_accessor()
     snapshot.match('accessor-granted', {'http_status': granted.status, 'bindings': [
         {'role': item['role'], 'members': [observe.text(member) for member in item['members']]}
@@ -355,6 +358,10 @@ def run_scenario(fixture, snapshot, created):
     deleted = fixture.call('DELETE')
     snapshot.match('deleted', {'http_status': deleted.status})
     snapshot.match('absent', observe.error(fixture.call('GET')))
+    # Nor about a secret that doesn't exist.
+    snapshot.match('absent-denied', observe.error(fixture.call('GET', actor='denied')))
+    snapshot.match('absent-denied-access',
+                   observe.error(fixture.call('GET', '/versions/latest:access', actor='denied')))
 
 
 def main(argv=None):

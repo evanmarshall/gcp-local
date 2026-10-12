@@ -8,7 +8,6 @@ import (
 	"hash/crc32"
 	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"time"
 
@@ -44,34 +43,26 @@ const (
 	stateDestroyed = "DESTROYED"
 )
 
-// execute dispatches one authorized method. Methods on one secret run with
-// the record under the scope lock, so they read, change, and render it there.
-func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+// execute dispatches one authorized method on the locked scope state; record
+// is the addressed secret, nil for project-level methods.
+func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, s *scopeState, record *secretRecord) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodSecretsCreate:
-		return p.create(request, scope)
+		return p.create(request, scope, s)
 	case methodSecretsList:
 		if request.Query.Get("filter") != "" {
 			return nil, gap("list filters are not implemented")
 		}
-		return p.list(scope)
+		return p.list(scope, s), nil
 	case methodLocationsList:
 		return &gateway.RESTResponse{JSON: map[string]any{"locations": []any{
 			map[string]any{"locationId": "us-central1"},
 		}}}, nil
+	case methodSecretsGet, methodSecretsUpdate, methodSecretsDelete, methodSecretsGetIam, methodSecretsSetIam:
+		return p.executeSecret(call, request, scope, s, record)
+	default:
+		return p.executeVersion(call, request, scope, record)
 	}
-	var response *gateway.RESTResponse
-	err := p.withSecret(scope, request.Path["secret"], func(s *scopeState, record *secretRecord) error {
-		var err error
-		switch call.Method {
-		case methodSecretsGet, methodSecretsUpdate, methodSecretsDelete, methodSecretsGetIam, methodSecretsSetIam:
-			response, err = p.executeSecret(call, request, scope, s, record)
-		default:
-			response, err = p.executeVersion(call, request, scope, record)
-		}
-		return err
-	})
-	return response, err
 }
 
 // executeSecret dispatches the secret-level methods on a locked record.
@@ -177,8 +168,8 @@ func versionNumber(id string) int {
 	return number
 }
 
-// create stores one secret.
-func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+// create stores one secret in the locked scope state.
+func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope, s *scopeState) (*gateway.RESTResponse, error) {
 	body, err := provider.DecodeObject(request.JSON)
 	if err != nil {
 		return nil, err
@@ -191,49 +182,31 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope) (*gat
 	if !ok || len(replication) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "A secret requires a replication policy")
 	}
-	now := p.clock()
-	var response *gateway.RESTResponse
-	err = p.scopes.With(scope, func(s *scopeState) error {
-		if s.secrets[id] != nil {
-			response = provider.WireError(409, "ALREADY_EXISTS", "secret "+id+" already exists")
-			return nil
-		}
-		if err := p.index.Put(serviceName, state.Resource{
-			Name: secretResource(scope.Project, id), Service: serviceName,
-			Kind: "secret", Parent: provider.ProjectResource(scope.Project), Scope: scope,
-		}); err != nil {
-			return fmt.Errorf("index the secret: %w", err)
-		}
-		record := &secretRecord{
-			Name: id, Replication: replication, Labels: labelsOf(body["labels"]),
-			Versions: map[string]*versionRecord{}, CreatedAt: now,
-		}
-		s.secrets[id] = record
-		response = &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("store the secret: %w", err)
+	if s.secrets[id] != nil {
+		return provider.WireError(409, "ALREADY_EXISTS", "secret "+id+" already exists"), nil
 	}
-	return response, nil
+	if err := p.index.Put(serviceName, state.Resource{
+		Name: secretResource(scope.Project, id), Service: serviceName,
+		Kind: "secret", Parent: provider.ProjectResource(scope.Project), Scope: scope,
+	}); err != nil {
+		return nil, fmt.Errorf("index the secret: %w", err)
+	}
+	record := &secretRecord{
+		Name: id, Replication: replication, Labels: labelsOf(body["labels"]),
+		Versions: map[string]*versionRecord{}, CreatedAt: p.clock(),
+	}
+	s.secrets[id] = record
+	return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}, nil
 }
 
-// list returns the project's secrets.
-func (p *Provider) list(scope state.Scope) (*gateway.RESTResponse, error) {
-	var items []any
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		names := make([]string, 0, len(s.secrets))
-		for name := range s.secrets {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		items = make([]any, 0, len(names))
-		for _, name := range names {
-			items = append(items, secretDocument(p.wireProject(scope.Project), s.secrets[name]))
-		}
-		return nil
-	})
-	return &gateway.RESTResponse{JSON: map[string]any{"secrets": items}}, nil
+// list returns the project's secrets from the locked scope state.
+func (p *Provider) list(scope state.Scope, s *scopeState) *gateway.RESTResponse {
+	names := slices.Sorted(maps.Keys(s.secrets))
+	items := make([]any, 0, len(names))
+	for _, name := range names {
+		items = append(items, secretDocument(p.wireProject(scope.Project), s.secrets[name]))
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{"secrets": items}}
 }
 
 // update replaces the labels of one locked secret.

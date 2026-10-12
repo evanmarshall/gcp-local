@@ -370,3 +370,29 @@ func decodeName(t *testing.T, recorder *httptest.ResponseRecorder) string {
 	}
 	return document.Name
 }
+
+// TestDeniedCallerLearnsNothing follows the secretmanager-access-lifecycle
+// recording: a caller without permission gets 403 whether or not the secret
+// or version exists, and only a permitted caller sees 404.
+func TestDeniedCallerLearnsNothing(t *testing.T) {
+	h := newHarness(t)
+	secret := "/v1/projects/" + testProject + "/secrets/" + testSecret
+	missing := "/v1/projects/" + testProject + "/secrets/absent"
+	for _, path := range []string{missing, missing + "/versions/latest:access", missing + ":getIamPolicy"} {
+		if code := h.invoke(http.MethodGet, path, nil, "outsider").Code; code != 403 {
+			t.Fatalf("outsider %s = %d, want 403", path, code)
+		}
+		if code := h.invoke(http.MethodGet, path, nil, "actor").Code; code != 404 {
+			t.Fatalf("actor %s = %d, want 404", path, code)
+		}
+	}
+	h.create(replicationAuto())
+	for _, path := range []string{secret, secret + "/versions/99:access"} {
+		if code := h.invoke(http.MethodGet, path, nil, "outsider").Code; code != 403 {
+			t.Fatalf("outsider %s = %d, want 403", path, code)
+		}
+	}
+	if code := h.invoke(http.MethodGet, secret+"/versions/99:access", nil, "actor").Code; code != 404 {
+		t.Fatalf("actor missing version = %d, want 404", code)
+	}
+}

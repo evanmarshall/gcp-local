@@ -1,6 +1,6 @@
 {
   "secretmanager-access-lifecycle": {
-    "recorded-date": "12-10-2026, 17:40:47",
+    "recorded-date": "12-10-2026, 22:37:38",
     "recorded-content": {
       "created": {
         "fields": [
@@ -33,6 +33,11 @@
         "state": "ENABLED"
       },
       "denied-access": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-missing-version": {
         "code": 403,
         "http_status": 403,
         "status": "PERMISSION_DENIED"
@@ -143,6 +148,16 @@
         "code": 404,
         "http_status": 404,
         "status": "NOT_FOUND"
+      },
+      "absent-denied": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "absent-denied-access": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
       },
       "cleanup": {
         "secret_absent": true
