@@ -10,7 +10,7 @@ This is a source-level comparison, not a runtime benchmark or a cloud conformanc
 - Local checkout: optional `../localstack`, a sibling of this repository.
 - Revision: `8b9a79f05846835cf4dff63ab7eefdde9df83783`, the archived `main` HEAD; commit dated March 23, 2026, titled “Update the project README (#13901)”.
 - Checkout type: shallow Git clone with the complete working tree at that revision. Source files are unmodified.
-- Compared design: [design.md](design.md), imported from the reviewed outline; the pre-review version is preserved in [gcp-local.before-localstack-review.md](gcp-local.before-localstack-review.md).
+- Compared design: [design.md](design.md), imported from the reviewed outline; the pre-review version is preserved in [the original design outline](decisions/0000-original-design.md).
 
 The comparison applies to this public source snapshot. References to Pro features or directories in its documentation do not establish that those implementations are present. Findings below use files that exist in the checkout.
 

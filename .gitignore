@@ -26,3 +26,6 @@ bin/
 .gcp-local/
 
 dist/
+
+# Built by `go build ./tools/genapi` at the repository root.
+/genapi
