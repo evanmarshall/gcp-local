@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -79,6 +80,22 @@ func requireAppPrincipal(t *testing.T, s *Service, token string) gateway.Princip
 		t.Fatalf("scopes: %v", p.Scopes)
 	}
 	return p
+}
+
+// Client libraries using default scopes omit scope; the token gets the
+// principal's configured scopes, as the metadata server does.
+func TestExchangeWithoutScopeUsesPrincipalScopes(t *testing.T) {
+	s, _ := service(t)
+	values := form()
+	values.Del("scope")
+	code, body := exchange(t, s, values)
+	if code != http.StatusOK {
+		t.Fatalf("scope-less exchange = %d %v", code, body)
+	}
+	p, err := s.Resolve(context.Background(), accessToken(t, body))
+	if err != nil || p.State != gateway.Authenticated || p.Subject != appSubject || !slices.Contains(p.Scopes, CloudPlatform) {
+		t.Fatalf("%+v %v", p, err)
+	}
 }
 
 func TestExchangeExpiryAndPrincipalStates(t *testing.T) {

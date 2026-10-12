@@ -167,7 +167,7 @@ func (r *Registry) Invoke(call Call, request any) (any, error) {
 	handler := r.unary[call.Method]
 	r.mu.RUnlock()
 	if handler == nil {
-		return nil, gap(call.Method)
+		return nil, r.missing(call.Method)
 	}
 	result, err := handler(call, request)
 	return result, normalizeError(err)
@@ -177,7 +177,7 @@ func (r *Registry) streamHandler(method string) (StreamHandler, error) {
 	handler := r.stream[method]
 	r.mu.RUnlock()
 	if handler == nil {
-		return nil, gap(method)
+		return nil, r.missing(method)
 	}
 	return handler, nil
 }
@@ -198,6 +198,39 @@ func (r *Registry) Providers() []string {
 	sort.Strings(names)
 	return names
 }
+
+// missing explains a method with no handler: a service this server was not
+// started with, or a method its provider does not implement.
+func (r *Registry) missing(method string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	service := r.contracts[method].service
+	if service != "" && !r.serves(service) {
+		flag := service
+		if service == "cloudkms" {
+			flag = "kms" // the -services spelling
+		}
+		return status.Errorf(codes.Unimplemented, "Service %s is not enabled on this server; add %s to -services", service, flag)
+	}
+	return gap(method)
+}
+
+// serves reports whether any handler of the service is registered. The
+// caller holds the lock.
+func (r *Registry) serves(service string) bool {
+	for method := range r.unary {
+		if r.contracts[method].service == service {
+			return true
+		}
+	}
+	for method := range r.stream {
+		if r.contracts[method].service == service {
+			return true
+		}
+	}
+	return false
+}
+
 func gap(method string) error {
 	return status.Error(codes.Unimplemented, "No provider implements "+method)
 }

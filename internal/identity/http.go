@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"mime"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -59,12 +61,33 @@ func (s *Service) exchange(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, 400, "invalid_grant", "Unknown local subject credential")
 		return
 	}
-	value, lifetime, err := s.mint(p, strings.Fields(r.PostForm.Get("scope")))
+	value, lifetime, err := s.mint(p, requestedScopes(r, p.scopes))
 	if err != nil {
 		oauthError(w, 400, "invalid_scope", err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"access_token": value, "issued_token_type": AccessTokenType, "token_type": "Bearer", "expires_in": lifetime})
+}
+
+// requestedScopes returns the exchange's scopes. Like the metadata server, an
+// exchange without one gets the principal's configured scopes; client
+// libraries that rely on default scopes omit it.
+func requestedScopes(r *http.Request, configured []string) []string {
+	if scopes := strings.Fields(r.PostForm.Get("scope")); len(scopes) > 0 {
+		return scopes
+	}
+	return configured
+}
+
+// unexpectedField reports a repeated field or one that is neither required nor
+// the optional scope.
+func unexpectedField(form url.Values, required []string) bool {
+	for field, values := range form {
+		if (field != "scope" && !slices.Contains(required, field)) || len(values) != 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // exchangeForm validates the token-exchange form and reports the OAuth error to
@@ -74,13 +97,11 @@ func exchangeForm(r *http.Request) (int, [2]string, bool) {
 	refuse := func(code int, code_ string, detail string) (int, [2]string, bool) {
 		return code, [2]string{code_, detail}, true
 	}
-	required := map[string]bool{"grant_type": true, "audience": true, "requested_token_type": true, "subject_token_type": true, "subject_token": true, "scope": true}
-	for field, values := range r.PostForm {
-		if !required[field] || len(values) != 1 {
-			return refuse(400, "invalid_request", "Unsupported or repeated exchange parameter")
-		}
+	required := []string{"grant_type", "audience", "requested_token_type", "subject_token_type", "subject_token"}
+	if unexpectedField(r.PostForm, required) {
+		return refuse(400, "invalid_request", "Unsupported or repeated exchange parameter")
 	}
-	for field := range required {
+	for _, field := range required {
 		if r.PostForm.Get(field) == "" {
 			return refuse(400, "invalid_request", "Missing exchange parameter")
 		}
