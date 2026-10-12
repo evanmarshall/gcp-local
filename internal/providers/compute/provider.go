@@ -113,6 +113,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	call.Location = scope.Location
 	response, err := p.execute(call, request, scope)
 	if err != nil {
+		if strings.HasPrefix(call.Method, "compute.") {
+			if refusal := computeResponse(err); refusal != nil {
+				return refusal, nil
+			}
+		}
 		return nil, err
 	}
 	if response.Headers == nil {

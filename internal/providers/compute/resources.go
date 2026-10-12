@@ -9,10 +9,7 @@ import (
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // execute dispatches one authorized method.
@@ -46,7 +43,7 @@ func (p *Provider) executeAnalysis(call gateway.Call, request *gateway.RESTReque
 	case methodRegionOperationsGet:
 		return p.operationGet(request, scope, "region")
 	case methodZoneOperationsGet:
-		return p.operationGet(request, scope, "zone")
+		return p.operationGet(request, scope, keyZone)
 	case methodOperationsList:
 		return p.operationsList(request, scope, "global")
 	default:
@@ -66,7 +63,7 @@ func networkDocument(project string, record *networkRecord, subnets []any, peeri
 		keyTimestamp:                            stamp(record.CreatedAt),
 		keyKind:                                 "compute#network",
 		keyAutoSubnets:                          record.AutoCreateSubnetworks,
-		"routingConfig":                         map[string]any{"routingMode": record.RoutingMode, "bgpBestPathSelectionMode": "LEGACY"},
+		keyRoutingConfig:                        map[string]any{"routingMode": record.RoutingMode, "bgpBestPathSelectionMode": "LEGACY"},
 		"networkFirewallPolicyEnforcementOrder": "AFTER_CLASSIC_FIREWALL",
 	}
 	setText(document, keyDescription, record.Description)
@@ -115,7 +112,7 @@ func subnetworkDocument(project string, record *subnetworkRecord) map[string]any
 		keyIPCIDR:                      record.IPCIDRRange,
 		"gatewayAddress":               record.Gateway,
 		"privateIpGoogleAccess":        record.PrivateAccess,
-		"privateIpv6GoogleAccess":      "DISABLE_GOOGLE_ACCESS",
+		keyPrivateIPv6:                 "DISABLE_GOOGLE_ACCESS",
 		"allowSubnetCidrRoutesOverlap": false,
 		keyFingerprint:                 fingerprint(record.Name, record.Generation),
 		"purpose":                      "PRIVATE",
@@ -143,7 +140,7 @@ func firewallDocument(project string, record *firewallRecord) map[string]any {
 		keyDirection:   record.Direction,
 		keyPriority:    record.Priority,
 		"disabled":     record.Disabled,
-		"logConfig":    map[string]any{"enable": false},
+		keyLogConfig:   map[string]any{"enable": false},
 		keyDescription: record.Description,
 	}
 	setList(document, "allowed", record.Allowed)
@@ -152,6 +149,8 @@ func firewallDocument(project string, record *firewallRecord) map[string]any {
 	setList(document, "destinationRanges", record.DestinationRanges)
 	setList(document, "targetTags", record.TargetTags)
 	setList(document, "sourceTags", record.SourceTags)
+	setList(document, "targetServiceAccounts", record.TargetServiceAccounts)
+	setList(document, "sourceServiceAccounts", record.SourceServiceAccounts)
 	return document
 }
 
@@ -174,7 +173,7 @@ func routeDocument(project string, record *routeRecord) map[string]any {
 		keyNetwork:     selfLink(project, "networks", record.Network),
 		keyDestRange:   record.DestRange,
 		keyPriority:    record.Priority,
-		keyDescription: "",
+		keyDescription: record.Description,
 	}
 	setText(document, "nextHopGateway", record.NextHopGateway)
 	setText(document, "nextHopIp", record.NextHopIP)
@@ -188,7 +187,7 @@ func operationDocument(project string, record *operationRecord) map[string]any {
 	entry := map[string]any{
 		"id":            record.ID,
 		keyName:         record.Name,
-		"status":        "RUNNING",
+		keyStatus:       "RUNNING",
 		"progress":      0,
 		"insertTime":    stamp(record.Created),
 		"operationType": record.Type,
@@ -200,87 +199,24 @@ func operationDocument(project string, record *operationRecord) map[string]any {
 	case "region":
 		entry[keySelfLink] = regionalSelfLink(project, record.Region, "operations", record.Name)
 		entry[keyRegion] = regionLink(project, record.Region)
-	case "zone":
+	case keyZone:
 		entry[keySelfLink] = zoneLink(project, record.Region) + "/operations/" + record.Name
-		entry["zone"] = zoneLink(project, record.Region)
+		entry[keyZone] = zoneLink(project, record.Region)
 	default:
 		entry[keySelfLink] = selfLink(project, "operations", record.Name)
 	}
 	if !record.Done {
 		return entry
 	}
-	entry["status"] = "DONE"
+	entry[keyStatus] = "DONE"
 	entry["progress"] = 100
 	entry["endTime"] = stamp(record.Created)
 	if record.Error != nil {
 		entry["httpErrorStatusCode"] = 400
 		entry["httpErrorMessage"] = "BAD REQUEST"
-		entry[keyError] = map[string]any{"errors": []any{map[string]any{keyCode: record.Error.Code, keyMessage: record.Error.Message}}}
+		entry[keyError] = map[string]any{keyErrors: []any{map[string]any{keyCode: record.Error.Code, keyMessage: record.Error.Message}}}
 	}
 	return entry
-}
-
-// parseInsert reads one insert body as a validated map.
-func parseInsert(request *gateway.RESTRequest) (map[string]any, error) {
-	body, err := provider.DecodeObject(request.JSON)
-	if err != nil {
-		return nil, err
-	}
-	name := provider.Text(body["name"])
-	if name == "" {
-		name = request.Path["network"]
-	}
-	if name == "" {
-		name = request.Path["subnetwork"]
-	}
-	if name == "" {
-		name = request.Path["firewall"]
-	}
-	if name == "" {
-		name = request.Path["route"]
-	}
-	if !uidPattern.MatchString(name) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid resource name %q", name)
-	}
-	body["name"] = name
-	return body, nil
-}
-
-// intOf reads a numeric field with a default.
-func intOf(value any, fallback int) int {
-	if number, ok := value.(float64); ok {
-		return int(number)
-	}
-	return fallback
-}
-
-// boolOf reads a boolean field with a default.
-func boolOf(value any, fallback bool) bool {
-	if value, ok := value.(bool); ok {
-		return value
-	}
-	return fallback
-}
-
-// stringListOf reads a JSON string array field.
-func stringListOf(value any) []string {
-	entries, _ := value.([]any)
-	result := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if text, ok := entry.(string); ok {
-			result = append(result, text)
-		}
-	}
-	return result
-}
-
-// parseCidr validates one CIDR range field and returns it.
-func parseCidr(body map[string]any, key string) (string, error) {
-	value := provider.Text(body[key])
-	if value == "" || !cidrPattern.MatchString(value) {
-		return "", status.Errorf(codes.InvalidArgument, "Invalid %s %q", key, value)
-	}
-	return value, nil
 }
 
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope, kind string) (*gateway.RESTResponse, error) {
@@ -292,9 +228,21 @@ func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope,
 	}
 	p.mu.RUnlock()
 	if document == nil {
-		return nil, provider.NotFound("operations", request.Path["operation"])
+		return nil, notFound(operationRef(scope.Project, kind, request.Path["region"], request.Path[keyZone], request.Path["operation"]))
 	}
 	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// operationRef names one operation in Compute's not-found message.
+func operationRef(project, kind, region, zone, name string) string {
+	switch kind {
+	case "region":
+		return regionalRef(project, region, "operations", name)
+	case keyZone:
+		return zonalRef(project, zone, "operations", name)
+	default:
+		return globalRef(project, "operations", name)
+	}
 }
 
 // operationsList returns the scope's operations collection.
@@ -371,7 +319,7 @@ func routerDocument(project string, record *routerRecord) map[string]any {
 		keyTimestamp:   stamp(record.CreatedAt),
 		keyKind:        "compute#router",
 		keyNetwork:     selfLink(project, "networks", record.Network),
-		"nats":         nats,
-		keyDescription: "",
+		keyNATs:        nats,
+		keyDescription: record.Description,
 	}
 }

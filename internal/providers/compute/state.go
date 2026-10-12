@@ -55,20 +55,24 @@ type firewallRecord struct {
 	Description       string
 	Network           string
 	Direction         string
-	Allowed           []map[string]any
-	Denied            []map[string]any
+	Allowed           []firewallTerm
+	Denied            []firewallTerm
 	SourceRanges      []string
 	DestinationRanges []string
 	TargetTags        []string
 	SourceTags        []string
-	Priority          int
-	Disabled          bool
-	Generation        int64
-	CreatedAt         time.Time
+	// The service-account scopes; a rule never mixes them with tags.
+	TargetServiceAccounts []string
+	SourceServiceAccounts []string
+	Priority              int
+	Disabled              bool
+	Generation            int64
+	CreatedAt             time.Time
 }
 
 type routeRecord struct {
 	Name           string
+	Description    string
 	Network        string
 	DestRange      string
 	NextHopGateway string
@@ -100,19 +104,20 @@ type instanceRecord struct {
 	Network     string
 	Subnetwork  string
 	IP          string
-	Labels      map[string]any
+	Labels      map[string]string
 	Generation  int64
 	CreatedAt   time.Time
 }
 
 // routerRecord is one stored Cloud Router with its NAT gateways.
 type routerRecord struct {
-	Name       string
-	Region     string
-	Network    string
-	NATs       []natRecord
-	Generation int64
-	CreatedAt  time.Time
+	Name        string
+	Description string
+	Region      string
+	Network     string
+	NATs        []natRecord
+	Generation  int64
+	CreatedAt   time.Time
 }
 
 // scopeState is one project/location slice of provider state.
@@ -158,7 +163,7 @@ func (s *scopeState) nextGeneration() int64 {
 type operationRecord struct {
 	ID      string
 	Name    string
-	Kind    string // "global", "region", or "zone"
+	Kind    string // "global", "region", or keyZone
 	Region  string // the region or zone of a regional or zonal operation
 	Type    string
 	Target  string

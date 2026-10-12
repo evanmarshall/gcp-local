@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -38,6 +40,8 @@ type harness struct {
 	t               *testing.T
 	gate            *gateway.Gateway
 	analyzerHandler http.Handler
+	index           *state.Index
+	engine          *iam.Engine
 }
 
 func newHarness(t *testing.T) *harness {
@@ -70,7 +74,7 @@ func newHarness(t *testing.T) *harness {
 	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@demo-net.iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, analyzerHandler: analyzer}
+	return &harness{t: t, gate: g, analyzerHandler: analyzer, index: index, engine: engine}
 }
 
 // invoke issues one REST request as the fixture principal.
@@ -706,7 +710,7 @@ func TestConcurrentTopologyRequests(t *testing.T) {
 			{Method: http.MethodPost, Path: regionPath + "/subnetworks", Body: map[string]any{keyName: hammerSub, keyNetwork: testNetwork, "ipCidrRange": testRangeA}, Want: created},
 			{Method: http.MethodGet, Path: regionPath + "/subnetworks/" + hammerSub, Want: gone},
 			{Method: http.MethodGet, Path: regionPath + "/subnetworks", Want: ok},
-			{Method: http.MethodPost, Path: zonePath + "/instances", Body: instanceBody(hammerVM, hammerSub), Want: []int{200, 400, 409}},
+			{Method: http.MethodPost, Path: zonePath + "/instances", Body: vmBody(hammerVM, hammerSub), Want: []int{200, 400, 409}},
 			{Method: http.MethodGet, Path: zonePath + "/instances/" + hammerVM, Want: gone},
 			{Method: http.MethodGet, Path: zonePath + "/instances", Want: ok},
 			{Method: http.MethodPost, Path: regionPath + "/routers", Body: map[string]any{
@@ -854,4 +858,146 @@ func TestSubnetworksAndRoutersAreRegional(t *testing.T) {
 	if body[keyIPCIDR] != "10.1.0.0/24" {
 		t.Fatalf("us-central1 subnetwork after the us-east1 delete = %v", body)
 	}
+}
+
+// mustJSON encodes one test value.
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("encode %v: %v", value, err)
+	}
+	return string(encoded)
+}
+
+// withFields returns a copy of body with fields set.
+func withFields(body, fields map[string]any) map[string]any {
+	copied := maps.Clone(body)
+	maps.Copy(copied, fields)
+	return copied
+}
+
+// expectBody issues one request and compares the whole JSON response body.
+func (h *harness) expectBody(verb, path string, body any, code int, want string) {
+	h.t.Helper()
+	recorder := h.expectCode(verb, path, body, code)
+	var got, expected any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+		h.t.Fatalf("decode %s: %v", recorder.Body.String(), err)
+	}
+	if err := json.Unmarshal([]byte(want), &expected); err != nil {
+		h.t.Fatalf("decode the expected body: %v", err)
+	}
+	gotText, wantText := mustJSON(h.t, got), mustJSON(h.t, expected)
+	if gotText != wantText {
+		h.t.Fatalf("%s %s body = %s, want %s", verb, path, gotText, wantText)
+	}
+}
+
+// Compute refuses contradictory firewall scopes and missing resources in its
+// native error body, and mistyped values in its request parser's body
+// (recorded: vm-firewall-service-accounts).
+func TestRefusalsUseComputeErrorBodies(t *testing.T) {
+	h := newHarness(t)
+	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
+	firewalls := "/compute/v1/projects/demo-net/global/firewalls"
+	rule := func(fields map[string]any) map[string]any {
+		return withFields(map[string]any{keyName: "probe", keyNetwork: testNetwork, "allowed": tcp("1111"), "sourceRanges": []any{testRangeA}}, fields)
+	}
+	native := func(reason, message string) string {
+		return mustJSON(t, map[string]any{keyError: map[string]any{
+			keyCode: 400, keyMessage: message, "errors": []any{map[string]any{"domain": "global", "reason": reason, keyMessage: message}},
+		}})
+	}
+	mixed := native("badRequest", "ServiceAccounts and Tags are mutually exclusive and can't be combined in the same firewall rule.")
+	for _, fields := range []map[string]any{
+		{"targetTags": []any{saTag}, "targetServiceAccounts": []any{saAccount}},
+		{"sourceTags": []any{saTag}, "sourceServiceAccounts": []any{saAccount}},
+		{"sourceServiceAccounts": []any{saAccount}, "targetTags": []any{saTag}},
+		{"sourceTags": []any{saTag}, "targetServiceAccounts": []any{saAccount}},
+	} {
+		h.expectBody(http.MethodPost, firewalls, rule(fields), 400, mixed)
+	}
+	h.expectBody(http.MethodPost, firewalls, rule(map[string]any{keyDirection: directionEgress, "sourceServiceAccounts": []any{saAccount}}), 400,
+		native("badRequest", "Should not specify source tag or service account for egress direction."))
+	parser := func(field, kind, raw string) string {
+		message := "Invalid value at '" + field + "' (" + kind + "), " + raw
+		return mustJSON(t, map[string]any{keyError: map[string]any{
+			keyCode: 400, keyMessage: message, "status": "INVALID_ARGUMENT",
+			"errors": []any{map[string]any{"reason": "invalid", keyMessage: message}},
+			"details": []any{map[string]any{
+				"@type": "type.googleapis.com/google.rpc.BadRequest", "fieldViolations": []any{map[string]any{"field": field, "description": message}},
+			}},
+		}})
+	}
+	h.expectBody(http.MethodPost, firewalls, rule(map[string]any{keyPriority: "high"}), 400, parser("resource.priority", "TYPE_INT32", `"high"`))
+	labeled := vmBody(vmOne, testSubnetOne)
+	labeled["labels"] = "managed-by"
+	h.expectBody(http.MethodPost, zonePath+"/instances", labeled, 400,
+		parser("resource.labels", "type.googleapis.com/compute.v1.Instance.LabelsEntry", `"managed-by"`))
+	missing := "The resource 'projects/demo-net/regions/us-east1/subnetworks/" + testSubnetOne + "' was not found"
+	h.expectBody(http.MethodGet, "/compute/v1/projects/demo-net/regions/us-east1/subnetworks/"+testSubnetOne, nil, 404, mustJSON(t, map[string]any{keyError: map[string]any{
+		keyCode: 404, keyMessage: missing, "errors": []any{map[string]any{"domain": "global", "reason": "notFound", keyMessage: missing}},
+	}}))
+}
+
+// Compute reads some mistyped values instead of refusing them, and ignores
+// names outside the resource (recorded); every field it would honor that the
+// provider doesn't model is refused as a gap instead of dropped.
+func TestBodyFieldsAreReadOrRefusedNeverDropped(t *testing.T) {
+	h := newHarness(t)
+	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
+	firewalls := "/compute/v1/projects/demo-net/global/firewalls"
+	h.expectCode(http.MethodPost, firewalls, map[string]any{
+		keyName: "lenient", keyNetwork: testNetwork, "allowed": tcp("1111"), "sourceRanges": []any{testRangeA},
+		"disabled": "yes", "targetServiceAccounts": saAccount, "bogusField": "x",
+	}, 200)
+	stored := decode(t, h.expectCode(http.MethodGet, firewalls+"/lenient", nil, 200))
+	if stored["disabled"] != true || fmt.Sprint(stored["targetServiceAccounts"]) != "["+saAccount+"]" || stored["bogusField"] != nil {
+		t.Fatalf("lenient firewall = %v", stored)
+	}
+	h.expectCode(http.MethodPost, firewalls, map[string]any{
+		keyName: "coerced", keyNetwork: testNetwork, "allowed": []any{map[string]any{keyIPProto: 6}},
+		"sourceRanges": map[string]any{"cidr": testRangeA}, "disabled": "no", keyPriority: "900",
+	}, 200)
+	stored = decode(t, h.expectCode(http.MethodGet, firewalls+"/coerced", nil, 200))
+	if stored["disabled"] != false || fmt.Sprint(stored["sourceRanges"]) != "[0.0.0.0/0]" ||
+		fmt.Sprint(stored["allowed"]) != "[map[IPProtocol:tcp]]" || stored[keyPriority] != float64(900) {
+		t.Fatalf("coerced firewall = %v", stored)
+	}
+	// Forms Compute's reading of is unrecorded are gaps, not guesses.
+	for _, fields := range []map[string]any{{"disabled": "maybe"}, {"disabled": 1}, {"sourceRanges": 5}, {"allowed": []any{map[string]any{keyIPProto: 17}}}} {
+		h.expectCode(http.MethodPost, firewalls, withFields(map[string]any{keyName: "unknown-form", keyNetwork: testNetwork, "allowed": tcp("1")}, fields), 501)
+	}
+}
+
+// Every Compute field the provider can't honor is refused as a gap, unless it
+// holds the default a client echoes.
+func TestUnmodeledFieldsAreGaps(t *testing.T) {
+	h := newHarness(t)
+	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
+	firewalls := "/compute/v1/projects/demo-net/global/firewalls"
+	for path, body := range map[string]map[string]any{
+		firewalls: {keyName: "logged", keyNetwork: testNetwork, "allowed": tcp("1"), "logConfig": map[string]any{"enable": true}},
+		"/compute/v1/projects/demo-net/global/networks": {keyName: "ula", "enableUlaInternalIpv6": true},
+		"/compute/v1/projects/demo-net/regions/us-central1/subnetworks": {
+			keyName: "secondary", keyNetwork: testNetwork, keyIPCIDR: "10.9.0.0/24",
+			"secondaryIpRanges": []any{map[string]any{"rangeName": "pods", keyIPCIDR: "10.8.0.0/24"}},
+		},
+		"/compute/v1/projects/demo-net/global/routes": {keyName: "ilb", keyNetwork: testNetwork, keyDestRange: "10.7.0.0/24", "nextHopIlb": "x"},
+	} {
+		h.expectCode(http.MethodPost, path, body, 501)
+	}
+	withMetadata := vmBody(vmOne, testSubnetOne)
+	withMetadata["metadata"] = map[string]any{"items": []any{map[string]any{"key": "startup-script", "value": "echo"}}}
+	h.expectCode(http.MethodPost, zonePath+"/instances", withMetadata, 501)
+	external := vmBody(vmOne, testSubnetOne)
+	external["networkInterfaces"] = []any{map[string]any{
+		"subnetwork": "regions/us-central1/subnetworks/" + testSubnetOne, "accessConfigs": []any{map[string]any{"type": "ONE_TO_ONE_NAT"}},
+	}}
+	h.expectCode(http.MethodPost, zonePath+"/instances", external, 501)
+	// Echoed defaults are accepted: Terraform sends logConfig.enable false.
+	h.expectCode(http.MethodPost, firewalls, map[string]any{
+		keyName: "quiet", keyNetwork: testNetwork, "allowed": tcp("1"), "logConfig": map[string]any{"enable": false},
+	}, 200)
 }

@@ -20,21 +20,21 @@ type peeringRequest struct {
 }
 
 // parsePeering reads either addPeering body form.
-func parsePeering(body map[string]any) peeringRequest {
-	if nested, ok := body["networkPeering"].(map[string]any); ok {
+func parsePeering(body *peeringBody) peeringRequest {
+	if nested := body.NetworkPeering; nested != nil {
 		return peeringRequest{
-			name: provider.Text(nested[keyName]), network: provider.Text(nested[keyNetwork]),
-			exchange:     boolOf(nested["exchangeSubnetRoutes"], true),
-			importCustom: boolOf(nested["importCustomRoutes"], false),
-			export:       boolOf(nested["exportCustomRoutes"], false),
-			exportPublic: boolOf(nested["exportSubnetRoutesWithPublicIp"], true),
-			importPublic: boolOf(nested["importSubnetRoutesWithPublicIp"], false),
+			name: nested.Name, network: nested.Network,
+			exchange: orTrue(nested.ExchangeSubnetRoutes), importCustom: bool(nested.ImportCustomRoutes),
+			export: bool(nested.ExportCustomRoutes), exportPublic: orTrue(nested.ExportPublicIP),
+			importPublic: bool(nested.ImportPublicIP),
 		}
 	}
-	return peeringRequest{
-		name: provider.Text(body[keyName]), network: provider.Text(body[keyPeerNetwork]),
-		exchange: boolOf(body["autoCreateRoutes"], true), exportPublic: true,
-	}
+	return peeringRequest{name: body.Name, network: body.PeerNetwork, exchange: orTrue(body.AutoCreateRoutes), exportPublic: true}
+}
+
+// orTrue reads an optional boolean that defaults to true.
+func orTrue(value *flexBool) bool {
+	return value == nil || bool(*value)
 }
 
 // peerProject reports the project a peer network reference names, or "" for
@@ -50,7 +50,7 @@ func peerProject(reference string) string {
 
 // addPeering stores one peering of a network toward a same-project peer.
 func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := provider.DecodeObject(request.JSON)
+	body, err := decodeBody[peeringBody](request.JSON, peeringSchema)
 	if err != nil {
 		return nil, err
 	}
@@ -71,9 +71,9 @@ func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (
 	if err := p.scopes.With(scope, func(s *scopeState) error { return s.addPeering(network, peering) }); err != nil {
 		switch {
 		case errors.Is(err, errAlreadyExists):
-			return nil, conflict("peering", spec.name)
+			return nil, conflict(globalRef(scope.Project, "networks", network) + "/peerings/" + spec.name)
 		case errors.Is(err, errMissing):
-			return nil, provider.NotFound(kindNetwork, network)
+			return nil, notFound(globalRef(scope.Project, "networks", network))
 		default:
 			return nil, err //nolint:wrapcheck // addPeering returns wire statuses or sentinels
 		}
@@ -103,12 +103,11 @@ func (s *scopeState) addPeering(network string, peering peeringRecord) error {
 // removePeering deletes one named peering of a network. Compute refuses an
 // unknown peering name with 400.
 func (p *Provider) removePeering(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := provider.DecodeObject(request.JSON)
+	body, err := decodeBody[removePeeringBody](request.JSON, bodySchema{})
 	if err != nil {
 		return nil, err
 	}
-	name := provider.Text(body[keyName])
-	network := request.Path["network"]
+	name, network := body.Name, request.Path["network"]
 	removed := false
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		record := s.networks[network]
@@ -124,7 +123,7 @@ func (p *Provider) removePeering(request *gateway.RESTRequest, scope state.Scope
 		}
 		return nil
 	}); err != nil {
-		return nil, provider.NotFound(kindNetwork, network)
+		return nil, notFound(globalRef(scope.Project, "networks", network))
 	}
 	if !removed {
 		return nil, status.Errorf(codes.InvalidArgument, "There is no peering named '%s' in network '%s'", name, network)
@@ -175,7 +174,7 @@ func peeringDocument(project string, record peeringRecord, active bool) map[stri
 		"exportSubnetRoutesWithPublicIp": record.ExportPublicIP,
 		"importSubnetRoutesWithPublicIp": record.ImportPublicIP,
 		keyStackType:                     stackIPv4Only,
-		"updateStrategy":                 "INDEPENDENT",
+		"updateStrategy":                 strategyIndependent,
 		"connectionStatus": map[string]any{
 			"trafficConfiguration": map[string]any{
 				"exportCustomRoutesToPeer":               record.ExportCustomRoutes,
@@ -184,7 +183,7 @@ func peeringDocument(project string, record peeringRecord, active bool) map[stri
 				"importSubnetRoutesWithPublicIpFromPeer": record.ImportPublicIP,
 				keyStackType:                             stackIPv4Only,
 			},
-			"updateStrategy": "INDEPENDENT",
+			"updateStrategy": strategyIndependent,
 		},
 	}
 }

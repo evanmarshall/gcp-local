@@ -41,8 +41,8 @@ func instanceRef(name string) string {
 	return "projects/demo-net/zones/" + vmZone + "/instances/" + name
 }
 
-// instanceBody is the recorded e2-micro insert body without external addresses.
-func instanceBody(name, subnet string) map[string]any {
+// vmBody is the recorded e2-micro insert body without external addresses.
+func vmBody(name, subnet string) map[string]any {
 	return map[string]any{
 		keyName: name, "machineType": "zones/" + vmZone + "/machineTypes/e2-micro",
 		"disks": []any{map[string]any{"boot": true, "autoDelete": true, "initializeParams": map[string]any{
@@ -68,7 +68,7 @@ func (h *harness) vmTopology() {
 		}, 200)
 	}
 	for _, vm := range []struct{ name, subnet string }{{vmOne, vmSubnetA}, {vmTwo, vmSubnetA}, {vmThree, vmSubnetB}} {
-		if status, errs := operationErrors(h.t, h.invoke(http.MethodPost, zonePath+"/instances", instanceBody(vm.name, vm.subnet))); status != "DONE" || len(errs) != 0 {
+		if status, errs := operationErrors(h.t, h.invoke(http.MethodPost, zonePath+"/instances", vmBody(vm.name, vm.subnet))); status != "DONE" || len(errs) != 0 {
 			h.t.Fatalf("instance %s operation = %s %v", vm.name, status, errs)
 		}
 	}
@@ -192,7 +192,7 @@ func TestInstanceLifecycleAndAddresses(t *testing.T) {
 	if items, _ := listing[keyItems].([]any); len(items) != 3 {
 		t.Fatalf("instance listing = %v", listing)
 	}
-	h.expectCode(http.MethodPost, zonePath+"/instances", instanceBody(vmOne, vmSubnetA), 409)
+	h.expectCode(http.MethodPost, zonePath+"/instances", vmBody(vmOne, vmSubnetA), 409)
 	// The subnetwork and network an instance uses are refused in the operation.
 	status, errs := operationErrors(t, h.invoke(http.MethodDelete, regionPath+"/subnetworks/"+vmSubnetB, nil))
 	if status != "DONE" || len(errs) != 1 || errs[0] != "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE" {
@@ -213,14 +213,14 @@ func TestInstanceLifecycleAndAddresses(t *testing.T) {
 func TestInstanceInsertGapsAndValidation(t *testing.T) {
 	h := newHarness(t)
 	h.topology(vmNetA, vmSubnetA, testRangeA)
-	external := instanceBody("ext", vmSubnetA)
+	external := vmBody("ext", vmSubnetA)
 	nics, _ := external["networkInterfaces"].([]any)
 	nic, _ := nics[0].(map[string]any)
 	nic["accessConfigs"] = []any{map[string]any{"type": "ONE_TO_ONE_NAT"}}
 	h.expectCode(http.MethodPost, zonePath+"/instances", external, 501)
-	h.expectCode(http.MethodPost, zonePath+"/instances", instanceBody("orphan", "missing"), 400)
-	h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/zones/europe-west1-b/instances", instanceBody("far", vmSubnetA), 400)
-	taken := instanceBody("fixed", vmSubnetA)
+	h.expectCode(http.MethodPost, zonePath+"/instances", vmBody("orphan", "missing"), 400)
+	h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/zones/europe-west1-b/instances", vmBody("far", vmSubnetA), 400)
+	taken := vmBody("fixed", vmSubnetA)
 	nics, _ = taken["networkInterfaces"].([]any)
 	nic, _ = nics[0].(map[string]any)
 	nic["networkIP"] = "10.10.0.1"
@@ -246,5 +246,36 @@ func TestInstanceEndpointsKeepAddressPathsHonest(t *testing.T) {
 	h.expectCode(http.MethodPost, connectivityTests+"?testId=t-tagged", map[string]any{
 		keySource:      map[string]any{kindInstance: instanceRef(vmOne)},
 		keyDestination: map[string]any{kindInstance: instanceRef(vmTwo), keyPort: 9090},
+	}, 501)
+}
+
+// Names of the service-account scenario, mirroring vm-firewall-service-accounts.
+const (
+	saAccount = "runner@demo-net.iam.gserviceaccount.com"
+	saTag     = "gl-web"
+)
+
+// tcp is one allowed or denied tcp term on a port.
+func tcp(port string) []any {
+	return []any{map[string]any{keyIPProto: "tcp", keyPorts: []any{port}}}
+}
+
+// A rule scoped to a service account used to lose its scope on insert and
+// apply to every instance, so the analyzer answered with a confident verdict.
+// Until scopes are modeled such a rule is an explicit gap.
+func TestServiceAccountScopedRuleIsNeverAppliedToEveryInstance(t *testing.T) {
+	h := newHarness(t)
+	h.vmTopology()
+	h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
+		keyName: "for-runner", keyNetwork: "projects/demo-net/global/networks/" + vmNetA, "sourceRanges": []any{testRangeA},
+		"targetServiceAccounts": []any{saAccount}, "allowed": tcp("9090"),
+	}, 200)
+	stored := decode(t, h.expectCode(http.MethodGet, "/compute/v1/projects/demo-net/global/firewalls/for-runner", nil, 200))
+	if mustJSON(t, stored["targetServiceAccounts"]) != `["`+saAccount+`"]` {
+		t.Fatalf("stored rule = %v", stored)
+	}
+	h.expectCode(http.MethodPost, connectivityTests+"?testId=t-runner", map[string]any{
+		keySource:      map[string]any{kindInstance: instanceRef(vmOne)},
+		keyDestination: map[string]any{kindInstance: instanceRef(vmTwo), keyPort: 9090}, keyProtocol: "TCP",
 	}, 501)
 }

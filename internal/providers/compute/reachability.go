@@ -274,9 +274,11 @@ func (s *scopeState) decidingRule(network, direction string, spec flow, matches 
 }
 
 // applies reports whether an enabled rule of the network and direction is
-// tagged (source or target tags) exactly when tagged is set.
+// scoped (source or target tags or service accounts) exactly when tagged is
+// set. Scoped rules are not modeled, so the analyzer reports them as gaps.
 func (rule *firewallRecord) applies(network, direction string, tagged bool) bool {
-	hasTags := len(rule.TargetTags) > 0 || len(rule.SourceTags) > 0
+	hasTags := len(rule.TargetTags) > 0 || len(rule.SourceTags) > 0 ||
+		len(rule.TargetServiceAccounts) > 0 || len(rule.SourceServiceAccounts) > 0
 	return rule.Network == network && rule.Direction == direction && !rule.Disabled && hasTags == tagged
 }
 
@@ -296,13 +298,13 @@ func egressMatches(rule *firewallRecord, spec flow) bool {
 }
 
 // termsMatch reports whether one allowed/denied term list covers the flow.
-func termsMatch(entries []map[string]any, spec flow) bool {
-	for _, entry := range entries {
-		protocol := strings.ToLower(fmt.Sprint(entry[keyIPProto]))
+func termsMatch(terms []firewallTerm, spec flow) bool {
+	for _, term := range terms {
+		protocol := strings.ToLower(string(term.IPProtocol))
 		if protocol != spec.protocol && protocol != "all" {
 			continue
 		}
-		if portMatches(entry[keyPorts], spec.port) {
+		if portMatches(term.Ports, spec.port) {
 			return true
 		}
 	}
@@ -311,12 +313,11 @@ func termsMatch(entries []map[string]any, spec flow) bool {
 
 // portMatches reports whether the port list covers the port. An empty list
 // matches every port (terms without ports are unrestricted).
-func portMatches(ports any, port int) bool {
-	values := stringListOf(ports)
-	if len(values) == 0 {
+func portMatches(ports []string, port int) bool {
+	if len(ports) == 0 {
 		return true
 	}
-	for _, value := range values {
+	for _, value := range ports {
 		low, high, isRange := strings.Cut(value, "-")
 		if !isRange {
 			high = low
@@ -511,7 +512,7 @@ func (s *scopeState) instanceWithIP(ip net.IP) *instanceRecord {
 // instanceFlow applies the source instance's egress rules and routes.
 func (s *scopeState) instanceFlow(spec flow, source, dest *instanceRecord) analysis {
 	if s.taggedRuleMatches(source.Network, directionEgress, spec) {
-		return analysis{gap: "Firewall rules with source or target tags are not modeled for instance endpoints"}
+		return analysis{gap: "Firewall rules with source or target tags or service accounts are not modeled for instance endpoints"}
 	}
 	rule := s.egressRule(source.Network, spec)
 	steps := []map[string]any{
@@ -594,7 +595,7 @@ func (s *scopeState) toInstance(spec flow, source, dest *instanceRecord, steps [
 			"The networks are not peered; the default route sends private traffic to the internet")
 	}
 	if s.taggedRuleMatches(dest.Network, directionIngress, spec) {
-		return analysis{gap: "Firewall rules with source or target tags are not modeled for instance endpoints"}
+		return analysis{gap: "Firewall rules with source or target tags or service accounts are not modeled for instance endpoints"}
 	}
 	rule := s.decidingRule(dest.Network, directionIngress, spec, ingressMatches)
 	steps = append(steps, route, instanceStep(spec.project, stepArriveInstance, dest),

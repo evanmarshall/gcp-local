@@ -70,55 +70,39 @@ type instanceInterface struct {
 	network, subnetwork, subnetRegion, address string
 }
 
-// parseInstance validates an instance insert body. A second interface or
-// any external, IPv6, or alias address is an explicit gap.
-func parseInstance(body map[string]any) (instanceInterface, string, error) {
-	machineType := provider.Text(body["machineType"])
-	if machineType == "" {
+// parseInstance validates an instance insert body: one interface, one boot
+// disk created from initializeParams, and at most one service account.
+// Everything else is refused as a gap by the body schema.
+func parseInstance(body *instanceBody) (instanceInterface, string, error) {
+	if body.MachineType == "" {
 		return instanceInterface{}, "", provider.Invalid("An instance requires a machineType")
 	}
-	if !hasBootDisk(provider.MapList(body["disks"])) {
-		return instanceInterface{}, "", provider.Invalid("An instance requires a boot disk")
+	if len(body.Disks) != 1 || !bool(body.Disks[0].Boot) || body.Disks[0].Initialize == nil {
+		return instanceInterface{}, "", provider.Invalid("An instance requires a boot disk created from initializeParams")
 	}
-	nics := provider.MapList(body["networkInterfaces"])
-	if len(nics) == 0 {
+	if len(body.NetworkInterfaces) == 0 {
 		return instanceInterface{}, "", provider.Invalid("An instance requires a network interface")
 	}
-	if len(nics) > 1 {
-		return instanceInterface{}, "", gap("instances with more than one network interface are not modeled")
-	}
-	nic := nics[0]
-	for _, field := range []string{"accessConfigs", "ipv6AccessConfigs", "aliasIpRanges"} {
-		if len(provider.MapList(nic[field])) > 0 {
-			return instanceInterface{}, "", gap("instance " + field + " (external, IPv6, or alias addresses) are not modeled")
-		}
-	}
-	subnetRegion, subnet := subnetReference(provider.Text(nic["subnetwork"]))
+	nic := body.NetworkInterfaces[0]
+	subnetRegion, subnet := subnetReference(nic.Subnetwork)
 	return instanceInterface{
-		network: networkName(provider.Text(nic[keyNetwork])), subnetwork: subnet, subnetRegion: subnetRegion,
-		address: provider.Text(nic["networkIP"]),
-	}, machineType[strings.LastIndex(machineType, "/")+1:], nil
-}
-
-// hasBootDisk reports whether the attached disks include a boot disk.
-func hasBootDisk(disks []map[string]any) bool {
-	for _, disk := range disks {
-		if boolOf(disk["boot"], false) {
-			return true
-		}
-	}
-	return false
+		network: networkName(nic.Network), subnetwork: subnet, subnetRegion: subnetRegion, address: nic.NetworkIP,
+	}, body.MachineType[strings.LastIndex(body.MachineType, "/")+1:], nil
 }
 
 // createInstance validates and stores one instance, assigning its internal
 // address from the subnetwork, then reports the zonal operation.
 func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	zone := request.Path["zone"]
+	zone := request.Path[keyZone]
 	region, ok := zoneRegion(zone)
 	if !ok {
 		return nil, provider.Invalid("Invalid zone " + zone)
 	}
-	body, err := parseInsert(request)
+	body, err := decodeBody[instanceBody](request.JSON, instanceSchema)
+	if err != nil {
+		return nil, err
+	}
+	name, err := checkName(body.Name, "")
 	if err != nil {
 		return nil, err
 	}
@@ -127,10 +111,13 @@ func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scop
 		return nil, err
 	}
 	record := &instanceRecord{
-		Name: provider.Text(body[keyName]), Zone: zone, Region: region, Description: provider.Text(body[keyDescription]),
-		MachineType: machineType, CreatedAt: p.clock(),
+		Name: name, Zone: zone, Region: region, Description: body.Description,
+		MachineType: machineType, Labels: body.Labels, CreatedAt: p.clock(),
 	}
-	record.Labels, _ = body["labels"].(map[string]any)
+	if len(body.ServiceAccounts) > 0 || (body.Tags != nil && len(body.Tags.Items) > 0) {
+		return nil, gap("instance service accounts and network tags are not modeled")
+	}
+	link := instanceLink(scope.Project, zone, name)
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		return s.addInstance(record, nic, func() error {
 			if err := p.index.Put(serviceName, state.Resource{
@@ -142,16 +129,16 @@ func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scop
 			return nil
 		})
 	}); err != nil {
-		return nil, instanceError(err, record.Name)
+		return nil, instanceError(err, zonalRef(scope.Project, zone, "instances", record.Name))
 	}
-	return p.newOperation(scope, "zone", zone, "insert", instanceLink(scope.Project, zone, record.Name))
+	return p.newOperation(scope, keyZone, zone, "insert", link)
 }
 
 // instanceError maps an instance placement failure onto its status.
-func instanceError(err error, name string) error {
+func instanceError(err error, path string) error {
 	switch {
 	case errors.Is(err, errAlreadyExists):
-		return conflict(kindInstance, name)
+		return conflict(path)
 	case errors.Is(err, errIndex):
 		return gap("index the instance")
 	case errors.Is(err, errMissing):
@@ -267,7 +254,7 @@ func usableHost(block *net.IPNet, ip net.IP) bool {
 }
 
 func (p *Provider) getInstance(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	zone, name := request.Path["zone"], request.Path["instance"]
+	zone, name := request.Path[keyZone], request.Path["instance"]
 	var document map[string]any
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		if record := s.instances[instanceKey(zone, name)]; record != nil {
@@ -276,21 +263,21 @@ func (p *Provider) getInstance(request *gateway.RESTRequest, scope state.Scope) 
 		return nil
 	})
 	if document == nil {
-		return nil, provider.NotFound(kindInstance, name)
+		return nil, notFound(zonalRef(scope.Project, zone, "instances", name))
 	}
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
 // listInstances returns the zone's instances in name order.
 func (p *Provider) listInstances(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	zone := request.Path["zone"]
+	zone := request.Path[keyZone]
 	return listRecords(p, scope, "compute#instanceList", func(s *scopeState) map[string]*instanceRecord { return s.instances },
 		func(record *instanceRecord) bool { return record.Zone == zone }, inProject(scope, instanceDocument))
 }
 
 // deleteInstance removes one instance, releasing its internal address.
 func (p *Provider) deleteInstance(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	zone, name := request.Path["zone"], request.Path["instance"]
+	zone, name := request.Path[keyZone], request.Path["instance"]
 	found := false
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		if found = s.instances[instanceKey(zone, name)] != nil; !found {
@@ -305,9 +292,9 @@ func (p *Provider) deleteInstance(request *gateway.RESTRequest, scope state.Scop
 		return nil, err //nolint:wrapcheck // unindex already wraps
 	}
 	if !found {
-		return nil, provider.NotFound(kindInstance, name)
+		return nil, notFound(zonalRef(scope.Project, zone, "instances", name))
 	}
-	return p.newOperation(scope, "zone", zone, "delete", instanceLink(scope.Project, zone, name))
+	return p.newOperation(scope, keyZone, zone, "delete", instanceLink(scope.Project, zone, name))
 }
 
 // instanceDocument renders the instance wire shape: one interface with its
@@ -320,9 +307,9 @@ func instanceDocument(project string, record *instanceRecord) map[string]any {
 		keyKind:            "compute#instance",
 		keySelfLink:        instanceLink(project, record.Zone, record.Name),
 		keyTimestamp:       stamp(record.CreatedAt),
-		"zone":             zoneLink(project, record.Zone),
+		keyZone:            zoneLink(project, record.Zone),
 		"machineType":      zoneLink(project, record.Zone) + "/machineTypes/" + record.MachineType,
-		"status":           "RUNNING",
+		keyStatus:          "RUNNING",
 		"canIpForward":     false,
 		keyFingerprint:     fingerprint(record.Name, record.Generation),
 		"labelFingerprint": fingerprint(record.Name+"/labels", record.Generation),

@@ -248,7 +248,7 @@ func (p *Provider) deleteConnectivity(request *gateway.RESTRequest, scope state.
 		return nil, err
 	}
 	return p.connectivityOperation(scope, "delete", testName(scope.Project, id),
-		map[string]any{"@type": "type.googleapis.com/google.protobuf.Empty"})
+		map[string]any{keyAtType: "type.googleapis.com/google.protobuf.Empty"})
 }
 
 // testName renders the full ConnectivityTest resource name.
@@ -295,13 +295,13 @@ func (p *Provider) connectivityOperation(scope state.Scope, verb, target string,
 		return nil
 	})
 	now := stampRFC3339(p.clock())
-	if _, typed := response["@type"]; !typed {
-		response["@type"] = "type.googleapis.com/google.cloud.networkmanagement.v1.ConnectivityTest"
+	if _, typed := response[keyAtType]; !typed {
+		response[keyAtType] = "type.googleapis.com/google.cloud.networkmanagement.v1.ConnectivityTest"
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{
 		keyName: "projects/" + scope.Project + "/locations/global/operations/operation-" + strconv.FormatInt(generation, 10),
-		"metadata": map[string]any{
-			"@type":      "type.googleapis.com/google.cloud.networkmanagement.v1.OperationMetadata",
+		keyMetadata: map[string]any{
+			keyAtType:    "type.googleapis.com/google.cloud.networkmanagement.v1.OperationMetadata",
 			"createTime": now, "endTime": now, "target": target, "verb": verb, "apiVersion": "v1",
 		},
 		"done":     true,
