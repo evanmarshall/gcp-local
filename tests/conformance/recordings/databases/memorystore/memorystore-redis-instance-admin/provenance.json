@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T01:32:25.146061+00:00",
+  "recorded_at": "2026-10-12T18:06:27.834360+00:00",
   "scenario": {
     "id": "memorystore-redis-instance-admin",
     "service": "redis",
     "transport": "rest-v1",
-    "revision": "64df7e74fdffeb8a8fdd19b45e0929dc62196fb845f3df833b8bbea5e04c471a",
+    "revision": "c1e3aa48dd95da08df88982d4b5737e70c10273cb0266ef7e473f366c62099eb",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "4d11fab2a5cbf1b5dfcc1f1214e46043b7f5435c205b56d732bed8f6ecca2241",
+  "snapshot_sha256": "40edc2d5145d3d95b053fe303f351f12d46e6799f89d19ee9cdff386135fd4f3",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,12 +22,12 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/memorystore.py": "619c2b454150dbce0ebeda5fb5a9b5f33e89e0c4762c4fa8fc7498dc1707f860",
-      "gcp_validation/networking.py": "3b633fc57efa342a1bea7616646ea26341b10db6f20fb25143ca4586ad13a5e4",
-      "gcp_validation/live_paths.py": "a958dd5c7db15db268241edb7588fb4aa8e2cc870744d33204b4e023d5e20cf1",
-      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "tests/conformance/memorystore/conftest.py": "62de7a316ff3e4758b1ab019ac4556a3bd893ea1e38e5c7e400110f198d1959b"
+      "gcp_validation/services/databases/memorystore.py": "df7a2630a3899da6d5ffa7424f9e1817f4a445376b504198533829cd23eebe68",
+      "gcp_validation/services/compute/networking.py": "a17ea6b5766e41d4b63ab7b5ee3fd2509432d6b003d0973083c04dce3dd193c4",
+      "gcp_validation/live_paths.py": "9f6dcf0382d5be6ce5039f0f0bcff07f7c02c9c087deb9f5885f5a9834a5a1d7",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/databases/memorystore/conftest.py": "3d0fc4961ba7b53820554c32b212a99bd978b22f40a291230bbf90fc3de996c7"
     },
     "scope": {
       "services": [

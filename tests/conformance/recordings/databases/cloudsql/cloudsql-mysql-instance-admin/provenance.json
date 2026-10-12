@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T08:10:46.164713+00:00",
+  "recorded_at": "2026-10-12T18:28:29.202913+00:00",
   "scenario": {
     "id": "cloudsql-mysql-instance-admin",
     "service": "cloudsql",
     "transport": "rest-v1beta4",
-    "revision": "64d69872043e2308bf953a9c09a88cea5cf83d5de64df47c468b0db7abf3fe07",
+    "revision": "90ef56877c8a1a14f4bb9a34bcd4d97751a372facd6694d1d4b7e89b182e669d",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "6847512768397e80fc3ad5444bc0dcf9b79fc161f90503fbddf214029d997d01",
+  "snapshot_sha256": "2f388b2c4605fdd6ffcb6927e2100a7f0e8917f9082e9545316303da98b053db",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,11 +22,11 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/cloudsql_mysql.py": "41c5ca365d0b6887815521ebf6a74b3839df1cf492429c690999f14a8981b3b0",
-      "gcp_validation/cloudsql.py": "629f8e6ceeb7729bb22b66531b1207df5193e51b555b1737bf8a16267c4d4235",
-      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "tests/conformance/cloudsqlmysql/conftest.py": "15ddbc460f7da3f382d300d58594f28d63ab87753cf14df3cbdcff07111fb5c7"
+      "gcp_validation/services/databases/cloudsql_mysql.py": "bb1c1b472d4a5a8a3c85f2c2f84fa7c8323a74577631dd812da4f8ae1b88bd0f",
+      "gcp_validation/services/databases/cloudsql.py": "e4f6653ccee34c37b2806c8b2f9249db58a103ca568314d5a8612ae6427069dc",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/databases/cloudsql/mysql/conftest.py": "d3675e1ea94437b6fb8cf07e81691ade1b2533ad9113c59041a9a6c8e7781fdf"
     },
     "scope": {
       "services": [

@@ -11,4 +11,9 @@ GCP_LOCAL_TEST_PYTHON=${GCP_LOCAL_TEST_PYTHON:-"$PWD/.venv-tools/bin/python"}
 export GCP_LOCAL_TEST_PYTHON
 sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance
 sh scripts/go.sh test -c -tags=pubsubintegration -race -o bin/pubsub-integration ./internal/providers/messaging/pubsub
+# GCP_LOCAL_LOW_DISK=1 frees the build cache before the servers start, because
+# a moo guest disk can't hold it and Cloud SQL data (docs/contributing/moo.md).
+if [ -n "${GCP_LOCAL_LOW_DISK:-}" ]; then
+    sh scripts/go.sh clean -cache
+fi
 "$GCP_LOCAL_TEST_PYTHON" scripts/run/recordings.py

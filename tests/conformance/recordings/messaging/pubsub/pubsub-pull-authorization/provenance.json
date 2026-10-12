@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T08:25:43.586340+00:00",
+  "recorded_at": "2026-10-12T17:06:40.234800+00:00",
   "scenario": {
     "id": "pubsub-pull-authorization",
     "service": "pubsub",
     "transport": "grpc-v1",
-    "revision": "ce9f470d2ce052dea13e122361a204e4e9fa7290aeeca38cd8288f24f2b2378d",
+    "revision": "e777bf05726d53589ed2f669325afb01b173cf0524054be83f9fc4ed8dc18d1a",
     "versions": {
       "sdk": "google-cloud-pubsub/2.42.0;grpcio/1.84.0;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "1322df73fb5c970528334c0377f1e0263d87cab1e2c92da77c42626629db8cf1",
+  "snapshot_sha256": "1203f9e33aaed91ce051a8bae253e1e2085a5ba975a1076e5ea708af3cb1abe7",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,11 +22,11 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/messaging/pubsub.py": "c07923006e8ed975658b62b48906e83cfeca321cefb1a7cb5337d396a3e544dc",
-      "gcp_validation/services/messaging/pubsub_scope.py": "e219368c8408688d6c7e3dd2cd54be5c375617250c2a3b3a9b4aea52e080977a",
+      "gcp_validation/services/messaging/pubsub.py": "d4ac3686b736a0cf0e64a6e2ad8cd77a6d87028aa959efe00f247f3a605561e9",
+      "gcp_validation/services/messaging/pubsub_scope.py": "7b2a89a50cfe6c80ceb0eabd8d074ccb4c1594234c5cb2e4f108d06624aa0458",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701",
-      "tests/conformance/messaging/pubsub/pull/conftest.py": "5cc8cb1decb29ab74a9da0f73e5e2f0e9e28c73edeb78116ab263fc7b0959809"
+      "gcp_validation/federation.py": "addf34416b0231baedb9747942a78952394d1592fc2ec1b2dbc0133d54ae513a",
+      "tests/conformance/messaging/pubsub/pull/conftest.py": "853d5a79ae8b3f294aa8646083dc701c3f5a0b1f95f2fe1b8d1296b6b9bab3d1"
     },
     "scope": {
       "services": [

@@ -102,6 +102,15 @@ class RecordingWiringTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("spanner-orphan: no scenario with this id", errors[0])
 
+    def test_recording_outside_a_service_path_fails(self):
+        self.tree.write(
+            "tests/conformance/storage/test_storage.py", SCENARIO.format(id="storage-root")
+        )
+        self.tree.record(".", "storage-root")
+        errors = self.tree.recording_errors()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("storage-root: move it under its service path", errors[0])
+
     def test_scenario_in_another_service_does_not_count(self):
         self.tree.write(
             "tests/conformance/storage/test_storage.py", SCENARIO.format(id="storage-x")

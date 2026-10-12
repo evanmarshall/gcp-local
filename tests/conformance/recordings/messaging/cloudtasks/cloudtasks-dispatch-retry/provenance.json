@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T08:42:22.015109+00:00",
+  "recorded_at": "2026-10-12T17:47:34.340168+00:00",
   "scenario": {
     "id": "cloudtasks-dispatch-retry",
     "service": "cloudtasks",
     "transport": "rest-v1",
-    "revision": "7d085afbbf78a0e32b1310359a36cf1568d9a2b40e99c8b3745f8983c58f9969",
+    "revision": "4c9f7100e7aecec22f52f04929e52f56008baa7a775ac18e99e25336a2b2f862",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "85de94193c56c64cf58fbfeee15de37b59f6eb099d65c955fd6ea78b753fe0c5",
+  "snapshot_sha256": "4be8f684515a5b7c6d9611372d1658048abaa10d6760bb14473dab51c2089e45",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,11 +22,11 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/messaging/cloudtasks.py": "95de6ad11a83bce87445c4a788e7d042b0b52e4ca56cee5778fbc26fd68af046",
-      "gcp_validation/live_rest.py": "ab9f7a3e1c77f35ee579d2b593e5ab56d46612a3338e3ea28f19cecc1c3f8e0a",
+      "gcp_validation/services/messaging/cloudtasks.py": "e0f88c0a0e659dacdc16c26170a4aeff1d6c03f4e7c26e2de5327618ae08cadd",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/live_paths.py": "9f6dcf0382d5be6ce5039f0f0bcff07f7c02c9c087deb9f5885f5a9834a5a1d7",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "tests/conformance/messaging/cloudtasks/conftest.py": "14cae2dcdb3a444b986d7d94f554892c6763a622848e46157e23e775157cab43"
+      "tests/conformance/messaging/cloudtasks/conftest.py": "93c56d17f4719465abcc41eef6bef0d1ac04bc0c400d8c63530bd604d2192653"
     },
     "scope": {
       "services": [

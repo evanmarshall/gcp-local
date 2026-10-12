@@ -46,7 +46,7 @@ Permissions follow [Bigtable access control](https://docs.cloud.google.com/bigta
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `bigtable-instance-table-admin` | 2026-10-11 | Instance create, instance and cluster reads, viewer denied then allowed by an instance grant, empty policy, table and family create, duplicate conflicts, deletes |
+| `bigtable-instance-table-admin` | 2026-10-12 | Instance create, instance and cluster reads, viewer denied then allowed by an instance grant, empty policy, table and family create, duplicate conflicts, deletes |
 
 ```sh
 sh scripts/check/recordings.sh   # the recording

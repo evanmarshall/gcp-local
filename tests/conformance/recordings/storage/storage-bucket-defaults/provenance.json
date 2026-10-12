@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T07:19:30.550040+00:00",
+  "recorded_at": "2026-10-12T17:02:34.629986+00:00",
   "scenario": {
     "id": "storage-bucket-defaults",
     "service": "storage",
     "transport": "rest-json-v1",
-    "revision": "7f4ec5e92914751deb9a73b6883e1692b1e824cc90ebd40b9f0151efc155b228",
+    "revision": "e643819f38bed08dc690ccf1b5e859abf4673a9458348a9eee16b6b6a07c0de3",
     "versions": {
       "sdk": "rclone/1.75.2 request shape",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "0b0dc8eb24fd468b946625dac43237e1a66bef63f211c9b97e9548b626e38a8e",
+  "snapshot_sha256": "f30a88dd9ac7533b485995dee575086805a010749e7512d125e4913c4c32c28f",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,11 +22,11 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/storage.py": "18b25751e765c562713bf2ead41e42b9d3ead111af62a2b67f771eb670ef70be",
-      "gcp_validation/storage_defaults.py": "3fca7bd7e88aedaa7a3e907657dab26401d6c9cd3f15099a24cd49d963f727c1",
-      "gcp_validation/normalization.py": "0ef80b778393fc23ccaad1544e6ac2d08c634571f303e10677b466060a874a54",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701"
+      "gcp_validation/services/storage/client.py": "51d69bf56a4ee0dfd955142f2a70ad38db443ee4323437861a924e70ba46f8ad",
+      "gcp_validation/services/storage/defaults.py": "34a15d9a5e31858212326c09422924f3db0d25b314fec5eb48371942f0b5c418",
+      "gcp_validation/services/storage/normalization.py": "c76208471a34ba5e1995b9d879c7a9af28cf1f3b555644c6380cf815838fd545",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "gcp_validation/federation.py": "addf34416b0231baedb9747942a78952394d1592fc2ec1b2dbc0133d54ae513a"
     },
     "scope": {
       "services": [

@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-11T22:16:49.910686+00:00",
+  "recorded_at": "2026-10-12T17:56:24.251528+00:00",
   "scenario": {
     "id": "spanner-instance-database-admin",
     "service": "spanner",
     "transport": "rest-v1",
-    "revision": "04ae986d06ceb01b99b7c017c6e8036147dcdf1e6059b980b59d4ca1e78f7a93",
+    "revision": "1d6388ebf37b43b20f520bc8894ffb80636719f57fe569a0b5c35708e3a5424f",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "1a3e8143c9a15fd4741f8978ff72402711afaeaff6a5986c38f19f932e431946",
+  "snapshot_sha256": "edaa361e3016deaf2e53cf89cada95c832d9d3d3b8f2dfc2be9bfd2d9a646fe9",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/spanner.py": "49dea320a003142081ffda11b9f9fd3f10822342ed47735bfcd6b1feb450edba",
-      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "tests/conformance/spanner/conftest.py": "6999645dba055f11269ef96bf95bf60538f7869b9f68b3b03e8a61bd80ce44b6"
+      "gcp_validation/services/databases/spanner.py": "401a19b1a69e44bc83dbaa6e8125bd53ce4d7c2cf001d9bc12a7ba593e07ac9d",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/databases/spanner/admin/conftest.py": "42a8bf6c8668f8118efaf3de70003daee53edd57e17e41138363639225f7feb8"
     },
     "scope": {
       "services": [

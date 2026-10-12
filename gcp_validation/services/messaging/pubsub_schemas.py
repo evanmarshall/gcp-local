@@ -612,19 +612,35 @@ def until_refused(fixture: SchemaFixture, short: str) -> str:
         time.sleep(10)
 
 
+def settled_settings(fixture: SchemaFixture, short: str) -> object:
+    """Read the topic until its schema settings report the deletion.
+
+    GCP rewrites a deleted schema's name on the topic only once the deletion
+    propagates, independently of when publishing starts failing.
+    """
+    deadline = min(fixture.deadline, time.monotonic() + DELETION_WAIT_SECONDS)
+    while True:
+        topic = fixture.call("topic", "get_topic", {"topic": fixture.name("topic", short)})
+        if topic.schema_settings.schema == "_deleted-schema_":
+            return topic.schema_settings
+        if time.monotonic() >= deadline:
+            raise Inconclusive("The schema deletion did not reach the topic settings")
+        time.sleep(10)
+
+
 def deleted_schemas(fixture: SchemaFixture, snapshot: Snapshot) -> None:
     """Delete each schema while a topic still names it."""
     observation = {}
     for kind, short in (("proto", "proto-json"), ("avro", "avro-json")):
         fixture.call("schema", "delete_schema", {"name": fixture.name("schema", kind)})
-        topic = fixture.call("topic", "get_topic", {"topic": fixture.name("topic", short)})
-        settings = topic.schema_settings
+        publish = until_refused(fixture, short)
+        settings = settled_settings(fixture, short)
         observation[kind] = {
             "schema": settings.schema,
             "encoding": settings.encoding.name,
             "first_revision_id": settings.first_revision_id,
             "last_revision_id": settings.last_revision_id,
-            "publish": until_refused(fixture, short),
+            "publish": publish,
         }
     snapshot.match("deleted-schemas", observation)
 

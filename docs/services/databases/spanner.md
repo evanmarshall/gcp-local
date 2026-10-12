@@ -62,7 +62,7 @@ A request that begins a transaction inline also needs the `BeginTransaction` per
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `spanner-instance-database-admin` | 2026-10-11 | Instance and database create, DDL update and canonical form, operations, 409 duplicate, delete then 404 |
+| `spanner-instance-database-admin` | 2026-10-12 | Instance and database create, DDL update and canonical form, operations, 409 duplicate, delete then 404 |
 | `spanner-data-plane-rest` | 2026-10-12 | Session create and delete, mutation commit, read, DML in a transaction, query, denied session and query |
 
 ```sh

@@ -80,8 +80,10 @@ def plan(root: Path = ROOT) -> tuple[list[Run], list[str]]:
     storage, rest, pubsub = Run("storage"), Run("rest"), Run("pubsub")
     errors = []
     for scenario, service in recordings(root).items():
-        module = scenario_module(root, scenario, service)
-        if module is None:
+        module = scenario_module(root, scenario, service) if service != "." else None
+        if service == ".":
+            errors.append(f"{RECORDINGS}/{scenario}: move it under its service path")
+        elif module is None:
             errors.append(
                 f"{RECORDINGS}/{service}/{scenario}: no scenario with this id under "
                 f"{CONFORMANCE}/{service}/"

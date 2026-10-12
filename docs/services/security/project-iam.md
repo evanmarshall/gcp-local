@@ -21,7 +21,7 @@ Select `-services ...,resourcemanager`. Routes are `POST /v1/projects/{project}:
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `project-iam-policy-binding` | 2026-10-11 | Policy fields, 403 before grant, write changes the etag and keeps other bindings, stale etag 409 |
+| `project-iam-policy-binding` | 2026-10-12 | Policy fields, 403 before grant, write changes the etag and keeps other bindings, stale etag 409 |
 
 Binding contents are not compared; sandbox and local projects hold different grants.
 

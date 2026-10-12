@@ -1,6 +1,6 @@
 {
   "serviceaccount-lifecycle-authorization": {
-    "recorded-date": "12-10-2026, 08:35:48",
+    "recorded-date": "12-10-2026, 17:40:37",
     "recorded-content": {
       "created": {
         "client_id_equals_unique_id": true,

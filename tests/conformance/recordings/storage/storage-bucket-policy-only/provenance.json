@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T08:22:38.773733+00:00",
+  "recorded_at": "2026-10-12T17:02:45.102515+00:00",
   "scenario": {
     "id": "storage-bucket-policy-only",
     "service": "storage",
     "transport": "rest-json-v1",
-    "revision": "14e99b5a042098afb3bb12b2517a93c0cdbdb5b3be030ad68bcb7517c7160817",
+    "revision": "9da5664b5da4c83d2e71894ec7c1d0a56cebcbc8f099fd008dbe800628cc6632",
     "versions": {
       "sdk": "rclone/1.75.2 request shape",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "1b6d50e470b94757286cd9b7526cc473c513434dbe267f514384501c435a20d7",
+  "snapshot_sha256": "7e331fc150a595b029c030276cf5e18c89954e4d6fd7b201414cbecc85d56a85",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -24,7 +24,7 @@
     "contract_files": {
       "gcp_validation/services/storage/client.py": "51d69bf56a4ee0dfd955142f2a70ad38db443ee4323437861a924e70ba46f8ad",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701"
+      "gcp_validation/federation.py": "addf34416b0231baedb9747942a78952394d1592fc2ec1b2dbc0133d54ae513a"
     },
     "scope": {
       "services": [

@@ -46,7 +46,7 @@ gRPC `TestIamPermissions`, `RotateSecret`, `EnableManagedRotation`, and every re
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `secretmanager-access-lifecycle` | 2026-10-11 | Create and addVersion fields, number-form names, denied then granted access, `latest`, 64 KiB limit, disabled and destroyed access, double destroy, delete then 404 |
+| `secretmanager-access-lifecycle` | 2026-10-12 | Create and addVersion fields, number-form names, denied then granted access, `latest`, 64 KiB limit, disabled and destroyed access, double destroy, delete then 404 |
 
 ```sh
 sh scripts/check/recordings.sh

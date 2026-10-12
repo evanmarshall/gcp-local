@@ -56,7 +56,7 @@ Permissions follow the documented `compute.*` and `networkmanagement.connectivit
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `vpc-firewall-connectivity` | 2026-10-11 | Network, subnetwork, firewall, and peering field sets; async overlap and in-use errors; Connectivity Tests for IP endpoints |
+| `vpc-firewall-connectivity` | 2026-10-12 | Network, subnetwork, firewall, and peering field sets; async overlap and in-use errors; Connectivity Tests for IP endpoints |
 | `vm-connectivity-nat-peering` | 2026-10-12 | Instance and router inserts; instance-to-instance tests with firewall, peering, and Cloud NAT |
 
 ```sh

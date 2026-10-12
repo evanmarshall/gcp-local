@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T08:41:00.239284+00:00",
+  "recorded_at": "2026-10-12T17:38:18.711243+00:00",
   "scenario": {
     "id": "firestore-query-transaction",
     "service": "firestore",
     "transport": "rest-v1",
-    "revision": "ef93be7af49f42b2aa64f0df27585278ddc9038c0339b14c4f590ec504dbf085",
+    "revision": "3826990edd85df35903dcb14401c56c24fc419d4e16782a491afba5a5834a940",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "aefdfc494b7de3fa4a5df981a2885907249e3c72710030cf8cadf07c5c95e884",
+  "snapshot_sha256": "a55aba2b2b9958b7b80b1865848b5ab2269dcc0ee0114489ba6000c5489cc1e6",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/databases/firestore_query.py": "463448fa1f98b54c260072ae0a10d65583256d15a0f82e20264f31366f93fccb",
-      "gcp_validation/live_rest.py": "ab9f7a3e1c77f35ee579d2b593e5ab56d46612a3338e3ea28f19cecc1c3f8e0a",
+      "gcp_validation/services/databases/firestore_query.py": "b9f407013652b8f5c74b1022963ffaa5196ce277d1f1b2d30d574020d34b3e4c",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "tests/conformance/databases/firestore/query/conftest.py": "2118057f151bbd36607e4c8080e6ff869f7a121976bd271099148fa97506087f"
+      "tests/conformance/databases/firestore/query/conftest.py": "3c102d1ab33e9d08c35a133db76882c67039cb9ec6498919fd6d00e6c478c9be"
     },
     "scope": {
       "services": [

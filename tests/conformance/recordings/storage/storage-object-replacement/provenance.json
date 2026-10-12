@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T08:23:06.350033+00:00",
+  "recorded_at": "2026-10-12T17:03:17.622526+00:00",
   "scenario": {
     "id": "storage-object-replacement",
     "service": "storage",
     "transport": "rest-json-v1",
-    "revision": "edec59dfaa94ec544defc25fd08cb64621fb9353d414fcaef6eb41365448f084",
+    "revision": "04891f8dcf7d71667a88f647bd7a2286b1ff009fc0a512b4d714daa537a07e52",
     "versions": {
       "sdk": "stdlib-http/3.14.2;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "ab53e2ed94870fbb80e8b0e45cc1384c6401487cf0d9f5e29cacc0c494b7d276",
+  "snapshot_sha256": "b04e50cdb65249363ece2eff0da99cca7f4a86fbdde12fb698e4ac97bc715a98",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -26,7 +26,7 @@
       "gcp_validation/services/storage/normalization.py": "c76208471a34ba5e1995b9d879c7a9af28cf1f3b555644c6380cf815838fd545",
       "gcp_validation/services/storage/authorization.py": "907aaf9db8f7de7a68d5aaac6c1e6e701f7fc12e37ed77191cc75e330d1a547c",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701",
+      "gcp_validation/federation.py": "addf34416b0231baedb9747942a78952394d1592fc2ec1b2dbc0133d54ae513a",
       "tests/conformance/storage/conftest.py": "69ae08b00c47a86843aad36f3dba01dbf98928cc0bb31265ce6bfe63d52a71c5"
     },
     "scope": {

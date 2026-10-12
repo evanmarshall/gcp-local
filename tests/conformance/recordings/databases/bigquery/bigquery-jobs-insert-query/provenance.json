@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T08:31:50.713771+00:00",
+  "recorded_at": "2026-10-12T17:35:17.483802+00:00",
   "scenario": {
     "id": "bigquery-jobs-insert-query",
     "service": "bigquery",
     "transport": "rest-v1",
-    "revision": "9969cd57644bb5fde75ea8a04f6efd72536bceccb1335eac5613c510dc863553",
+    "revision": "df1af348f710176af9bee4d618e24982577fd4eaf0161e5cb7a483b5f6d70f32",
     "versions": {
       "sdk": "google-cloud-bigquery/3.46.1 request shapes",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "d0054f12a63ac2cd90977305fe6afa261edff8fe41fb9b7213e0f76d3f9669ef",
+  "snapshot_sha256": "e46aba1874789d5d93154a336e73dc92fba8e691862ec5e0df3fb53baea60933",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/databases/bigquery.py": "ed3d554d889b9bbc79e0dbae80e9341c6d3ff885fcac1fe6366e6e6b5f3414da",
-      "gcp_validation/live_rest.py": "ab9f7a3e1c77f35ee579d2b593e5ab56d46612a3338e3ea28f19cecc1c3f8e0a",
+      "gcp_validation/services/databases/bigquery.py": "b00e9a3e63e3dc49e42042c6b7ce7a29e71ca3932f4f40234617c60aae09ce65",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "tests/conformance/databases/bigquery/conftest.py": "f2da7efcae0257862324529ed038162b8c7736af4f5a73d531ac1b874a13de23"
+      "tests/conformance/databases/bigquery/conftest.py": "51022741e89f1a70218b45eaf78471a329874ee50fe8569a1040df398cc2b055"
     },
     "scope": {
       "services": [

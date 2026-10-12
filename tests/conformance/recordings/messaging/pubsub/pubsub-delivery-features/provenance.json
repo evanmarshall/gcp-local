@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T08:27:18.700023+00:00",
+  "recorded_at": "2026-10-12T17:08:11.986602+00:00",
   "scenario": {
     "id": "pubsub-delivery-features",
     "service": "pubsub",
     "transport": "grpc-v1",
-    "revision": "6d7392f852ff758b2924f72e97bd9bb6f311330a4245e2e4c9d14c0b557521df",
+    "revision": "1072a5d7bf3debece4f3362fc53936fc7c68550cc7f3f2935ae0a902f76063ea",
     "versions": {
       "sdk": "google-cloud-pubsub/2.42.0;grpcio/1.84.0;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "0320f32edb4679003578e5648836d6fea878ed433bab92ce5dfd055aed56e4bc",
+  "snapshot_sha256": "c7b19f23e1c06ec6ee5ad53f302f13617fc76e6eda56881e8a1267969057f5b6",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,12 +22,12 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/messaging/pubsub_delivery.py": "1f9a84d83d1d537cbd4c9dc2d137cb8d3b1dc0e966f0efb802f05f9cc97c2ce2",
-      "gcp_validation/services/messaging/pubsub.py": "c07923006e8ed975658b62b48906e83cfeca321cefb1a7cb5337d396a3e544dc",
-      "gcp_validation/services/messaging/pubsub_scope.py": "e219368c8408688d6c7e3dd2cd54be5c375617250c2a3b3a9b4aea52e080977a",
+      "gcp_validation/services/messaging/pubsub_delivery.py": "9b344e7edadc49299054ea8ea413a73d350c60e3227364fd6eebbd023c09c22a",
+      "gcp_validation/services/messaging/pubsub.py": "d4ac3686b736a0cf0e64a6e2ad8cd77a6d87028aa959efe00f247f3a605561e9",
+      "gcp_validation/services/messaging/pubsub_scope.py": "7b2a89a50cfe6c80ceb0eabd8d074ccb4c1594234c5cb2e4f108d06624aa0458",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701",
-      "tests/conformance/messaging/pubsub/delivery/conftest.py": "b3cc682e7a926c0d40334c1f1d97d79851e7c15270eb2df5dd733049e74f69dc"
+      "gcp_validation/federation.py": "addf34416b0231baedb9747942a78952394d1592fc2ec1b2dbc0133d54ae513a",
+      "tests/conformance/messaging/pubsub/delivery/conftest.py": "031b4837ad54d563298f2acb0835ca9547d9294a07b4db691ad8dc07fb600d0b"
     },
     "scope": {
       "services": [
