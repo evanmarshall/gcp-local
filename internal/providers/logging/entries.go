@@ -17,6 +17,7 @@ import (
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"google.golang.org/genproto/googleapis/api/monitoredres"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -56,6 +57,18 @@ type pending struct {
 	entry          *loggingpb.LogEntry
 }
 
+// defaultGlobalProject fills in the project of a "global" resource that omits
+// it, as Cloud Logging does.
+func defaultGlobalProject(resource *monitoredres.MonitoredResource, project string) {
+	if resource.GetType() != "global" || resource.GetLabels()["project_id"] != "" {
+		return
+	}
+	if resource.Labels == nil {
+		resource.Labels = map[string]string{}
+	}
+	resource.Labels["project_id"] = project
+}
+
 // prepareEntry applies the request defaults to one entry and validates it.
 func (p *Provider) prepareEntry(index int, source *loggingpb.LogEntry, request *loggingpb.WriteLogEntriesRequest, now *timestamppb.Timestamp) (pending, error) {
 	entry := proto.CloneOf(source)
@@ -76,13 +89,7 @@ func (p *Provider) prepareEntry(index int, source *loggingpb.LogEntry, request *
 	if entry.GetResource().GetType() == "" {
 		return pending{}, status.Errorf(codes.InvalidArgument, "Log entry %d has no monitored resource type", index)
 	}
-	// Cloud Logging fills in the project of a "global" resource that omits it.
-	if entry.GetResource().GetType() == "global" && entry.GetResource().GetLabels()["project_id"] == "" {
-		if entry.Resource.Labels == nil {
-			entry.Resource.Labels = map[string]string{}
-		}
-		entry.Resource.Labels["project_id"] = project
-	}
+	defaultGlobalProject(entry.GetResource(), project)
 	if len(request.GetLabels()) > 0 {
 		labels := maps.Clone(request.GetLabels())
 		maps.Copy(labels, entry.GetLabels())

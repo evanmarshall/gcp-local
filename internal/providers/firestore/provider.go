@@ -146,12 +146,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
 			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
 		}
-		denied := provider.Denied(decision, databaseResource(project))
-		if streamedREST[call.Method] {
-			// Streamed REST methods answer with a JSON array, errors included.
-			denied.JSON = []any{denied.JSON}
-		}
-		return denied, nil
+		return streamed(call.Method, provider.Denied(decision, databaseResource(project))), nil
 	}
 	call.Resource = databaseResource(project)
 	call.Location = scope.Location
@@ -188,4 +183,13 @@ func (p *Provider) ensureDatabase(scope state.Scope) {
 	}); err != nil {
 		return
 	}
+}
+
+// streamed wraps a response to a streamed REST method in a JSON array, as
+// Firestore does for errors too.
+func streamed(method string, response *gateway.RESTResponse) *gateway.RESTResponse {
+	if streamedREST[method] {
+		response.JSON = []any{response.JSON}
+	}
+	return response
 }
