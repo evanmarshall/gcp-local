@@ -2,6 +2,7 @@ package pubsub
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
@@ -175,7 +176,9 @@ func TestProjectScopesStayIsolated(t *testing.T) {
 	attach := call(subscriber+"CreateSubscription", b2, other)
 	attach.Project = secondProject
 	_, err = registry.Invoke(attach, &pb.Subscription{Name: b2, Topic: testTopic})
-	expectCode(t, err, codes.Unimplemented)
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "cross-project subscriptions") {
+		t.Fatalf("cross-project attachment = %v", err)
+	}
 	// Resetting project-b leaves project-a's index entries in place.
 	must(t, p.manager.Reset(context.Background(), keyOf(attach)))
 	if _, found := p.index.Get(canonical(testTopic)); !found {

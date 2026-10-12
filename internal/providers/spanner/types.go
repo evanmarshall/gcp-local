@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -82,12 +83,8 @@ const (
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("spanner requires registry, manager, index, and iam")
 
-func instanceName(project, instance string) string {
-	return "projects/" + project + "/instances/" + instance
-}
-
 func databaseName(project, instance, database string) string {
-	return instanceName(project, instance) + "/databases/" + database
+	return provider.InstanceName(project, instance) + "/databases/" + database
 }
 
 // fullName prefixes a canonical Spanner name for the IAM index.

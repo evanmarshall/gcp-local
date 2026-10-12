@@ -9,6 +9,7 @@ package bigtable
 
 import (
 	"errors"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"regexp"
 	"time"
 )
@@ -127,14 +128,10 @@ func tableResource(project, instance, table string) string {
 	return instanceResource(project, instance) + "/tables/" + table
 }
 
-func instanceName(project, instance string) string {
-	return "projects/" + project + "/instances/" + instance
-}
-
 func tableName(project, instance, table string) string {
-	return instanceName(project, instance) + "/tables/" + table
+	return provider.InstanceName(project, instance) + "/tables/" + table
 }
 
 func clusterName(project, instance, cluster string) string {
-	return instanceName(project, instance) + "/clusters/" + cluster
+	return provider.InstanceName(project, instance) + "/clusters/" + cluster
 }

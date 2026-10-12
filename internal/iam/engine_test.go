@@ -453,6 +453,26 @@ func TestConditionalBindingsFailClosedAndGrant(t *testing.T) {
 // TestConditionAttributesAndTimeMatchRecording mirrors storage-iam-conditions:
 // a resource.name prefix scopes a grant, the conditional binding need not be
 // first in the policy, and request.time compares as a timestamp.
+// A condition that compiles but errors at evaluation time grants nothing.
+func TestConditionEvaluationErrorFailsClosed(t *testing.T) {
+	engine, _ := setup(t)
+	if _, err := engine.SetPolicy(projectA, iam.Policy{}); err != nil {
+		t.Fatal(err)
+	}
+	condition, _ := json.Marshal(map[string]string{"title": "bad", "expression": `int(resource.name) == 1`}) //nolint:errchkjson // plain string map
+	policy := iam.Policy{Version: 3, Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{fixture}, Condition: condition}}}
+	if _, err := engine.SetPolicy(object().Parent, policy); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := engine.Authorize(call(testObjectGet, fixture, testProject), object(), nil)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("erroring condition did not deny: %v", err)
+	}
+	if len(decision.Checks) == 0 || len(decision.Checks[0].Conditions) == 0 || !strings.Contains(decision.Checks[0].Conditions[0], "could not be evaluated") {
+		t.Fatalf("no evaluation-error trace: %+v", decision.Checks)
+	}
+}
+
 func TestConditionAttributesAndTimeMatchRecording(t *testing.T) {
 	engine, _ := setup(t)
 	read := call(testObjectGet, fixture, testProject)

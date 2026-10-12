@@ -233,7 +233,7 @@ func (p *Provider) operation(ctx context.Context, id string, scope state.Scope) 
 					return nil
 				}
 			}
-			return notFound(operationName(scope, id))
+			return notFound(provider.OperationName(scope, id))
 		})
 	})
 	if err != nil {

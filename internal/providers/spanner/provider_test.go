@@ -189,13 +189,13 @@ func TestLifecycleDecoratesAndPublishesReferences(t *testing.T) {
 	if response["resourceLocation"] != "us-central1" {
 		t.Fatalf("resourceLocation = %v", response["resourceLocation"])
 	}
-	if _, found := h.index.Get(fullName(instanceName(testProject, testInstance))); !found {
+	if _, found := h.index.Get(fullName(provider.InstanceName(testProject, testInstance))); !found {
 		t.Fatal("instance reference was not published")
 	}
 	expectDatabaseDecorations(h)
 	// Deleting the instance drops its databases and their references, as in GCP.
 	h.expect(h.invoke(adminToken, http.MethodDelete, testPath, nil), http.StatusOK)
-	for _, name := range []string{instanceName(testProject, testInstance), databaseName(testProject, testInstance, testDatabase)} {
+	for _, name := range []string{provider.InstanceName(testProject, testInstance), databaseName(testProject, testInstance, testDatabase)} {
 		if _, found := h.index.Get(fullName(name)); found {
 			t.Fatalf("reference %s survived deletion", name)
 		}
@@ -243,7 +243,7 @@ func TestResetStopsBackendAndClearsScope(t *testing.T) {
 	if first.stops == 0 {
 		t.Fatal("reset did not stop the emulator")
 	}
-	if _, found := h.index.Get(fullName(instanceName(testProject, testInstance))); found {
+	if _, found := h.index.Get(fullName(provider.InstanceName(testProject, testInstance))); found {
 		t.Fatal("reset left the instance reference")
 	}
 	// The next call starts a fresh emulator and sees no state.
@@ -266,7 +266,7 @@ func TestProjectsUseIsolatedBackends(t *testing.T) {
 	}
 	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: provider.ProjectScope(peerProject)}))
 	h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)
-	if _, found := h.index.Get(fullName(instanceName(testProject, testInstance))); !found {
+	if _, found := h.index.Get(fullName(provider.InstanceName(testProject, testInstance))); !found {
 		t.Fatal("resetting one project removed another project's reference")
 	}
 }
@@ -277,7 +277,7 @@ func TestPathBindingOverridesBodyNames(t *testing.T) {
 	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, body), http.StatusOK)
 	fake := h.fake(testProject)
 	request, ok := fake.invoked[len(fake.invoked)-1].(*instancepb.CreateInstanceRequest)
-	if !ok || request.GetInstance().GetName() != instanceName(testProject, testInstance) || request.GetParent() != "projects/"+testProject {
+	if !ok || request.GetInstance().GetName() != provider.InstanceName(testProject, testInstance) || request.GetParent() != "projects/"+testProject {
 		t.Fatalf("forwarded request = %v", request)
 	}
 }
@@ -288,13 +288,13 @@ func TestUncertainCreateIsReconciledOrBlocksScope(t *testing.T) {
 	fake := h.fake(testProject)
 	fake.fault = func(method string) error {
 		if method == instanceAdmin+"CreateInstance" {
-			fake.instances[instanceName(testProject, testInstance)] = &instancepb.Instance{Name: instanceName(testProject, testInstance)}
+			fake.instances[provider.InstanceName(testProject, testInstance)] = &instancepb.Instance{Name: provider.InstanceName(testProject, testInstance)}
 			return status.Error(codes.Unavailable, "connection reset")
 		}
 		return nil
 	}
 	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, instanceBody(testProject)), http.StatusServiceUnavailable)
-	if _, found := h.index.Get(fullName(instanceName(testProject, testInstance))); !found {
+	if _, found := h.index.Get(fullName(provider.InstanceName(testProject, testInstance))); !found {
 		t.Fatal("an instance the backend holds was not reconciled into the index")
 	}
 	fake.fault = func(string) error { return status.Error(codes.Unavailable, "backend lost") }

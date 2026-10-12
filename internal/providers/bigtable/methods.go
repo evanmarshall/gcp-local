@@ -123,7 +123,7 @@ func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Sco
 	}
 	err = p.scopes.With(scope, func(s *scopeState) error {
 		if s.instances[record.Name] != nil {
-			return status.Errorf(codes.AlreadyExists, "Instance %s already exists", instanceName(scope.Project, record.Name))
+			return status.Errorf(codes.AlreadyExists, "Instance %s already exists", provider.InstanceName(scope.Project, record.Name))
 		}
 		s.instances[record.Name] = record
 		return nil
@@ -181,7 +181,7 @@ func (p *Provider) createOperation(project string, record *instanceRecord) map[s
 	result["@type"] = typeInstance
 	return map[string]any{
 		keyName: fmt.Sprintf("operations/%s/locations/%s/operations/%d",
-			instanceName(project, record.Name), record.Cluster.Location, number),
+			provider.InstanceName(project, record.Name), record.Cluster.Location, number),
 		"metadata": map[string]any{
 			"@type":       typeCreateInstanceMetadata,
 			"requestTime": provider.Stamp(record.CreatedAt),
@@ -225,7 +225,7 @@ func instanceSummary(project string, record *instanceRecord) map[string]any {
 		labels = map[string]string{}
 	}
 	return map[string]any{
-		keyName:       instanceName(project, record.Name),
+		keyName:       provider.InstanceName(project, record.Name),
 		"displayName": record.DisplayName,
 		"type":        record.Type,
 		"edition":     record.Edition,

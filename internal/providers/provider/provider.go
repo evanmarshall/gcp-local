@@ -59,6 +59,16 @@ func Invalid(message string) error {
 	return status.Error(codes.InvalidArgument, message)
 }
 
+// InstanceName is the relative name of a project-level instance (Spanner, Bigtable).
+func InstanceName(project, instance string) string {
+	return "projects/" + project + "/instances/" + instance
+}
+
+// OperationName is the relative name of a long-running operation in a location.
+func OperationName(scope state.Scope, id string) string {
+	return "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + id
+}
+
 // ProjectResource is the IAM target name of a project.
 func ProjectResource(project string) string {
 	return "//cloudresourcemanager.googleapis.com/projects/" + project

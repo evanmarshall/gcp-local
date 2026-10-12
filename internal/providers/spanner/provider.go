@@ -126,7 +126,7 @@ func (p *Provider) target(path map[string]string) iam.Target {
 	project := path[pathProject]
 	names := []string{provider.ProjectResource(project)}
 	if instance := path[pathInstance]; instance != "" {
-		names = append(names, fullName(instanceName(project, instance)))
+		names = append(names, fullName(provider.InstanceName(project, instance)))
 		if database := path[pathDatabase]; database != "" {
 			names = append(names, fullName(databaseName(project, instance, database)))
 		}
@@ -141,7 +141,7 @@ func (p *Provider) target(path map[string]string) iam.Target {
 
 // addressed names the instance or database an IAM-policy request addresses.
 func addressed(path map[string]string) string {
-	name := instanceName(path[pathProject], path[pathInstance])
+	name := provider.InstanceName(path[pathProject], path[pathInstance])
 	if database := path[pathDatabase]; database != "" {
 		name += "/databases/" + database
 	}

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -25,10 +26,6 @@ type operation struct {
 	Response         map[string]any // the Instance at completion, or nil for Empty
 }
 
-func operationName(scope state.Scope, id string) string {
-	return "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + id
-}
-
 // wire renders the operation with the Redis v1 metadata and response types.
 func (o operation) wire(scope state.Scope) map[string]any {
 	response := map[string]any{"@type": emptyType}
@@ -37,7 +34,7 @@ func (o operation) wire(scope state.Scope) map[string]any {
 		response["@type"] = instanceType
 	}
 	return map[string]any{
-		"name": operationName(scope, o.ID),
+		"name": provider.OperationName(scope, o.ID),
 		"metadata": map[string]any{
 			"@type":      operationType,
 			"createTime": o.Created.Format(time.RFC3339Nano),

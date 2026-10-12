@@ -159,7 +159,7 @@ func addressed(method string, path map[string]string) string {
 	case methodCreate, methodList:
 		return "projects/" + scope.Project + "/locations/" + scope.Location
 	case methodOperationGet:
-		return operationName(scope, path[pathOperation])
+		return provider.OperationName(scope, path[pathOperation])
 	case methodOperationList:
 		return "projects/" + scope.Project + "/locations/" + scope.Location
 	default:

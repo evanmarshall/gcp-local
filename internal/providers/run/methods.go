@@ -478,12 +478,7 @@ func (p *Provider) launchOperation(scope state.Scope, id string) *gateway.RESTRe
 // rolloutOperation names the long-running operation of a service's latest
 // rollout; a later rollout of the same service reuses the name.
 func rolloutOperation(scope state.Scope, id string) string {
-	return operationResource(scope, "rel-"+id)
-}
-
-// operationResource is the full resource name of one operation id.
-func operationResource(scope state.Scope, id string) string {
-	return "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + id
+	return provider.OperationName(scope, "rel-"+id)
 }
 
 // finishOperation records the terminal state of one operation.
@@ -753,7 +748,7 @@ func (p *Provider) operationsList(scope state.Scope) (*gateway.RESTResponse, err
 }
 
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	entry := p.operation(scope, operationResource(scope, request.Path["operation"]))
+	entry := p.operation(scope, provider.OperationName(scope, request.Path["operation"]))
 	if entry == nil {
 		return provider.WireError(404, "NOT_FOUND", "operation is not found"), nil
 	}

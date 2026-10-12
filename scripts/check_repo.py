@@ -108,6 +108,51 @@ def check_tooling_index(errors: list[str]) -> None:
     )
 
 
+MAX_TRACKED_BYTES = 1_000_000
+GO_FUNCTION = re.compile(r"^func (\w+)\(([^)]*)\)([^{\n]*)\{\n(.*?)^\}", re.MULTILINE | re.DOTALL)
+# Functions whose text matches across providers but whose types are each
+# package's own, so they are not the same helper.
+DISTINCT_PER_PROVIDER = {"driverOf": "asserts the package's own driver interface"}
+
+
+def check_tracked_files(errors: list[str], paths: list[Path]) -> None:
+    """Reject committed binaries, non-script executables, and large files."""
+    modes = subprocess.check_output([GIT, "ls-files", "-s"], cwd=ROOT).decode().splitlines()
+    executable = {line.split("\t", 1)[1] for line in modes if line.startswith("100755")}
+    for path in paths:
+        if not path.is_file():
+            continue
+        label = str(path.relative_to(ROOT))
+        size = path.stat().st_size
+        if size > MAX_TRACKED_BYTES:
+            errors.append(f"{label}: {size} bytes; keep tracked files under {MAX_TRACKED_BYTES}")
+        head = path.read_bytes()[:8192]
+        if b"\0" in head:
+            errors.append(f"{label}: binary file; build it instead of committing it")
+        elif label in executable and not head.startswith(b"#!"):
+            errors.append(f"{label}: executable without a shebang")
+
+
+def check_provider_duplicates(errors: list[str]) -> None:
+    """Fail when an identical function is declared in two providers."""
+    seen: dict[str, set[str]] = {}
+    for path in sorted((ROOT / "internal/providers").glob("*/*.go")):
+        if path.parent.name == "provider" or path.name.endswith("_test.go"):
+            continue
+        for match in GO_FUNCTION.finditer(path.read_text()):
+            name, params, results, body = match.groups()
+            if name in DISTINCT_PER_PROVIDER:
+                continue
+            key = " ".join(f"{params}{results}{{{body}".split())
+            seen.setdefault(key, set()).add(f"{path.parent.name}.{name}")
+    errors.extend(
+        "identical function in several providers; move it to internal/providers/provider: "
+        + ", ".join(sorted(names))
+        for names in seen.values()
+        if len({name.split(".")[0] for name in names}) > 1
+    )
+
+
 def skill_error(path: Path, content: str) -> str | None:
     """Return the first skill-metadata defect, or None when the skill is sound."""
     match = re.match(r"\A---\n(.*?)\n---\n", content, re.DOTALL)
@@ -151,6 +196,8 @@ def main() -> int:
     )
     paths = [ROOT / name for name in sorted(set(files)) if name]
     check_documents(errors, paths)
+    check_tracked_files(errors, paths)
+    check_provider_duplicates(errors)
     check_coverage(errors)
     check_tooling_index(errors)
     skills = sorted(

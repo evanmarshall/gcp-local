@@ -169,7 +169,7 @@ func TestDataPlaneThroughAuthenticatedGateway(t *testing.T) {
 		t.Fatalf("ReadModifyWriteRow = %v, %v", row, err)
 	}
 	ping := bigtablepb.NewBigtableClient(d.conn(t, userActor))
-	if _, err := ping.PingAndWarm(ctx, &bigtablepb.PingAndWarmRequest{Name: instanceName(testProject, testInstance)}); err != nil {
+	if _, err := ping.PingAndWarm(ctx, &bigtablepb.PingAndWarmRequest{Name: provider.InstanceName(testProject, testInstance)}); err != nil {
 		t.Fatalf("PingAndWarm: %v", err)
 	}
 }
@@ -230,7 +230,7 @@ func TestDataPlaneDeniedBeforeBackend(t *testing.T) {
 		_, results["CheckAndMutateRow"] = client.CheckAndMutateRow(ctx, &bigtablepb.CheckAndMutateRowRequest{TableName: name, RowKey: []byte("r"), TrueMutations: mutation})
 		_, results["ReadModifyWriteRow"] = client.ReadModifyWriteRow(ctx, &bigtablepb.ReadModifyWriteRowRequest{TableName: name, RowKey: []byte("r"),
 			Rules: []*bigtablepb.ReadModifyWriteRule{{FamilyName: familyOne, ColumnQualifier: []byte("n"), Rule: &bigtablepb.ReadModifyWriteRule_IncrementAmount{IncrementAmount: 1}}}})
-		_, results["PingAndWarm"] = client.PingAndWarm(ctx, &bigtablepb.PingAndWarmRequest{Name: instanceName(testProject, testInstance)})
+		_, results["PingAndWarm"] = client.PingAndWarm(ctx, &bigtablepb.PingAndWarmRequest{Name: provider.InstanceName(testProject, testInstance)})
 		results["ReadRows"] = drain(client.ReadRows(ctx, &bigtablepb.ReadRowsRequest{TableName: name}))
 		results["SampleRowKeys"] = drain(client.SampleRowKeys(ctx, &bigtablepb.SampleRowKeysRequest{TableName: name}))
 		results["MutateRows"] = drain(client.MutateRows(ctx, &bigtablepb.MutateRowsRequest{TableName: name,

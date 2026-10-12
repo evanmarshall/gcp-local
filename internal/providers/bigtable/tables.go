@@ -30,7 +30,7 @@ type tableAdmin struct {
 
 // instance is the canonical parent of the request's tables.
 func (t tableAdmin) instance() string {
-	return instanceName(t.scope.Project, t.request.Path["instance"])
+	return provider.InstanceName(t.scope.Project, t.request.Path["instance"])
 }
 
 // table is the canonical name of the request's table.

@@ -11,6 +11,7 @@ import (
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -43,7 +44,7 @@ func configPath(path map[string]string) string {
 	return projectPath(path) + "/instanceConfigs/" + path["instanceConfig"]
 }
 func instancePath(path map[string]string) string {
-	return instanceName(path[pathProject], path[pathInstance])
+	return provider.InstanceName(path[pathProject], path[pathInstance])
 }
 func databasePath(path map[string]string) string {
 	return databaseName(path[pathProject], path[pathInstance], path[pathDatabase])
