@@ -101,19 +101,11 @@ func (p *Provider) listNetworks(scope state.Scope) (*gateway.RESTResponse, error
 func (p *Provider) deleteNetwork(_ gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	name := request.Path["network"]
 	target := selfLink(scope.Project, "networks", name)
-	var missing bool
-	var user string
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if s.networks[name] == nil {
-			missing = true
-			return nil
-		}
-		if user = s.networkUser(name); user == "" {
-			delete(s.networks, name)
-		}
-		return nil
-	})
-	if missing {
+	found, user := p.removeUnlessUsed(scope,
+		func(s *scopeState) bool { return s.networks[name] != nil },
+		func(s *scopeState) string { return s.networkUser(name) },
+		func(s *scopeState) { delete(s.networks, name) })
+	if !found {
 		return nil, notFound(kindNetwork, name)
 	}
 	if user != "" {
@@ -126,26 +118,56 @@ func (p *Provider) deleteNetwork(_ gateway.Call, request *gateway.RESTRequest, s
 	return p.newOperation(scope, "global", "", "delete", target)
 }
 
+// removeUnlessUsed deletes one resource under the scope lock unless another
+// resource still uses it. It reports whether the resource existed and, when
+// the delete was refused, the resource that uses it.
+func (p *Provider) removeUnlessUsed(scope state.Scope, exists func(*scopeState) bool,
+	user func(*scopeState) string, remove func(*scopeState),
+) (bool, string) {
+	found, usedBy := false, ""
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		if found = exists(s); !found {
+			return nil
+		}
+		if usedBy = user(s); usedBy == "" {
+			remove(s)
+		}
+		return nil
+	})
+	return found, usedBy
+}
+
 // networkUser names one resource that still references the network, if any.
 func (s *scopeState) networkUser(network string) string {
-	for _, name := range sortedKeys(s.subnetworks) {
-		if s.subnetworks[name].Network == network {
-			return "subnetworks/" + name
+	for _, user := range []string{
+		firstUser("subnetworks", s.subnetworks, func(r *subnetworkRecord) bool { return r.Network == network }),
+		firstUser("firewalls", s.firewalls, func(r *firewallRecord) bool { return r.Network == network }),
+		firstUser("routes", s.routes, func(r *routeRecord) bool { return r.Network == network }),
+		firstUser("routers", s.routers, func(r *routerRecord) bool { return r.Network == network }),
+		s.instanceUser(func(r *instanceRecord) bool { return r.Network == network }),
+	} {
+		if user != "" {
+			return user
 		}
 	}
-	for _, name := range sortedKeys(s.firewalls) {
-		if s.firewalls[name].Network == network {
-			return "firewalls/" + name
+	return ""
+}
+
+// firstUser names the first record, in name order, that uses a resource.
+func firstUser[T any](kind string, records map[string]T, uses func(T) bool) string {
+	for _, name := range sortedKeys(records) {
+		if uses(records[name]) {
+			return kind + "/" + name
 		}
 	}
-	for _, name := range sortedKeys(s.routes) {
-		if s.routes[name].Network == network {
-			return "routes/" + name
-		}
-	}
-	for _, name := range sortedKeys(s.routers) {
-		if s.routers[name].Network == network {
-			return "routers/" + name
+	return ""
+}
+
+// instanceUser names the first instance, in zone/name order, that uses a resource.
+func (s *scopeState) instanceUser(uses func(*instanceRecord) bool) string {
+	for _, key := range sortedKeys(s.instances) {
+		if record := s.instances[key]; uses(record) {
+			return "zones/" + record.Zone + "/instances/" + record.Name
 		}
 	}
 	return ""
@@ -282,12 +304,28 @@ func (p *Provider) listSubnetworks(scope state.Scope) (*gateway.RESTResponse, er
 	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
 }
 
-// deleteSubnetwork removes one subnetwork.
+// deleteSubnetwork removes one subnetwork. Like a network, a subnetwork that
+// an instance still uses is refused in the finished operation and kept.
 func (p *Provider) deleteSubnetwork(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	return p.removeRegionResource(request, scope, "subnetworks", kindSubnetwork,
-		func(s *scopeState, name string) { delete(s.subnetworks, name) },
-		func(s *scopeState, name string) bool { return s.subnetworks[name] != nil },
-	)
+	name, region := request.Path["subnetwork"], request.Path["region"]
+	target := regionalSelfLink(scope.Project, region, "subnetworks", name)
+	found, user := p.removeUnlessUsed(scope,
+		func(s *scopeState) bool { return s.subnetworks[name] != nil },
+		func(s *scopeState) string {
+			return s.instanceUser(func(r *instanceRecord) bool { return r.Subnetwork == name })
+		},
+		func(s *scopeState) { delete(s.subnetworks, name) })
+	if !found {
+		return nil, notFound(kindSubnetwork, name)
+	}
+	if user != "" {
+		return p.failedOperation(scope, "region", region, "delete", target, &operationError{
+			Code:    "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE",
+			Message: "The subnetwork resource '" + target + "' is already being used by '" + user + "'",
+		})
+	}
+	_ = p.index.Remove(serviceName, scope, regionalName(scope.Project, region, kindSubnetwork, name))
+	return p.newOperation(scope, "region", region, "delete", target)
 }
 
 // removeRegionResource deletes one regional resource, unregisters it, and
@@ -421,6 +459,7 @@ func (p *Provider) storeFirewall(scope state.Scope, body map[string]any, network
 		created.SourceRanges = stringListOf(body["sourceRanges"])
 		created.DestinationRanges = stringListOf(body["destinationRanges"])
 		created.TargetTags = stringListOf(body["targetTags"])
+		created.SourceTags = stringListOf(body["sourceTags"])
 		created.Priority = intOf(body[keyPriority], 1000)
 		created.Disabled = boolOf(body["disabled"], false)
 		return nil
@@ -656,34 +695,42 @@ func (p *Provider) parseNATs(raw any, scope state.Scope) ([]natRecord, error) {
 	return nats, nil
 }
 
-// parseNAT validates one NAT gateway entry of a router body.
+// NAT source selectors and the address allocation the recording used.
+const (
+	listOfSubnetworks = "LIST_OF_SUBNETWORKS"
+	natAutoOnly       = "AUTO_ONLY"
+)
+
+// parseNAT validates one NAT gateway entry of a router body in the Compute
+// v1 shape: sourceSubnetworkIpRangesToNat, and for LIST_OF_SUBNETWORKS the
+// subnetworks[].name references. Manually allocated NAT addresses are not
+// modeled.
 func (p *Provider) parseNAT(raw any, scope state.Scope) (natRecord, error) {
 	gateway, ok := raw.(map[string]any)
 	if !ok {
 		return natRecord{}, statusInvalid("Invalid NAT gateway entry")
 	}
-	name := textOf(gateway["name"])
-	if name == "" {
-		return natRecord{}, statusInvalid("A NAT gateway requires a name")
+	record := natRecord{
+		Name: textOf(gateway["name"]), Allocation: textOr(gateway["natIpAllocateOption"], natAutoOnly),
+		Ranges: textOf(gateway["sourceSubnetworkIpRangesToNat"]),
 	}
-	ranges, ok := gateway["sourceSubnetworkIpRanges"].([]any)
-	if !ok || len(ranges) == 0 {
-		return natRecord{}, statusInvalid("A NAT gateway requires sourceSubnetworkIpRanges")
+	if !uidPattern.MatchString(record.Name) || record.Ranges == "" {
+		return natRecord{}, statusInvalid("A NAT gateway requires a name and sourceSubnetworkIpRangesToNat")
 	}
-	subnets := make([]string, 0, len(ranges))
-	for _, value := range ranges {
-		subnet := textOf(value)
-		if subnet == allSubnetworks {
-			subnets = append(subnets, allSubnetworks)
-			continue
-		}
-		subnet = subnetName(subnet)
+	if record.Allocation != natAutoOnly {
+		return natRecord{}, gap("NAT gateways with manually allocated addresses are not modeled")
+	}
+	for _, entry := range listOfMaps(gateway["subnetworks"]) {
+		subnet := subnetName(textOf(entry["name"]))
 		if !p.subnetworkExists(scope, subnet) {
 			return natRecord{}, missingReference()
 		}
-		subnets = append(subnets, subnet)
+		record.Subnetworks = append(record.Subnetworks, subnet)
 	}
-	return natRecord{Name: name, SourceSubnetworks: subnets}, nil
+	if (record.Ranges == listOfSubnetworks) != (len(record.Subnetworks) > 0) {
+		return natRecord{}, statusInvalid("Only a LIST_OF_SUBNETWORKS NAT gateway names subnetworks")
+	}
+	return record, nil
 }
 
 // subnetName strips a subnetwork self-link or name into the plain name.

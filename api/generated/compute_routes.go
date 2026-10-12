@@ -36,4 +36,9 @@ var ComputeRoutes = []Route{
 	{"compute.globalOperations.get", "GET", "/compute/v1/projects/{project}/global/operations/{operation}", false, false},
 	{"compute.globalOperations.list", "GET", "/compute/v1/projects/{project}/global/operations", false, false},
 	{"compute.regionOperations.get", "GET", "/compute/v1/projects/{project}/regions/{region}/operations/{operation}", false, false},
+	{"compute.instances.insert", "POST", "/compute/v1/projects/{project}/zones/{zone}/instances", true, false},
+	{"compute.instances.list", "GET", "/compute/v1/projects/{project}/zones/{zone}/instances", false, false},
+	{"compute.instances.get", "GET", "/compute/v1/projects/{project}/zones/{zone}/instances/{instance}", false, false},
+	{"compute.instances.delete", "DELETE", "/compute/v1/projects/{project}/zones/{zone}/instances/{instance}", false, false},
+	{"compute.zoneOperations.get", "GET", "/compute/v1/projects/{project}/zones/{zone}/operations/{operation}", false, false},
 }

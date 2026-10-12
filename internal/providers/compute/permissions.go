@@ -42,6 +42,18 @@ var permissions = map[string]string{
 	methodOperationsGet:         "compute.globalOperations.get",
 	methodOperationsList:        "compute.globalOperations.list",
 	methodRegionOperationsGet:   "compute.regionOperations.get",
+	methodInstancesInsert:       "compute.instances.create",
+	methodInstancesGet:          "compute.instances.get",
+	methodInstancesList:         "compute.instances.list",
+	methodInstancesDelete:       "compute.instances.delete",
+	methodZoneOperationsGet:     "compute.zoneOperations.get",
+}
+
+// extraPermissions are the documented additional checks of a method: creating
+// an instance also creates its boot disk and attaches it to a subnetwork. Each
+// permission is in the pinned roles/compute.admin role.
+var extraPermissions = map[string][]string{
+	methodInstancesInsert: {"compute.disks.create", "compute.subnetworks.use"},
 }
 
 // Method name constants; the generated route table uses the same identifiers.
@@ -79,6 +91,11 @@ const (
 	methodOperationsGet         = "compute.globalOperations.get"
 	methodOperationsList        = "compute.globalOperations.list"
 	methodRegionOperationsGet   = "compute.regionOperations.get"
+	methodInstancesInsert       = "compute.instances.insert"
+	methodInstancesGet          = "compute.instances.get"
+	methodInstancesList         = "compute.instances.list"
+	methodInstancesDelete       = "compute.instances.delete"
+	methodZoneOperationsGet     = "compute.zoneOperations.get"
 )
 
 // methodNames lists every registered method.
@@ -94,13 +111,15 @@ func methodNames() []string {
 		methodConnectivityCreate, methodConnectivityRerun,
 		methodConnectivityList, methodConnectivityGet, methodConnectivityDelete,
 		methodOperationsGet, methodOperationsList, methodRegionOperationsGet,
+		methodInstancesInsert, methodInstancesGet, methodInstancesList, methodInstancesDelete,
+		methodZoneOperationsGet,
 	}
 }
 
 // registerPermissions binds every method to its permission.
 func registerPermissions(engine *iam.Engine) error {
 	for method, permission := range permissions {
-		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
+		if err := engine.Register(method, iam.Rule{Baseline: append([]string{permission}, extraPermissions[method]...)}); err != nil {
 			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}

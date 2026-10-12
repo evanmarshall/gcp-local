@@ -50,8 +50,8 @@ here is a cloud-fidelity claim yet (#13 tracks that work).
 
 The reachability analyzer ([networking.md](networking.md)) evaluates flows
 against the modeled VPC topology and also backs the Network Management
-Connectivity Tests API. It models no Cloud Run or VM endpoints, so it never
-reports a Cloud Run service as reachable.
+Connectivity Tests API. It models VM instances as endpoints but no Cloud Run
+endpoints, so it never reports a Cloud Run service as reachable.
 
 ## Ingress scope
 

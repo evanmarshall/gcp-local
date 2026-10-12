@@ -2,7 +2,9 @@ package compute
 
 import (
 	"encoding/json"
+	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -15,9 +17,10 @@ import (
 // delete, and rerun. Tests are analyzed when created or rerun and store that
 // result, as GCP does; reads do not re-evaluate the topology.
 
-// connectivityEndpoint is one IP-address endpoint of a test.
+// connectivityEndpoint is one IP-address or VM-instance endpoint of a test.
 type connectivityEndpoint struct {
 	IPAddress string `json:"ipAddress"`
+	Instance  string `json:"instance"`
 	Network   string `json:"network"`
 	ProjectID string `json:"projectId"`
 	Port      int    `json:"port"`
@@ -72,8 +75,7 @@ func parseConnectivity(request *gateway.RESTRequest, project, id string) (*named
 		}
 	}
 	protocol := textOr(spec.Protocol, "TCP")
-	flowSpec, err := newFlow(project, spec.Source.IPAddress, spec.Source.Network, spec.Destination.IPAddress,
-		protocol, spec.Destination.Port)
+	flowSpec, err := connectivityFlow(project, protocol, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +87,56 @@ func parseConnectivity(request *gateway.RESTRequest, project, id string) (*named
 		Name: id, Description: spec.Description, Source: source, Destination: destination,
 		Spec: flowSpec, Protocol: protocol,
 	}, nil
+}
+
+// connectivityFlow builds the analyzer flow of a test. Instance endpoints are
+// resolved by the analyzer; an endpoint without an instance needs an address.
+func connectivityFlow(project, protocol string, spec connectivityRequest) (flow, error) {
+	source, err := instanceEndpoint(project, spec.Source.Instance)
+	if err != nil {
+		return flow{}, err
+	}
+	destination, err := instanceEndpoint(project, spec.Destination.Instance)
+	if err != nil {
+		return flow{}, err
+	}
+	if source == "" && destination == "" {
+		return newFlow(project, spec.Source.IPAddress, spec.Source.Network, spec.Destination.IPAddress, protocol, spec.Destination.Port)
+	}
+	result := flow{
+		project: project, sourceInstance: source, sourceNetwork: networkName(spec.Source.Network), destInstance: destination,
+		protocol: strings.ToLower(protocol), port: spec.Destination.Port,
+	}
+	for _, endpoint := range []struct {
+		instance, address string
+		target            *net.IP
+	}{{source, spec.Source.IPAddress, &result.sourceIP}, {destination, spec.Destination.IPAddress, &result.destIP}} {
+		if endpoint.instance != "" {
+			continue
+		}
+		if *endpoint.target = net.ParseIP(strings.TrimSpace(endpoint.address)); *endpoint.target == nil {
+			return flow{}, statusInvalid("Connectivity test endpoints require a valid IP address or an instance")
+		}
+	}
+	return result, nil
+}
+
+// instanceEndpoint parses an instance URI (projects/P/zones/Z/instances/N,
+// optionally a full URL) into its zone/name key. Instances of other projects
+// are an explicit gap.
+func instanceEndpoint(project, reference string) (string, error) {
+	if reference == "" {
+		return "", nil
+	}
+	_, rest, _ := strings.Cut(reference, "projects/")
+	parts := strings.Split(rest, "/")
+	if len(parts) != 5 || parts[1] != "zones" || parts[3] != "instances" || !uidPattern.MatchString(parts[4]) {
+		return "", statusInvalid("Invalid instance endpoint " + reference)
+	}
+	if parts[0] != project {
+		return "", gap("cross-project connectivity test endpoints are not modeled")
+	}
+	return instanceKey(parts[2], parts[4]), nil
 }
 
 // createConnectivity analyzes and stores one test named by ?testId=, then
@@ -201,9 +253,9 @@ func connectivityDocument(project string, record *namedTest) map[string]any {
 	verified := stampRFC3339(record.UpdatedAt)
 	trace := map[string]any{
 		"endpointInfo": map[string]any{
-			"sourceIp": record.Spec.sourceIP.String(), "destinationIp": record.Spec.destIP.String(),
+			"sourceIp": record.Result.sourceIP.String(), "destinationIp": record.Result.destIP.String(),
 			"protocol": record.Protocol, "destinationPort": record.Spec.port,
-			"sourceNetworkUri": relativeNetwork(project, record.Result.sourceNetwork()),
+			"sourceNetworkUri": relativeNetwork(project, record.Result.network),
 		},
 		"steps": record.Result.steps, "forwardTraceId": 1,
 	}
@@ -220,16 +272,6 @@ func connectivityDocument(project string, record *namedTest) map[string]any {
 	}
 	setText(document, keyDescription, record.Description)
 	return document
-}
-
-// sourceNetwork names the network of the analysis's first step.
-func (a analysis) sourceNetwork() string {
-	if len(a.steps) == 0 {
-		return ""
-	}
-	network, _ := a.steps[0]["network"].(map[string]any)
-	name, _ := network["displayName"].(string)
-	return name
 }
 
 // stampRFC3339 renders the Network Management timestamp shape.

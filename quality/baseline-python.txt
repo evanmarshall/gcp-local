@@ -19,6 +19,7 @@
 1	ANN204	gcp_validation/sdk_storage.py
 1	ANN204	gcp_validation/serviceaccounts.py
 1	ANN204	gcp_validation/spanner.py
+1	ANN204	gcp_validation/vm_connectivity.py
 1	ANN205	gcp_validation/normalization.py
 1	ANN206	gcp_validation/live_rest.py
 1	ANN206	gcp_validation/pubsub_scope.py
@@ -37,6 +38,7 @@
 1	D101	gcp_validation/pubsub_scope.py
 1	D102	gcp_validation/live_paths.py
 1	D102	gcp_validation/sdk_storage.py
+1	D102	gcp_validation/vm_connectivity.py
 1	D103	gcp_validation/federation.py
 1	D103	gcp_validation/pubsub.py
 1	D103	gcp_validation/pubsub_scope.py
@@ -53,14 +55,17 @@
 1	D107	gcp_validation/sdk_storage.py
 1	D107	gcp_validation/serviceaccounts.py
 1	D107	gcp_validation/spanner.py
+1	D107	gcp_validation/vm_connectivity.py
 1	D205	gcp_validation/bigtable.py
 1	D205	gcp_validation/cloudkms.py
 1	D205	gcp_validation/networking.py
 1	D205	gcp_validation/spanner.py
+1	D205	gcp_validation/vm_connectivity.py
 1	D209	gcp_validation/bigtable.py
 1	D209	gcp_validation/cloudkms.py
 1	D209	gcp_validation/networking.py
 1	D209	gcp_validation/spanner.py
+1	D209	gcp_validation/vm_connectivity.py
 1	D401	gcp_validation/artifactregistry.py
 1	D401	gcp_validation/bigquery.py
 1	D401	gcp_validation/bigtable.py
@@ -73,6 +78,7 @@
 1	D401	gcp_validation/secretmanager.py
 1	D401	gcp_validation/serviceaccounts.py
 1	D401	gcp_validation/spanner.py
+1	D401	gcp_validation/vm_connectivity.py
 1	E501	gcp_validation/normalization.py
 1	E501	tests/conformance/artifactregistry/conftest.py
 1	E501	tests/conformance/artifactregistry/test_artifactregistry.py
@@ -147,6 +153,7 @@
 1	T201	gcp_validation/serviceaccounts.py
 1	T201	gcp_validation/spanner.py
 1	T201	gcp_validation/storage.py
+1	T201	gcp_validation/vm_connectivity.py
 1	TRY004	gcp_validation/federation.py
 1	TRY004	gcp_validation/live_rest.py
 1	TRY004	gcp_validation/normalization.py
@@ -162,6 +169,7 @@
 11	E501	gcp_validation/serviceaccounts.py
 11	PLC0415	gcp_validation/pubsub.py
 13	D102	gcp_validation/pubsub.py
+13	E501	gcp_validation/vm_connectivity.py
 14	ANN201	gcp_validation/live_rest.py
 14	D102	gcp_validation/live_rest.py
 14	E501	gcp_validation/spanner.py
@@ -178,6 +186,7 @@
 19	ANN001	gcp_validation/bigtable.py
 19	ANN001	gcp_validation/cloudtasks.py
 19	ANN001	gcp_validation/projectiam.py
+19	ANN001	gcp_validation/vm_connectivity.py
 19	E501	gcp_validation/bigtable.py
 2	ANN002	gcp_validation/sdk_storage.py
 2	ANN003	gcp_validation/sdk_storage.py
@@ -193,6 +202,7 @@
 2	D103	gcp_validation/secretmanager.py
 2	D103	gcp_validation/serviceaccounts.py
 2	D103	gcp_validation/storage.py
+2	D103	gcp_validation/vm_connectivity.py
 2	D107	gcp_validation/storage.py
 2	E501	gcp_validation/conditions.py
 2	E501	gcp_validation/pubsub_scope.py
@@ -200,8 +210,10 @@
 2	E501	tests/conformance/cloudtasks/test_cloudtasks.py
 2	E501	tests/conformance/networking/test_networking.py
 2	E501	tests/conformance/projectiam/conftest.py
+2	E501	tests/conformance/vmconnectivity/test_vmconnectivity.py
 2	FURB162	tests/conformance/test_storage_bucket_updates.py
 2	I001	gcp_validation/pubsub.py
+2	PT028	gcp_validation/vm_connectivity.py
 20	ANN201	gcp_validation/secretmanager.py
 20	E501	gcp_validation/cloudkms.py
 23	ANN001	gcp_validation/cloudkms.py
@@ -278,6 +290,7 @@
 6	S101	gcp_validation/pubsub.py
 7	ANN001	gcp_validation/authorization.py
 7	ANN001	gcp_validation/conditions.py
+7	ANN201	gcp_validation/vm_connectivity.py
 7	E501	tests/conformance/test_storage_bucket_updates.py
 8	ANN001	gcp_validation/normalization.py
 8	ANN001	gcp_validation/sandbox.py

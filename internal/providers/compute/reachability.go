@@ -18,7 +18,8 @@ import (
 // than reporting a firewall verdict, and a private destination reached only
 // through the default route drops with PRIVATE_TRAFFIC_TO_INTERNET. Anything
 // the recording does not establish (custom-route next hops, external
-// destinations, NAT) reports a coverage gap instead of a verdict.
+// destinations, NAT) reports a coverage gap instead of a verdict. Flows that
+// name VM instances follow a separate recording; see reachability_instance.go.
 
 // Connectivity Tests result values.
 const (
@@ -44,23 +45,30 @@ type reachabilityRequest struct {
 	Port          int    `json:"port"`
 }
 
-// flow is one validated flow the analyzer evaluates.
+// flow is one validated flow the analyzer evaluates. An endpoint is either an
+// IP address or a zone/name instance key; the analyzer resolves an instance
+// endpoint to its internal address.
 type flow struct {
-	project       string
-	sourceIP      net.IP
-	sourceNetwork string // network name; empty resolves it from the source subnet
-	destIP        net.IP
-	protocol      string // lower case, as firewall terms spell it
-	port          int
+	project        string
+	sourceIP       net.IP
+	sourceNetwork  string // network name; empty resolves it from the source subnet
+	sourceInstance string
+	destIP         net.IP
+	destInstance   string
+	protocol       string // lower case, as firewall terms spell it
+	port           int
 }
 
 // analysis is the analyzer outcome: a Connectivity Tests result with its
 // steps, or a coverage gap when the flow needs topology that is not modeled.
 type analysis struct {
-	result string
-	steps  []map[string]any
-	reason string
-	gap    string
+	result   string
+	steps    []map[string]any
+	reason   string
+	gap      string
+	network  string // the source network
+	sourceIP net.IP // the resolved endpoint addresses
+	destIP   net.IP
 }
 
 // newFlow validates the addresses of one flow specification.
@@ -154,9 +162,23 @@ func (p *Provider) analyze(spec flow) analysis {
 	return outcome
 }
 
-// analyze walks the recorded step order: source network, egress firewall,
-// route, then the final state.
+// analyze evaluates one flow: instance endpoints follow the VM recording and
+// IP-address endpoints the earlier address-only recording.
 func (s *scopeState) analyze(spec flow) analysis {
+	if spec.sourceInstance != "" || spec.destInstance != "" {
+		return s.analyzeInstances(spec)
+	}
+	if s.instanceWithIP(spec.sourceIP) != nil || s.instanceWithIP(spec.destIP) != nil {
+		return analysis{gap: "An IP-address endpoint that belongs to a modeled instance is not recorded; name the instance"}
+	}
+	outcome := s.analyzeAddresses(spec)
+	outcome.sourceIP, outcome.destIP = spec.sourceIP, spec.destIP
+	return outcome
+}
+
+// analyzeAddresses walks the recorded step order for IP-address endpoints:
+// source network, egress firewall, route, then the final state.
+func (s *scopeState) analyzeAddresses(spec flow) analysis {
 	source := s.sourceSubnet(spec)
 	if source == nil {
 		return analysis{gap: "The source address is not inside a modeled subnetwork of the source network"}
@@ -164,15 +186,15 @@ func (s *scopeState) analyze(spec flow) analysis {
 	network := source.Network
 	steps := []map[string]any{startStep(spec.project, source)}
 	rule := s.egressRule(network, spec)
-	steps = append(steps, firewallStep(spec.project, network, rule))
+	steps = append(steps, firewallStep(spec.project, network, directionEgress, rule))
 	if rule != nil && len(rule.Denied) > 0 {
 		steps = append(steps, finalStep(spec, network, "DROP", "drop", "FIREWALL_RULE"))
-		return analysis{result: resultUnreachable, steps: steps, reason: "Egress firewall rule " + rule.Name + " denies the flow"}
+		return analysis{result: resultUnreachable, steps: steps, network: network, reason: "Egress firewall rule " + rule.Name + " denies the flow"}
 	}
 	if subnet := s.subnetContaining(network, spec.destIP); subnet != nil {
 		steps = append(steps, subnetRouteStep(spec.project, subnet),
 			finalStep(spec, network, "ABORT", "abort", "UNKNOWN_IP"))
-		return analysis{result: resultUndetermined, steps: steps, reason: "No modeled endpoint has the destination address"}
+		return analysis{result: resultUndetermined, steps: steps, network: network, reason: "No modeled endpoint has the destination address"}
 	}
 	if route := s.customRoute(network, spec.destIP); route != "" {
 		return analysis{gap: "Static route " + route + " matches the destination; route next hops are not modeled"}
@@ -182,7 +204,7 @@ func (s *scopeState) analyze(spec flow) analysis {
 	}
 	steps = append(steps, defaultRouteStep(spec.project, network),
 		finalStep(spec, network, "DROP", "drop", "PRIVATE_TRAFFIC_TO_INTERNET"))
-	return analysis{result: resultUnreachable, steps: steps, reason: "The default route sends private traffic to the internet"}
+	return analysis{result: resultUnreachable, steps: steps, network: network, reason: "The default route sends private traffic to the internet"}
 }
 
 // sourceSubnet finds the subnetwork that contains the source address, within
@@ -225,11 +247,15 @@ func (s *scopeState) customRoute(network string, ip net.IP) string {
 // tags never match: tagged endpoints are not modeled. At equal priority a deny
 // rule takes precedence, as in VPC firewall evaluation.
 func (s *scopeState) egressRule(network string, spec flow) *firewallRecord {
+	return s.decidingRule(network, directionEgress, spec, egressMatches)
+}
+
+// decidingRule returns the highest-priority enabled untagged rule of one
+// direction that matches the flow, deny first at equal priority, or nil.
+func (s *scopeState) decidingRule(network, direction string, spec flow, matches func(*firewallRecord, flow) bool) *firewallRecord {
 	var rules []*firewallRecord
 	for _, name := range sortedKeys(s.firewalls) {
-		rule := s.firewalls[name]
-		if rule.Network == network && rule.Direction == directionEgress && !rule.Disabled &&
-			len(rule.TargetTags) == 0 && egressMatches(rule, spec) {
+		if rule := s.firewalls[name]; rule.applies(network, direction, false) && matches(rule, spec) {
 			rules = append(rules, rule)
 		}
 	}
@@ -245,6 +271,13 @@ func (s *scopeState) egressRule(network string, spec flow) *firewallRecord {
 	return rules[0]
 }
 
+// applies reports whether an enabled rule of the network and direction is
+// tagged (source or target tags) exactly when tagged is set.
+func (rule *firewallRecord) applies(network, direction string, tagged bool) bool {
+	hasTags := len(rule.TargetTags) > 0 || len(rule.SourceTags) > 0
+	return rule.Network == network && rule.Direction == direction && !rule.Disabled && hasTags == tagged
+}
+
 // Firewall rule directions.
 const (
 	directionIngress = "INGRESS"
@@ -257,15 +290,7 @@ func egressMatches(rule *firewallRecord, spec flow) bool {
 	if !termsMatch(rule.Allowed, spec) && !termsMatch(rule.Denied, spec) {
 		return false
 	}
-	if len(rule.DestinationRanges) == 0 {
-		return true
-	}
-	for _, cidr := range rule.DestinationRanges {
-		if cidrContains(cidr, spec.destIP) {
-			return true
-		}
-	}
-	return false
+	return rangesCover(rule.DestinationRanges, spec.destIP)
 }
 
 // termsMatch reports whether one allowed/denied term list covers the flow.
@@ -326,7 +351,7 @@ func startStep(project string, subnet *subnetworkRecord) map[string]any {
 		keyState: "START_FROM_PRIVATE_NETWORK", keyDescription: "Initial state: packet originating from a VPC network.",
 		keyProjectID: project, keyCausesDrop: false,
 		"network": map[string]any{
-			keyDisplayName: subnet.Network, "uri": relativeNetwork(project, subnet.Network),
+			keyDisplayName: subnet.Network, keyURI: relativeNetwork(project, subnet.Network),
 			"matchedIpRange":   subnet.IPCIDRRange,
 			"matchedSubnetUri": "projects/" + project + "/regions/" + subnet.Region + "/subnetworks/" + subnet.Name,
 			keyRegion:          subnet.Region,
@@ -334,13 +359,17 @@ func startStep(project string, subnet *subnetworkRecord) map[string]any {
 	}
 }
 
-// firewallStep is the APPLY_EGRESS_FIREWALL_RULE step: the deciding rule, or
-// the implied default-allow-egress rule when no configured rule matches.
-func firewallStep(project, network string, rule *firewallRecord) map[string]any {
+// firewallStep is the APPLY_EGRESS_FIREWALL_RULE or APPLY_INGRESS_FIREWALL_RULE
+// step: the deciding rule, or the implied default-allow-egress or
+// default-deny-ingress rule when no configured rule matches.
+func firewallStep(project, network, direction string, rule *firewallRecord) map[string]any {
 	info := map[string]any{
-		keyDisplayName: "default-allow-egress", keyDirection: directionEgress, "action": "ALLOW",
+		keyDisplayName: "default-allow-egress", keyDirection: direction, "action": "ALLOW",
 		keyPriority: 65535, keyNetworkURI: relativeNetwork(project, network),
 		"firewallRuleType": "IMPLIED_VPC_FIREWALL_RULE",
+	}
+	if direction == directionIngress {
+		info[keyDisplayName], info["action"] = "default-deny-ingress", "DENY"
 	}
 	if rule != nil {
 		action := "ALLOW"
@@ -348,13 +377,13 @@ func firewallStep(project, network string, rule *firewallRecord) map[string]any 
 			action = "DENY"
 		}
 		info = map[string]any{
-			keyDisplayName: rule.Name, "uri": "projects/" + project + "/global/firewalls/" + rule.Name,
-			keyDirection: directionEgress, "action": action, keyPriority: rule.Priority,
+			keyDisplayName: rule.Name, keyURI: "projects/" + project + "/global/firewalls/" + rule.Name,
+			keyDirection: direction, "action": action, keyPriority: rule.Priority,
 			keyNetworkURI: relativeNetwork(project, network), "firewallRuleType": "VPC_FIREWALL_RULE",
 		}
 	}
 	return map[string]any{
-		keyState: "APPLY_EGRESS_FIREWALL_RULE", keyDescription: "Config checking state: verify EGRESS firewall rule.",
+		keyState: "APPLY_" + direction + "_FIREWALL_RULE", keyDescription: "Config checking state: verify " + direction + " firewall rule.",
 		keyProjectID: project, keyCausesDrop: false, "firewall": info,
 	}
 }
@@ -362,8 +391,8 @@ func firewallStep(project, network string, rule *firewallRecord) map[string]any 
 // subnetRouteStep is the APPLY_ROUTE step for the destination subnet route.
 func subnetRouteStep(project string, subnet *subnetworkRecord) map[string]any {
 	return routeStep(project, map[string]any{
-		keyDisplayName: subnet.Name, "routeType": "SUBNET", "destIpRange": subnet.IPCIDRRange,
-		"nextHopType": "NEXT_HOP_NETWORK", "nextHop": relativeNetwork(project, subnet.Network),
+		keyDisplayName: subnet.Name, keyRouteType: "SUBNET", keyDestIPRange: subnet.IPCIDRRange,
+		keyNextHopType: "NEXT_HOP_NETWORK", keyNextHop: relativeNetwork(project, subnet.Network),
 		keyNetworkURI: relativeNetwork(project, subnet.Network), keyPriority: 0,
 	})
 }
@@ -371,8 +400,8 @@ func subnetRouteStep(project string, subnet *subnetworkRecord) map[string]any {
 // defaultRouteStep is the APPLY_ROUTE step for the network's default route.
 func defaultRouteStep(project, network string) map[string]any {
 	return routeStep(project, map[string]any{
-		keyDisplayName: "default-route", "routeType": "STATIC", "destIpRange": "0.0.0.0/0",
-		"nextHopType": "NEXT_HOP_INTERNET_GATEWAY", "nextHop": "internet gateway",
+		keyDisplayName: "default-route", keyRouteType: "STATIC", keyDestIPRange: "0.0.0.0/0",
+		keyNextHopType: "NEXT_HOP_INTERNET_GATEWAY", keyNextHop: "internet gateway",
 		keyNetworkURI: relativeNetwork(project, network), keyPriority: 1000,
 	})
 }
@@ -390,7 +419,7 @@ func finalStep(spec flow, network, stepState, key, cause string) map[string]any 
 	detail := map[string]any{keyCause: cause, "resourceUri": relativeNetwork(spec.project, network)}
 	description := "Final state: packet could be dropped."
 	if key == "abort" {
-		detail["ipAddress"] = spec.destIP.String()
+		detail[keyIPAddress] = spec.destIP.String()
 		description = "Final state: analysis is aborted."
 	} else {
 		detail["sourceIp"], detail["destinationIp"] = spec.sourceIP.String(), spec.destIP.String()

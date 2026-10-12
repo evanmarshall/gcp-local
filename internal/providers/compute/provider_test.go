@@ -19,21 +19,21 @@ import (
 
 // Names and keys repeated across the lifecycle tests.
 const (
-	testNetwork      = "vpc-1"
-	testFirewall     = "fw-1"
-	testAllowed      = "allowed"
-	testProject      = "demo-net"
-	testKindProj     = "project"
-	testSubnetOne    = "subnet-1"
-	testPeerNetwork  = "peer-net"
-	testPeerSubnet   = "peer-subnet"
-	testPeering      = "peering-1"
-	testTCP          = "tcp"
-	testSubnetCIDR   = "10.0.0.0/20"
-	testSourceCIDR   = "10.0.0.0/8"
-	keyNats          = "nats"
-	keySourceSubnets = "sourceSubnetworkIpRanges"
-	keySourceRanges  = "sourceRanges"
+	testNetwork     = "vpc-1"
+	testFirewall    = "fw-1"
+	testAllowed     = "allowed"
+	testProject     = "demo-net"
+	testKindProj    = "project"
+	testSubnetOne   = "subnet-1"
+	testPeerNetwork = "peer-net"
+	testPeerSubnet  = "peer-subnet"
+	testPeering     = "peering-1"
+	testTCP         = "tcp"
+	testSubnetCIDR  = "10.0.0.0/20"
+	testSourceCIDR  = "10.0.0.0/8"
+	keyNats         = "nats"
+	keyNATRanges    = "sourceSubnetworkIpRangesToNat"
+	keySourceRanges = "sourceRanges"
 )
 
 // harness drives the provider through the gateway.
@@ -198,7 +198,9 @@ func TestRouterLifecycleWithNAT(t *testing.T) {
 	}
 	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
 		keyName: "router-1", keyNetwork: testNetwork,
-		keyNats: []any{map[string]any{keyName: "nat-1", keySourceSubnets: []any{testSubnetOne}}},
+		keyNats: []any{map[string]any{
+			keyName: "nat-1", keyNATRanges: listOfSubnetworks, "subnetworks": []any{map[string]any{keyName: testSubnetOne}},
+		}},
 	})
 	if recorder.Code != 200 {
 		t.Fatalf("router create status = %d body %s", recorder.Code, recorder.Body.String())
@@ -210,7 +212,9 @@ func TestRouterLifecycleWithNAT(t *testing.T) {
 	// A NAT referencing a missing subnetwork is refused.
 	recorder = h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
 		keyName: "router-2", keyNetwork: testNetwork,
-		keyNats: []any{map[string]any{keyName: "nat-2", keySourceSubnets: []any{"missing-subnet"}}},
+		keyNats: []any{map[string]any{
+			keyName: "nat-2", keyNATRanges: listOfSubnetworks, "subnetworks": []any{map[string]any{keyName: "missing-subnet"}},
+		}},
 	})
 	if recorder.Code != 400 {
 		t.Fatalf("missing subnetwork NAT status = %d", recorder.Code)
@@ -304,7 +308,7 @@ func TestNetworkInUseDeleteFailsInOperation(t *testing.T) {
 
 func TestOverlappingSubnetworkFailsInOperation(t *testing.T) {
 	h := newHarness(t)
-	h.topology(testNetwork, testSubnetOne, "10.10.0.0/24")
+	h.topology(testNetwork, testSubnetOne, testRangeA)
 	recorder := h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
 		keyName: "bad", keyNetwork: "projects/demo-net/global/networks/" + testNetwork, keyIPCIDR: "10.10.0.128/25",
 	})
@@ -338,7 +342,7 @@ func TestDocumentsMatchRecordedFieldSets(t *testing.T) {
 		t.Fatalf("network fields = %s", got)
 	}
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
-		keyName: testSubnetOne, keyNetwork: "projects/demo-net/global/networks/vpc-1", keyIPCIDR: "10.10.0.0/24", "region": "us-central1",
+		keyName: testSubnetOne, keyNetwork: "projects/demo-net/global/networks/vpc-1", keyIPCIDR: testRangeA, "region": "us-central1",
 	})
 	subnet := decode(t, h.invoke(http.MethodGet, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks/subnet-1", nil))
 	if got := fieldSet(subnet); got != "allowSubnetCidrRoutesOverlap,creationTimestamp,fingerprint,gatewayAddress,id,"+
@@ -351,7 +355,7 @@ func TestDocumentsMatchRecordedFieldSets(t *testing.T) {
 	}
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
 		keyName: testFirewall, keyNetwork: "projects/demo-net/global/networks/vpc-1", keyDirection: directionIngress,
-		keyPriority: 1000, keySourceRanges: []any{"10.10.0.0/24"},
+		keyPriority: 1000, keySourceRanges: []any{testRangeA},
 		testAllowed: []any{map[string]any{keyIPProto: testTCP, keyPorts: []any{"8080"}}},
 	})
 	firewall := decode(t, h.invoke(http.MethodGet, "/compute/v1/projects/demo-net/global/firewalls/fw-1", nil))
@@ -548,7 +552,7 @@ func TestEgressAllowStillReportsUnknownIP(t *testing.T) {
 // connectivityBody is one recorded-shape ConnectivityTest body.
 func connectivityBody(source string, port int) map[string]any {
 	endpoint := func(ip string) map[string]any {
-		return map[string]any{"ipAddress": ip, keyNetwork: "projects/demo-net/global/networks/" + testNetwork, "projectId": testProject}
+		return map[string]any{keyIPAddress: ip, keyNetwork: "projects/demo-net/global/networks/" + testNetwork, "projectId": testProject}
 	}
 	destination := endpoint("10.0.0.9")
 	destination[keyPort] = port
@@ -653,7 +657,7 @@ func TestAnalyzerDoesNotClaimNATEgress(t *testing.T) {
 	h.topology(testNetwork, testSubnetOne, testSubnetCIDR)
 	h.invoke(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/routers", map[string]any{
 		keyName: "router-1", keyNetwork: testNetwork,
-		keyNats: []any{map[string]any{keyName: "nat-1", keySourceSubnets: []any{testSubnetOne}}},
+		keyNats: []any{map[string]any{keyName: "nat-1", keyNATRanges: allSubnetworks}},
 	})
 	// External destinations and NAT are unrecorded: an explicit gap, not a pass.
 	if verdict := h.analyzeFlow("10.0.1.5", "203.0.113.9", 443); verdict.Result != verdictUnsupported {

@@ -9,6 +9,7 @@ const (
 	kindFirewall   = "firewall"
 	kindRoute      = "route"
 	kindRouter     = "router"
+	kindInstance   = "instance"
 	kindLocation   = "location"
 )
 
@@ -60,6 +61,7 @@ type firewallRecord struct {
 	SourceRanges      []string
 	DestinationRanges []string
 	TargetTags        []string
+	SourceTags        []string
 	Priority          int
 	Disabled          bool
 	Generation        int64
@@ -79,10 +81,30 @@ type routeRecord struct {
 	CreatedAt      time.Time
 }
 
-// natRecord is one Cloud NAT gateway configured on a router.
+// natRecord is one Cloud NAT gateway configured on a router. Ranges is the
+// sourceSubnetworkIpRangesToNat mode; Subnetworks lists the named
+// subnetworks of a LIST_OF_SUBNETWORKS gateway.
 type natRecord struct {
-	Name              string
-	SourceSubnetworks []string
+	Name        string
+	Allocation  string
+	Ranges      string
+	Subnetworks []string
+}
+
+// instanceRecord is one zonal VM instance with a single network interface and
+// no external address. Its primary internal IP comes from its subnetwork.
+type instanceRecord struct {
+	Name        string
+	Zone        string
+	Region      string
+	Description string
+	MachineType string
+	Network     string
+	Subnetwork  string
+	IP          string
+	Labels      map[string]any
+	Generation  int64
+	CreatedAt   time.Time
 }
 
 // routerRecord is one stored Cloud Router with its NAT gateways.
@@ -103,6 +125,7 @@ type scopeState struct {
 	firewalls    map[string]*firewallRecord
 	routes       map[string]*routeRecord
 	routers      map[string]*routerRecord
+	instances    map[string]*instanceRecord // keyed by zone/name
 	operations   map[string]*operationRecord
 	generation   int64
 }
@@ -112,7 +135,7 @@ func newScopeState() scopeState {
 		connectivity: map[string]*namedTest{},
 		networks:     map[string]*networkRecord{}, subnetworks: map[string]*subnetworkRecord{},
 		firewalls: map[string]*firewallRecord{}, routes: map[string]*routeRecord{},
-		routers:    map[string]*routerRecord{},
+		routers: map[string]*routerRecord{}, instances: map[string]*instanceRecord{},
 		operations: map[string]*operationRecord{},
 	}
 }
@@ -124,6 +147,7 @@ func (s *scopeState) reset() {
 	s.firewalls = map[string]*firewallRecord{}
 	s.routes = map[string]*routeRecord{}
 	s.routers = map[string]*routerRecord{}
+	s.instances = map[string]*instanceRecord{}
 	s.operations = map[string]*operationRecord{}
 }
 
@@ -136,8 +160,8 @@ func (s *scopeState) nextGeneration() int64 {
 type operationRecord struct {
 	ID      string
 	Name    string
-	Kind    string // "global" or "region"
-	Region  string
+	Kind    string // "global", "region", or "zone"
+	Region  string // the region or zone of a regional or zonal operation
 	Type    string
 	Target  string
 	Error   *operationError

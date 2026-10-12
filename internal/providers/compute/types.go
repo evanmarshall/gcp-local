@@ -62,6 +62,13 @@ const (
 	keyStackType   = "stackType"
 	keyDisplayName = "displayName"
 	keyProjectID   = "projectId"
+	keyFingerprint = "fingerprint"
+	keyURI         = "uri"
+	keyDestIPRange = "destIpRange"
+	keyNextHop     = "nextHop"
+	keyIPAddress   = "ipAddress"
+	keyRouteType   = "routeType"
+	keyNextHopType = "nextHopType"
 )
 
 // wireHost is the self-link host the recorded compute documents carry. Compute

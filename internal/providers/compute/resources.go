@@ -27,6 +27,8 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.executeRoute(call, request, scope)
 	case methodRoutersCreate, methodRoutersGet, methodRoutersList, methodRoutersDelete:
 		return p.executeRouters(call, request, scope)
+	case methodInstancesInsert, methodInstancesGet, methodInstancesList, methodInstancesDelete:
+		return p.executeInstances(call, request, scope)
 	default:
 		return p.executeAnalysis(call, request, scope)
 	}
@@ -41,6 +43,8 @@ func (p *Provider) executeAnalysis(call gateway.Call, request *gateway.RESTReque
 		return p.operationGet(request, scope, "global")
 	case methodRegionOperationsGet:
 		return p.operationGet(request, scope, "region")
+	case methodZoneOperationsGet:
+		return p.operationGet(request, scope, "zone")
 	case methodOperationsList:
 		return p.operationsList(request, scope, "global")
 	default:
@@ -119,7 +123,7 @@ func subnetworkDocument(project string, record *subnetworkRecord) map[string]any
 		"privateIpGoogleAccess":        record.PrivateAccess,
 		"privateIpv6GoogleAccess":      "DISABLE_GOOGLE_ACCESS",
 		"allowSubnetCidrRoutesOverlap": false,
-		"fingerprint":                  fingerprint(record.Name, record.Generation),
+		keyFingerprint:                 fingerprint(record.Name, record.Generation),
 		"purpose":                      "PRIVATE",
 		keyStackType:                   stackIPv4Only,
 	}
@@ -153,6 +157,7 @@ func firewallDocument(project string, record *firewallRecord) map[string]any {
 	setList(document, "sourceRanges", record.SourceRanges)
 	setList(document, "destinationRanges", record.DestinationRanges)
 	setList(document, "targetTags", record.TargetTags)
+	setList(document, "sourceTags", record.SourceTags)
 	return document
 }
 
@@ -196,10 +201,14 @@ func operationDocument(project string, record *operationRecord) map[string]any {
 		keyKind:         "compute#operation",
 		"user":          "gcp-local",
 	}
-	if record.Kind == "region" {
+	switch record.Kind {
+	case "region":
 		entry[keySelfLink] = regionalSelfLink(project, record.Region, "operations", record.Name)
 		entry[keyRegion] = regionLink(project, record.Region)
-	} else {
+	case "zone":
+		entry[keySelfLink] = zoneLink(project, record.Region) + "/operations/" + record.Name
+		entry["zone"] = zoneLink(project, record.Region)
+	default:
 		entry[keySelfLink] = selfLink(project, "operations", record.Name)
 	}
 	if !record.Done {
@@ -366,11 +375,17 @@ func (p *Provider) finishOperation(scope state.Scope, kind, region, opType, targ
 func routerDocument(project string, record *routerRecord) map[string]any {
 	nats := make([]any, 0, len(record.NATs))
 	for _, nat := range record.NATs {
-		ranges := make([]string, 0, len(nat.SourceSubnetworks))
-		ranges = append(ranges, nat.SourceSubnetworks...)
-		nats = append(nats, map[string]any{
-			keyName: nat.Name, "sourceSubnetworkIpRanges": ranges,
-		})
+		entry := map[string]any{
+			keyName: nat.Name, "natIpAllocateOption": nat.Allocation, "sourceSubnetworkIpRangesToNat": nat.Ranges,
+		}
+		subnets := make([]any, 0, len(nat.Subnetworks))
+		for _, subnet := range nat.Subnetworks {
+			subnets = append(subnets, map[string]any{
+				keyName: regionalSelfLink(project, record.Region, "subnetworks", subnet), "sourceIpRangesToNat": []any{"ALL_IP_RANGES"},
+			})
+		}
+		setList(entry, "subnetworks", subnets)
+		nats = append(nats, entry)
 	}
 	return map[string]any{
 		"id":           idOf(record.Name, record.Generation),
