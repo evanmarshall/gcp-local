@@ -60,7 +60,7 @@ python3 -m venv .venv-tools
 .venv-tools/bin/python examples/pubsub.py    # publishes and pulls one message over gRPC
 ```
 
-Both examples clean up after themselves and accept `--directory`. Storage buckets need an explicit location, uniform access, enforced public access prevention, and zero soft-delete duration ([Storage](storage.md)). To set up an application repository with an agent, see [agent setup](agent-setup.md).
+Both examples clean up after themselves and accept `--directory`. Storage buckets need an explicit location and uniform access ([Storage](storage.md)). To set up an application repository with an agent, see [agent setup](agent-setup.md).
 
 ## Terraform
 

@@ -20,6 +20,9 @@ type projectState struct {
 	// Uploads holds resumable sessions by upload ID until their final chunk
 	// commits the object to the backend.
 	Uploads map[string]*uploadSession
+	// SoftDeleted holds soft-deleted object generations by bucket, name, and
+	// generation until their hard-delete time (softdelete.go).
+	SoftDeleted map[string]softObject
 }
 type Catalog struct {
 	// Serialize publication/reset across provider store and shared index. Backend
@@ -31,7 +34,7 @@ type Catalog struct {
 
 func NewCatalog(index *state.Index) *Catalog {
 	return &Catalog{store: state.NewStore(func() projectState {
-		return projectState{Buckets: map[string]Bucket{}, Folders: map[string]Folder{}, Uploads: map[string]*uploadSession{}}
+		return projectState{Buckets: map[string]Bucket{}, Folders: map[string]Folder{}, Uploads: map[string]*uploadSession{}, SoftDeleted: map[string]softObject{}}
 	}, state.GlobalScope), index: index}
 }
 func BucketResource(name string) string { return "//storage.googleapis.com/projects/_/buckets/" + name }
@@ -107,6 +110,9 @@ func (c *Catalog) ForgetBucket(scope state.Scope, name string) error {
 		delete(value.Buckets, name)
 		maps.DeleteFunc(value.Folders, func(_ string, folder Folder) bool { return folder.Bucket == name })
 		maps.DeleteFunc(value.Uploads, func(_ string, upload *uploadSession) bool { return upload.bucket == name })
+		// GCP soft-deletes the bucket itself; that is not modeled, so its
+		// soft-deleted objects go with it.
+		maps.DeleteFunc(value.SoftDeleted, func(_ string, object softObject) bool { return object.Bucket == name })
 		return nil
 	}); err != nil {
 		return fmt.Errorf("delete bucket %s: %w", name, err)

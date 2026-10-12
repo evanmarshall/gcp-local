@@ -329,6 +329,12 @@ func TestAnonymousPublicBindingsAndInvalidCredentials(t *testing.T) {
 	if _, err := engine.Authorize(read, object(), nil); err != nil {
 		t.Fatal("explicit public read failed:", err)
 	}
+	// A target that prevents public access ignores the same binding.
+	prevented := object()
+	prevented.PublicPrevented = true
+	if _, err := engine.Authorize(read, prevented, nil); status.Code(err) != codes.Unauthenticated {
+		t.Fatal("public binding granted access on a public-prevented target:", err)
+	}
 	for _, state := range []gateway.PrincipalState{gateway.Unknown, gateway.Expired} {
 		read.Principal.State = state
 		if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unauthenticated {

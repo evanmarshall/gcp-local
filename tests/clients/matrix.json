@@ -72,20 +72,14 @@
       "client": "gcloud",
       "package": "gcloud",
       "transport": "JSON REST",
-      "expect": "xfail",
-      "issue": 65,
-      "gap": "bucket create refuses the enableObjectRetention query option",
-      "match": "unsupported query option enableObjectRetention"
+      "expect": "pass"
     },
     {
       "service": "storage",
       "client": "rclone",
       "package": "rclone",
       "transport": "JSON REST",
-      "expect": "xfail",
-      "issue": 64,
-      "gap": "bucket create without publicAccessPrevention and softDeletePolicy (the GCP defaults) is refused",
-      "match": "enforced public access prevention are required"
+      "expect": "pass"
     },
     {
       "service": "pubsub",

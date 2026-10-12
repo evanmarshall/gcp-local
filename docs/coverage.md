@@ -12,7 +12,7 @@ What each service supports and how it is verified. Every service authenticates c
 
 | Key | Service | Backend | Methods served | API total | Data plane for applications | Recordings | Terraform |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 17 | 88 | Yes: object read, write, list, delete, metadata patch, resumable uploads, V4 signed URLs, rewrite; rewrite and XML paths other than signed URLs not recorded | storage-authorization, storage-bucket-policy-only, storage-bucket-updates, storage-cross-project, storage-go-client-projection, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk, storage-resumable-signed-url | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
+| `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 19 | 88 | Yes: object read, write, list, delete, metadata patch, resumable uploads, V4 signed URLs, rewrite, soft delete and restore, public access prevention; rewrite, public members under inherited prevention, and XML paths other than signed URLs not recorded | storage-authorization, storage-bucket-defaults, storage-bucket-policy-only, storage-bucket-updates, storage-cross-project, storage-gcloud-bucket-defaults, storage-gcloud-object-requests, storage-go-client-projection, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-public-access-enforced, storage-python-sdk, storage-resumable-signed-url | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
 | `pubsub` | [Pub/Sub](pubsub.md) | Official emulator; Protocol Buffer schemas in gcp-local | 28 | 46 | Yes: publish, pull, streaming pull, push, ordering, filters, dead-letter topics, retry backoff, exactly-once, snapshots and seek, Avro and Protocol Buffer schemas with publish-time validation; streaming pull, push, retry backoff, snapshots and seek not recorded | pubsub-delivery-features, pubsub-pull-authorization, pubsub-rest-data-plane, pubsub-schemas | TestAccPubSubTopicAndSubscription |
 | `firestore` | [Firestore](firestore.md) | Official emulator | 16 | 60 | Yes: documents, subcollections, queries, aggregations, transactions, batch writes, listeners over REST and gRPC; batch writes and listeners not recorded | firestore-document-lifecycle, firestore-query-transaction | TestAccFirestoreDocument |
 | `spanner` | [Spanner](spanner.md) | Official emulator | 36 | 99 | Yes: sessions, SQL queries, DML, reads, mutations, transactions over gRPC (unary methods also over REST) | spanner-instance-database-admin, spanner-data-plane-rest | TestAccSpannerInstanceAndDatabase |
@@ -85,6 +85,8 @@ A recording proves only the requests it sends. This table lists the real clients
 | storage | Go `cloud.google.com/go/storage` 1.65.0 | JSON REST | `tests/clients/go` |
 | storage | Node `@google-cloud/storage` 8.4.0 | JSON REST | `tests/clients/node` |
 | storage | Python `google-cloud-storage` 3.10.1 | JSON REST | `tests/clients/python` |
+| storage | `gcloud` 588.0.0 | JSON REST | `tests/clients/cli` |
+| storage | `rclone` 1.75.2 | JSON REST | `tests/clients/cli` |
 | pubsub | Go `cloud.google.com/go/pubsub/v2` 2.7.0 | gRPC | `tests/clients/go` |
 | pubsub | Node `@google-cloud/pubsub` 6.2.0 | gRPC | `tests/clients/node` |
 | pubsub | Python `google-cloud-pubsub` 2.42.0 | gRPC | `tests/clients/python` |
@@ -122,12 +124,7 @@ A recording proves only the requests it sends. This table lists the real clients
 
 ### Known client failures
 
-These matrix pairs fail today. `sh scripts/check_clients.sh` fails if one starts passing or fails differently, so this table stays current.
-
-| Service | Client | Transport | Fails because | Issue |
-| --- | --- | --- | --- | --- |
-| storage | `gcloud` 588.0.0 | JSON REST | bucket create refuses the enableObjectRetention query option | [#65](https://github.com/evanmarshall/gcp-local/issues/65) |
-| storage | `rclone` 1.75.2 | JSON REST | bucket create without publicAccessPrevention and softDeletePolicy (the GCP defaults) is refused | [#64](https://github.com/evanmarshall/gcp-local/issues/64) |
+No matrix pair fails today. A pair that fails is listed here as `xfail` in `tests/clients/matrix.json` with its issue; `sh scripts/check_clients.sh` fails if one starts passing or fails differently.
 
 Untested: Java clients, `gsutil`, the Node.js and gcloud clients of Cloud Run, and every client of Artifact Registry, Cloud SQL, Memorystore, and Compute.
 

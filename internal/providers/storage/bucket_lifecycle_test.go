@@ -152,9 +152,7 @@ func TestBucketPolicyOnlyAlias(t *testing.T) {
 		{"b-disagree", `{"uniformBucketLevelAccess":{"enabled":true},"bucketPolicyOnly":{"enabled":false},"publicAccessPrevention":"enforced"}`,
 			"uniformBucketLevelAccess and bucketPolicyOnly disagree"},
 		{"b-alias-off", `{"bucketPolicyOnly":{"enabled":false},"publicAccessPrevention":"enforced"}`,
-			"explicit uniform bucket-level access and enforced public access prevention are required"},
-		{"b-alias-public", `{"bucketPolicyOnly":{"enabled":true}}`,
-			"explicit uniform bucket-level access and enforced public access prevention are required"},
+			"explicit uniform bucket-level access is required; ACLs are not modeled"},
 	}
 	for _, refusal := range refusals {
 		body := f.request(admin, "POST", "/storage/v1/b?project=project-a",

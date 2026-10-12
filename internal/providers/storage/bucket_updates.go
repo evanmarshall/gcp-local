@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strconv"
@@ -29,10 +30,8 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	}
 	var metadata map[string]any
 	_ = json.Unmarshal([]byte(bucket.Metadata), &metadata)
-	if raw, ok := patch["labels"]; ok {
-		if err := patchLabels(metadata, raw); err != nil {
-			return nil, err
-		}
+	if refused, err := applyBucketPatch(metadata, patch); refused != nil || err != nil {
+		return refused, err
 	}
 	nextMetageneration(metadata, current, name)
 	encoded, err := json.Marshal(metadata)
@@ -44,6 +43,19 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	}
 	p.bucketMetadata(scope, current)
 	return &gateway.RESTResponse{Status: 200, JSON: current}, nil
+}
+
+// applyBucketPatch applies the patched fields to the bucket's metadata.
+func applyBucketPatch(metadata map[string]any, patch map[string]json.RawMessage) (*gateway.RESTResponse, error) {
+	if raw, ok := patch["labels"]; ok {
+		if err := patchLabels(metadata, raw); err != nil {
+			return nil, err
+		}
+	}
+	if raw, ok := patch["softDeletePolicy"]; ok {
+		return patchSoftDelete(metadata, raw)
+	}
+	return nil, nil //nolint:nilnil // a nil response with a nil error means the patch applied
 }
 
 // currentBucket reads the bucket a patch applies to, merged with its catalog
@@ -64,18 +76,40 @@ func (p *Provider) currentBucket(ctx context.Context, b *memoryBackend, r *gatew
 	return current, nil, nil
 }
 
-// decodeBucketPatch reads a bucket patch, which may change labels only.
+// decodeBucketPatch reads a bucket patch, which may change labels and the
+// soft-delete retention only.
 func decodeBucketPatch(body []byte) (map[string]json.RawMessage, error) {
 	var patch map[string]json.RawMessage
 	if json.Unmarshal(body, &patch) != nil || patch == nil {
 		return nil, provider.Invalid("Expected a bucket patch")
 	}
 	for key := range patch {
-		if key != "labels" {
-			return nil, gap("bucket updates currently support labels only")
+		if key != "labels" && key != "softDeletePolicy" {
+			return nil, gap("bucket updates currently support labels and softDeletePolicy only")
 		}
 	}
 	return patch, nil
+}
+
+// patchSoftDelete sets a new soft-delete retention, which takes effect now
+// and applies to objects deleted from then on; already soft-deleted objects
+// keep their hard-delete time (storage/docs/soft-delete). A disabled policy
+// reports only its zero duration (recorded: storage-gcloud-bucket-defaults).
+func patchSoftDelete(metadata map[string]any, raw json.RawMessage) (*gateway.RESTResponse, error) {
+	var policy struct {
+		Seconds json.Number `json:"retentionDurationSeconds"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&policy) != nil || policy.Seconds == "" {
+		return nil, gap("softDeletePolicy updates set retentionDurationSeconds only")
+	}
+	seconds, refused := softDeleteRetention(policy.Seconds)
+	if refused != nil {
+		return refused, nil
+	}
+	metadata["softDeletePolicy"] = softDeletePolicy(seconds, storageTime(time.Now()))
+	return nil, nil //nolint:nilnil // a nil response with a nil error means the patch applied
 }
 
 // patchLabels applies a labels patch: a null value removes that label and a

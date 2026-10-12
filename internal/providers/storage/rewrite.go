@@ -142,9 +142,23 @@ func (p *Provider) serveRewrite(ctx context.Context, b *memoryBackend, req rewri
 	if response, err := preconditions(req.rest, current, MethodObjectsInsert); response != nil || err != nil {
 		return response, err
 	}
-	response, err := copyObject(ctx, b, req, source)
+	response, err := p.copyRetaining(ctx, b, req, source)
 	finishResponse(response, id, req.rest.Host)
 	return response, err
+}
+
+// copyRetaining copies the source over the destination, soft-deleting the
+// destination generation it replaces when the bucket keeps them.
+func (p *Provider) copyRetaining(ctx context.Context, b *memoryBackend, req rewriteRequest, source map[string]any) (*gateway.RESTResponse, error) {
+	keep, err := p.retainLive(ctx, b, req.scope, req.bucket, req.object)
+	if err != nil {
+		return nil, err
+	}
+	response, err := copyObject(ctx, b, req, source)
+	if err != nil {
+		return response, err
+	}
+	return response, keep(response)
 }
 
 // missingBucket refuses the first bucket not owned by scope, or returns nil.
@@ -182,15 +196,9 @@ func copyObject(ctx context.Context, b *memoryBackend, req rewriteRequest, sourc
 	if err != nil {
 		return nil, err
 	}
-	metadata := map[string]json.RawMessage{}
-	for _, field := range copiedFields {
-		if value, ok := source[field]; ok {
-			encoded, err := json.Marshal(value)
-			if err != nil {
-				return nil, status.Error(codes.Internal, "Unable to copy the source metadata")
-			}
-			metadata[field] = encoded
-		}
+	metadata, err := copiedMetadata(source)
+	if err != nil {
+		return nil, err
 	}
 	maps.Copy(metadata, req.metadata)
 	upload, err := multipartUpload(req.object, metadata, data)
@@ -203,7 +211,23 @@ func copyObject(ctx context.Context, b *memoryBackend, req rewriteRequest, sourc
 	}
 	size := strconv.Itoa(len(data))
 	return &gateway.RESTResponse{JSON: map[string]any{
-		"kind": "storage#rewriteResponse", "totalBytesRewritten": size, "objectSize": size, "done": true, "resource": stored.JSON}}, nil
+		keyKind: "storage#rewriteResponse", "totalBytesRewritten": size, "objectSize": size, "done": true, "resource": stored.JSON}}, nil
+}
+
+// copiedMetadata selects the copiedFields of an object resource as upload
+// metadata; rewrite and restore carry them to the new generation.
+func copiedMetadata(source map[string]any) (map[string]json.RawMessage, error) {
+	metadata := map[string]json.RawMessage{}
+	for _, field := range copiedFields {
+		if value, ok := source[field]; ok {
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return nil, status.Error(codes.Internal, "Unable to copy the source metadata")
+			}
+			metadata[field] = encoded
+		}
+	}
+	return metadata, nil
 }
 
 // readSource reads one object's media from the backend.

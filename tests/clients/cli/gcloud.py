@@ -48,8 +48,6 @@ def run_storage():
         bucket,
         "--location=us-central1",
         "--uniform-bucket-level-access",
-        "--public-access-prevention",
-        "--soft-delete-duration=0",
     )
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory, "hello.txt")

@@ -14,6 +14,7 @@ const (
 	MethodBucketsDelete       = "storage.buckets.delete"
 	MethodBucketsGetIamPolicy = "storage.buckets.getIamPolicy"
 	MethodBucketsSetIamPolicy = "storage.buckets.setIamPolicy"
+	MethodBucketsGetLayout    = "storage.buckets.getStorageLayout"
 	MethodFoldersCreate       = "storage.folders.create"
 	MethodFoldersInsert       = "storage.folders.insert"
 	MethodFoldersGet          = "storage.folders.get"
@@ -25,6 +26,7 @@ const (
 	MethodObjectsDelete       = "storage.objects.delete"
 	MethodObjectsRewrite      = "storage.objects.rewrite"
 	MethodObjectsPatch        = "storage.objects.patch"
+	MethodObjectsRestore      = "storage.objects.restore"
 	// MethodXMLGet and MethodXMLPut are the XML API object methods; they
 	// authorize as objects.get and objects.insert.
 	MethodXMLGet = "storage.xml.objects.get"
@@ -44,6 +46,7 @@ const (
 	permissionObjectsDelete       = "storage.objects.delete"
 	permissionObjectsGet          = "storage.objects.get"
 	permissionObjectsList         = "storage.objects.list"
+	permissionObjectsRestore      = "storage.objects.restore"
 	permissionObjectsUpdate       = "storage.objects.update"
 )
 
@@ -62,11 +65,19 @@ const (
 	keyMetadata           = "metadata"
 	queryAlt              = "alt"
 	queryUploadType       = "uploadType"
-	valueFalse            = "false"
-	headerContentType     = "Content-Type"
-	headerPayloadHash     = "x-goog-content-sha256"
-	paramSignature        = "X-Goog-Signature"
-	storageClassStandard  = "STANDARD"
+	querySoftDeleted      = "softDeleted"
+	queryMaxResults       = "maxResults"
+	queryPrefix           = "prefix"
+	queryVersions         = "versions"
+	keyKind               = "kind"
+	// queryFoldersAsPrefixes is objects.list includeFoldersAsPrefixes, which
+	// gcloud storage ls sends as True.
+	queryFoldersAsPrefixes = "includeFoldersAsPrefixes"
+	valueFalse             = "false"
+	headerContentType      = "Content-Type"
+	headerPayloadHash      = "x-goog-content-sha256"
+	paramSignature         = "X-Goog-Signature"
+	storageClassStandard   = "STANDARD"
 	// keyName is the name key shared by query options, upload metadata, and
 	// bucket/folder documents.
 	keyName = "name"

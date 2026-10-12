@@ -35,7 +35,8 @@ client = storage.Client(
     client_options={"api_endpoint": "http://127.0.0.1:4566"},
 )
 bucket = client.bucket("my-bucket")
-# The local Storage provider currently requires these recommended settings.
+# Uniform bucket-level access is required. The other two settings are
+# optional; without them the bucket gets GCP's defaults.
 bucket.iam_configuration.uniform_bucket_level_access_enabled = True
 bucket.iam_configuration.public_access_prevention = "enforced"
 bucket.soft_delete_policy.retention_duration_seconds = 0
@@ -82,7 +83,7 @@ Scenarios are recorded once against a sandbox Google Cloud project and replayed 
 
 - Unsupported methods and options return `UNIMPLEMENTED`.
 - State is in memory; `reset` and `down` discard it.
-- Storage buckets need uniform bucket-level access, enforced public access prevention, and no soft-delete retention.
+- Storage buckets need uniform bucket-level access; ACLs, versioning, and object retention are not modeled. Public access prevention and soft delete work, but deleted buckets are not soft-deleted and organization policies are not applied ([Storage](docs/storage.md#gaps)).
 - Packaged Cloud Run runs your own images only with `gcp-local --cloud-run-docker up`, which mounts the Docker socket (root-equivalent on the host). Revisions have no internet access ([Cloud Run](docs/cloudrun.md)).
 - Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379 or 5432; read the port from the API. Neither accepts TLS.
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.

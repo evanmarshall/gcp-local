@@ -1,0 +1,165 @@
+{
+  "storage-bucket-defaults": {
+    "recorded-date": "12-10-2026, 07:19:30",
+    "recorded-content": {
+      "bucket-created": {
+        "has_object_retention": false,
+        "public_access_prevention": "inherited",
+        "soft_delete": {
+          "effective_time_is_creation": true,
+          "fields": [
+            "effectiveTime",
+            "retentionDurationSeconds"
+          ],
+          "retention_seconds": "604800"
+        },
+        "status": 200,
+        "uniform_enabled": true
+      },
+      "bucket-read": {
+        "has_object_retention": false,
+        "public_access_prevention": "inherited",
+        "soft_delete": {
+          "effective_time_is_creation": true,
+          "fields": [
+            "effectiveTime",
+            "retentionDurationSeconds"
+          ],
+          "retention_seconds": "604800"
+        },
+        "status": 200,
+        "uniform_enabled": true
+      },
+      "delete": {
+        "status": 204
+      },
+      "read-after-delete": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "No such object: <bucket>/deleted.txt",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "live-list-after-delete": {
+        "names": []
+      },
+      "soft-deleted-list": {
+        "items": [
+          {
+            "generation": "<generation-1>",
+            "has_hard_delete_time": true,
+            "has_soft_delete_time": true,
+            "has_time_deleted": false,
+            "name": "deleted.txt",
+            "retained_seconds": 604800.0,
+            "time_deleted_is_soft_delete_time": false
+          }
+        ],
+        "status": 200
+      },
+      "soft-deleted-get": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "has_hard_delete_time": true,
+        "has_soft_delete_time": true,
+        "has_time_deleted": false,
+        "md5Hash": "7KBFYce8tjo7Cdp4Bs4N5w==",
+        "metageneration": "<metageneration-1>",
+        "name": "deleted.txt",
+        "retained_seconds": 604800.0,
+        "size": "22",
+        "status": 200,
+        "time_deleted_is_soft_delete_time": false
+      },
+      "restore-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.restore access to the Google Cloud Storage object. Permission 'storage.objects.restore' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/deleted.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "restore": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-2>",
+        "generation": "<generation-2>",
+        "has_hard_delete_time": false,
+        "has_soft_delete_time": false,
+        "has_time_deleted": false,
+        "md5Hash": "7KBFYce8tjo7Cdp4Bs4N5w==",
+        "metageneration": "<metageneration-1>",
+        "name": "deleted.txt",
+        "retained_seconds": null,
+        "size": "22",
+        "status": 200,
+        "time_deleted_is_soft_delete_time": null
+      },
+      "restored-content": {
+        "bytes": 22,
+        "sha256": "1d5e16a94acc74d3eb6d4cdb2da08dd722af9431c6c0d45b407832d78d4b57ba",
+        "status": 200
+      },
+      "soft-deleted-after-restore": {
+        "items": [
+          {
+            "generation": "<generation-1>",
+            "has_hard_delete_time": true,
+            "has_soft_delete_time": true,
+            "has_time_deleted": false,
+            "name": "deleted.txt",
+            "retained_seconds": 604800.0,
+            "time_deleted_is_soft_delete_time": false
+          }
+        ],
+        "status": 200
+      },
+      "soft-deleted-after-overwrite": {
+        "items": [
+          {
+            "generation": "<generation-1>",
+            "has_hard_delete_time": true,
+            "has_soft_delete_time": true,
+            "has_time_deleted": false,
+            "name": "deleted.txt",
+            "retained_seconds": 604800.0,
+            "time_deleted_is_soft_delete_time": false
+          },
+          {
+            "generation": "<generation-3>",
+            "has_hard_delete_time": true,
+            "has_soft_delete_time": true,
+            "has_time_deleted": false,
+            "name": "replaced.txt",
+            "retained_seconds": 604800.0,
+            "time_deleted_is_soft_delete_time": false
+          }
+        ],
+        "status": 200
+      },
+      "bucket-delete-with-soft-deleted-objects": {
+        "status": 204
+      },
+      "bucket-read-after-delete": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The specified bucket does not exist.",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}

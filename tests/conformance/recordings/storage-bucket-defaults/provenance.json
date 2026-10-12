@@ -1,0 +1,48 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T07:19:30.550040+00:00",
+  "scenario": {
+    "id": "storage-bucket-defaults",
+    "service": "storage",
+    "transport": "rest-json-v1",
+    "revision": "7f4ec5e92914751deb9a73b6883e1692b1e824cc90ebd40b9f0151efc155b228",
+    "versions": {
+      "sdk": "rclone/1.75.2 request shape",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "0b0dc8eb24fd468b946625dac43237e1a66bef63f211c9b97e9548b626e38a8e",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/storage.py": "18b25751e765c562713bf2ead41e42b9d3ead111af62a2b67f771eb670ef70be",
+      "gcp_validation/storage_defaults.py": "3fca7bd7e88aedaa7a3e907657dab26401d6c9cd3f15099a24cd49d963f727c1",
+      "gcp_validation/normalization.py": "0ef80b778393fc23ccaad1544e6ac2d08c634571f303e10677b466060a874a54",
+      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701"
+    },
+    "scope": {
+      "services": [
+        "storage"
+      ],
+      "region": "us-central1",
+      "max_buckets": 1,
+      "max_objects": 10,
+      "max_object_bytes": 1048576,
+      "cleanup_required": true,
+      "identities": [
+        "allowed",
+        "denied",
+        "fixture",
+        "peer"
+      ]
+    }
+  }
+}

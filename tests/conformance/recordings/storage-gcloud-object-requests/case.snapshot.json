@@ -1,0 +1,59 @@
+{
+  "storage-gcloud-object-requests": {
+    "recorded-date": "12-10-2026, 07:34:54",
+    "recorded-content": {
+      "storage-layout": {
+        "bucket": "<bucket>",
+        "hierarchicalNamespace": null,
+        "kind": "storage#storageLayout",
+        "location": "US-CENTRAL1",
+        "locationType": "region",
+        "status": 200
+      },
+      "storage-layout-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.list access to the Google Cloud Storage bucket. Permission 'storage.objects.list' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "multipart-upload": {
+        "bucket": "<bucket>",
+        "contentType": "text/plain",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "Jn22wGFy0nsD1Zq2c50ogw==",
+        "metageneration": "<metageneration-1>",
+        "name": "gcloud.txt",
+        "size": "18",
+        "status": 200
+      },
+      "list-folders-as-prefixes": {
+        "names": [
+          "gcloud.txt"
+        ],
+        "prefixes": [],
+        "status": 200
+      },
+      "stat": {
+        "name": "gcloud.txt",
+        "size": "18",
+        "status": 200
+      },
+      "download": {
+        "bytes": 18,
+        "status": 200
+      },
+      "delete": {
+        "status": 204
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

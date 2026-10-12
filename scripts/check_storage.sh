@@ -9,7 +9,7 @@ sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/stor
 "$storage_python" scripts/run_isolated.py -- "$storage_python" scripts/smoke_storage.py
 "$storage_python" scripts/run_isolated.py \
   --server-json '["bin/storage-conformance"]' --ready-url http://127.0.0.1:4566/_local/health -- \
-  "$storage_python" -m pytest tests/conformance/test_storage*.py tests/conformance/storageclients tests/conformance/storagealias --gcp-mode local --gcp-project gcp-local-test \
+  "$storage_python" -m pytest tests/conformance/test_storage*.py tests/conformance/storageclients tests/conformance/storagealias tests/conformance/storagedefaults --gcp-mode local --gcp-project gcp-local-test \
   --gcp-endpoint http://127.0.0.1:4566 --gcp-artifacts .artifacts/storage-provider \
   --gcp-provider-version "gcp-local/${GITHUB_SHA:-working-tree}" \
   --gcp-backend-version fake-gcs-server/1.56.1 -q

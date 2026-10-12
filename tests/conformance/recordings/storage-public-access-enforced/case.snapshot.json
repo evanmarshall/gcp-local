@@ -1,0 +1,66 @@
+{
+  "storage-public-access-enforced": {
+    "recorded-date": "12-10-2026, 07:19:38",
+    "recorded-content": {
+      "bucket-created": {
+        "has_object_retention": false,
+        "public_access_prevention": "enforced",
+        "soft_delete": {
+          "effective_time_is_creation": true,
+          "fields": [
+            "effectiveTime",
+            "retentionDurationSeconds"
+          ],
+          "retention_seconds": "604800"
+        },
+        "status": 200,
+        "uniform_enabled": true
+      },
+      "private-binding": {
+        "bindings": [
+          [
+            "roles/storage.objectUser",
+            [
+              "serviceAccount:<allowed>"
+            ]
+          ]
+        ],
+        "status": 200
+      },
+      "binding-all-users": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The member bindings allUsers and allAuthenticatedUsers are not allowed since public access prevention is enforced.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "binding-all-authenticated-users": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The member bindings allUsers and allAuthenticatedUsers are not allowed since public access prevention is enforced.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "policy-after-refusals": {
+        "bindings": [
+          [
+            "roles/storage.objectUser",
+            [
+              "serviceAccount:<allowed>"
+            ]
+          ]
+        ],
+        "status": 200
+      },
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}

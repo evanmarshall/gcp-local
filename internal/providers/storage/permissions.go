@@ -22,11 +22,17 @@ func RegisterPermissions(engine *iam.Engine) error {
 		MethodBucketsPatch:        {Baseline: []string{permissionBucketsUpdate}},
 		MethodBucketsGetIamPolicy: {Baseline: []string{MethodBucketsGetIamPolicy}},
 		MethodBucketsSetIamPolicy: {Baseline: []string{MethodBucketsSetIamPolicy}},
-		MethodObjectsList:         {Baseline: []string{MethodObjectsList}},
-		MethodObjectsGet:          {Baseline: []string{MethodObjectsGet}},
-		MethodObjectsDelete:       {Baseline: []string{MethodObjectsDelete}},
-		MethodObjectsPatch:        {Baseline: []string{permissionObjectsUpdate}},
-		MethodObjectsInsert:       {Baseline: []string{"storage.objects.create"}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
+		// buckets/getStorageLayout requires storage.objects.list.
+		MethodBucketsGetLayout: {Baseline: []string{permissionObjectsList}},
+		MethodObjectsList:      {Baseline: []string{MethodObjectsList}},
+		MethodObjectsGet:       {Baseline: []string{MethodObjectsGet}},
+		MethodObjectsDelete:    {Baseline: []string{MethodObjectsDelete}},
+		MethodObjectsPatch:     {Baseline: []string{permissionObjectsUpdate}},
+		MethodObjectsInsert:    {Baseline: []string{"storage.objects.create"}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
+		// objects/restore: restore and create, plus delete when a live object
+		// is overwritten. The recorded denial names storage.objects.restore
+		// first (storage-bucket-defaults "restore-denied").
+		MethodObjectsRestore: {Baseline: []string{permissionObjectsRestore, permissionObjectsCreate}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
 	}
 	for method, rule := range rules {
 		if err := engine.Register(method, rule); err != nil {

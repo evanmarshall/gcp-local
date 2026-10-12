@@ -251,13 +251,24 @@ func (e *Engine) compileBindings(bindings []Binding) ([]conditionGuard, error) {
 	return guards, nil
 }
 
+// The public principals: everyone, and every authenticated caller.
+const (
+	memberAllUsers         = "allUsers"
+	memberAllAuthenticated = "allAuthenticatedUsers"
+)
+
+// isPublicMember reports whether a member is a public principal.
+func isPublicMember(member string) bool {
+	return member == memberAllUsers || member == memberAllAuthenticated
+}
+
 // validateMembers accepts the public principals and user/service-account emails.
 func validateMembers(members []string) error {
 	if len(members) == 0 || len(members) > 1000 {
 		return status.Error(codes.InvalidArgument, "Supply one to one thousand members per binding")
 	}
 	for _, member := range members {
-		if member == "allUsers" || member == "allAuthenticatedUsers" {
+		if isPublicMember(member) {
 			continue
 		}
 		if (!strings.HasPrefix(member, "user:") && !strings.HasPrefix(member, "serviceAccount:")) || !strings.Contains(member, "@") || strings.ContainsAny(member, " \r\n\t") {

@@ -1,0 +1,69 @@
+{
+  "storage-gcloud-bucket-defaults": {
+    "recorded-date": "12-10-2026, 07:19:34",
+    "recorded-content": {
+      "bucket-created": {
+        "has_object_retention": false,
+        "public_access_prevention": "inherited",
+        "soft_delete": {
+          "effective_time_is_creation": true,
+          "fields": [
+            "effectiveTime",
+            "retentionDurationSeconds"
+          ],
+          "retention_seconds": "604800"
+        },
+        "status": 200,
+        "uniform_enabled": true
+      },
+      "bucket-read": {
+        "has_object_retention": false,
+        "public_access_prevention": "inherited",
+        "soft_delete": {
+          "effective_time_is_creation": true,
+          "fields": [
+            "effectiveTime",
+            "retentionDurationSeconds"
+          ],
+          "retention_seconds": "604800"
+        },
+        "status": 200,
+        "uniform_enabled": true
+      },
+      "soft-delete-below-minimum": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Soft delete policy must have a retention duration between 7 days and 90 days.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "soft-delete-disabled": {
+        "metageneration": "2",
+        "soft_delete": {
+          "effective_time_is_creation": false,
+          "fields": [
+            "retentionDurationSeconds"
+          ],
+          "retention_seconds": "0"
+        },
+        "status": 200
+      },
+      "soft-deleted-list-without-policy": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Soft delete policy is required to list soft-deleted versions",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}

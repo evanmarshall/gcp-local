@@ -39,10 +39,10 @@ var errProviderShape = errors.New("storage requires registry, lifecycle, index, 
 // arrives as storage.folders.insert from the generated route table.
 var registeredMethods = []string{
 	MethodBucketsInsert, MethodBucketsList, MethodBucketsGet, MethodBucketsPatch, MethodBucketsDelete,
-	MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy,
+	MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy, MethodBucketsGetLayout,
 	MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete,
 	MethodFoldersInsert, MethodFoldersGet, MethodFoldersList, MethodFoldersDelete,
-	MethodXMLGet, MethodXMLPut, MethodObjectsRewrite, MethodObjectsPatch,
+	MethodXMLGet, MethodXMLPut, MethodObjectsRewrite, MethodObjectsPatch, MethodObjectsRestore,
 }
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
@@ -179,8 +179,10 @@ func denialText(call gateway.Call, target, permission string) (int, string, stri
 	if call.Principal.State == gateway.Anonymous {
 		actor, httpCode, reason = "Anonymous caller", 401, "required"
 	}
+	// The message names the resource checked: a listing checks
+	// storage.objects.list on the bucket and GCP names the bucket.
 	kind := kindBucket
-	if strings.HasPrefix(permission, "storage.objects.") {
+	if strings.Contains(target, "/objects/") {
 		kind = "object"
 	}
 	message := fmt.Sprintf("%s does not have %s access to the Google Cloud Storage %s. Permission '%s' denied on resource '%s' (or it may not exist).", actor, permission, kind, permission, target)
@@ -338,7 +340,7 @@ func finishResponse(response *gateway.RESTResponse, decision, host string) {
 func publishLinks(value map[string]any, origin string) {
 	bucket, _ := value[keyBucket].(string)
 	name, _ := value[keyName].(string)
-	switch value["kind"] {
+	switch value[keyKind] {
 	case "storage#object":
 		self := "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(name)
 		value["selfLink"] = origin + self
@@ -380,6 +382,10 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 	// IAM condition attributes use Storage's documented resource names.
 	target.Attributes = iam.ResourceAttributes{Name: "projects/_/buckets/" + bucket,
 		Type: "storage.googleapis.com/Bucket", Service: "storage.googleapis.com"}
+	// Enforced public access prevention overrides public grants on the
+	// bucket and its objects (storage/docs/public-access-prevention).
+	_, public := p.bucketSettings(resource.Scope, bucket)
+	target.PublicPrevented = public == publicEnforced
 	if object != "" {
 		target.Parent = target.Name
 		target.Name += "/objects/" + object
@@ -404,7 +410,7 @@ func (p *Provider) projectTarget(project string) (iam.Target, state.Scope, *gate
 // object-exists permission plan depends on.
 func (p *Provider) objectFeatures(ctx context.Context, b *memoryBackend, call gateway.Call, bucket, object string) (map[string]bool, map[string]any, error) {
 	features := map[string]bool{}
-	if call.Method != MethodObjectsInsert {
+	if call.Method != MethodObjectsInsert && call.Method != MethodObjectsRestore {
 		return features, nil, nil
 	}
 	result, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
@@ -536,7 +542,7 @@ func (b *memoryBackend) removeBackendLinks(value map[string]any) {
 	delete(value, "acl")
 	delete(value, "defaultObjectAcl")
 	if generation, ok := value[keyGeneration].(string); ok {
-		if value["kind"] == "storage#object" {
+		if value[keyKind] == "storage#object" {
 			bucket, _ := value[keyBucket].(string)
 			name, _ := value[keyName].(string)
 			value["metageneration"] = b.metageneration(bucket, name, generation)
@@ -575,11 +581,11 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, c
 	case MethodBucketsGetIamPolicy:
 		return p.readBucketPolicy(req.bucket)
 	case MethodBucketsSetIamPolicy:
-		return p.writeBucketPolicy(req.bucket, req.rest)
+		return p.writeBucketPolicy(req.scope, req.bucket, req.rest)
 	case MethodBucketsList:
 		return p.listBuckets(ctx, b, req.rest, req.scope)
-	case MethodBucketsGet:
-		return p.getBucket(ctx, b, req.rest, req.scope, path)
+	case MethodBucketsGet, MethodBucketsGetLayout:
+		return p.readBucket(ctx, b, req, path)
 	case MethodBucketsDelete:
 		return p.deleteBucket(ctx, b, req.rest, req.scope, path, req.bucket)
 	}
@@ -589,19 +595,60 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, c
 // executeObject serves the object methods, including the XML API's and a
 // resumable initiation.
 func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
+	softDeleted, _ := booleanOption(req.rest.Query, querySoftDeleted)
+	switch req.call.Method {
+	case MethodObjectsRestore:
+		return p.restoreObject(ctx, b, req, current)
+	case MethodObjectsList:
+		return p.listObjects(ctx, b, req, softDeleted)
+	case MethodObjectsGet:
+		switch {
+		case req.xml:
+			return xmlGet(ctx, b, req)
+		case softDeleted:
+			return p.getSoftDeleted(req)
+		}
+		return readOrDeleteObject(ctx, b, req)
+	case MethodObjectsInsert:
+		if req.upload.resumable && !req.xml {
+			return p.startUpload(req, current)
+		}
+	}
+	return p.writeObject(ctx, b, req, current)
+}
+
+// listObjects serves objects.list, live or soft-deleted.
+func (p *Provider) listObjects(ctx context.Context, b *memoryBackend, req request, softDeleted bool) (*gateway.RESTResponse, error) {
+	if softDeleted {
+		return p.listSoftDeleted(req)
+	}
+	if refused := p.foldersAsPrefixes(req); refused != nil {
+		return nil, refused
+	}
+	return b.forward(ctx, "GET", "/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", req.rest.Query, nil, nil)
+}
+
+// writeObject serves inserts (JSON, XML, and a resumable commit) and deletes,
+// which remove the live generation that a bucket with a soft-delete policy
+// keeps.
+func (p *Provider) writeObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
+	keep, err := p.retainLive(ctx, b, req.scope, req.bucket, req.object)
+	if err != nil {
+		return nil, err
+	}
+	var response *gateway.RESTResponse
 	switch {
 	case req.xml:
-		return executeXML(ctx, b, req, current)
-	case req.call.Method == MethodObjectsInsert && req.upload.resumable:
-		return p.startUpload(req, current)
+		response, err = executeXML(ctx, b, req, current)
+	case req.call.Method == MethodObjectsInsert:
+		response, err = insertObject(ctx, b, req, current)
+	default:
+		response, err = readOrDeleteObject(ctx, b, req)
 	}
-	switch req.call.Method {
-	case MethodObjectsList:
-		return b.forward(ctx, "GET", "/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", req.rest.Query, nil, nil)
-	case MethodObjectsInsert:
-		return insertObject(ctx, b, req, current)
+	if err != nil {
+		return response, err
 	}
-	return readOrDeleteObject(ctx, b, req)
+	return response, keep(response)
 }
 
 // insertObject uploads an object once its preconditions hold against the
@@ -677,13 +724,18 @@ func (p *Provider) readBucketPolicy(bucket string) (*gateway.RESTResponse, error
 }
 
 // writeBucketPolicy validates and stores one bucket IAM policy.
-func (p *Provider) writeBucketPolicy(bucket string, r *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+func (p *Provider) writeBucketPolicy(scope state.Scope, bucket string, r *gateway.RESTRequest) (*gateway.RESTResponse, error) {
 	request, err := decodeBucketPolicy(bucket, r.JSON)
 	if err != nil {
 		return nil, err
 	}
-	if public, refused := policyBindsPublic(request.Bindings); refused {
-		return public, nil
+	// Enforced prevention refuses public members (recorded:
+	// storage-public-access-enforced). Inherited prevention follows the
+	// storage.publicAccessPrevention organization policy; the emulator models
+	// no organization policies, so, as for a hierarchy that sets none, it does
+	// not apply and public members are accepted and grant access.
+	if _, public := p.bucketSettings(scope, bucket); public != publicInherited && policyBindsPublic(request.Bindings) {
+		return wireError(412, "conditionNotMet", "The member bindings allUsers and allAuthenticatedUsers are not allowed since public access prevention is enforced."), nil
 	}
 	result, err := p.iam.SetPolicy(BucketResource(bucket), request.Policy)
 	if status.Code(err) == codes.InvalidArgument {
@@ -721,16 +773,16 @@ func decodeBucketPolicy(bucket string, body []byte) (bucketPolicyEnvelope, error
 }
 
 // policyBindsPublic reports whether a policy grants allUsers or all
-// authenticated users, which public access prevention forbids.
-func policyBindsPublic(bindings []iam.Binding) (*gateway.RESTResponse, bool) {
+// authenticated users, which enforced public access prevention forbids.
+func policyBindsPublic(bindings []iam.Binding) bool {
 	for _, binding := range bindings {
 		for _, member := range binding.Members {
 			if member == "allUsers" || member == "allAuthenticatedUsers" {
-				return wireError(412, "conditionNotMet", "The bucket is subject to public access prevention."), true
+				return true
 			}
 		}
 	}
-	return nil, false
+	return false
 }
 
 // listBuckets mirrors every returned bucket into the provider-owned catalog.
@@ -763,6 +815,55 @@ func (p *Provider) getBucket(ctx context.Context, b *memoryBackend, r *gateway.R
 	}
 	p.bucketMetadata(scope, body)
 	return response, nil
+}
+
+// foldersAsPrefixes accepts includeFoldersAsPrefixes=true, which adds the
+// bucket's folders and managed folders to a "/"-delimited listing's prefixes
+// (objects/list). Managed folders are not modeled, so none exist; a bucket
+// without folders lists the same either way. A bucket with folders refuses
+// it rather than omit them.
+func (p *Provider) foldersAsPrefixes(req request) error {
+	include, _ := booleanOption(req.rest.Query, queryFoldersAsPrefixes)
+	req.rest.Query.Del(queryFoldersAsPrefixes)
+	if !include || req.rest.Query.Get("delimiter") != "/" {
+		return nil
+	}
+	folders, err := p.catalog.Folders(req.scope, req.bucket)
+	if err != nil {
+		return err
+	}
+	if len(folders) > 0 {
+		return gap("includeFoldersAsPrefixes in a bucket with folders")
+	}
+	return nil
+}
+
+// readBucket serves buckets.get and buckets.getStorageLayout.
+func (p *Provider) readBucket(ctx context.Context, b *memoryBackend, req request, path string) (*gateway.RESTResponse, error) {
+	if req.call.Method == MethodBucketsGetLayout {
+		return p.storageLayout(ctx, b, req.rest, req.scope, path)
+	}
+	return p.getBucket(ctx, b, req.rest, req.scope, path)
+}
+
+// storageLayout serves buckets.getStorageLayout. gcloud reads it before
+// object commands: locationType "zone" selects its zonal-bucket client, and
+// hierarchicalNamespace its folder handling. Buckets here have neither, and
+// GCP omits hierarchicalNamespace when it is off (recorded:
+// storage-gcloud-object-requests "storage-layout").
+func (p *Provider) storageLayout(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, path string) (*gateway.RESTResponse, error) {
+	response, err := p.getBucket(ctx, b, r, scope, path)
+	if err != nil || response.Status != 200 {
+		return response, err
+	}
+	bucket, err := jsonObject(response.JSON)
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: map[string]any{
+		keyKind: "storage#storageLayout", keyBucket: bucket[keyName], "location": bucket["location"],
+		"locationType": bucket["locationType"],
+	}}, nil
 }
 
 // deleteBucket deletes one bucket, then releases its catalog and IAM state.

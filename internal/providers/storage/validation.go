@@ -53,26 +53,52 @@ const (
 // queryOptions lists the documented query parameters each method may carry.
 var queryOptions = map[string][]string{
 	MethodBucketsInsert:       {queryProject},
-	MethodBucketsList:         {queryProject, "prefix", "maxResults", "pageToken"},
+	MethodBucketsList:         {queryProject, queryPrefix, queryMaxResults, "pageToken"},
 	MethodBucketsGetIamPolicy: {"optionsRequestedPolicyVersion"},
 	MethodBucketsPatch:        {queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsInsert:       {queryUploadType, keyName, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsGet:          {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsGet:          {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch, querySoftDeleted},
 	MethodObjectsDelete:       {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsPatch:        {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	// Rewrite preconditions apply to the destination. maxBytesRewrittenPerCall
 	// is accepted and not enforced: every rewrite here finishes in one call.
 	MethodObjectsRewrite: {"sourceGeneration", "maxBytesRewrittenPerCall", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsList:    {"prefix", "delimiter", "maxResults", "pageToken", "startOffset", "endOffset", "versions"},
+	MethodObjectsList:    {queryPrefix, "delimiter", queryMaxResults, "pageToken", "startOffset", "endOffset", queryVersions, querySoftDeleted, queryFoldersAsPrefixes},
+	// objects/restore: generation names the soft-deleted version; the
+	// preconditions apply to the live object it would replace.
+	MethodObjectsRestore: {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 }
 
 // defaultOnlyOptions are options accepted only at their documented default,
 // which is the behavior served; any other value is a gap. The Go client sends
-// them on every call (storage/docs/json_api/v1/objects/list, buckets/list).
+// them on every call (storage/docs/json_api/v1/objects/list, buckets/list),
+// and gcloud sends enableObjectRetention=False on every bucket insert
+// (buckets/insert: true permanently enables object retention, which is not
+// modeled). copySourceAcl copies ACLs, which uniform buckets do not have.
 var defaultOnlyOptions = map[string]map[string]string{
-	MethodBucketsList: {"returnPartialSuccess": valueFalse},
-	MethodObjectsList: {"matchGlob": "", "includeTrailingDelimiter": valueFalse, "includeFoldersAsPrefixes": valueFalse, "softDeleted": valueFalse},
-	MethodObjectsGet:  {"softDeleted": valueFalse},
+	MethodBucketsInsert:  {"enableObjectRetention": valueFalse},
+	MethodBucketsList:    {"returnPartialSuccess": valueFalse},
+	MethodObjectsList:    {"matchGlob": "", "includeTrailingDelimiter": valueFalse},
+	MethodObjectsRestore: {"copySourceAcl": valueFalse},
+}
+
+// isFalse reports whether a boolean option is false. Google's API front end
+// reads booleans case-insensitively; gcloud sends "False" (recorded:
+// storage-gcloud-bucket-defaults). An empty value is the default, false.
+func isFalse(value string) bool {
+	return value == "" || strings.EqualFold(value, valueFalse)
+}
+
+// booleanOption reads one boolean query option, refusing a non-boolean value.
+func booleanOption(query url.Values, key string) (bool, error) {
+	value := query.Get(key)
+	switch {
+	case isFalse(value):
+		return false, nil
+	case strings.EqualFold(value, "true"):
+		return true, nil
+	}
+	return false, provider.Invalid(key + " must be a boolean")
 }
 
 // universalQueryOptions apply to every method.
@@ -112,7 +138,7 @@ func validateOption(method, key string, values []string) error {
 		return status.Error(codes.InvalidArgument, "Query options must not repeat")
 	}
 	if fallback, ok := defaultOnlyOptions[method][key]; ok {
-		if value := values[0]; value != fallback && (fallback != valueFalse || value != "") {
+		if value := values[0]; value != fallback && (fallback != valueFalse || !isFalse(value)) {
 			return gap(key + "=" + value)
 		}
 		return nil
@@ -158,8 +184,10 @@ func validateOptionValues(query url.Values) error {
 	if projection := query.Get("projection"); projection != "" && projection != "noAcl" && projection != "full" {
 		return gap("projection " + projection)
 	}
-	if versions := query.Get("versions"); versions != "" && versions != "true" && versions != valueFalse {
-		return provider.Invalid("versions must be a boolean")
+	for _, key := range []string{queryVersions, querySoftDeleted, queryFoldersAsPrefixes} {
+		if _, err := booleanOption(query, key); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -280,10 +308,27 @@ func parseMultipart(r *gateway.RESTRequest, payload []byte, u *uploadRequest) er
 // multipartBoundary extracts the boundary of a multipart/related content type.
 func multipartBoundary(contentType string) (string, error) {
 	kind, params, err := mime.ParseMediaType(contentType)
-	if err != nil || kind != "multipart/related" || params["boundary"] == "" {
+	if err != nil {
+		kind, params = singleQuotedBoundary(contentType)
+	}
+	if kind != "multipart/related" || params["boundary"] == "" {
 		return "", status.Error(codes.InvalidArgument, "Expected multipart/related upload")
 	}
 	return params["boundary"], nil
+}
+
+// singleQuotedBoundary reads the content type apitools (gcloud) sends for a
+// multipart upload: it renders the boundary with Python's %r, so it arrives
+// single-quoted, as in boundary='===============0123456789=='. RFC 2045 has
+// no single quotes, so mime.ParseMediaType refuses it; GCP accepts it.
+func singleQuotedBoundary(contentType string) (string, map[string]string) {
+	kind, rest, _ := strings.Cut(contentType, ";")
+	value, ok := strings.CutPrefix(strings.TrimSpace(rest), "boundary='")
+	value, closed := strings.CutSuffix(value, "'")
+	if !ok || !closed || value == "" || strings.ContainsAny(value, "';") {
+		return "", nil
+	}
+	return strings.ToLower(strings.TrimSpace(kind)), map[string]string{"boundary": value}
 }
 
 // readMetadataPart validates the metadata part of a multipart upload.
@@ -473,10 +518,25 @@ type bucketRequest struct {
 	} `json:"lifecycle,omitempty"`
 }
 
+// Public access prevention values (buckets resource, iamConfiguration).
+const (
+	publicInherited = "inherited"
+	publicEnforced  = "enforced"
+)
+
+// Soft-delete retention bounds (storage/docs/soft-delete): 0 disables soft
+// delete; otherwise 7 to 90 days. A bucket created without a policy gets the
+// 7-day default (recorded: storage-bucket-defaults).
+const (
+	minRetention     = 7 * 24 * 60 * 60
+	maxRetention     = 90 * 24 * 60 * 60
+	defaultRetention = minRetention
+)
+
 func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	request, err := decodeBucketRequest(r.JSON)
-	if err != nil {
-		return nil, err
+	request, refused, err := decodeBucketRequest(r.JSON)
+	if refused != nil || err != nil {
+		return refused, err
 	}
 	if _, exists := p.index.Get(BucketResource(request.Name)); exists {
 		return bucketNameOwned(), nil
@@ -489,16 +549,16 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	if err != nil || response.Status != 200 {
 		return response, err
 	}
-	metadata, err := p.createdBucketMetadata(scope, request, payload)
+	body, err := jsonObject(response.JSON)
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := p.createdBucketMetadata(scope, request, payload, body)
 	if err != nil {
 		return nil, err
 	}
 	if err := p.catalog.PublishBucket(scope, Bucket{Name: request.Name, Location: request.Location, Metadata: metadata}); err != nil {
 		return rollBackBucket(ctx, b, request.Name)
-	}
-	body, err := jsonObject(response.JSON)
-	if err != nil {
-		return nil, err
 	}
 	p.bucketMetadata(scope, body)
 	return response, nil
@@ -510,33 +570,50 @@ func bucketNameOwned() *gateway.RESTResponse {
 
 // decodeBucketRequest reads a bucket create body and refuses every
 // configuration this emulator does not model, then normalizes the rest.
-func decodeBucketRequest(body []byte) (bucketRequest, error) {
+func decodeBucketRequest(body []byte) (bucketRequest, *gateway.RESTResponse, error) {
 	var request bucketRequest
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
-			return request, gap("unsupported bucket field " + field)
+			return request, nil, gap("unsupported bucket field " + field)
 		}
-		return request, gap("unsupported bucket configuration")
+		return request, nil, gap("unsupported bucket configuration")
 	}
 	if err := uniformAccess(&request); err != nil {
-		return request, err
+		return request, nil, err
 	}
-	if err := unsupportedBucketPolicy(request); err != nil {
-		return request, err
+	if err := unsupportedBucketPolicy(&request); err != nil {
+		return request, nil, err
+	}
+	if request.SoftDelete.Seconds == "" {
+		request.SoftDelete.Seconds = json.Number(strconv.Itoa(defaultRetention))
+	}
+	if _, refused := softDeleteRetention(request.SoftDelete.Seconds); refused != nil {
+		return request, refused, nil
 	}
 	if request.StorageClass == "" {
 		request.StorageClass = storageClassStandard
 	}
 	if request.StorageClass != storageClassStandard {
-		return request, gap("only STANDARD storage class")
+		return request, nil, gap("only STANDARD storage class")
 	}
 	if request.Location == "" {
-		return request, status.Error(codes.InvalidArgument, "Explicit bucket location is required")
+		return request, nil, status.Error(codes.InvalidArgument, "Explicit bucket location is required")
 	}
 	request.Location = strings.ToUpper(request.Location)
-	return request, nil
+	return request, nil, nil
+}
+
+// softDeleteRetention parses a soft-delete retention duration and refuses one
+// outside GCP's bounds with its recorded error (storage-gcloud-bucket-defaults
+// "soft-delete-below-minimum").
+func softDeleteRetention(value json.Number) (int64, *gateway.RESTResponse) {
+	seconds, err := strconv.ParseInt(string(value), 10, 64)
+	if err != nil || (seconds != 0 && (seconds < minRetention || seconds > maxRetention)) {
+		return 0, wireError(400, "invalid", "Soft delete policy must have a retention duration between 7 days and 90 days.")
+	}
+	return seconds, nil
 }
 
 // bucketAccess is one uniform bucket-level access setting.
@@ -562,14 +639,19 @@ func uniformAccess(request *bucketRequest) error {
 	return nil
 }
 
-// unsupportedBucketPolicy requires the access, retention, and lifecycle
-// settings the emulator implements to be stated explicitly.
-func unsupportedBucketPolicy(request bucketRequest) error {
-	if request.IAM.Uniform == nil || !request.IAM.Uniform.Enabled || request.IAM.Public != "enforced" {
-		return gap("explicit uniform bucket-level access and enforced public access prevention are required")
+// unsupportedBucketPolicy requires uniform bucket-level access, the only
+// access model here, and refuses the retention and lifecycle settings the
+// emulator does not implement. An omitted public access prevention is GCP's
+// default, inherited (recorded: storage-bucket-defaults).
+func unsupportedBucketPolicy(request *bucketRequest) error {
+	if request.IAM.Uniform == nil || !request.IAM.Uniform.Enabled {
+		return gap("explicit uniform bucket-level access is required; ACLs are not modeled")
 	}
-	if request.Versioning.Enabled || request.Hold || request.SoftDelete.Seconds != "0" {
-		return gap("explicitly disable versioning, default holds, and soft delete")
+	if err := publicAccessPrevention(request); err != nil {
+		return err
+	}
+	if request.Versioning.Enabled || request.Hold {
+		return gap("explicitly disable versioning and default holds")
 	}
 	if request.SoftDelete.EffectiveTime != nil {
 		return gap("soft-delete effective time is server-owned")
@@ -580,15 +662,48 @@ func unsupportedBucketPolicy(request bucketRequest) error {
 	return nil
 }
 
+// publicAccessPrevention accepts GCP's two settings and fills in the
+// default, inherited, when the request omits it.
+func publicAccessPrevention(request *bucketRequest) error {
+	switch request.IAM.Public {
+	case "":
+		request.IAM.Public = publicInherited
+	case publicInherited, publicEnforced:
+	default:
+		return gap("publicAccessPrevention " + request.IAM.Public)
+	}
+	return nil
+}
+
+// softDeletePolicy renders a policy as GCP reports it: an active policy
+// carries the time it took effect, a disabled one only its zero duration
+// (recorded: storage-gcloud-bucket-defaults).
+func softDeletePolicy(seconds int64, effective string) map[string]string {
+	policy := map[string]string{"retentionDurationSeconds": strconv.FormatInt(seconds, 10)}
+	if seconds > 0 {
+		policy["effectiveTime"] = effective
+	}
+	return policy
+}
+
+// storageTime formats a time as Storage reports it.
+func storageTime(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
 // createdBucketMetadata derives the provider-owned metadata of a new bucket
-// from the request body forwarded to the backend.
-func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketRequest, payload []byte) (string, error) {
+// from the request body forwarded to the backend and the backend's reply.
+func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketRequest, payload []byte, created map[string]any) (string, error) {
 	metadata := map[string]any{}
 	_ = json.Unmarshal(payload, &metadata)
-	metadata["softDeletePolicy"] = map[string]string{"retentionDurationSeconds": string(request.SoftDelete.Seconds)}
+	seconds, _ := softDeleteRetention(request.SoftDelete.Seconds)
+	// A new bucket's policy takes effect when it is created (recorded:
+	// storage-bucket-defaults "effective_time_is_creation").
+	timeCreated, _ := created["timeCreated"].(string)
+	metadata["softDeletePolicy"] = softDeletePolicy(seconds, timeCreated)
 	// GCP reports the same lockedTime under both names: the deadline, 90 days
 	// out, for disabling uniform access (recorded: storage-bucket-policy-only).
-	access := map[string]any{"enabled": true, "lockedTime": time.Now().Add(90 * 24 * time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")}
+	access := map[string]any{"enabled": true, "lockedTime": storageTime(time.Now().Add(90 * 24 * time.Hour))}
 	metadata["iamConfiguration"] = map[string]any{
 		"uniformBucketLevelAccess": access, "bucketPolicyOnly": access, "publicAccessPrevention": request.IAM.Public,
 	}
@@ -630,5 +745,5 @@ func (p *Provider) bucketMetadata(scope state.Scope, value map[string]any) {
 	_ = json.Unmarshal([]byte(bucket.Metadata), &metadata)
 	maps.Copy(value, metadata)
 	value["id"] = name
-	value["kind"] = "storage#bucket"
+	value[keyKind] = "storage#bucket"
 }

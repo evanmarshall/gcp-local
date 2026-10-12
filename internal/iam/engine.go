@@ -29,6 +29,10 @@ type Rule struct {
 type Target struct {
 	Name, Parent string
 	Attributes   ResourceAttributes
+	// PublicPrevented excludes allUsers and allAuthenticatedUsers bindings
+	// at every level, as Storage's enforced public access prevention does:
+	// existing public grants stay in place but grant nothing.
+	PublicPrevented bool
 }
 
 // ResourceAttributes are the documented IAM condition resource attributes.
@@ -58,6 +62,8 @@ type Decision struct {
 	Signals []Signal `json:"signals,omitempty"`
 	// conditions holds the request's CEL attributes; never serialized.
 	conditions conditionContext
+	// publicPrevented is the target's PublicPrevented; never serialized.
+	publicPrevented bool
 }
 
 // Signal records one non-IAM policy family's observation on a decision.
@@ -169,6 +175,7 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 	}
 	decision.conditions = conditionContext{ResourceName: target.Attributes.Name, ResourceType: target.Attributes.Type,
 		Service: target.Attributes.Service, Now: time.Now()}
+	decision.publicPrevented = target.PublicPrevented
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	finish := func(outcome, reason string, code codes.Code) (Decision, error) {
@@ -408,22 +415,22 @@ func (e *Engine) evaluatePermission(decision *Decision, ancestors []state.Resour
 		return check
 	}
 	for _, ancestor := range ancestors {
-		e.matchBindings(&check, ancestor.Name, permission, principal, decision.conditions)
+		e.matchBindings(&check, ancestor.Name, permission, principal, decision)
 	}
 	return check
 }
 
 // matchBindings records the first binding that grants one permission at one
 // policy. A binding whose condition fails closed never grants.
-func (e *Engine) matchBindings(check *Check, policyName, permission string, principal gateway.Principal, attributes conditionContext) {
+func (e *Engine) matchBindings(check *Check, policyName, permission string, principal gateway.Principal, decision *Decision) {
 	stored := e.policies[policyName]
 	for index, binding := range stored.policy.Bindings {
-		member := firstMember(binding, principal)
+		member := firstMember(binding, principal, decision.publicPrevented)
 		if member == "" || !e.roles[binding.Role][permission] {
 			continue
 		}
 		if len(binding.Condition) > 0 {
-			matched, reason := stored.evaluateBinding(index, attributes)
+			matched, reason := stored.evaluateBinding(index, decision.conditions)
 			check.Conditions = append(check.Conditions, reason)
 			if !matched {
 				continue
@@ -439,9 +446,13 @@ func (e *Engine) matchBindings(check *Check, policyName, permission string, prin
 }
 
 // firstMember returns the effective member of a binding for the principal.
-func firstMember(binding Binding, principal gateway.Principal) string {
+// With public principals prevented, only the principal's own member counts.
+func firstMember(binding Binding, principal gateway.Principal, publicPrevented bool) string {
 	for _, member := range binding.Members {
-		if member == "allUsers" || (principal.State == gateway.Authenticated && (member == principal.Subject || member == "allAuthenticatedUsers")) {
+		if publicPrevented && isPublicMember(member) {
+			continue
+		}
+		if member == memberAllUsers || (principal.State == gateway.Authenticated && (member == principal.Subject || member == memberAllAuthenticated)) {
 			return member
 		}
 	}
