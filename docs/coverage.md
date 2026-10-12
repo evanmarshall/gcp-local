@@ -12,14 +12,14 @@ What each service supports and how it is verified. Every service authenticates c
 
 | Key | Service | Backend | Methods served | API total | Data plane for applications | Recordings | Terraform |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 17 | 88 | Yes: object read, write, list, delete, metadata patch, resumable uploads, V4 signed URLs, rewrite; rewrite and XML paths other than signed URLs not recorded | storage-authorization, storage-bucket-updates, storage-cross-project, storage-go-client-projection, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk, storage-resumable-signed-url | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
+| `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 17 | 88 | Yes: object read, write, list, delete, metadata patch, resumable uploads, V4 signed URLs, rewrite; rewrite and XML paths other than signed URLs not recorded | storage-authorization, storage-bucket-policy-only, storage-bucket-updates, storage-cross-project, storage-go-client-projection, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk, storage-resumable-signed-url | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
 | `pubsub` | [Pub/Sub](pubsub.md) | Official emulator | 18 | 46 | Yes: publish, pull, streaming pull, push, ordering, filters, dead-letter topics, retry backoff, exactly-once, snapshots and seek; streaming pull, push, retry backoff, snapshots and seek not recorded | pubsub-delivery-features, pubsub-pull-authorization | TestAccPubSubTopicAndSubscription |
 | `firestore` | [Firestore](firestore.md) | Official emulator | 16 | 60 | Yes: documents, subcollections, queries, aggregations, transactions, batch writes, listeners over REST and gRPC; batch writes and listeners not recorded | firestore-document-lifecycle, firestore-query-transaction | TestAccFirestoreDocument |
 | `spanner` | [Spanner](spanner.md) | Official emulator | 36 | 99 | Yes: sessions, SQL queries, DML, reads, mutations, transactions over gRPC (unary methods also over REST) | spanner-instance-database-admin, spanner-data-plane-rest | TestAccSpannerInstanceAndDatabase |
 | `bigtable` | [Bigtable](bigtable.md) | Official emulator code (bttest) | 24 | 101 | Yes, modeled locally, not recorded: row reads, scans, and mutations over gRPC | bigtable-instance-table-admin | none |
 | `cloudsql` | [Cloud SQL for PostgreSQL](cloudsql.md) | Real PostgreSQL per instance | 14 | 85 | Yes: PostgreSQL on a published `127.0.0.1` port with a user password; no TLS | cloudsql-postgres-instance-admin | none |
 | `redis` | [Memorystore for Redis](memorystore.md) | Real Redis per instance | 8 | 47 | Yes: Redis on the reported `127.0.0.1` port, with AUTH; no TLS | memorystore-redis-instance-admin | none |
-| `bigquery` | [BigQuery](bigquery.md) | gcp-local | 18 | 47 | Partial: streaming inserts and single-table SELECT with an equality filter | bigquery-dataset-rows-query | TestAccBigQueryDatasetAndTable |
+| `bigquery` | [BigQuery](bigquery.md) | gcp-local | 20 | 47 | Partial: streaming inserts and single-table SELECT with an equality filter, through `jobs.query` or query jobs | bigquery-dataset-rows-query, bigquery-jobs-insert-query | TestAccBigQueryDatasetAndTable |
 | `secretmanager` | [Secret Manager](secretmanager.md) | gcp-local | 15 | 36 | Yes: secret versions and payload access over REST and gRPC; gRPC not recorded | secretmanager-access-lifecycle | TestAccSecretManagerSecretAndVersion |
 | `cloudkms` | [Cloud KMS](cloudkms.md) | gcp-local | 26 | 87 | Yes: symmetric encrypt and decrypt; asymmetric sign, HMAC, and (modeled locally) asymmetric decrypt | cloudkms-symmetric-key-lifecycle, cloudkms-asymmetric-mac-keys | TestAccKMSKeyRingCryptoKey |
 | `cloudtasks` | [Cloud Tasks](cloudtasks.md) | gcp-local | 16 | 24 | Yes: HTTP-target dispatch with OIDC and retries; tasks created over REST (v2beta3) or gRPC (v2); gRPC not recorded | cloudtasks-dispatch-retry | TestAccCloudTasksQueueLifecycle |
@@ -78,6 +78,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | storage | Go `cloud.google.com/go/storage` 1.65.0 | JSON REST | `tests/clients/go` |
 | storage | Node `@google-cloud/storage` 8.4.0 | JSON REST | `tests/clients/node` |
 | storage | Python `google-cloud-storage` 3.10.1 | JSON REST | `tests/clients/python` |
+| pubsub | Go `cloud.google.com/go/pubsub/v2` 2.7.0 | gRPC | `tests/clients/go` |
 | pubsub | Python `google-cloud-pubsub` 2.42.0 | gRPC | `tests/clients/python` |
 | firestore | Go `cloud.google.com/go/firestore` 1.22.0 | gRPC | `tests/clients/go` |
 | firestore | Python `google-cloud-firestore` 2.34.1 | gRPC | `tests/clients/python` |
@@ -93,6 +94,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | run | Python `google-cloud-run` 0.16.1 | gRPC | `tests/clients/python` |
 | bigquery | Go `cloud.google.com/go/bigquery` 1.85.0 | REST | `tests/clients/go` |
 | bigquery | Node `@google-cloud/bigquery` 9.2.0 | REST | `tests/clients/node` |
+| bigquery | Python `google-cloud-bigquery` 3.46.1 | REST | `tests/clients/python` |
 | logging | Go `cloud.google.com/go/logging` 1.18.0 | gRPC | `tests/clients/go` |
 | logging | Node `@google-cloud/logging` 12.2.0 | gRPC | `tests/clients/node` |
 | logging | Python `google-cloud-logging` 3.17.0 | gRPC | `tests/clients/python` |
@@ -105,11 +107,9 @@ These matrix pairs fail today. `sh scripts/check_clients.sh` fails if one starts
 | Service | Client | Transport | Fails because | Issue |
 | --- | --- | --- | --- | --- |
 | storage | `gcloud` 588.0.0 | JSON REST | bucket create refuses the enableObjectRetention query option | [#65](https://github.com/evanmarshall/gcp-local/issues/65) |
-| storage | `rclone` 1.75.2 | JSON REST | bucket create with bucketPolicyOnly is refused | [#64](https://github.com/evanmarshall/gcp-local/issues/64) |
-| pubsub | Go `cloud.google.com/go/pubsub/v2` 2.7.0 | gRPC | StreamingPull refuses protocol_version | [#55](https://github.com/evanmarshall/gcp-local/issues/55) |
+| storage | `rclone` 1.75.2 | JSON REST | bucket create without publicAccessPrevention and softDeletePolicy (the GCP defaults) is refused | [#64](https://github.com/evanmarshall/gcp-local/issues/64) |
 | pubsub | Node `@google-cloud/pubsub` 6.2.0 | gRPC | StreamingPull refuses protocol_version | [#55](https://github.com/evanmarshall/gcp-local/issues/55) |
 | pubsub | `gcloud` 588.0.0 | REST | REST publish and pull are not served | [#66](https://github.com/evanmarshall/gcp-local/issues/66) |
-| bigquery | Python `google-cloud-bigquery` 3.46.1 | REST | jobs.insert is not served | [#57](https://github.com/evanmarshall/gcp-local/issues/57) |
 | spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |
 | spanner | Node `@google-cloud/spanner` 9.0.0 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |
 | spanner | Python `google-cloud-spanner` 3.71.0 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |

@@ -54,10 +54,22 @@ func (p *Provider) executeTables(call gateway.Call, request *gateway.RESTRequest
 		return p.tablesDelete(request, scope)
 	case methodRowsInsert:
 		return p.rowsInsert(request, scope)
+	default:
+		return p.executeJobs(call, request, scope)
+	}
+}
+
+// executeJobs dispatches the job methods and tabledata.list.
+func (p *Provider) executeJobs(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	switch call.Method {
 	case methodJobsQuery:
-		return p.jobsQuery(request, scope)
+		return p.jobsQuery(call, request, scope)
 	case methodJobsResults:
 		return p.jobsResults(request, scope)
+	case methodJobsInsert:
+		return p.jobsInsert(call, request, scope)
+	case methodJobsGet:
+		return p.jobsGet(request, scope)
 	default:
 		return p.rowsList(request, scope)
 	}
@@ -116,7 +128,7 @@ func datasetWire(project, dataset string, record *datasetRecord) map[string]any 
 		keyKind:            "bigquery#dataset",
 		"id":               project + ":" + dataset,
 		keyETag:            etagOf(created),
-		"selfLink":         selfLink + project + "/datasets/" + dataset,
+		keySelfLink:        selfLink + project + "/datasets/" + dataset,
 		"datasetReference": map[string]any{"datasetId": dataset, keyProjectID: project},
 		keyLocation:        cmp.Or(record.Location, "US"),
 		"type":             "DEFAULT",
@@ -263,7 +275,7 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 	if p.datasetLocked(scope, dataset) == nil {
 		return nil, provider.NotFound(kindDataset, dataset)
 	}
-	if body.Schema == nil || body.Schema["fields"] == nil {
+	if body.Schema == nil || body.Schema[keyFields] == nil {
 		return nil, status.Error(codes.InvalidArgument, "A table requires a schema with fields")
 	}
 	now := p.clock()
@@ -292,14 +304,14 @@ func (p *Provider) tablesCreate(request *gateway.RESTRequest, scope state.Scope)
 // scope lock is held by the caller, so this must not re-enter the store.
 func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *tableRecord) map[string]any {
 	document := map[string]any{
-		keyKind:    "bigquery#table",
-		"id":       scope.Project + ":" + dataset + "." + table,
-		keyETag:    etagOf(record.CreatedAt),
-		"selfLink": selfLink + scope.Project + "/datasets/" + dataset + "/tables/" + table,
+		keyKind:     "bigquery#table",
+		"id":        scope.Project + ":" + dataset + "." + table,
+		keyETag:     etagOf(record.CreatedAt),
+		keySelfLink: selfLink + scope.Project + "/datasets/" + dataset + "/tables/" + table,
 		"tableReference": map[string]any{
 			"datasetId": dataset, keyProjectID: scope.Project, "tableId": table,
 		},
-		"schema":           record.Schema,
+		keySchema:          record.Schema,
 		"type":             "TABLE",
 		keyLocation:        cmp.Or(record.Location, "US"),
 		keyCreationTime:    strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
@@ -451,49 +463,6 @@ func (p *Provider) tableIam(call gateway.Call, request *gateway.RESTRequest, tar
 	return &gateway.RESTResponse{JSON: policy}, nil
 }
 
-// jobsQuery runs a bounded local SELECT against one stored table.
-// Supported grammar: SELECT * | column[, column] FROM dataset.table
-// [WHERE column = literal]; joins, aggregations, and functions are refused
-// as explicit gaps rather than approximated.
-func (p *Provider) jobsQuery(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	var body struct {
-		Query        string `json:"query"`
-		UseLegacySQL bool   `json:"useLegacySql"`
-		DryRun       bool   `json:"dryRun"`
-	}
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid query body")
-	}
-	if body.UseLegacySQL {
-		return nil, status.Error(codes.Unimplemented, "Legacy SQL is not supported")
-	}
-	parsed, parseErr := parseQuery(body.Query)
-	if parseErr != nil {
-		return nil, parseErr
-	}
-	table := p.tableLocked(scope, parsed.dataset, parsed.table)
-	if table == nil {
-		return nil, provider.NotFound("table", parsed.table)
-	}
-	fields, err := projectFields(nullableFields(schemaFields(table.Schema)), parsed.columns)
-	if err != nil {
-		return nil, err
-	}
-	rows := selectRows(table.Rows, fields, parsed)
-	jobID := "job_" + strconv.Itoa(int(p.clock().UnixNano()))
-	job := &jobRecord{ID: jobID, Fields: fields, Rows: rows, Location: table.Location, CreatedAt: p.clock()}
-	if body.DryRun {
-		return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, true)}, nil
-	}
-	if err := p.scopes.With(scope, func(s *scopeState) error {
-		s.jobs[jobID] = job
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("store query job: %w", err)
-	}
-	return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, false)}, nil
-}
-
 // projectFields keeps the schema fields named by an explicit column list, in
 // schema order; an empty list selects every field.
 func projectFields(fields []map[string]any, columns []string) ([]map[string]any, error) {
@@ -532,24 +501,9 @@ func selectRows(stored []map[string]any, fields []map[string]any, query parsedQu
 	return rows
 }
 
-// jobsResults returns the stored result of one query job.
-func (p *Provider) jobsResults(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	job := p.jobLocked(scope, request.Path["jobId"])
-	if job == nil {
-		return nil, provider.NotFound("job", request.Path["jobId"])
-	}
-	return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, false)}, nil
-}
-
-// jobLocked reads one job under the scope lock.
-func (p *Provider) jobLocked(scope state.Scope, job string) *jobRecord {
-	var record *jobRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.jobs[job]; return nil })
-	return record
-}
-
 // parsedQuery is the bounded SELECT the local engine accepts.
 type parsedQuery struct {
+	project        string // empty when the query names only dataset.table
 	dataset, table string
 	columns        []string
 	filterColumn   string
@@ -600,7 +554,7 @@ func parseTableReference(table string) (parsedQuery, error) {
 	case 2:
 		parsed.dataset, parsed.table = parts[0], parts[1]
 	case 3:
-		parsed.dataset, parsed.table = parts[1], parts[2]
+		parsed.project, parsed.dataset, parsed.table = parts[0], parts[1], parts[2]
 	default:
 		return parsed, status.Errorf(codes.InvalidArgument, "Unreadable table reference %q", table)
 	}
@@ -644,7 +598,7 @@ func parseFilter(filter string) (string, string, error) {
 
 // schemaFields returns the schema's field list.
 func schemaFields(schema map[string]any) []map[string]any {
-	fields, _ := schema["fields"].([]any)
+	fields, _ := schema[keyFields].([]any)
 	out := []map[string]any{}
 	for _, field := range fields {
 		if entry, ok := field.(map[string]any); ok {

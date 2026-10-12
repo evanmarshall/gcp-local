@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Private, uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, and `objects.rewrite` work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../third_party/fake-gcs-server/manifest.json)). Ten scenarios are recorded against GCP; rewrite and the XML paths other than signed URLs are modeled locally, not recorded.
+Private, uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, and `objects.rewrite` work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../third_party/fake-gcs-server/manifest.json)). Eleven scenarios are recorded against GCP; rewrite and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -19,14 +19,14 @@ Point each client at the emulator and keep its normal credential loading:
 | Python `google-cloud-storage` | `Client(client_options={"api_endpoint": "http://127.0.0.1:4566"})` | Yes ([`smoke_storage.py`](../scripts/smoke_storage.py)) |
 | Go `cloud.google.com/go/storage` | `storage.NewClient(ctx, option.WithEndpoint("http://127.0.0.1:4566/storage/v1/"))` | Yes ([`sdk_test.go`](../internal/providers/storage/sdk_test.go)) |
 | Node `@google-cloud/storage` | `new Storage({apiEndpoint: "http://127.0.0.1:4566", useAuthWithCustomEndpoint: true})`; upload with `save(data, {resumable: false})` | Yes ([client matrix](clients.md)) |
-| rclone | `endpoint = http://127.0.0.1:4566/storage/v1/` in the `google cloud storage` remote | No; its requests are tested in Go |
+| rclone | `endpoint = http://127.0.0.1:4566/storage/v1/` in the `google cloud storage` remote | `mkdir` fails ([client matrix](coverage.md#known-client-failures)) |
 | Terraform `hashicorp/google` | `storage_custom_endpoint = "http://127.0.0.1:4566/storage/v1/"` | Yes ([Terraform](terraform-compatibility.md)) |
 
 - Without `useAuthWithCustomEndpoint`, the Node client sends no credentials. Its resumable uploads (the `save()` default) never send them to a custom endpoint: 8.4.0 omits the option in `File.startResumableUpload_`.
 - Go and rclone need the `/storage/v1/` suffix; without it they request `/storage/b/...`. The Go client reads objects over the XML API at the endpoint's host.
 - Signed URLs use the client's endpoint as their host: Python takes `client.api_endpoint`, Go takes `SignedURLOptions{Hostname: "127.0.0.1:4566", Insecure: true}`.
 
-Bucket create must set `location`, `iamConfiguration.uniformBucketLevelAccess.enabled: true`, `iamConfiguration.publicAccessPrevention: enforced`, and `softDeletePolicy.retentionDurationSeconds: "0"`. Storage class is `STANDARD`; versioning and default holds must stay off.
+Bucket create must set `location`, `iamConfiguration.uniformBucketLevelAccess.enabled: true` (or its former name `bucketPolicyOnly`, which rclone sends), `iamConfiguration.publicAccessPrevention: enforced`, and `softDeletePolicy.retentionDurationSeconds: "0"`. Storage class is `STANDARD`; versioning and default holds must stay off. rclone sends neither public access prevention nor a soft-delete policy, so its `mkdir` is refused. Buckets report uniform access under both names, each with a `lockedTime` 90 days after creation.
 
 ## Methods
 
@@ -76,6 +76,7 @@ All recorded against GCP in `us-central1` ([recordings](../tests/conformance/rec
 | `storage-python-sdk` | 2026-10-05 | Three upstream Python Storage tests, pagination, guarded cleanup |
 | `storage-iam-conditions` | 2026-10-11 | Version-3 conditional `objectViewer`; conditional binding rejected in a version-1 policy |
 | `storage-resumable-signed-url` | 2026-10-12 | Resumable session, status query, cancel and a request after it, signed PUT and GET, tampered, expired, and wrong-method URLs |
+| `storage-bucket-policy-only` | 2026-10-12 | Bucket create with only `bucketPolicyOnly`; both names and their `lockedTime` on create and read |
 | `storage-go-client-projection` | 2026-10-12 | The Go client's `projection=full` bucket and object calls, object `patch`, an undefined query option, an invalid projection |
 
 Run in Linux or moo:

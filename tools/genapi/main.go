@@ -660,7 +660,7 @@ func computeRoutes() []byte {
 	return routeTable("ComputeRoutes", "is the Compute Engine v1 route table slice.", rows)
 }
 
-// bigqueryRoutes generates the BigQuery v2 dataset and table route slice.
+// bigqueryRoutes generates the BigQuery v2 dataset, table, and job route slice.
 func bigqueryRoutes() []byte {
 	const (
 		base   = "/bigquery/v2/projects/{project}/datasets"
@@ -688,6 +688,8 @@ func bigqueryRoutes() []byte {
 		{"bigquery.tabledata.list", http.MethodGet, table + "/data", false, false},
 		{"bigquery.jobs.query", http.MethodPost, "/bigquery/v2/projects/{project}/queries", true, false},
 		{"bigquery.jobs.getQueryResults", http.MethodGet, "/bigquery/v2/projects/{project}/queries/{jobId}", false, false},
+		{"bigquery.jobs.insert", http.MethodPost, "/bigquery/v2/projects/{project}/jobs", true, false},
+		{"bigquery.jobs.get", http.MethodGet, "/bigquery/v2/projects/{project}/jobs/{jobId}", false, false},
 	}
 	return routeTable("BigQueryRoutes", "is the BigQuery v2 route table slice.", rows)
 }

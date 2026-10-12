@@ -1,0 +1,168 @@
+{
+  "bigquery-jobs-insert-query": {
+    "recorded-date": "12-10-2026, 06:41:19",
+    "recorded-content": {
+      "job-inserted": {
+        "fields": [
+          "configuration",
+          "etag",
+          "id",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "principal_subject",
+          "selfLink",
+          "statistics",
+          "status",
+          "user_email"
+        ],
+        "http_status": 200,
+        "job_reference_fields": [
+          "jobId",
+          "location",
+          "projectId"
+        ],
+        "job_type": "QUERY",
+        "query_echoed": true,
+        "state_known": true,
+        "use_legacy_sql": false,
+        "user_email": "<fixture>"
+      },
+      "job-done": {
+        "fields": [
+          "configuration",
+          "etag",
+          "id",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "principal_subject",
+          "selfLink",
+          "statistics",
+          "status",
+          "user_email"
+        ],
+        "has_error": false,
+        "http_status": 200,
+        "job_reference_fields": [
+          "jobId",
+          "location",
+          "projectId"
+        ],
+        "job_type": "QUERY",
+        "query_echoed": true,
+        "state": "DONE",
+        "state_known": true,
+        "statement_type": "SELECT",
+        "use_legacy_sql": false,
+        "user_email": "<fixture>"
+      },
+      "results-wait": {
+        "fields": [
+          "cacheHit",
+          "etag",
+          "jobComplete",
+          "jobReference",
+          "kind",
+          "pageToken",
+          "schema",
+          "totalBytesProcessed",
+          "totalRows"
+        ],
+        "has_page_token": true,
+        "http_status": 200,
+        "jobComplete": true,
+        "row_count": 0,
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "totalRows": "2"
+      },
+      "results-first-page": {
+        "fields": [
+          "cacheHit",
+          "etag",
+          "jobComplete",
+          "jobReference",
+          "kind",
+          "pageToken",
+          "rows",
+          "schema",
+          "totalBytesProcessed",
+          "totalRows"
+        ],
+        "has_page_token": true,
+        "http_status": 200,
+        "jobComplete": true,
+        "row_count": 1,
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "totalRows": "2"
+      },
+      "results-second-page": {
+        "fields": [
+          "jobReference",
+          "rows",
+          "totalRows"
+        ],
+        "has_page_token": false,
+        "http_status": 200,
+        "jobComplete": null,
+        "row_count": 1,
+        "schema": null,
+        "totalRows": "2"
+      },
+      "results-rows": {
+        "rows": [
+          [
+            "alpha"
+          ],
+          [
+            "beta"
+          ]
+        ]
+      },
+      "duplicate-job-id": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ALREADY_EXISTS"
+      },
+      "denied-job-get": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-results": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-insert": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-job-absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "dataset_absent": true
+      }
+    }
+  }
+}

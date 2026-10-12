@@ -193,7 +193,7 @@ func TestTableRequiresSchema(t *testing.T) {
 func TestViewerCannotInsert(t *testing.T) {
 	h := newHarness(t)
 	h.table()
-	if _, err := h.engineSet(iam.Policy{Version: 3, Bindings: []iam.Binding{
+	if err := h.engineSet(iam.Policy{Version: 3, Bindings: []iam.Binding{
 		{Role: "roles/bigquery.dataViewer", Members: []string{"serviceAccount:viewer@" + testProject + ".iam.gserviceaccount.com"}},
 	}}); err != nil {
 		t.Fatal(err)
@@ -228,12 +228,11 @@ func TestEveryRouteIsHandled(t *testing.T) {
 }
 
 // engineSet replaces the project policy in the test harness.
-func (h *harness) engineSet(policy iam.Policy) (iam.Policy, error) {
-	policy, err := h.engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, policy)
-	if err != nil {
-		return policy, fmt.Errorf("set the project policy: %w", err)
+func (h *harness) engineSet(policy iam.Policy) error {
+	if _, err := h.engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, policy); err != nil {
+		return fmt.Errorf("set the project policy: %w", err)
 	}
-	return policy, nil
+	return nil
 }
 
 func TestJobsQueryAndResults(t *testing.T) {

@@ -43,7 +43,7 @@ Use `SubscriberGrpcTransport(channel=channel)` for subscribers. `local_channel_c
 | Surface | Methods | Notes |
 | --- | --- | --- |
 | Publisher (gRPC) | `CreateTopic`, `GetTopic`, `ListTopics`, `DeleteTopic`, `Publish` | Labels at create; 1 MiB per publish request |
-| Subscriber (gRPC) | `CreateSubscription`, `GetSubscription`, `ListSubscriptions`, `DeleteSubscription`, `Pull`, `Acknowledge`, `ModifyAckDeadline`, `StreamingPull`, `Seek`, `CreateSnapshot`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot` | Same-project only; delivery settings below are fixed at create; `ModifyAckDeadline=0` redelivers |
+| Subscriber (gRPC) | `CreateSubscription`, `GetSubscription`, `ListSubscriptions`, `DeleteSubscription`, `Pull`, `Acknowledge`, `ModifyAckDeadline`, `StreamingPull`, `Seek`, `CreateSnapshot`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot` | Same-project only; delivery settings below are fixed at create; `ModifyAckDeadline=0` redelivers. StreamingPull `protocol_version` 0 or 1 (the Go client sends 1) on the first request only; with 1 the emulator answers keepalive requests. Other versions return `UNIMPLEMENTED` |
 | IAMPolicy (gRPC) | `GetIamPolicy`, `SetIamPolicy` | Topics and subscriptions; version-1 policies with etag checks |
 | REST | Topic and subscription `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy` | No REST publish, pull, snapshots, or seek. Unknown body fields return 400; known unsupported fields return 501 |
 | Push | Authenticated HTTP push to a numeric loopback URL | Modeled locally, not recorded |

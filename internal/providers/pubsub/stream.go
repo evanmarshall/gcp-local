@@ -14,20 +14,36 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+// maxProtocolVersion is the newest StreamingPull protocol the official
+// emulator implements: version 1, which the Go client sends, has the server
+// answer the client's empty keepalive requests. The emulator does that itself.
+const maxProtocolVersion = 1
+
 func validateStream(request *pb.StreamingPullRequest, first bool) error {
-	if err := fields(request, "subscription", "ack_ids", "modify_deadline_seconds", "modify_deadline_ack_ids", "stream_ack_deadline_seconds", "client_id", "max_outstanding_messages", "max_outstanding_bytes"); err != nil {
+	if err := fields(request, "subscription", "ack_ids", "modify_deadline_seconds", "modify_deadline_ack_ids", "stream_ack_deadline_seconds", "client_id", "max_outstanding_messages", "max_outstanding_bytes", "protocol_version"); err != nil {
 		return err
 	}
 	if first {
 		if _, err := resourceName(request.GetSubscription(), "subscriptions"); err != nil {
 			return err
 		}
+		if version := request.GetProtocolVersion(); version < 0 || version > maxProtocolVersion {
+			return gap(fmt.Sprintf("protocol_version %d", version))
+		}
 		return validateStreamFlow(request)
 	}
-	if request.GetSubscription() != "" || request.GetClientId() != "" || request.GetMaxOutstandingMessages() != 0 || request.GetMaxOutstandingBytes() != 0 {
-		return provider.Invalid("Subscription, client ID, and flow control belong only in the first request")
+	if setsOpeningFields(request) {
+		return provider.Invalid("Subscription, client ID, flow control, and protocol version belong only in the first request")
 	}
 	return validateStreamFlow(request)
+}
+
+// setsOpeningFields reports fields the StreamingPullRequest reference says
+// "can only be set on the initial StreamingPullRequest"; later, they are
+// INVALID_ARGUMENT.
+func setsOpeningFields(request *pb.StreamingPullRequest) bool {
+	return request.GetSubscription() != "" || request.GetClientId() != "" || request.GetMaxOutstandingMessages() != 0 ||
+		request.GetMaxOutstandingBytes() != 0 || request.GetProtocolVersion() != 0
 }
 
 // validateStreamFlow rejects negative flow-control values, mismatched

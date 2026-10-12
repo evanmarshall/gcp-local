@@ -78,7 +78,7 @@ LOCAL_SUPPORT = {
     "storage": "partial-recorded-slice",
     "pubsub": "partial-recorded-slice",
     "secret-manager": "single-recorded-scenario",
-    "bigquery": "single-recorded-scenario",
+    "bigquery": "partial-recorded-slice",
     "firestore": "single-recorded-scenario",
     "cloud-run": "local-only-slice",
 }

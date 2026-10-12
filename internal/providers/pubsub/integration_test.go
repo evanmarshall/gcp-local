@@ -149,6 +149,30 @@ func TestOfficialEmulatorThroughAuthenticatedGateway(t *testing.T) {
 		t.Fatal("half-close did not drain", err)
 	}
 
+	// Protocol version 1 (the Go client's): the emulator answers a keepalive.
+	pinged, err := sub.StreamingPull(f.owner)
+	must(t, err)
+	must(t, pinged.Send(&pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10, ProtocolVersion: 1}))
+	_, err = pinged.Header()
+	must(t, err)
+	must(t, pinged.Send(&pb.StreamingPullRequest{}))
+	pong, err := pinged.Recv()
+	must(t, err)
+	if len(pong.GetReceivedMessages()) != 0 {
+		t.Fatal("keepalive answer carried messages", pong)
+	}
+	must(t, pinged.CloseSend())
+	for { // Drain any further keepalive answers until the emulator closes.
+		pong, err = pinged.Recv()
+		if err == io.EOF {
+			break
+		}
+		must(t, err)
+		if len(pong.GetReceivedMessages()) != 0 {
+			t.Fatal("keepalive answer carried messages", pong)
+		}
+	}
+
 	// Nack and redelivery stay in the official emulator.
 	published, err = pub.Publish(f.owner, &pb.PublishRequest{Topic: testTopic, Messages: []*pb.PubsubMessage{{Data: []byte("redeliver")}}})
 	must(t, err)

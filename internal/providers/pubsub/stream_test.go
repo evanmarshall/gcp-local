@@ -3,6 +3,7 @@ package pubsub
 import (
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -194,7 +196,8 @@ func TestStreamingPullRejectsBeforeOpeningUpstream(t *testing.T) {
 		{"short deadline", owner, &pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 5}, codes.InvalidArgument},
 		{"mismatched modify", owner, &pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10, ModifyDeadlineSeconds: []int32{10}}, codes.InvalidArgument},
 		{"modify range", owner, &pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10, ModifyDeadlineSeconds: []int32{601}, ModifyDeadlineAckIds: []string{"a"}}, codes.InvalidArgument},
-		{"unsupported field", owner, &pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10, ProtocolVersion: 1}, codes.Unimplemented},
+		{"unknown protocol version", owner, &pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10, ProtocolVersion: 2}, codes.Unimplemented},
+		{"unknown field", owner, withUnknownField(&pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10}), codes.Unimplemented},
 		{"no consume grant", consumer, &pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10}, codes.PermissionDenied},
 		{"foreign caller", other, &pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10}, codes.PermissionDenied},
 	}
@@ -211,6 +214,48 @@ func TestStreamingPullRejectsBeforeOpeningUpstream(t *testing.T) {
 	}
 	if b.called(subscriber+"StreamingPull") != 0 {
 		t.Fatal("a rejected stream opened the backend stream")
+	}
+}
+
+// withUnknownField adds a field newer than the pinned bindings.
+func withUnknownField(request *pb.StreamingPullRequest) *pb.StreamingPullRequest {
+	request.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 99, protowire.VarintType), 1))
+	return request
+}
+
+// TestStreamingPullProtocolVersion proves the opening request's
+// protocol_version 1, which the Go client sends, reaches the emulator, and
+// that other versions and a version on a later request are refused.
+func TestStreamingPullProtocolVersion(t *testing.T) {
+	p, _, upstream := streamFixture(t)
+	client := newClientStream(
+		&pb.StreamingPullRequest{Subscription: testSub, StreamAckDeadlineSeconds: 10, ProtocolVersion: 1},
+		&pb.StreamingPullRequest{},
+	)
+	must(t, p.stream(call(subscriber+"StreamingPull", testSub, owner), client))
+	if forwarded := upstream().requests(); len(forwarded) != 2 || forwarded[0].GetProtocolVersion() != 1 {
+		t.Fatalf("upstream received %v", forwarded)
+	}
+
+	refusals := []struct {
+		name     string
+		requests []*pb.StreamingPullRequest
+		code     codes.Code
+		message  string
+	}{
+		{"newer version", []*pb.StreamingPullRequest{{Subscription: testSub, StreamAckDeadlineSeconds: 10, ProtocolVersion: 2}},
+			codes.Unimplemented, "Pub/Sub coverage gap: protocol_version 2"},
+		{"negative version", []*pb.StreamingPullRequest{{Subscription: testSub, StreamAckDeadlineSeconds: 10, ProtocolVersion: -1}},
+			codes.Unimplemented, "Pub/Sub coverage gap: protocol_version -1"},
+		{"later version", []*pb.StreamingPullRequest{{Subscription: testSub, StreamAckDeadlineSeconds: 10}, {ProtocolVersion: 1}},
+			codes.InvalidArgument, "Subscription, client ID, flow control, and protocol version belong only in the first request"},
+	}
+	for _, refusal := range refusals {
+		p, _, _ := streamFixture(t)
+		err := p.stream(call(subscriber+"StreamingPull", testSub, owner), newClientStream(refusal.requests...))
+		if status.Code(err) != refusal.code || !strings.HasSuffix(status.Convert(err).Message(), "desc = "+refusal.message) && status.Convert(err).Message() != refusal.message {
+			t.Errorf("%s: got %v, want %v %q", refusal.name, err, refusal.code, refusal.message)
+		}
 	}
 }
 

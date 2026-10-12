@@ -1,0 +1,38 @@
+{
+  "storage-bucket-policy-only": {
+    "recorded-date": "12-10-2026, 06:41:21",
+    "recorded-content": {
+      "bucket-created": {
+        "fields": [
+          "bucketPolicyOnly",
+          "publicAccessPrevention",
+          "uniformBucketLevelAccess"
+        ],
+        "legacy_enabled": true,
+        "legacy_locked_time": true,
+        "locked_times_equal": true,
+        "public_access_prevention": "enforced",
+        "status": 200,
+        "uniform_enabled": true,
+        "uniform_locked_time": true
+      },
+      "bucket-read": {
+        "fields": [
+          "bucketPolicyOnly",
+          "publicAccessPrevention",
+          "uniformBucketLevelAccess"
+        ],
+        "legacy_enabled": true,
+        "legacy_locked_time": true,
+        "locked_times_equal": true,
+        "public_access_prevention": "enforced",
+        "status": 200,
+        "uniform_enabled": true,
+        "uniform_locked_time": true
+      },
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}

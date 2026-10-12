@@ -23,4 +23,6 @@ var BigQueryRoutes = []Route{
 	{"bigquery.tabledata.list", "GET", "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}/data", false, false},
 	{"bigquery.jobs.query", "POST", "/bigquery/v2/projects/{project}/queries", true, false},
 	{"bigquery.jobs.getQueryResults", "GET", "/bigquery/v2/projects/{project}/queries/{jobId}", false, false},
+	{"bigquery.jobs.insert", "POST", "/bigquery/v2/projects/{project}/jobs", true, false},
+	{"bigquery.jobs.get", "GET", "/bigquery/v2/projects/{project}/jobs/{jobId}", false, false},
 }

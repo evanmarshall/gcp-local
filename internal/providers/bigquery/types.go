@@ -1,7 +1,6 @@
 // Package bigquery implements the BigQuery v2 control plane: datasets,
-// tables with typed schemas, insertAll row storage, and tabledata reads.
-// Queries (jobs.query) remain an explicit gap. No cloud recording covers
-// these methods yet, so nothing here claims recorded conformance.
+// tables with typed schemas, insertAll row storage, tabledata reads, and a
+// bounded single-table SELECT through jobs.query and query jobs.insert.
 package bigquery
 
 import (
@@ -29,6 +28,8 @@ const (
 	methodRowsList       = "bigquery.tabledata.list"
 	methodJobsQuery      = "bigquery.jobs.query"
 	methodJobsResults    = "bigquery.jobs.getQueryResults"
+	methodJobsInsert     = "bigquery.jobs.insert"
+	methodJobsGet        = "bigquery.jobs.get"
 	methodDatasetsGetIam = "bigquery.datasets.getIamPolicy"
 	methodDatasetsSetIam = "bigquery.datasets.setIamPolicy"
 	methodTablesGetIam   = "bigquery.tables.getIamPolicy"
@@ -49,12 +50,30 @@ var permissions = map[string]string{
 	methodTablesUpdate:   "bigquery.tables.update",
 	methodRowsInsert:     "bigquery.tables.updateData",
 	methodRowsList:       "bigquery.tables.getData",
-	methodJobsQuery:      "bigquery.jobs.create",
+	methodJobsQuery:      permJobsCreate,
 	methodJobsResults:    "bigquery.jobs.get",
+	methodJobsInsert:     permJobsCreate,
+	methodJobsGet:        "bigquery.jobs.get",
 	methodDatasetsGetIam: "bigquery.datasets.getIamPolicy",
 	methodDatasetsSetIam: "bigquery.datasets.setIamPolicy",
 	methodTablesGetIam:   "bigquery.tables.getIamPolicy",
 	methodTablesSetIam:   "bigquery.tables.setIamPolicy",
+}
+
+// Checks that are not routes. A query needs bigquery.tables.getData on the
+// table it reads besides bigquery.jobs.create on the project (access-control
+// "Run a query" row). jobs.get and getQueryResults need bigquery.jobs.get,
+// except for the job's creator ("Requires that you're the person who ran the
+// job", jobs.get reference); the creator's check is modeled as
+// bigquery.jobs.create on the project, not recorded.
+const (
+	checkQueryTable = "bigquery.query.readTable"
+	checkOwnJob     = "bigquery.jobs.readOwn"
+)
+
+var relatedPermissions = map[string]string{
+	checkQueryTable: "bigquery.tables.getData",
+	checkOwnJob:     permJobsCreate,
 }
 
 // Resource-name helpers follow the real BigQuery namespace.
@@ -88,13 +107,17 @@ type tableRecord struct {
 	CreatedAt    time.Time
 }
 
-// jobRecord is one stored query job with its materialized result.
+// jobRecord is one stored query job with its materialized result. Principal
+// is the creator, who may read the job without bigquery.jobs.get.
 type jobRecord struct {
 	ID        string
 	Fields    []map[string]any
 	Rows      []map[string]any
 	Location  string
 	CreatedAt time.Time
+	Principal string
+	Query     string
+	Labels    map[string]string
 }
 
 // scopeState is one project slice of provider state.

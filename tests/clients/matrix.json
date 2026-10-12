@@ -84,18 +84,15 @@
       "transport": "JSON REST",
       "expect": "xfail",
       "issue": 64,
-      "gap": "bucket create with bucketPolicyOnly is refused",
-      "match": "bucketPolicyOnly"
+      "gap": "bucket create without publicAccessPrevention and softDeletePolicy (the GCP defaults) is refused",
+      "match": "enforced public access prevention are required"
     },
     {
       "service": "pubsub",
       "client": "go",
       "package": "cloud.google.com/go/pubsub/v2",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 55,
-      "gap": "StreamingPull refuses protocol_version",
-      "match": "field protocol_version"
+      "expect": "pass"
     },
     {
       "service": "pubsub",
@@ -255,10 +252,7 @@
       "client": "python",
       "package": "google-cloud-bigquery",
       "transport": "REST",
-      "expect": "xfail",
-      "issue": 57,
-      "gap": "jobs.insert is not served",
-      "match": "No provider implements this REST API method"
+      "expect": "pass"
     },
     {
       "service": "spanner",

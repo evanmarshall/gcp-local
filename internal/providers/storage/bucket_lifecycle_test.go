@@ -131,6 +131,40 @@ func TestBucketCreateRejectsUnsupportedConfiguration(t *testing.T) {
 	}
 }
 
+// TestBucketPolicyOnlyAlias covers the legacy name rclone sends for uniform
+// bucket-level access: accepted on create, reported under both names, and
+// refused when it contradicts uniformBucketLevelAccess or is off.
+func TestBucketPolicyOnlyAlias(t *testing.T) {
+	f := setup(t)
+	rest := `"location":"US-CENTRAL1","softDeletePolicy":{"retentionDurationSeconds":"0"}`
+	created := decodeBody(t, f.request(admin, "POST", "/storage/v1/b?project=project-a",
+		[]byte(`{"name":"alias-bucket",`+rest+`,"iamConfiguration":{"bucketPolicyOnly":{"enabled":true},"publicAccessPrevention":"enforced"}}`), 200).Body.Bytes())
+	read := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/alias-bucket", nil, 200).Body.Bytes())
+	for name, bucket := range map[string]map[string]any{"create": created, "get": read} {
+		iamConfiguration, _ := bucket["iamConfiguration"].(map[string]any)
+		uniform, _ := iamConfiguration["uniformBucketLevelAccess"].(map[string]any)
+		legacy, _ := iamConfiguration["bucketPolicyOnly"].(map[string]any)
+		if uniform["enabled"] != true || legacy["enabled"] != true || uniform["lockedTime"] == nil || uniform["lockedTime"] != legacy["lockedTime"] {
+			t.Fatalf("%s response does not report both names: %v", name, bucket)
+		}
+	}
+	refusals := []struct{ name, iam, message string }{
+		{"b-disagree", `{"uniformBucketLevelAccess":{"enabled":true},"bucketPolicyOnly":{"enabled":false},"publicAccessPrevention":"enforced"}`,
+			"uniformBucketLevelAccess and bucketPolicyOnly disagree"},
+		{"b-alias-off", `{"bucketPolicyOnly":{"enabled":false},"publicAccessPrevention":"enforced"}`,
+			"explicit uniform bucket-level access and enforced public access prevention are required"},
+		{"b-alias-public", `{"bucketPolicyOnly":{"enabled":true}}`,
+			"explicit uniform bucket-level access and enforced public access prevention are required"},
+	}
+	for _, refusal := range refusals {
+		body := f.request(admin, "POST", "/storage/v1/b?project=project-a",
+			[]byte(`{"name":"`+refusal.name+`",`+rest+`,"iamConfiguration":`+refusal.iam+`}`), 400).Body.String()
+		if !strings.Contains(body, refusal.message) {
+			t.Fatalf("%s: got %s, want %q", refusal.name, body, refusal.message)
+		}
+	}
+}
+
 // TestRequestOptionValidation covers unsupported and malformed query options
 // and headers, which fail before any data access.
 func TestRequestOptionValidation(t *testing.T) {

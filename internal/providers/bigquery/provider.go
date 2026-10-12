@@ -31,6 +31,9 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	if err := provider.RegisterPermissions(engine, permissions); err != nil {
 		return nil, fmt.Errorf("bigquery permissions: %w", err)
 	}
+	if err := provider.RegisterPermissions(engine, relatedPermissions); err != nil {
+		return nil, fmt.Errorf("bigquery related permissions: %w", err)
+	}
 	p := &Provider{
 		index: index, engine: engine,
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
@@ -95,12 +98,14 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	authorized := call
+	authorized.Method = p.ownJobCheck(call, request, scope)
+	decision, authorizeErr := p.engine.Authorize(authorized, target, nil)
 	if authorizeErr != nil && status.Code(authorizeErr) == codes.Unimplemented {
 		// A deleted target still reads 404 through the project anchor: the
 		// project's policies govern resources that no longer exist.
 		target = iam.Target{Name: provider.ProjectResource(scope.Project)}
-		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+		decision, authorizeErr = p.engine.Authorize(authorized, target, nil)
 	}
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
@@ -115,12 +120,23 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	stampDecision(response, decision.ID)
+	return response, nil
+}
+
+// stampDecision names the call's IAM decision on its response, unless a
+// related check that denied the call already named its own.
+func stampDecision(response *gateway.RESTResponse, id string) {
 	if response.Headers == nil {
 		response.Headers = http.Header{}
 	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	if response.Headers.Get(headerDecision) == "" {
+		response.Headers.Set(headerDecision, id)
+	}
 }
+
+// headerDecision names the IAM decision that answered the request.
+const headerDecision = "X-Gcp-Local-Decision-Id"
 
 // resolve derives the scope and IAM target for one request. Dataset methods
 // authorize against the dataset resource; table and row methods authorize
@@ -131,7 +147,7 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	target := iam.Target{Name: provider.ProjectResource(project)}
 	dataset, table := request.Path["datasetId"], request.Path["tableId"]
 	switch call.Method {
-	case methodDatasetsCreate, methodDatasetsList, methodJobsQuery, methodJobsResults:
+	case methodDatasetsCreate, methodDatasetsList, methodJobsQuery, methodJobsResults, methodJobsInsert, methodJobsGet:
 		// The collection-level create takes the dataset id from the body, and
 		// query jobs authorize at the project, like the documented rows.
 		return scope, target, nil

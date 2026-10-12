@@ -453,10 +453,12 @@ type bucketRequest struct {
 	StorageClass string            `json:"storageClass"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	IAM          struct {
-		Uniform struct {
-			Enabled bool `json:"enabled"`
-		} `json:"uniformBucketLevelAccess"`
-		Public string `json:"publicAccessPrevention"`
+		Uniform *bucketAccess `json:"uniformBucketLevelAccess,omitempty"`
+		// The feature's former name. The Bucket reference: "For backward
+		// compatibility, this field will be populated with identical
+		// information as the uniformBucketLevelAccess field."
+		BucketPolicyOnly *bucketAccess `json:"bucketPolicyOnly,omitempty"`
+		Public           string        `json:"publicAccessPrevention"`
 	} `json:"iamConfiguration"`
 	SoftDelete struct {
 		Seconds       json.Number `json:"retentionDurationSeconds"`
@@ -518,6 +520,9 @@ func decodeBucketRequest(body []byte) (bucketRequest, error) {
 		}
 		return request, gap("unsupported bucket configuration")
 	}
+	if err := uniformAccess(&request); err != nil {
+		return request, err
+	}
 	if err := unsupportedBucketPolicy(request); err != nil {
 		return request, err
 	}
@@ -534,10 +539,33 @@ func decodeBucketRequest(body []byte) (bucketRequest, error) {
 	return request, nil
 }
 
+// bucketAccess is one uniform bucket-level access setting.
+type bucketAccess struct {
+	Enabled bool `json:"enabled"`
+}
+
+// uniformAccess accepts bucketPolicyOnly as the alias of
+// uniformBucketLevelAccess (rclone sends only the alias) and sets both, so the
+// created bucket reports both as GCP does.
+func uniformAccess(request *bucketRequest) error {
+	uniform, alias := request.IAM.Uniform, request.IAM.BucketPolicyOnly
+	if uniform != nil && alias != nil && uniform.Enabled != alias.Enabled {
+		return status.Error(codes.InvalidArgument, "uniformBucketLevelAccess and bucketPolicyOnly disagree")
+	}
+	if uniform == nil {
+		uniform = alias
+	}
+	if uniform != nil {
+		access := *uniform
+		request.IAM.Uniform, request.IAM.BucketPolicyOnly = &access, &access
+	}
+	return nil
+}
+
 // unsupportedBucketPolicy requires the access, retention, and lifecycle
 // settings the emulator implements to be stated explicitly.
 func unsupportedBucketPolicy(request bucketRequest) error {
-	if !request.IAM.Uniform.Enabled || request.IAM.Public != "enforced" {
+	if request.IAM.Uniform == nil || !request.IAM.Uniform.Enabled || request.IAM.Public != "enforced" {
 		return gap("explicit uniform bucket-level access and enforced public access prevention are required")
 	}
 	if request.Versioning.Enabled || request.Hold || request.SoftDelete.Seconds != "0" {
@@ -558,6 +586,12 @@ func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketReques
 	metadata := map[string]any{}
 	_ = json.Unmarshal(payload, &metadata)
 	metadata["softDeletePolicy"] = map[string]string{"retentionDurationSeconds": string(request.SoftDelete.Seconds)}
+	// GCP reports the same lockedTime under both names: the deadline, 90 days
+	// out, for disabling uniform access (recorded: storage-bucket-policy-only).
+	access := map[string]any{"enabled": true, "lockedTime": time.Now().Add(90 * 24 * time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")}
+	metadata["iamConfiguration"] = map[string]any{
+		"uniformBucketLevelAccess": access, "bucketPolicyOnly": access, "publicAccessPrevention": request.IAM.Public,
+	}
 	project, _ := p.index.Get(provider.ProjectResource(scope.Project))
 	metadata["projectNumber"] = project.Number
 	metadata["metageneration"] = "1"
