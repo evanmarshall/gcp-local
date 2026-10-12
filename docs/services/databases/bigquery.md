@@ -78,5 +78,6 @@ Not modeled:
 
 - `MERGE` reports no `numDmlAffectedRows`. Tables created by DDL report no `REQUIRED` modes or descriptions. `insertId` deduplication, streaming buffer limits, partitioning, clustering, load, extract, and copy jobs, `jobs.list`, `jobs.cancel`, materialized views, authorized views, and `access` list updates.
 - State is in memory; restart discards it.
+- Job retention follows GCP's documented bounds, not recorded: `getQueryResults` returns 404 24 hours after a job ran, when its rows are freed, and `jobs.get` returns 404 after 180 days (GCP keeps six months of job history). The 404 message is the emulator's.
 
 Why this engine: [decision 0002](../../decisions/0002-bigquery-engine.md).

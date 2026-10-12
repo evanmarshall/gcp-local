@@ -16,6 +16,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -746,5 +747,36 @@ func TestJobIDsAreUnique(t *testing.T) {
 	}
 	for id, name := range results {
 		h.rowsAre("results of "+id, h.invoke(http.MethodGet, testQueries+"/"+id, nil), name)
+	}
+}
+
+// TestJobRetention frees a job's rows once its results expire (24 hours)
+// and forgets the job after the six-month job history.
+func TestJobRetention(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	h.bq.clock = func() time.Time { return now }
+	h.expect(http.MethodPost, testJobs, jobBody("kept", "SELECT name FROM shop.people", nil), 200)
+	stored := func() *jobRecord {
+		var record *jobRecord
+		_ = h.bq.scopes.With(provider.ProjectScope(testProject), func(s *scopeState) error {
+			record = s.jobs["kept"]
+			return nil
+		})
+		return record
+	}
+	now = now.Add(23 * time.Hour)
+	h.rowsAre("results within a day", h.invoke(http.MethodGet, testQueries+"/kept", nil), "ada", "grace", "linus")
+	now = now.Add(2 * time.Hour)
+	want(t, "expired results", h.invoke(http.MethodGet, testQueries+"/kept", nil), 404, "have expired")
+	want(t, "job outlives its results", h.invoke(http.MethodGet, testJobs+"/kept", nil), 200, `"jobId":"kept"`)
+	if record := stored(); record == nil || record.Rows != nil {
+		t.Fatalf("expired results were not freed: %+v", record)
+	}
+	now = now.Add(jobHistory)
+	want(t, "job past the history", h.invoke(http.MethodGet, testJobs+"/kept", nil), 404, "kept")
+	if stored() != nil {
+		t.Fatal("a job past the history stayed in memory")
 	}
 }

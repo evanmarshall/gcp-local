@@ -211,6 +211,7 @@ func (p *Provider) jobsInsert(call gateway.Call, request *gateway.RESTRequest, s
 		return &gateway.RESTResponse{JSON: partial(request.Query, jobWire(scope.Project, job, true))}, nil
 	}
 	if err := p.scopes.With(scope, func(s *scopeState) error {
+		s.expireJobs(p.clock())
 		if s.jobs[job.ID] != nil {
 			return status.Errorf(codes.AlreadyExists, "Already Exists: Job %s:%s.%s", scope.Project, job.Location, job.ID)
 		}
@@ -303,7 +304,9 @@ func (p *Provider) jobsQuery(call gateway.Call, request *gateway.RESTRequest, sc
 		return nil, err
 	}
 	if err := p.scopes.With(scope, func(s *scopeState) error {
-		s.jobs[job.ID] = job
+		s.expireJobs(p.clock())
+		stored := *job // The response below reads job outside the lock.
+		s.jobs[job.ID] = &stored
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("store query job: %w", err)
@@ -619,6 +622,9 @@ func (p *Provider) jobsResults(request *gateway.RESTRequest, scope state.Scope) 
 	if err != nil {
 		return nil, err
 	}
+	if p.clock().Sub(job.CreatedAt) > resultLifetime {
+		return nil, status.Errorf(codes.NotFound, "Not found: the results of job %s:%s.%s have expired", scope.Project, cmp.Or(job.Location, "US"), job.ID)
+	}
 	start, end, err := resultPage(request.Query, len(job.Rows))
 	if err != nil {
 		return nil, err
@@ -640,11 +646,35 @@ func (p *Provider) requestedJob(method string, request *gateway.RESTRequest, sco
 	return job, nil
 }
 
+// Retention of stored jobs. GCP keeps six months of job history ("BigQuery
+// saves a six-month job history", Managing jobs) and a query's results in a
+// temporary table for about 24 hours ("Using cached query results"). Without
+// these bounds every job and its rows stayed in memory until a reset.
+const (
+	jobHistory     = 180 * 24 * time.Hour
+	resultLifetime = 24 * time.Hour
+)
+
+// expireJobs forgets jobs older than the job history and frees the rows of
+// jobs whose results have expired. It runs under the scope lock.
+func (s *scopeState) expireJobs(now time.Time) {
+	for id, job := range s.jobs {
+		switch age := now.Sub(job.CreatedAt); {
+		case age > jobHistory:
+			delete(s.jobs, id)
+		case age > resultLifetime:
+			job.Rows = nil
+		}
+	}
+}
+
 // jobCopy returns a copy of one job taken under the scope lock, or nil. A
-// stored job never changes, so its rows and columns are shared.
+// stored job changes only when expireJobs drops its row slice, so a copy
+// shares its rows and columns safely.
 func (p *Provider) jobCopy(scope state.Scope, job string) *jobRecord {
 	var copied *jobRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error {
+		s.expireJobs(p.clock())
 		if record := s.jobs[job]; record != nil {
 			clone := *record
 			clone.Labels = maps.Clone(record.Labels)
