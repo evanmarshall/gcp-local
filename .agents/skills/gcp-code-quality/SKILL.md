@@ -12,7 +12,7 @@ This repository is judged on how little machinery it takes to match real GCP beh
 ```sh
 python3 scripts/install_go.py
 python3 scripts/install_quality_tools.py
-.venv-tools/bin/python -m pip install -r requirements-quality.txt
+.venv-tools/bin/python -m pip install -r requirements-tools.txt
 .venv-tools/bin/python scripts/check_quality.py
 ```
 

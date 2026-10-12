@@ -4,8 +4,7 @@
 !go.sum
 !scripts
 !scripts/install_go.py
-!scripts/install_pubsub.py
-!scripts/install_firestore.py
+!scripts/install_emulator_jar.py
 !toolchains
 !toolchains/go.json
 !toolchains/pubsub.json

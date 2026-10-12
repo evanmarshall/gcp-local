@@ -3,7 +3,7 @@ base = "debian:bookworm-20260918-slim"
 workdir = "/srv/app"
 
 [recipe]
-lockfiles = ["requirements-tools.txt", "requirements-validation.txt", "requirements-cloud.txt", "requirements-sdk.txt", "toolchains/go.json", "go.mod", "go.sum", "scripts/install_go.py", "scripts/provision_moo.sh"]
+lockfiles = ["requirements-tools.txt", "requirements-cloud.txt", "requirements-sdk.txt", "toolchains/go.json", "go.mod", "go.sum", "scripts/install_go.py", "scripts/provision_moo.sh"]
 
 [resources]
 cpus = 2

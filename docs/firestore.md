@@ -34,7 +34,7 @@ Every document name in a request (batch get, writes, listen targets) must be in 
 
 ## Python client
 
-The official `google-cloud-firestore` client (pinned 2.34.1 in `requirements-firestore.txt`) works over the gRPC gateway with local ADC. Keep `FIRESTORE_EMULATOR_HOST` unset: that mode sends the emulator's anonymous `owner` token and bypasses IAM. The client has no public channel argument, so attach an authenticated loopback channel through its private `_firestore_api_internal` attribute:
+The official `google-cloud-firestore` client (pinned 2.34.1 in `requirements-services.txt`) works over the gRPC gateway with local ADC. Keep `FIRESTORE_EMULATOR_HOST` unset: that mode sends the emulator's anonymous `owner` token and bypasses IAM. The client has no public channel argument, so attach an authenticated loopback channel through its private `_firestore_api_internal` attribute:
 
 ```python
 import google.auth
@@ -56,7 +56,7 @@ The [SDK test](../internal/providers/firestore/testdata/sdk.py) uses this setup 
 
 ## Backend: the official emulator
 
-Documents are served by Google's official Cloud Firestore emulator, pinned in [toolchains/firestore.json](../toolchains/firestore.json) (version **1.19.9**, the `cloud-firestore-emulator` component of Cloud SDK 529.0.0). `python3 scripts/install_firestore.py` downloads the component from `dl.google.com` without gcloud, verifies the archive size/SHA-256 and the JAR SHA-256, and installs only `.tools/firestore/emulator.jar`. The provider re-hashes the JAR before every start.
+Documents are served by Google's official Cloud Firestore emulator, pinned in [toolchains/firestore.json](../toolchains/firestore.json) (version **1.19.9**, the `cloud-firestore-emulator` component of Cloud SDK 529.0.0). `python3 scripts/install_emulator_jar.py firestore` downloads the component from `dl.google.com` without gcloud, verifies the archive size/SHA-256 and the JAR SHA-256, and installs only `.tools/firestore/emulator.jar`. The provider re-hashes the JAR before every start.
 
 Version choice: the current release, 1.22.0 (SDK 588.0.0), and every release since 1.20.0 (SDK 530.0.0) ship Java 21 class files (class-file major version 65), so they cannot run on the pinned Java 17 runtime. Google's versioned SDK manifests (`components-v<sdk>.json`) list 1.19.9 for SDK 500.0.0 through 529.0.0. Its class files are Java 11 (major 55). Moving to a newer emulator requires changing the Java 21 runtime used by Moo, CI, and the packaged image.
 
@@ -95,8 +95,8 @@ The Terraform acceptance case `TestAccFirestoreDocument` (pinned google 8.5.0 pr
 ## Verification
 
 ```sh
-python3 scripts/install_firestore.py
-.venv-tools/bin/python -m pip install -r requirements-firestore.txt
+python3 scripts/install_emulator_jar.py firestore
+.venv-tools/bin/python -m pip install -r requirements-services.txt
 sh scripts/check_firestore.sh
 ```
 

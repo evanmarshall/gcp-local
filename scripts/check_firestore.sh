@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run the Firestore provider against the pinned official emulator with loopback only.
 # Run inside Linux CI or a moo task machine with namespace permission.
-# The Python SDK test needs requirements-firestore.txt in GCP_LOCAL_TEST_PYTHON.
+# The Python SDK test needs requirements-services.txt in GCP_LOCAL_TEST_PYTHON.
 set -eu
 cd "$(dirname "$0")/.."
 GCP_LOCAL_JAVA=${GCP_LOCAL_JAVA:-$(command -v java)}

@@ -23,7 +23,6 @@ import json
 import os
 import secrets
 import shutil
-import socket
 import stat
 import subprocess
 import sys
@@ -40,7 +39,8 @@ from google.auth.transport.grpc import secure_authorized_channel
 from google.auth.transport.requests import Request
 from google.cloud import pubsub_v1
 from google.pubsub_v1.services.publisher.transports.grpc import PublisherGrpcTransport
-from smoke_cloudrun import start_core  # helpers
+from smoke_cloudrun import start_core
+from smoke_support import free_ports
 
 REPO = Path(__file__).resolve().parents[1]
 SERVE_SOCKET = 9298
@@ -288,8 +288,9 @@ def assert_no_revisions() -> None:
 
 def install_tools() -> tuple[Path, str]:
     """Build the core and install the pinned Pub/Sub jar and Terraform."""
-    for installer in ("install_go.py", "install_pubsub.py", "install_terraform.py"):
-        subprocess.run([sys.executable, str(REPO / "scripts" / installer)],
+    for installer in (["install_go.py"], ["install_emulator_jar.py", "pubsub"],
+                      ["install_terraform.py"]):
+        subprocess.run([sys.executable, str(REPO / "scripts" / installer[0]), *installer[1:]],
                        check=True, capture_output=True, text=True)
     binary = REPO / "bin" / "gcp-local"
     subprocess.run(
@@ -353,23 +354,6 @@ def environment(directory: Path, action: str, *options: str) -> str:
     return result.stdout
 
 
-def free_port_pair() -> int:
-    """Pick a loopback port whose successor (the gRPC gateway) is also free."""
-    for _ in range(50):
-        with socket.socket() as first:
-            first.bind(("127.0.0.1", 0))
-            port = first.getsockname()[1]
-            if port >= 65535:
-                continue
-            with socket.socket() as second:
-                try:
-                    second.bind(("127.0.0.1", port + 1))
-                except OSError:
-                    continue
-                return port
-    raise AssertionError("No free loopback port pair")
-
-
 def packaged_workers(container: str) -> list[str]:
     """List the bundled worker processes running inside the core container."""
     top = subprocess.run([DOCKER, "top", container, "-o", "pid,args"], capture_output=True,
@@ -388,7 +372,7 @@ def packaged_credentials(adc: str) -> google.auth.credentials.Credentials:
 
 def packaged_run(directory: Path, workdir: Path) -> None:
     """Start the packaged environment, run the workflow, reset, and verify it is empty."""
-    port = free_port_pair()
+    port = free_ports(2)  # HTTP and its gRPC gateway
     print(environment(directory, "up", "--port", str(port), "--project", PROJECT,
                       "--workload", WORKER_EMAIL.split("@")[0]).strip().splitlines()[-1])
     env = json.loads(environment(directory, "env"))

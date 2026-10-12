@@ -4,7 +4,7 @@
 Staticcheck and deadcode are built from the pinned module versions with the
 pinned Go toolchain. golangci-lint is a released binary, verified against the
 checksum recorded in toolchains/quality.json. Python analyzers come from
-requirements-quality.txt.
+requirements-tools.txt.
 """
 
 import hashlib
@@ -78,7 +78,7 @@ def main() -> int:
     install_go_module("staticcheck", config["staticcheck"])
     install_go_module("deadcode", config["deadcode"])
     print(
-        f"Python analyzers are pinned in requirements-quality.txt "
+        f"Python analyzers are pinned in requirements-tools.txt "
         f"(ruff=={config['ruff']['version']}, vulture=={config['vulture']['version']})"
     )
 

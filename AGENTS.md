@@ -27,18 +27,12 @@ gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRP
 - Use [scoped state and lifecycle hooks](docs/state-and-backends.md). Run provider/backend mutations inside `Manager.Use` after authorization; publish index changes after backend success and clear state only after backend reset succeeds.
 - Use deterministic local tests for normal development. Real-GCP recording requires an authorized sandbox and explicit live-cloud scope; permission to edit a provider does not authorize cloud spending. Never fall back to real GCP when local emulation is missing.
 - Preserve observed cloud fixtures; update them through the recorder rather than editing expected results to match the emulator. Keep credentials and sensitive payloads out of fixtures, logs, and Git.
-- Run `sh scripts/check_storage.sh` inside moo/Linux when changing Storage. It tests production ADC and the real backend against committed cloud recordings without egress. Its synthetic credential adapter is test-only.
-- For Pub/Sub, install Java 17, `scripts/install_pubsub.py`, and `requirements-pubsub.txt` in the task guest, then run `sh scripts/check_pubsub.sh`. It exercises the real backend and SDK with local ADC in isolation. See [coverage and configuration](docs/pubsub.md); never use anonymous emulator SDK mode to claim IAM support.
-- For Firestore, install Java 17, `scripts/install_firestore.py`, and `requirements-firestore.txt` in the task guest, then run `sh scripts/check_firestore.sh`. The official emulator owns documents; the provider authorizes first and owns field configuration. See [Firestore](docs/firestore.md).
-- For Spanner, run `python3 scripts/install_spanner.py` in the Linux task guest, then `sh scripts/check_spanner.sh`. The official emulator is Linux-only; see [Spanner](docs/spanner.md).
-- For Memorystore, run `python3 scripts/install_redis.py` in the Linux task guest, then `sh scripts/check_redis.sh`. See [Memorystore](docs/memorystore.md).
-- For Cloud SQL, run `python3 scripts/install_postgres.py` in the Linux task guest, then `sh scripts/check_cloudsql.sh`. Run it as an unprivileged user, or as root with the install root traversable by `nobody`; see [Cloud SQL](docs/cloudsql.md).
-- For Vertex AI and Cloud Logging, install `requirements-vertexai.txt` and `requirements-logging.txt` in the task guest, then run `sh scripts/check_vertexai.sh` and `sh scripts/check_logging.sh`. They drive the google-genai and google-cloud-logging SDKs with local ADC in isolation. Vertex AI answers come from a stub or Ollama, never Gemini; see [Vertex AI](docs/vertexai.md) and [Cloud Logging](docs/logging.md).
-- Run `sh scripts/check_terraform.sh` inside moo/Linux for the pinned acceptance slice after installing `scripts/install_terraform.py`. It includes a negative control and never executes Terraform against GCP.
-- For packaged setup changes, run `.venv-tools/bin/python scripts/smoke_environment.py` with Docker and pinned SDK dependencies. Read [the quickstart](docs/quickstart.md); reset/down apply only to the selected private environment directory.
-- Update the relevant coverage notes when adding behavior. Run the checks appropriate to the change and report what was actually verified.
+- Never use an emulator's anonymous SDK mode (`PUBSUB_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST`) or a test-only credential adapter to claim IAM support.
+- Update [service coverage](docs/coverage.md) when adding behavior. Run the checks for the area you changed and report what was actually verified.
 
 ## Commands
+
+[CONTRIBUTING.md](CONTRIBUTING.md#checks) lists every check, what it verifies, where it runs, and what to install first. The host checks:
 
 ```sh
 sh scripts/setup_git.sh
@@ -49,19 +43,15 @@ python3 scripts/install_go.py
 sh scripts/check_go.sh
 python3 scripts/install_quality_tools.py
 .venv-tools/bin/python scripts/check_quality.py
+.venv-tools/bin/python -m pytest
 ```
 
-The history check needs an existing commit. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup without `uv`. See [runtime.md](docs/runtime.md) for the server. Format with `sh scripts/go.sh fmt ./...`; run focused tests with `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`. Use the pinned worktree toolchain instead of an ambient Go installation.
-
-After installing `requirements-sdk.txt`, `requirements-tools.txt`, and `requirements-quality.txt` in the tooling environment, run `.venv-tools/bin/python -m pytest` and `.venv-tools/bin/python scripts/check_quality.py`. It defaults to offline harness checks and writes separate harness/conformance results. Read [the validation guide](docs/validation.md) before writing a scenario. `.env` holds sandbox setup inputs described in [the sandbox guide](docs/gcp-sandbox.md); it is not automatically loaded by tests.
-
-For moo setup, run `sh scripts/setup_moo.sh`. Run tooling tests inside the task machine with `moo run task-name -- 'cd /srv/app && python3 -m unittest discover -s tests/tooling -v'`. Keep the repository and history checks above on the host: moo syncs source files, not `.git`.
+Format with `sh scripts/go.sh fmt ./...`; run focused tests with `sh scripts/go.sh test -race ./internal/runtime ./cmd/gcp-local`. Use the pinned worktree toolchain, not an ambient Go. Run the Linux checks in a moo task machine; run the repository and history checks on the host, because moo does not sync `.git`. Read [the validation guide](docs/validation.md) before writing a scenario.
 
 ## Git and GitHub
 
 - Keep commit messages short: one or two summary sentences followed by concise bullet points when there are details to capture. Use concrete changes and relevant validation; avoid long narratives. See `.gitmessage`.
 - Fast-forward-only integration: `git merge --ff-only`, followed by a normal push. No merge commits, squash merges, or GitHub Rebase and merge. If branches diverge, update the feature work on the current base and rerun checks; do not force-push `main` or rewrite another contributor's history.
-- `scripts/setup_git.sh` configures this clone's merge/pull defaults and pre-push hook. CI checks linear history too. These are safeguards, not server-enforced branch protection; the current private repository plan does not support that protection.
 - Keep issue and PR descriptions short and reviewable: behavior, scope, acceptance criteria, dependencies, and validation. Link the issue. Do not claim an issue is complete until its acceptance criteria are met.
 - These files do not grant permission to publish, merge, create issues, or contact others beyond the user's current authorization.
 

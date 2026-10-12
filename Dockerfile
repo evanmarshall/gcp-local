@@ -18,16 +18,16 @@ RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s
 # Downloads the checksum-pinned official Pub/Sub emulator JAR for the runtime stage.
 FROM python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS pubsub
 WORKDIR /src
-COPY scripts/install_pubsub.py scripts/install_pubsub.py
+COPY scripts/install_emulator_jar.py scripts/install_emulator_jar.py
 COPY toolchains/pubsub.json toolchains/pubsub.json
-RUN python3 scripts/install_pubsub.py
+RUN python3 scripts/install_emulator_jar.py pubsub
 
 # Downloads the checksum-pinned official Firestore emulator JAR for the runtime stage.
 FROM python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS firestore
 WORKDIR /src
-COPY scripts/install_firestore.py scripts/install_firestore.py
+COPY scripts/install_emulator_jar.py scripts/install_emulator_jar.py
 COPY toolchains/firestore.json toolchains/firestore.json
-RUN python3 scripts/install_firestore.py
+RUN python3 scripts/install_emulator_jar.py firestore
 
 # Downloads the checksum-pinned official Spanner emulator binary and the newer
 # libstdc++ it requires from the per-architecture gcr.io image layers.

@@ -18,7 +18,7 @@ description: Use when a gcp-local change adds or removes a service, provider met
 | Terraform case | `docs/coverage.md` Terraform column and `docs/terraform-compatibility.md` |
 | Evidence level changes (first recording, or modeled to recorded) | `LOCAL_SUPPORT` in `skills/gcp-local-setup/scripts/inspect_repo.py` |
 | Developer role | `gcp_local/bootstrap.py` `DEVELOPER_ROLES` and the `docs/quickstart.md` roles table |
-| New service | All of the above, plus the README table, `docs/quickstart.md`, an `AGENTS.md` check-command line, and the `SERVICES` list |
+| New service | All of the above, plus the README table, `docs/quickstart.md`, a row in the `CONTRIBUTING.md` checks table, and the `SERVICES` list |
 
 Then find stale copies:
 

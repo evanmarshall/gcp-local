@@ -14,7 +14,6 @@ import sys
 import tempfile
 import time
 import urllib.error
-import urllib.parse
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -34,7 +33,12 @@ DOCKER = shutil.which("docker") or "docker"
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from smoke_support import exchange, free_ports  # noqa: E402
+
 from gcp_local.bootstrap import SERVICES  # noqa: E402
+
+# Each environment publishes HTTP, gRPC, and 16 data-plane ports from its base port.
+PORT_BLOCK = 18
 
 # One read per packaged provider (Cloud Run, Connectivity Tests, and project
 # IAM included). The developer's explicit grants must allow each; an enrolled
@@ -91,24 +95,6 @@ def cli(
     if check and result.returncode:
         raise AssertionError(result.stdout + result.stderr)
     return result
-
-
-def unused_port() -> int:
-    """Find a base port whose HTTP, gRPC, and 16 data-plane ports are all free."""
-    for _ in range(100):
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            base = sock.getsockname()[1]
-        if base + 17 > 65535:  # the highest TCP port
-            continue
-        try:
-            for port in range(base, base + 18):
-                with socket.socket() as sock:
-                    sock.bind(("127.0.0.1", port))
-        except OSError:
-            continue
-        return base
-    raise AssertionError("No free block of 18 loopback ports")
 
 
 def client_for(directory: Path) -> tuple[storage.Client, requests.Session, requests.Session]:
@@ -275,27 +261,6 @@ def local_call(
             return response.status, response.read()
     except urllib.error.HTTPError as error:
         return error.code, error.read()
-
-
-def exchange(endpoint: str, subject_token: str) -> str:
-    """Exchange one enrolled subject token at the local STS for an access token."""
-    form = urllib.parse.urlencode(
-        {
-            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-            "audience": "//gcp-local/identity",
-            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
-            "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
-            "subject_token": subject_token,
-            "scope": "https://www.googleapis.com/auth/cloud-platform",
-        }
-    ).encode()
-    request = HTTPRequest(  # noqa: S310 -- the environment's loopback STS endpoint
-        endpoint + "/v1/token",
-        data=form,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    with build_opener(ProxyHandler({})).open(request, timeout=10) as response:
-        return json.loads(response.read())["access_token"]
 
 
 def verify_services(directory: Path) -> None:
@@ -683,7 +648,7 @@ def verify_standalone(image: str, temporary: Path) -> None:
     """Run the image with docker run alone and require the SDK examples to pass."""
     state = temporary / "standalone"
     state.mkdir(mode=0o700)
-    port = unused_port()
+    port = free_ports(PORT_BLOCK)
     name = "gcp-local-standalone-" + str(port)
     subprocess.run(
         [
@@ -774,7 +739,7 @@ def main() -> int:
         resources: list[Any] = []
         try:
             for directory in directories[:2]:
-                cli(directory, "up", "--port", str(unused_port()), "--workload", UNGRANTED)
+                cli(directory, "up", "--port", str(free_ports(PORT_BLOCK)), "--workload", UNGRANTED)
                 status = json.loads(cli(directory, "status").stdout)
                 assert status["ready"]
                 assert status["providers"] == SERVICES

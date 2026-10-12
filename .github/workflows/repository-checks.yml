@@ -16,13 +16,13 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 scripts/install_go.py
-      - run: python3 scripts/install_pubsub.py
-      - run: python3 scripts/install_firestore.py
+      - run: python3 scripts/install_emulator_jar.py pubsub
+      - run: python3 scripts/install_emulator_jar.py firestore
       - run: python3 scripts/install_spanner.py
       - run: python3 scripts/install_redis.py
       - run: python3 scripts/install_postgres.py
       - run: python3 -m venv .venv-tools
-      - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt -r requirements-firestore.txt -r requirements-vertexai.txt -r requirements-logging.txt
+      - run: .venv-tools/bin/python -m pip install -r requirements-services.txt
       - run: .venv-tools/bin/python -m pip check
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - run: sh scripts/go.sh build -tags=backendprobe -o bin/pubsub-probe ./tools/pubsub-probe
@@ -115,7 +115,7 @@ jobs:
       - run: python -m pip install -r requirements-pubsub.txt
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - run: python scripts/install_go.py
-      - run: python scripts/install_pubsub.py
+      - run: python scripts/install_emulator_jar.py pubsub
       - run: python scripts/install_terraform.py
       - name: Provision and run the Pub/Sub push to Cloud Run worker to Storage workflow with Terraform
         run: |
@@ -149,8 +149,8 @@ jobs:
           python-version: '3.12'
       - run: python scripts/install_go.py
       - run: python scripts/install_terraform.py
-      - run: python scripts/install_pubsub.py
-      - run: python scripts/install_firestore.py
+      - run: python scripts/install_emulator_jar.py pubsub
+      - run: python scripts/install_emulator_jar.py firestore
       - run: python scripts/install_spanner.py
       - run: python scripts/install_redis.py
       - run: python scripts/install_postgres.py
@@ -208,7 +208,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-tools.txt -r requirements-quality.txt
+      - run: python -m pip install -r requirements-tools.txt
       - run: python scripts/install_go.py
       - run: python scripts/install_quality_tools.py
       - name: Lint Go and Python and reject unbudgeted dead code
@@ -265,8 +265,8 @@ jobs:
       - run: python scripts/install_spanner.py
       - run: python scripts/install_redis.py
       - run: python scripts/install_postgres.py
-      - run: python scripts/install_firestore.py
-      - run: python scripts/install_pubsub.py
+      - run: python scripts/install_emulator_jar.py firestore
+      - run: python scripts/install_emulator_jar.py pubsub
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - name: Warm the Storage builds before blocking network egress
         run: |

@@ -52,7 +52,7 @@
   },
   "quality": {
     "tools": "toolchains/quality.json",
-    "python_tools": "requirements-quality.txt",
+    "python_tools": "requirements-tools.txt",
     "go_config": ".golangci.yml",
     "python_config": "ruff.toml",
     "baselines": "quality/",

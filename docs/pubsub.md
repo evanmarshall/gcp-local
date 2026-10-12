@@ -46,7 +46,7 @@ The split between caller and service-agent checks follows [Google's push authent
 
 Use `python3 scripts/local_env.py up` (or the `gcp-local` CLI) for the [packaged environment](quickstart.md), or follow the manual instructions below for a private runtime checkout or Moo machine.
 
-The manual path uses Java 17, the pinned Go toolchain, and `python3 scripts/install_pubsub.py`. Generate an identity bundle with `scripts/create_local_identity.py`; configure the corresponding project and a `roles/pubsub.admin` grant to that named local principal in an owner-only IAM file, following [the bootstrap format](iam.md). Then:
+The manual path uses Java 17, the pinned Go toolchain, and `python3 scripts/install_emulator_jar.py pubsub`. Generate an identity bundle with `scripts/create_local_identity.py`; configure the corresponding project and a `roles/pubsub.admin` grant to that named local principal in an owner-only IAM file, following [the bootstrap format](iam.md). Then:
 
 ```sh
 sh scripts/go.sh build -o bin/gcp-local ./cmd/gcp-local
@@ -98,7 +98,7 @@ The race-enabled Go suite and real Python SDK run with only loopback available. 
 Install Java 17 in the task machine, then run from its synced checkout:
 
 ```sh
-python3 scripts/install_pubsub.py
+python3 scripts/install_emulator_jar.py pubsub
 sh scripts/check_pubsub_backend.sh
 ```
 

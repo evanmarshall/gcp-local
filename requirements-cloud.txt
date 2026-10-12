@@ -1,5 +1,17 @@
-# Optional real-GCP authentication; pinned including transitive dependencies.
--r requirements-validation.txt
+# Offline validation harness (pytest, snapshots) and optional real-GCP
+# authentication (google-auth). Every transitive dependency is pinned.
+# Runners match the archived LocalStack baseline where applicable.
+pytest==9.0.2
+pytest-socket==0.8.1
+localstack-snapshot==0.3.3
+cachebox==5.2.3
+deepdiff==9.1.0
+iniconfig==2.3.0
+jsonpath-ng==1.8.0
+orderly-set==5.5.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
 certifi==2026.7.22
 cffi==2.1.1
 charset-normalizer==3.5.2

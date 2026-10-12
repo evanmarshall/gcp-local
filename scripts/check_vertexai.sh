@@ -1,6 +1,6 @@
 #!/bin/sh
 # Drive the google-genai SDK (Vertex AI mode) against the stub with local ADC and only loopback.
-# Run inside Linux CI or a moo task machine after installing requirements-vertexai.txt.
+# Run inside Linux CI or a moo task machine after installing requirements-services.txt.
 set -eu
 cd "$(dirname "$0")/.."
 GCP_LOCAL_TEST_PYTHON=${GCP_LOCAL_TEST_PYTHON:-"$PWD/.venv-tools/bin/python"}

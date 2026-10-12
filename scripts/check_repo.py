@@ -98,6 +98,17 @@ def check_coverage(errors: list[str]) -> None:
         errors.append("README.md: must link docs/coverage.md")
 
 
+def check_tooling_index(errors: list[str]) -> None:
+    """Require CONTRIBUTING.md to name every script and requirements file."""
+    index = (ROOT / "CONTRIBUTING.md").read_text()
+    paths = [*(ROOT / "scripts").iterdir(), *ROOT.glob("requirements*.txt")]
+    errors.extend(
+        f"CONTRIBUTING.md: {path.relative_to(ROOT)} is not listed in the tooling index"
+        for path in sorted(paths)
+        if path.is_file() and not re.search(rf"(?<![\w-]){re.escape(path.name)}\b", index)
+    )
+
+
 def skill_error(path: Path, content: str) -> str | None:
     """Return the first skill-metadata defect, or None when the skill is sound."""
     match = re.match(r"\A---\n(.*?)\n---\n", content, re.DOTALL)
@@ -142,6 +153,7 @@ def main() -> int:
     paths = [ROOT / name for name in sorted(set(files)) if name]
     check_documents(errors, paths)
     check_coverage(errors)
+    check_tooling_index(errors)
     skills = sorted(
         [*(ROOT / ".agents/skills").glob("*/SKILL.md"), *(ROOT / "skills").glob("*/SKILL.md")]
     )

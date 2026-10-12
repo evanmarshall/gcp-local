@@ -1,1 +1,5 @@
+# Repository checks: check_repo.py (PyYAML) and check_quality.py (ruff, vulture).
+# The Go analyzers are pinned in toolchains/quality.json.
 PyYAML==6.0.3
+ruff==0.17.0
+vulture==2.16

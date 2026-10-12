@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the repository quality gate: strict Go/Python lint plus dead-code analysis.
 
-Every analyzer is version-pinned (toolchains/quality.json, requirements-quality.txt),
+Every analyzer is version-pinned (toolchains/quality.json, requirements-tools.txt),
 so the gate is reproducible on any host. Known lint findings live in the checked-in
 baselines under quality/, keyed by rule and file; the gate fails on any finding that is
 not baselined and on any baseline entry that has gone stale, so a baseline can only

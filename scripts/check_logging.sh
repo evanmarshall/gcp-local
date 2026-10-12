@@ -1,6 +1,6 @@
 #!/bin/sh
 # Drive the google-cloud-logging SDK over REST and gRPC with local ADC and only loopback.
-# Run inside Linux CI or a moo task machine after installing requirements-logging.txt.
+# Run inside Linux CI or a moo task machine after installing requirements-services.txt.
 set -eu
 cd "$(dirname "$0")/.."
 GCP_LOCAL_TEST_PYTHON=${GCP_LOCAL_TEST_PYTHON:-"$PWD/.venv-tools/bin/python"}

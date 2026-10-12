@@ -1,5 +1,0 @@
-# Local authenticated Firestore SDK runner; no live-cloud execution by default.
--r requirements-sdk.txt
-google-cloud-firestore==2.34.1
-grpcio==1.84.0
-grpcio-status==1.84.0

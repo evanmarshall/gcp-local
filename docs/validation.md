@@ -65,7 +65,7 @@ Permission minimization probes use a separate runner and report format; see [per
 | [Terratest](https://github.com/gruntwork-io/terratest) | Optional cross-service orchestration; Apache-2.0 | Evaluate for #14 when orchestration is needed |
 | [Schemathesis](https://github.com/schemathesis/schemathesis) | Local REST property tests; MIT | Deferred until a supported OpenAPI contract exists; not a Discovery/gRPC/IAM oracle |
 
-All installed dependencies, including transitives, are pinned in `requirements-validation.txt`. Transitive licenses: cachebox, deepdiff, iniconfig, orderly-set, and pluggy are MIT; jsonpath-ng is Apache-2.0; packaging is Apache-2.0 OR BSD-2-Clause; Pygments is BSD-2-Clause. PyYAML in the contributor requirements is MIT. No upstream suite is vendored or claimed as running yet.
+All installed dependencies, including transitives, are pinned in `requirements-cloud.txt`. Transitive licenses: cachebox, deepdiff, iniconfig, orderly-set, and pluggy are MIT; jsonpath-ng is Apache-2.0; packaging is Apache-2.0 OR BSD-2-Clause; Pygments is BSD-2-Clause. PyYAML in the contributor requirements is MIT. No upstream suite is vendored or claimed as running yet.
 
 The runner versions follow [the archived LocalStack dependency list](https://github.com/localstack/localstack/blob/8b9a79f05846835cf4dff63ab7eefdde9df83783/requirements-test.txt). Update pins in reviewed changes, run dependency checks and the complete synthetic harness on Python 3.11/3.12, and explicitly review the private SnapshotSession methods used by the adapter. Keep GCP baselines unchanged during dependency upgrades; revalidation is a separate live task.
 

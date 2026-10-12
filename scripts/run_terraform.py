@@ -12,11 +12,47 @@ import tempfile
 from pathlib import Path
 
 
+def negative_control(root: Path) -> int:
+    """Require the upstream assertion to reject the fixture's deliberately incorrect RPO."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            __file__,
+            "--test",
+            "TestAccStorageBucket_basic",
+            "--output",
+            ".artifacts/terraform-fault",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=220,
+        check=False,
+    )
+    print(result.stdout, end="")
+    print(result.stderr, end="", file=sys.stderr)
+    report = json.loads((root / ".artifacts/terraform-fault/results.json").read_text())
+    if (
+        result.returncode == 0
+        or report["timed_out"]
+        or len(report["tests"]) != 1
+        or report["tests"][0]["Action"] != "fail"
+        or "Attribute 'rpo' found when not expected" not in result.stdout
+    ):
+        raise SystemExit("The negative control did not fail on the intended upstream RPO assertion")
+    print("Terraform negative control passed: incorrect bucket metadata was detected.")
+    return 0
+
+
 def main() -> int:
     """Run the allowlisted compiled upstream acceptance tests in isolation."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test", help="One exact allowlisted ID; defaults to the entire selection")
     parser.add_argument("--output", default=".artifacts/terraform")
+    parser.add_argument(
+        "--negative-control",
+        action="store_true",
+        help="Against a -fault-rpo server, require TestAccStorageBucket_basic to fail on RPO",
+    )
     args = parser.parse_args()
     if sys.platform != "linux" or os.environ.get("GCP_LOCAL_ISOLATED") != "1":
         raise RuntimeError(
@@ -25,6 +61,8 @@ def main() -> int:
     if {name for _, name in socket.if_nameindex()} != {"lo"}:
         raise RuntimeError("Terraform acceptance runs require the loopback-only network namespace")
     root = Path(__file__).resolve().parents[1]
+    if args.negative_control:
+        return negative_control(root)
     tools = root / ".tools/terraform"
     artifacts = root / args.output
     artifacts.mkdir(parents=True, exist_ok=True)
