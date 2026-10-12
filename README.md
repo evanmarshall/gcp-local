@@ -54,7 +54,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Cloud Storage](docs/storage.md) | fake-gcs-server | Objects: read, write, list, delete |
 | [Pub/Sub](docs/pubsub.md) | Official Google emulator | Publish, pull, streaming pull, push |
 | [Secret Manager](docs/secretmanager.md) | gcp-local | Secret versions and access |
-| [Cloud KMS](docs/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt; asymmetric sign and decrypt and HMAC (modeled locally, not recorded) |
+| [Cloud KMS](docs/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt, asymmetric sign and decrypt, HMAC |
 | [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries |
 | [Cloud Logging](docs/logging.md) | gcp-local | Write, filter, and delete log entries over REST and gRPC |
 | [Vertex AI](docs/vertexai.md) | Deterministic stub or Ollama | Generate, stream, count tokens, embed; answers are not from Gemini |

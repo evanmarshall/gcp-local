@@ -1,0 +1,239 @@
+{
+  "cloudkms-asymmetric-mac-keys": {
+    "recorded-date": "12-10-2026, 05:14:24",
+    "recorded-content": {
+      "sign-key-created": {
+        "fields": [
+          "createTime",
+          "destroyScheduledDuration",
+          "labels",
+          "name",
+          "purpose",
+          "versionTemplate"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "purpose": "ASYMMETRIC_SIGN",
+        "versionTemplate": {
+          "algorithm": "EC_SIGN_P256_SHA256",
+          "protectionLevel": "SOFTWARE"
+        }
+      },
+      "mac-key-created": {
+        "fields": [
+          "createTime",
+          "destroyScheduledDuration",
+          "labels",
+          "name",
+          "purpose",
+          "versionTemplate"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "purpose": "MAC",
+        "versionTemplate": {
+          "algorithm": "HMAC_SHA256",
+          "protectionLevel": "SOFTWARE"
+        }
+      },
+      "denied-sign": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "admin-cannot-sign": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "sign-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/cloudkms.signerVerifier"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "mac-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/cloudkms.signerVerifier"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "public-key": {
+        "algorithm": "EC_SIGN_P256_SHA256",
+        "fields": [
+          "algorithm",
+          "name",
+          "pem",
+          "pemCrc32c",
+          "protectionLevel"
+        ],
+        "http_status": 200,
+        "pem_crc32c_matches": true,
+        "pem_header": "-----BEGIN PUBLIC KEY-----",
+        "protectionLevel": "SOFTWARE"
+      },
+      "signed-digest": {
+        "fields": [
+          "name",
+          "protectionLevel",
+          "signature",
+          "signatureCrc32c",
+          "verifiedDigestCrc32c"
+        ],
+        "http_status": 200,
+        "protectionLevel": "SOFTWARE",
+        "signature_crc32c_matches": true,
+        "verifiedDataCrc32c": null,
+        "verifiedDigestCrc32c": true,
+        "verifies": true,
+        "version": "1"
+      },
+      "signed-data": {
+        "fields": [
+          "name",
+          "protectionLevel",
+          "signature",
+          "signatureCrc32c",
+          "verifiedDataCrc32c"
+        ],
+        "http_status": 200,
+        "protectionLevel": "SOFTWARE",
+        "signature_crc32c_matches": true,
+        "verifiedDataCrc32c": true,
+        "verifiedDigestCrc32c": null,
+        "verifies": true,
+        "version": "1"
+      },
+      "digest-crc-mismatch": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "wrong-digest": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "sign-key-mac": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "mac-key-public-key": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "mac-signed": {
+        "fields": [
+          "mac",
+          "macCrc32c",
+          "name",
+          "protectionLevel",
+          "verifiedDataCrc32c"
+        ],
+        "http_status": 200,
+        "mac_crc32c_matches": true,
+        "mac_length": 32,
+        "protectionLevel": "SOFTWARE",
+        "verifiedDataCrc32c": true
+      },
+      "mac-verified": {
+        "fields": [
+          "name",
+          "protectionLevel",
+          "success",
+          "verifiedMacCrc32c",
+          "verifiedSuccessIntegrity"
+        ],
+        "http_status": 200,
+        "success": true,
+        "verifiedMacCrc32c": true,
+        "verifiedSuccessIntegrity": true
+      },
+      "mac-mismatch": {
+        "fields": [
+          "name",
+          "protectionLevel",
+          "verifiedMacCrc32c"
+        ],
+        "http_status": 200,
+        "success": null,
+        "verifiedMacCrc32c": true,
+        "verifiedSuccessIntegrity": null
+      },
+      "version-disabled": {
+        "algorithm": "EC_SIGN_P256_SHA256",
+        "fields": [
+          "algorithm",
+          "createTime",
+          "generateTime",
+          "name",
+          "protectionLevel",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DISABLED"
+      },
+      "disabled-sign": {
+        "code": 400,
+        "http_status": 400,
+        "status": "FAILED_PRECONDITION"
+      },
+      "version-destroyed": {
+        "fields": [
+          "algorithm",
+          "createTime",
+          "destroyTime",
+          "generateTime",
+          "name",
+          "protectionLevel",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DESTROY_SCHEDULED"
+      },
+      "version-restored": {
+        "fields": [
+          "algorithm",
+          "createTime",
+          "generateTime",
+          "name",
+          "protectionLevel",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DISABLED"
+      },
+      "cleanup": {
+        "key_versions_destroyed": true
+      }
+    }
+  }
+}

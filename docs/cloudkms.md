@@ -1,6 +1,6 @@
 # Cloud KMS
 
-Cloud KMS v1 over REST: key rings, crypto keys, versions, symmetric encrypt/decrypt, asymmetric sign and decrypt, and HMAC, with per-resource IAM. Modeled locally. Symmetric keys are recorded against GCP (`cloudkms-symmetric-key-lifecycle`); asymmetric and MAC keys are modeled locally and not recorded.
+Cloud KMS v1 over REST: key rings, crypto keys, versions, symmetric encrypt/decrypt, asymmetric sign and decrypt, and HMAC, with per-resource IAM. Recorded against GCP: symmetric keys (`cloudkms-symmetric-key-lifecycle`) and asymmetric sign and MAC keys (`cloudkms-asymmetric-mac-keys`, 2026-10-12).
 
 ## Use
 
@@ -60,11 +60,11 @@ sh scripts/check_rest_recordings.sh  # the symmetric recording
 sh scripts/check_cloudkms.sh         # google-cloud-kms over REST with local ADC: sign, OAEP decrypt, HMAC, refusals
 ```
 
-The scenario `cloudkms-asymmetric-mac-keys` (sign, public key, HMAC, purpose and state refusals) runs against the local provider but has no GCP recording, so a local comparison reports it unverified. `TestAccKMSKeyRingCryptoKey` passes ([Terraform](terraform-compatibility.md)).
+`cloudkms-asymmetric-mac-keys` was recorded and revalidated against GCP on 2026-10-12 and matches locally (`sh scripts/check_rest_recordings.sh`): sign by digest and data, public key PEM and CRC32C, HMAC sign and verify, CRC32C and digest refusals, wrong-purpose and disabled-version `FAILED_PRECONDITION`, destroy and restore. `TestAccKMSKeyRingCryptoKey` passes ([Terraform](terraform-compatibility.md)).
 
 ## Gaps
 
-- Asymmetric and MAC behavior, its error codes, and its response field sets are not recorded.
+- `ASYMMETRIC_DECRYPT` (RSA-OAEP) is modeled locally, not recorded.
 - Versions are `ENABLED` at once; GCP reports `PENDING_GENERATION` first for asymmetric keys.
 - No HSM, external, raw, PQC, or key-encapsulation algorithms; no RSA 3072/4096, SHA-512, or other HMAC hashes; no import jobs.
 - Rotation is stored but not run.
