@@ -11,7 +11,7 @@ sh scripts/moo/setup.sh
 - Reuses an installed moo if `moo doctor` passes. Otherwise downloads the upstream v0.3.1 installer, checks its SHA-256, and installs it. Needs Homebrew. An unhealthy install fails instead of being replaced.
 - Provisions a `base` machine with Python 3.11, Git, a C compiler, iproute2, the pinned Go toolchain, and `requirements/tools.txt` plus `requirements/sdk.txt`. No GCP credentials or services. The provisioner runs the tooling tests before saving.
 - Machines get 2 CPUs and 8 GiB (`moo.toml`): compiling the BigQuery engine's GoogleSQL package peaks at 5.7 GiB, or 4.2 GiB with `GOGC=25`. The guest disk is 7.8 GB, about 2.4 GB of it free in a fresh fork, and one core build caches about 1.7 GB (the race build as much again). The go command's work directory doesn't fit beside that cache on disk, and `/dev/shm` is `noexec`, so mount `mount -t tmpfs -o size=3g tmpfs /mnt/go-build` and run checks with `GOTMPDIR=/mnt/go-build GOGC=25 GOFLAGS=-p=1`, adding `GCP_LOCAL_LOW_DISK=1` for `scripts/check/go.sh` and `scripts/check/recordings.sh` so the build cache is cleared before servers need the disk. Leave `TMPDIR` alone: Cloud SQL keeps its servers under it, and they run as `nobody`. Machines made before this keep 2 GiB and can't build the core.
-- Rerunning setup reprovisions the named machine. To change the recipe, provision a new name (`sh scripts/moo/setup.sh base-v2`); existing machines keep their image.
+- Rerunning setup reprovisions the named machine. To change the recipe, provision a new name (`sh scripts/moo/setup.sh base-v4`); existing machines keep their image.
 - Reviewed upstream source: [6ca60ff](https://github.com/heyito/moo/tree/6ca60ffd23564c740c39d8f21d612bbe6cb63ae9). `moo doctor` doesn't attest the installed binary's version.
 
 ## Work on an issue
@@ -19,7 +19,7 @@ sh scripts/moo/setup.sh
 ```sh
 git worktree add ../gcp-local-issue-20 -b issue/20
 cd ../gcp-local-issue-20
-moo new issue-20 from base
+moo new issue-20 from base-v3
 moo run issue-20 -- 'cd /srv/app && python3 -m unittest discover -s tests/tooling -v'
 moo run issue-20 -- 'cd /srv/app && python3 scripts/install/go.py && sh scripts/check/go.sh'
 ```

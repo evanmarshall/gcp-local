@@ -10,7 +10,7 @@ Read [the moo guide](../../../docs/contributing/moo.md). The host worktree owns 
 If `moo doctor` fails and setup is in scope, follow [moo-golden-image](../moo-golden-image/SKILL.md).
 
 ```sh
-moo new task-name from base
+moo new task-name from base-v3
 moo run task-name -- 'cd /srv/app && python3 -m unittest discover -s tests/tooling -v'
 ```
 
