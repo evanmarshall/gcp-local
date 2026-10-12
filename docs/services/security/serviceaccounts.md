@@ -25,7 +25,7 @@ Pinned roles: `roles/iam.serviceAccountAdmin`, `.serviceAccountViewer`, `.servic
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `serviceaccount-lifecycle-authorization` | 2026-10-11 | Create and get fields (`uniqueId` equals `oauth2ClientId`), denied read 403, user grant reads but cannot update, POST `getIamPolicy`, PATCH envelope, 409 duplicate, 400 invalid ID, delete then 404 |
+| `serviceaccount-lifecycle-authorization` | 2026-10-12 | Create and get fields (`uniqueId` equals `oauth2ClientId`), denied read 403, user grant reads but cannot update, POST `getIamPolicy`, PATCH envelope, 409 duplicate, 400 invalid ID, delete then 404 |
 
 ```sh
 sh scripts/check/recordings.sh

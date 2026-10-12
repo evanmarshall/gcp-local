@@ -99,14 +99,14 @@ All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `storage-object-lifecycle` | 2026-10-05 | Create, list, read, delete, failed conditional upload, denied write |
-| `storage-authorization` | 2026-10-05 | Bucket Object User, inherited project admin, anonymous denial, grant and revoke transitions |
-| `storage-cross-project` | 2026-10-05 | Foreign caller denied, allowed by bucket Object Viewer, denied after revoke |
-| `storage-object-replacement` | 2026-10-05 | Creator can add but not replace, Object User can replace, stale generation rejected |
-| `storage-bucket-updates` | 2026-10-05 | Label merge and removal, stale and denied PATCH |
-| `storage-multipart-query-name` | 2026-10-05 | Multipart upload with name in query, generation changes |
-| `storage-python-sdk` | 2026-10-05 | Three upstream Python Storage tests, pagination, guarded cleanup |
-| `storage-iam-conditions` | 2026-10-11 | Version-3 conditional `objectViewer`; conditional binding rejected in a version-1 policy |
+| `storage-object-lifecycle` | 2026-10-12 | Create, list, read, delete, failed conditional upload, denied write |
+| `storage-authorization` | 2026-10-12 | Bucket Object User, inherited project admin, anonymous denial, grant and revoke transitions |
+| `storage-cross-project` | 2026-10-12 | Foreign caller denied, allowed by bucket Object Viewer, denied after revoke |
+| `storage-object-replacement` | 2026-10-12 | Creator can add but not replace, Object User can replace, stale generation rejected |
+| `storage-bucket-updates` | 2026-10-12 | Label merge and removal, stale and denied PATCH |
+| `storage-multipart-query-name` | 2026-10-12 | Multipart upload with name in query, generation changes |
+| `storage-python-sdk` | 2026-10-12 | Three upstream Python Storage tests, pagination, guarded cleanup |
+| `storage-iam-conditions` | 2026-10-12 | Version-3 conditional `objectViewer`; conditional binding rejected in a version-1 policy |
 | `storage-resumable-signed-url` | 2026-10-12 | Resumable session, status query, cancel and a request after it, signed PUT and GET, tampered, expired, and wrong-method URLs |
 | `storage-bucket-policy-only` | 2026-10-12 | Bucket create with only `bucketPolicyOnly`; both names and their `lockedTime` on create and read |
 | `storage-go-client-projection` | 2026-10-12 | The Go client's `projection=full` bucket and object calls, object `patch`, an undefined query option, an invalid projection |

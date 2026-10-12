@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T06:14:43.687587+00:00",
+  "recorded_at": "2026-10-12T08:27:18.700023+00:00",
   "scenario": {
     "id": "pubsub-delivery-features",
     "service": "pubsub",
     "transport": "grpc-v1",
-    "revision": "a8a21d3212f1ccdf5a2b42dceb06a91ee6b8e8efa56756a23fd10d6180203949",
+    "revision": "6d7392f852ff758b2924f72e97bd9bb6f311330a4245e2e4c9d14c0b557521df",
     "versions": {
       "sdk": "google-cloud-pubsub/2.42.0;grpcio/1.84.0;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "38903ea4ca00a04919ea3c5361cb68ca9c6c38529c0d16749bf3330f601dfe9d",
+  "snapshot_sha256": "0320f32edb4679003578e5648836d6fea878ed433bab92ce5dfd055aed56e4bc",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,12 +22,12 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/pubsub_delivery.py": "223a83c39ad932bd6548afa8324cde2cd56e7bc9dd608cc6e7b81a203cfc209e",
-      "gcp_validation/pubsub.py": "365545d102fb73c1ea2b0b4f02a7bbbf8d616ee800cefbd33e46229cf96b33c5",
-      "gcp_validation/pubsub_scope.py": "686bdc1303d9581153978abda8f2ab114cc83fd1da50125638915350a012b7d0",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "gcp_validation/services/messaging/pubsub_delivery.py": "1f9a84d83d1d537cbd4c9dc2d137cb8d3b1dc0e966f0efb802f05f9cc97c2ce2",
+      "gcp_validation/services/messaging/pubsub.py": "c07923006e8ed975658b62b48906e83cfeca321cefb1a7cb5337d396a3e544dc",
+      "gcp_validation/services/messaging/pubsub_scope.py": "e219368c8408688d6c7e3dd2cd54be5c375617250c2a3b3a9b4aea52e080977a",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701",
-      "tests/conformance/pubsub_delivery/conftest.py": "beba093f55d068947f3be1c65078c6d42ee4871ec931fa25d02e1a5d1f940250"
+      "tests/conformance/messaging/pubsub/delivery/conftest.py": "b3cc682e7a926c0d40334c1f1d97d79851e7c15270eb2df5dd733049e74f69dc"
     },
     "scope": {
       "services": [

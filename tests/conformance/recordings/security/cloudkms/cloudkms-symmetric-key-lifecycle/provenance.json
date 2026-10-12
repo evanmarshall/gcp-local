@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-11T22:11:51.390500+00:00",
+  "recorded_at": "2026-10-12T08:35:17.493885+00:00",
   "scenario": {
     "id": "cloudkms-symmetric-key-lifecycle",
     "service": "cloudkms",
     "transport": "rest-v1",
-    "revision": "906b4ff68539d462d9245e5d0b89f53e2edef0a45dfa351440d83e4ca0f9cc0b",
+    "revision": "6c44f762e75d643628707adfc960b1af655555e3a669f1bbedd15aa97fe02327",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "4a0bf8b3e723e4ed6ad9d7a4572df1d3f5a00065ca597a202de365b52308847b",
+  "snapshot_sha256": "54e1b88bded1f06a4af1cd714d52040c3d3fa8582371645163e4aa612c290dc9",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/cloudkms.py": "bf13e51e26d76ea0e6fea83387652916be87078e45847155502d73d11439189a",
-      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "tests/conformance/cloudkms/conftest.py": "382a826d492ec78291d2b26628deb463f452bd3eb440569acb97e4defe2ba011"
+      "gcp_validation/services/security/cloudkms.py": "33e7789eb34b219c7903723b5f770561bbb30c5d6a076e48720aa5bd02212338",
+      "gcp_validation/live_rest.py": "ab9f7a3e1c77f35ee579d2b593e5ab56d46612a3338e3ea28f19cecc1c3f8e0a",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/cloudkms/symmetric/conftest.py": "565d38a22827bf8f7287d872e8a4dc288e2db3163a203b046c0a0d3bb5700148"
     },
     "scope": {
       "services": [

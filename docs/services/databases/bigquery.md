@@ -50,7 +50,7 @@ Baselines come from recorded `roles/bigquery.*` snapshots (`admin`, `dataEditor`
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `bigquery-dataset-rows-query` | 2026-10-11 | Dataset and table documents, insertAll and string-encoded reads, query and dry run shapes, dataset IAM 400, table-level grant, denied identity 403, non-empty dataset delete |
+| `bigquery-dataset-rows-query` | 2026-10-12 | Dataset and table documents, insertAll and string-encoded reads, query and dry run shapes, dataset IAM 400, table-level grant, denied identity 403, non-empty dataset delete |
 | `bigquery-jobs-insert-query` | 2026-10-12 | The Python client's `query().result()` calls: `jobs.insert`, `jobs.get` polling, `getQueryResults` pages; duplicate job id 409; creator reads its job without `bigquery.jobs.get`; ungranted reads 403; missing job 404 |
 | `bigquery-sql-engine` | 2026-10-12 | `CREATE TABLE`, `INSERT`, `CREATE TABLE AS SELECT`, a DDL table's schema, a join with `GROUP BY`/`HAVING`, a CTE with a subquery and functions, named and positional parameters, a default dataset, a script, `UPDATE`, `DELETE`, `MERGE`, a view, `tabledata.list`, a table-level reader that can read its table but gets 403 joining a second table and 403 on DML, missing table 404, unknown column 400, `DROP VIEW`, `DROP TABLE` |
 

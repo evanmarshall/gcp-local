@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-11T21:41:18.199301+00:00",
+  "recorded_at": "2026-10-12T08:40:50.726174+00:00",
   "scenario": {
     "id": "firestore-document-lifecycle",
     "service": "firestore",
     "transport": "rest-v1",
-    "revision": "d582ce2c5008ca02116c87cf5f0e36bf4a810f3597f1390d09d977c5ed0b199c",
+    "revision": "6e669b2cb4e970109b14311e9248128efa211ca0ae30ce9d5a73ed74b1959f29",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "fd484beb35bcab3adf0c8b6b36e3073b0d3eac5e141264e5ecc2b5f3ce2ad57b",
+  "snapshot_sha256": "f1ba8542c821fb61676a699dfc4b398d5bab279efd7aeddbd9239eb0dc968933",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/firestore.py": "33cf1f29187868bac68dee2a07af8d190e98d44312e9f3a2e57434e90b71ac78",
-      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "tests/conformance/firestore/conftest.py": "f4bb7a0c71ece932a9f73f4e6ebeeda48ca2e97df9b391e904c68a1f2d5ddde8"
+      "gcp_validation/services/databases/firestore.py": "d4c4f57abedd30aff2283164a4c2c4880ebb483313deea3cdb0da46218a3121f",
+      "gcp_validation/live_rest.py": "ab9f7a3e1c77f35ee579d2b593e5ab56d46612a3338e3ea28f19cecc1c3f8e0a",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/databases/firestore/documents/conftest.py": "3680167d78072f542cf66e690affff81052e7f0e126ac193e2ddb56daca75faa"
     },
     "scope": {
       "services": [

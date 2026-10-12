@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-11T18:29:48.019128+00:00",
+  "recorded_at": "2026-10-12T08:35:48.654865+00:00",
   "scenario": {
     "id": "serviceaccount-lifecycle-authorization",
     "service": "iam",
     "transport": "rest-v1",
-    "revision": "9a41bd07d00d932290ae75c96405ede9de8e8fa7cb9c920e55b09e8f4e2e2897",
+    "revision": "e97503e6dc80568ba2e1eb81d5ba532eb5c7998ab554bbda56620438a16ebbf7",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "866a3e28af64d213249b11f01316d98485f7864f8204ef3469bda5af538fe015",
+  "snapshot_sha256": "bda59edd90bcddc9e3c4ba716f92859453f4718b0b77d3fa5928678f882109b5",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/serviceaccounts.py": "1b5268e88490350ed68c80336dbcd9797c003afa306057ac8b0f72adcda7dcc2",
-      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "tests/conformance/serviceaccounts/conftest.py": "f4c6061af84ded5fa95fdcfcee8679255fc44bc094dc7b8dd2f5b474a8067748"
+      "gcp_validation/services/security/serviceaccounts.py": "4bca890e4f4aed9383d6caa8bf18cd99da39dbee72b9870dbb3908558a951ca1",
+      "gcp_validation/live_rest.py": "ab9f7a3e1c77f35ee579d2b593e5ab56d46612a3338e3ea28f19cecc1c3f8e0a",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/iam/conftest.py": "cf8be7499020cac6c47710fd64bc94819d8a729b474a9df598a968eafdfcc15e"
     },
     "scope": {
       "services": [

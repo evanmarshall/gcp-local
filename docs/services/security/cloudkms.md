@@ -74,7 +74,7 @@ Refusals, modeled locally:
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `cloudkms-symmetric-key-lifecycle` | 2026-10-11 | Missing ring 404, ring and key create shapes, 403 without grants and for admin on encrypt, empty and set policies, encrypt/decrypt fields and CRC32C, wrong AAD, version create, primary change, disable, decrypt with a disabled version, destroy |
+| `cloudkms-symmetric-key-lifecycle` | 2026-10-12 | Missing ring 404, ring and key create shapes, 403 without grants and for admin on encrypt, empty and set policies, encrypt/decrypt fields and CRC32C, wrong AAD, version create, primary change, disable, decrypt with a disabled version, destroy |
 
 ```sh
 sh scripts/check/recordings.sh   # the symmetric recording

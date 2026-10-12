@@ -111,7 +111,7 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `pubsub-pull-authorization` | 2026-10-09 | Topic-scoped Publisher and subscription-scoped Subscriber grants, denied publish and pull, message identity, ack, cleanup |
+| `pubsub-pull-authorization` | 2026-10-12 | Topic-scoped Publisher and subscription-scoped Subscriber grants, denied publish and pull, message identity, ack, cleanup |
 | `pubsub-delivery-features` | 2026-10-12 | Delivery settings echoed at create, denied pull, key order before and after a nack, filtered delivery, an invalid filter, a repeated exactly-once ack, dead-letter attempts and forwarding with and without the service agent's grants, cleanup |
 | `pubsub-rest-data-plane` | 2026-10-12 | REST publish, pull, nack (`modifyAckDeadline` 0), redelivery, and acknowledge in the shapes gcloud 588.0.0 sends; denied publish, pull, and acknowledge; a topic-scoped publisher that cannot pull; an out-of-range deadline; an empty pull; a pull without `maxMessages`; a publish body that repeats the topic; cleanup |
 | `pubsub-schemas` | 2026-10-12 | Avro and Protocol Buffer schemas: create, commit (including refused commits), revision listing and views, rollback, revision deletion, `ValidateSchema` and `ValidateMessage`, topics with schema settings, valid and invalid publishes and their attributes, schema-scoped Viewer and denied callers, deleted schemas, cleanup |

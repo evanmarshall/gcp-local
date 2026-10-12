@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-09T22:18:34.396690+00:00",
+  "recorded_at": "2026-10-12T08:25:43.586340+00:00",
   "scenario": {
     "id": "pubsub-pull-authorization",
     "service": "pubsub",
     "transport": "grpc-v1",
-    "revision": "d843e70f7d2ec3e74113e6a64bdacc8a102d3cb656c54c193d948480db44bd5c",
+    "revision": "ce9f470d2ce052dea13e122361a204e4e9fa7290aeeca38cd8288f24f2b2378d",
     "versions": {
       "sdk": "google-cloud-pubsub/2.42.0;grpcio/1.84.0;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "46f9d7144ad0dd05821b17d8f272ca7c5859bc63267df0d51028fb0344a54488",
+  "snapshot_sha256": "1322df73fb5c970528334c0377f1e0263d87cab1e2c92da77c42626629db8cf1",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,11 +22,11 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/pubsub.py": "365545d102fb73c1ea2b0b4f02a7bbbf8d616ee800cefbd33e46229cf96b33c5",
-      "gcp_validation/pubsub_scope.py": "686bdc1303d9581153978abda8f2ab114cc83fd1da50125638915350a012b7d0",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "gcp_validation/services/messaging/pubsub.py": "c07923006e8ed975658b62b48906e83cfeca321cefb1a7cb5337d396a3e544dc",
+      "gcp_validation/services/messaging/pubsub_scope.py": "e219368c8408688d6c7e3dd2cd54be5c375617250c2a3b3a9b4aea52e080977a",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701",
-      "tests/conformance/pubsub/conftest.py": "c28ecaaf98ee4985767416dab94b3dc932b125e6c5bdf57f31cd129369a0c1c4"
+      "tests/conformance/messaging/pubsub/pull/conftest.py": "5cc8cb1decb29ab74a9da0f73e5e2f0e9e28c73edeb78116ab263fc7b0959809"
     },
     "scope": {
       "services": [

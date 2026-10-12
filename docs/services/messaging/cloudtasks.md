@@ -45,7 +45,7 @@ Dispatch follows the queue's `retryConfig` (defaults: 100 attempts, 0.1 s min ba
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `cloudtasks-dispatch-retry` | 2026-10-11 | Queue create, denied enqueue, policy read, queue-level enqueuer grant, enqueuer cannot list, first attempt, removal after retries, OIDC without `actAs`, invalid URL, pause and resume, delete then 404 |
+| `cloudtasks-dispatch-retry` | 2026-10-12 | Queue create, denied enqueue, policy read, queue-level enqueuer grant, enqueuer cannot list, first attempt, removal after retries, OIDC without `actAs`, invalid URL, pause and resume, delete then 404 |
 
 Rate limits, TTLs, and queue type are compared by presence only.
 

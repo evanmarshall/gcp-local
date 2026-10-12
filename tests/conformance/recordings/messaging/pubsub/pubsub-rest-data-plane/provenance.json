@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T07:24:55.965813+00:00",
+  "recorded_at": "2026-10-12T08:27:38.066205+00:00",
   "scenario": {
     "id": "pubsub-rest-data-plane",
     "service": "pubsub",
     "transport": "rest-v1",
-    "revision": "787b88f4fa0bec82f408bc96cf446804483d53d874aa8cb551c26d48e9a615a1",
+    "revision": "91f2381ea588542a6f4ddbd1f34c99ebe962ee7a702cc120ebd2d5f97dce1b12",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "e3e05a223fb416135d5b8530a87e4ed00167b90b18f6ddc2c24003793210a663",
+  "snapshot_sha256": "48a73cfa709b11ec3c8d99fee2846a2e16ac0eb8e7702ef9d6470ff593f793f1",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/pubsub_rest.py": "cc9cf2f1fa9a78288842f4dcb85d4906e60a3d91df5bac167fa0462eac1ee7c4",
-      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "tests/conformance/pubsubrest/conftest.py": "eb504a1bdd51f914cde6577fec2802caae7833505904fab56428f33f3a5ad777"
+      "gcp_validation/services/messaging/pubsub_rest.py": "bd7bc6c5b3b70eed2f5a10afd289525b8e7942e01d93b5842f8c104b4a284c4e",
+      "gcp_validation/live_rest.py": "ab9f7a3e1c77f35ee579d2b593e5ab56d46612a3338e3ea28f19cecc1c3f8e0a",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/messaging/pubsub/rest/conftest.py": "ae4e3191e40ce8c665caa2de25ac45f6fd41f4c0c7024326f726a23ff6cc4f87"
     },
     "scope": {
       "services": [

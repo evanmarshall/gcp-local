@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T06:41:19.018810+00:00",
+  "recorded_at": "2026-10-12T08:31:50.713771+00:00",
   "scenario": {
     "id": "bigquery-jobs-insert-query",
     "service": "bigquery",
     "transport": "rest-v1",
-    "revision": "cea7cae4883a0b058cb1a0802dc5ad7989ff65cb1514b4921bab70ed865f0b2f",
+    "revision": "9969cd57644bb5fde75ea8a04f6efd72536bceccb1335eac5613c510dc863553",
     "versions": {
       "sdk": "google-cloud-bigquery/3.46.1 request shapes",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "cbe4dddaf5f7a9e2931c27264b3c41734d2f079ffcd6fb635bc8acf49cd5419e",
+  "snapshot_sha256": "d0054f12a63ac2cd90977305fe6afa261edff8fe41fb9b7213e0f76d3f9669ef",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/bigquery.py": "5fc2d15c10182967debad110c404586c7c688c7999419015efe1d058c72831a1",
-      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
-      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
-      "tests/conformance/bigquery/conftest.py": "cc4d65564392b646bcff8f479fc16abf45c1e1eb880cff7f532b17f91d759795"
+      "gcp_validation/services/databases/bigquery.py": "ed3d554d889b9bbc79e0dbae80e9341c6d3ff885fcac1fe6366e6e6b5f3414da",
+      "gcp_validation/live_rest.py": "ab9f7a3e1c77f35ee579d2b593e5ab56d46612a3338e3ea28f19cecc1c3f8e0a",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/databases/bigquery/conftest.py": "f2da7efcae0257862324529ed038162b8c7736af4f5a73d531ac1b874a13de23"
     },
     "scope": {
       "services": [

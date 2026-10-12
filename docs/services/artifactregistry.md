@@ -26,7 +26,7 @@ Pinned roles: `roles/artifactregistry.admin`, `.repoAdmin`, `.reader`. A reposit
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `artifactregistry-repository-lifecycle` | 2026-10-11 | Create and delete operations, per-method field sets, empty policy, denied read 403, reader cannot update, masked PATCH, 409 duplicate, 400 unknown format, 404 after delete |
+| `artifactregistry-repository-lifecycle` | 2026-10-12 | Create and delete operations, per-method field sets, empty policy, denied read 403, reader cannot update, masked PATCH, 409 duplicate, 400 unknown format, 404 after delete |
 
 `satisfiesPzi` and `vulnerabilityScanningConfig` are stand-ins; only their presence is recorded.
 

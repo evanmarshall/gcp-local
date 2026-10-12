@@ -75,7 +75,7 @@ Permissions follow Google's [required permissions table](https://docs.cloud.goog
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `firestore-document-lifecycle` | 2026-10-11 | Typed values round-trip, masked and unmasked PATCH, 409 duplicate, 404 missing, 200 on deleting a missing doc, 403 denied read and write |
+| `firestore-document-lifecycle` | 2026-10-12 | Typed values round-trip, masked and unmasked PATCH, 409 duplicate, 404 missing, 200 on deleting a missing doc, 403 denied read and write |
 | `firestore-query-transaction` | 2026-10-12 | Filtered limited query, count, subcollection query, `listCollectionIds`, transaction commit and rollback, denied query and commit |
 
 Recordings compare status and error `code`/`status`, not messages. Run in Linux or moo:
