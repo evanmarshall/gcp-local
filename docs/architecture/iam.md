@@ -70,7 +70,7 @@ Not recorded: deny rules and boundaries need organization-level setup (`roles/ia
 - A policy naming a group or domain outside the directory is refused with GCP's 400 errors: "Group EMAIL does not exist.", "Domain NAME does not exist.", a `group:` naming a service account, and empty or malformed references (recorded: `storage-iam-directory`). The same applies to `-iam-config` policies, which fail the load.
 - The directory is fixed at startup: there is no reload, and declaring it after any policy is stored fails. Restart the core to change it.
 
-Not recorded: a grant or deny through an existing group or domain. The sandbox organization has no Google groups, and its callers are service accounts, which no domain covers. Not modeled: Workspace users outside groups (`group:` naming a user is "does not exist", not GCP's "is of type user"), `deleted:group:`, dynamic groups, and principal access boundary enrollment by group or domain.
+Recorded (`storage-iam-groups`): bucket reads granted through a real group, through a group nesting it, and through a conditional binding naming the nested group; the non-member is denied and each revocation takes effect. The sandbox keeps two [standing groups](../contributing/gcp-sandbox.md#standing-groups) for it. Not recorded: a grant through a `domain:` (the sandbox callers are service accounts, which no domain covers) and a deny policy naming a group (deny policies are attached at the project and need `iam.denyAdmin`, which the fixture doesn't hold). Not modeled: Workspace users outside groups (`group:` naming a user is "does not exist", not GCP's "is of type user"), `deleted:group:`, dynamic groups, and principal access boundary enrollment by group or domain.
 
 ## Role snapshots
 

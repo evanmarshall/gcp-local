@@ -108,6 +108,7 @@ All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/
 | `storage-python-sdk` | 2026-10-12 | Three upstream Python Storage tests, pagination, guarded cleanup |
 | `storage-iam-conditions` | 2026-10-12 | Version-3 conditional `objectViewer`; conditional binding rejected in a version-1 policy |
 | `storage-iam-directory` | 2026-10-12 | Bucket policy refusals for a nonexistent group (`group:` and `principalSet://goog/group/`) and domain, a `group:` naming a service account, empty group and domain; policy unchanged |
+| `storage-iam-groups` | 2026-10-12 | `objectViewer` granted to a real group, to a group nesting it, and conditionally (object prefix) to the nested group: the member reads, the non-member gets 403, and each revocation returns 403 |
 | `storage-resumable-signed-url` | 2026-10-12 | Resumable session, status query, cancel and a request after it, signed PUT and GET, tampered, expired, and wrong-method URLs |
 | `storage-bucket-policy-only` | 2026-10-12 | Bucket create with only `bucketPolicyOnly`; both names and their `lockedTime` on create and read |
 | `storage-go-client-projection` | 2026-10-12 | The Go client's `projection=full` bucket and object calls, object `patch`, an undefined query option, an invalid projection |

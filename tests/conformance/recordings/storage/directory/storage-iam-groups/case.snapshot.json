@@ -1,0 +1,148 @@
+{
+  "storage-iam-groups": {
+    "recorded-date": "12-10-2026, 23:34:38",
+    "recorded-content": {
+      "direct-member-removed": {
+        "actor": "allowed",
+        "attachment": "bucket",
+        "roles": []
+      },
+      "no-grant": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/public-a.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "direct-grant": [
+        [
+          "roles/storage.objectViewer",
+          [
+            "group:gcp-local-allowed@stitchwink.com"
+          ],
+          []
+        ]
+      ],
+      "direct-allowed": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "5ABcqULpLgnGz7KR3Z/zWg==",
+        "metageneration": "<metageneration-1>",
+        "name": "public-a.txt",
+        "size": "25"
+      },
+      "direct-denied-caller": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/public-a.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "direct-revoked": [],
+      "direct-revoked-read": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/public-a.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "nested-grant": [
+        [
+          "roles/storage.objectViewer",
+          [
+            "group:gcp-local-nested@stitchwink.com"
+          ],
+          []
+        ]
+      ],
+      "nested-allowed": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "5ABcqULpLgnGz7KR3Z/zWg==",
+        "metageneration": "<metageneration-1>",
+        "name": "public-a.txt",
+        "size": "25"
+      },
+      "nested-denied-caller": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/public-a.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "nested-revoked": [],
+      "nested-revoked-read": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/public-a.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "conditional-grant": [
+        [
+          "roles/storage.objectViewer",
+          [
+            "group:gcp-local-nested@stitchwink.com"
+          ],
+          [
+            "expression",
+            "title"
+          ]
+        ]
+      ],
+      "conditional-allowed": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "5ABcqULpLgnGz7KR3Z/zWg==",
+        "metageneration": "<metageneration-1>",
+        "name": "public-a.txt",
+        "size": "25"
+      },
+      "conditional-outside-prefix": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/private-b.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "conditional-denied-caller": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/public-a.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

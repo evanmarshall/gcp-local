@@ -36,6 +36,17 @@ The signing-in user needs Service Account Token Creator on each account. Grants:
 - **Denied**: no service grants. Check inherited grants from parents too.
 - **All three**: Service Usage Consumer, for quota charging.
 
+### Standing groups
+
+`storage-iam-groups` grants through two Google groups in the sandbox organization. The owner maintains them; scenarios never change membership, and service accounts can't administer groups.
+
+| Group | Members |
+| --- | --- |
+| `gcp-local-allowed@stitchwink.com` | The allowed identity |
+| `gcp-local-nested@stitchwink.com` | The group `gcp-local-allowed@stitchwink.com` |
+
+The denied identity is in neither. A sandbox in another organization needs the same groups, or the scenario fails with "Group ... does not exist." `tools/storage-conformance` declares the same groups in its local directory for replay.
+
 Check the profile offline, then optionally refresh all three tokens (no resources created):
 
 ```sh

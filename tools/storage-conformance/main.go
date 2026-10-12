@@ -64,6 +64,13 @@ func main() {
 	index := state.NewIndex()
 	engine, err := iam.New(index)
 	must(err)
+	// Mirrors the sandbox organization's standing groups (storage-iam-groups):
+	// the allowed caller is in gcp-local-allowed, which is nested in
+	// gcp-local-nested. The denied caller is in neither.
+	must(engine.SetDirectory(iam.Directory{Groups: map[string][]string{
+		"gcp-local-allowed@stitchwink.com": {"serviceAccount:allowed@gcp-local-test.iam.gserviceaccount.com"},
+		"gcp-local-nested@stitchwink.com":  {"group:gcp-local-allowed@stitchwink.com"},
+	}}))
 	for i, project := range []string{"gcp-local-test", "synthetic-peer"} {
 		name := "//cloudresourcemanager.googleapis.com/projects/" + project
 		number := "000000000001"
