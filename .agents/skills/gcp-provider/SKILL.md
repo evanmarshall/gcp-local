@@ -15,6 +15,13 @@ Read the issue and [the design](../../../docs/design.md). Find the existing patt
 4. Put background work (operations, delivery, workloads) in provider workers. Cross-service calls act as the service agent through the IAM engine, never as an implicit administrator. Preserve cancellation, streaming, and error details.
 5. Use the backend manager's start, readiness, reset, and shutdown hooks (`Manager.Use`). Persistence is unsupported. Keep analytical network results separate from observed container connectivity.
 
+## Client compatibility
+
+- Check every query parameter and body field of a served method against Google's API reference. Each is supported, accepted with its documented default, or refused with an explicit gap. Note in the code which reference a choice follows.
+- A refusal must not make a client hang. Clients retry 5xx; where the main client libraries retry a service's 5xx without a limit (Storage), refuse with a non-retryable 4xx.
+- Never drop or rewrite a GCP response field (`mediaLink`, `selfLink`, operation names) on the assumption that clients derive it. Rewrite it to the emulator's public origin, and test with a client that reads it.
+- Claim a client works only with a row in the [client compatibility table](../../../docs/coverage.md#client-compatibility) backed by a test that drives that client.
+
 ## Finish
 
 Test one complete supported behavior and one meaningful denial or failure. Every refusal the change adds (an `UNIMPLEMENTED` coverage gap or a fail-closed fallback) gets a test that asserts the refusal and its message, so removing it fails a test even when another check returns the same code. Update [coverage](../../../docs/coverage.md) with the gcp-docs skill. Use gcp-conformance for any real-GCP parity claim. Report the criteria met, checks run, and what remains unsupported. Don't build a workflow engine or rewrite a backend for uniformity.

@@ -40,6 +40,24 @@ Notes on counts:
 - Firestore: 14 document methods (all on gRPC; all but Listen on REST) and 2 Admin field methods on REST.
 - Logging serves its 4 methods over both REST and gRPC.
 
+## Client compatibility
+
+A recording proves only the requests it sends. This table lists the real clients a test drives against the emulator; a client not listed is untested, even for a recorded service.
+
+| Service | Client | Transport | Test |
+| --- | --- | --- | --- |
+| storage | Python `google-cloud-storage` 3.10.1 | JSON REST | `tests/conformance/test_storage_sdk.py` |
+| pubsub | Python `google-cloud-pubsub` 2.42.0 | gRPC | `internal/providers/pubsub/testdata/sdk.py` |
+| firestore | Python `google-cloud-firestore` 2.34.1 | gRPC | `internal/providers/firestore/testdata/sdk.py` |
+| spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | `internal/providers/spanner/data_integration_test.go` |
+| bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 | gRPC | `internal/providers/bigtable/data_test.go` |
+| logging | Python `google-cloud-logging` 3.17.0 | REST and gRPC | `internal/providers/logging/testdata/sdk.py` |
+| vertexai | Python `google-genai` 2.29.0 | REST | `internal/providers/vertexai/testdata/sdk.py` |
+| identity | Python `google-auth` 2.56.2 (ADC, metadata) | HTTP | `internal/identity/testdata/sdk.py` |
+| Terraform cases above | `hashicorp/google` 8.5.0 | REST | `tests/terraform/runner` |
+
+Untested: the Go, Node, and Java client libraries for every service not listed above, `gcloud`, `gsutil`, and `rclone`. Secret Manager, Cloud KMS, Cloud Tasks, BigQuery, Artifact Registry, IAM, Cloud SQL, Memorystore, and Cloud Run are exercised only through raw REST, Terraform, or their wire protocols.
+
 ## Cross-service behavior
 
 | Capability | Status |

@@ -12,12 +12,15 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -48,7 +51,7 @@ import (
 )
 
 func main() {
-	trace := flag.Bool("trace", false, "Log local request methods, paths and status codes only")
+	trace := flag.Bool("trace", false, "Log request methods, paths, query parameter names (never values), and status codes")
 	fault := flag.Bool("fault-rpo", false, "Inject incorrect bucket RPO to verify acceptance-test failures")
 	flag.Parse()
 	interfaces, err := net.Interfaces()
@@ -182,7 +185,7 @@ func main() {
 			recorded := httptest.NewRecorder()
 			handler.ServeHTTP(recorded, r)
 			if *trace {
-				log.Printf("%s %s %d", r.Method, r.URL.Path, recorded.Code)
+				log.Printf("%s %s %s %d", r.Method, r.URL.Path, queryNames(r), recorded.Code)
 			}
 			body := recorded.Body.Bytes()
 			if *fault && recorded.Code == 200 {
@@ -283,4 +286,11 @@ func addCloudSQL(root string, registry *gateway.Registry, server *core.Server, i
 		}
 	}
 	return nil
+}
+
+// queryNames lists a request's query parameter names, sorted, without values,
+// so a trace shows which options a client sends.
+func queryNames(r *http.Request) string {
+	names := slices.Sorted(maps.Keys(r.URL.Query()))
+	return "[" + strings.Join(names, ",") + "]"
 }

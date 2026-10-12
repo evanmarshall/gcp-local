@@ -9,6 +9,7 @@ Start from a concrete scenario and existing recordings. Read [validation](../../
 
 ## Scenarios
 
+- A recording proves only the requests it sends. Build each scenario from what real clients send: run the client against the conformance server with `-trace` (method, path, query parameter names, status) and record those exact request shapes, including the options they set by default (for example the Go Storage SDK's `projection=full`).
 - Define request features, initial state, named callers and service agents, grants, completion criteria, cleanup, and expected outcomes. Record SDK, provider, and backend versions.
 - Normalize variable IDs but keep repeated references. Assert etags and lifecycle transitions in the test rather than normalizing them away.
 - Redact credentials and sensitive payloads before anything is written.

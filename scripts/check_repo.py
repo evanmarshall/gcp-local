@@ -93,6 +93,12 @@ def check_coverage(errors: list[str]) -> None:
         for name in names("tests/permission/recordings")
         if name not in coverage
     )
+    clients = coverage.split("## Client compatibility", 1)[-1].split("\n## ", 1)[0]
+    errors.extend(
+        f"{label}: client test {path} does not exist"
+        for path in re.findall(r"^\|[^\n]*\| `([^`]+)` \|$", clients, re.MULTILINE)
+        if not (ROOT / path).exists()
+    )
     if "docs/coverage.md" not in (ROOT / "README.md").read_text():
         errors.append("README.md: must link docs/coverage.md")
 

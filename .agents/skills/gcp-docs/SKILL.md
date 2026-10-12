@@ -17,6 +17,7 @@ description: Use when a gcp-local change adds or removes a service, provider met
 | Permission probe | The `docs/coverage.md` cross-service table and `docs/permission-discovery.md` |
 | Terraform case | `docs/coverage.md` Terraform column and `docs/terraform-compatibility.md` |
 | Evidence level changes (first recording, or modeled to recorded) | `LOCAL_SUPPORT` in `skills/gcp-local-setup/scripts/inspect_repo.py` |
+| A real client is tested (or found broken) | The client compatibility table in `docs/coverage.md`; its test path must exist |
 | Developer role | `gcp_local/bootstrap.py` `DEVELOPER_ROLES` and the `docs/quickstart.md` roles table |
 | New service | All of the above, plus the README table, `docs/quickstart.md`, a row in the `CONTRIBUTING.md` checks table, and the `SERVICES` list |
 
