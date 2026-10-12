@@ -86,10 +86,20 @@ LOCAL_UNIVERSE = "gcp-local.invalid"
 DATA_PORT_COUNT = 16
 MAX_DATA_PORTS = 64
 
+# The core creates the gRPC TLS CA and server key in this directory on first
+# start; clients trust tls/ca.pem. Every file is owner-only.
+TLS_DIRECTORY = "tls"
+TLS_FILES = ("ca.pem", "server.pem", "server-key.pem")
+
 
 def default_data_ports(port: int) -> tuple[int, int]:
     """Return the default data-plane range for an HTTP port."""
     return port + 2, port + 1 + DATA_PORT_COUNT
+
+
+def default_grpc_tls_port(port: int) -> int:
+    """Return the gRPC TLS port: the one after the default data range (4584 for 4566)."""
+    return port + 2 + DATA_PORT_COUNT
 
 
 def parse_data_ports(text: str) -> tuple[int, int]:
@@ -100,7 +110,9 @@ def parse_data_ports(text: str) -> tuple[int, int]:
     return int(match[1]), int(match[2])
 
 
-def check_data_ports(ports: Sequence[int], port: int, grpc_port: int) -> tuple[int, int]:
+def check_data_ports(
+    ports: Sequence[int], port: int, grpc_port: int, tls_port: int
+) -> tuple[int, int]:
     """Require a bounded range that avoids the environment's HTTP and gRPC ports."""
     first, last = ports
     if (
@@ -110,10 +122,11 @@ def check_data_ports(ports: Sequence[int], port: int, grpc_port: int) -> tuple[i
         or last - first >= MAX_DATA_PORTS
         or first <= port <= last
         or first <= grpc_port <= last
+        or first <= tls_port <= last
     ):
         raise ValueError(
             f"Select at most {MAX_DATA_PORTS} data ports between 1024 and 65535 "
-            "that exclude the HTTP and gRPC ports"
+            "that exclude the HTTP, gRPC, and gRPC TLS ports"
         )
     return first, last
 
@@ -268,10 +281,10 @@ def initialize(
         raise ValueError("Unknown environment mode")
     if any(path.name != ".lock" for path in directory.iterdir()):
         raise ValueError("An uninitialized environment directory must be empty")
-    grpc_port = port + 1
-    if grpc_port > 65535:
+    grpc_port, tls_port = port + 1, default_grpc_tls_port(port)
+    if tls_port > 65535:
         raise ValueError("Select a base port that leaves room for the gRPC gateway")
-    data = check_data_ports(data_ports or default_data_ports(port), port, grpc_port)
+    data = check_data_ports(data_ports or default_data_ports(port), port, grpc_port, tls_port)
     principal = "serviceAccount:developer@" + project + ".iam.gserviceaccount.com"
     number = project_number(project)
     write_identity(
@@ -283,6 +296,7 @@ def initialize(
         recorded=recorded / "identity",
     )
     write_iam(directory / "iam.json", project, number, principal)
+    (directory / TLS_DIRECTORY).mkdir(mode=0o700)
     value: dict[str, object] = {
         "owner": "gcp-local",
         "schema": SCHEMA,
@@ -290,6 +304,7 @@ def initialize(
         "directory": str(recorded),
         "port": port,
         "grpc_port": grpc_port,
+        "grpc_tls_port": tls_port,
         "data_ports": list(data),
         "project": project,
         "project_number": number,
@@ -329,6 +344,8 @@ def load(
                 "identity/subject.txt",
             )
         )
+        tls = directory / TLS_DIRECTORY
+        paths.extend(path for path in (tls / name for name in TLS_FILES) if path.exists())
     check_private_files(paths)
     value = json.loads((directory / "environment.json").read_text())
     if value.get("owner") == "gcp-local" and value.get("schema") != SCHEMA:
@@ -369,9 +386,14 @@ def load(
         or (value.get("cloud_run_docker") and type(value.get("docker_socket_gid")) is not int)
     ):
         raise ValueError("Invalid environment port, project, image, or source version")
-    # Manifests written before the data-plane range existed use the default.
+    # Manifests written before the data-plane range or the gRPC TLS port
+    # existed use the defaults.
+    tls_port = value.get("grpc_tls_port") or default_grpc_tls_port(port)
+    if type(tls_port) is not int or not 1024 <= tls_port <= 65535 or tls_port in {port, grpc_port}:
+        raise ValueError("Invalid environment gRPC TLS port")
+    value["grpc_tls_port"] = tls_port
     data = value.get("data_ports") or default_data_ports(port)
     if not isinstance(data, list | tuple) or len(data) != 2:
         raise ValueError("Invalid environment data ports")
-    value["data_ports"] = list(check_data_ports(data, port, grpc_port))
+    value["data_ports"] = list(check_data_ports(data, port, grpc_port, tls_port))
     return value

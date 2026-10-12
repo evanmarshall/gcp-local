@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,6 +23,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/localtls"
 	artifactregistryprovider "github.com/evanmarshall/gcp-local/internal/providers/artifactregistry"
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
 	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
@@ -66,6 +69,9 @@ func run(ctx context.Context, args []string, output, errors io.Writer) int {
 	}
 	logger := slog.New(slog.NewJSONHandler(output, nil))
 	logger.Info("gcp-local listening", "address", listeners.HTTP.Addr().String(), "grpc_address", listeners.GRPC.Addr().String(), "version", version)
+	if listeners.GRPCTLS != nil {
+		logger.Info("gRPC TLS listening", "address", listeners.GRPCTLS.Addr().String(), "ca", filepath.Join(options.grpcTLSDir, localtls.CAFile))
+	}
 	if listeners.Metadata != nil {
 		logger.Info("workload metadata listening", "address", listeners.Metadata.Addr().String())
 	}
@@ -106,6 +112,7 @@ func runSubcommand(ctx context.Context, args []string, output, errors io.Writer)
 // their own parsers; this one describes the long-running emulator only.
 type serveOptions struct {
 	listen, grpcListen, metadataListen string
+	grpcTLSListen, grpcTLSDir          string
 	shutdown                           time.Duration
 	iamPath, identityPath              string
 	runSocket, runNetwork, runEnv      string
@@ -129,6 +136,8 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	var options serveOptions
 	flags.StringVar(&options.listen, "listen", "127.0.0.1:4566", "HTTP listen address")
 	flags.StringVar(&options.grpcListen, "grpc-listen", "127.0.0.1:4567", "gRPC listen address")
+	flags.StringVar(&options.grpcTLSListen, "grpc-tls-listen", "", "optional gRPC TLS listen address; requires -grpc-tls-dir")
+	flags.StringVar(&options.grpcTLSDir, "grpc-tls-dir", "", "owner-only directory holding the gRPC TLS CA and server key; created with new material when missing")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
 	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager,iam,logging,vertexai")
@@ -155,8 +164,8 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.metadataListen, "metadata-listen", "", "optional per-workload loopback metadata listener")
 	flags.StringVar(&options.metadataPrincipal, "metadata-principal", "", "enrolled service account bound to the metadata listener")
 	flags.BoolVar(&options.showVersion, "version", false, "print the build version")
-	if flags.Parse(args) != nil || flags.NArg() != 0 || options.shutdown <= 0 {
-		fmt.Fprintln(errors, "Supply valid flags and a positive shutdown timeout")
+	if flags.Parse(args) != nil || flags.NArg() != 0 || options.shutdown <= 0 || (options.grpcTLSListen == "") != (options.grpcTLSDir == "") {
+		fmt.Fprintln(errors, "Supply valid flags, a positive shutdown timeout, and -grpc-tls-listen together with -grpc-tls-dir")
 		return serveOptions{}, false
 	}
 	pool, err := dataplane.Parse(options.dataPorts, options.dataListen)
@@ -187,7 +196,13 @@ func assemble(ctx context.Context, options serveOptions) (*core.Server, core.Lis
 		}
 		server.IAM = engine
 	}
-	listeners, err := bindListeners(ctx, options, server, metadataHandler)
+	var tlsConfig *tls.Config
+	if options.grpcTLSDir != "" {
+		if tlsConfig, err = localtls.Load(options.grpcTLSDir, time.Now()); err != nil {
+			return nil, core.Listeners{}, fmt.Errorf("load the gRPC TLS material: %w", err)
+		}
+	}
+	listeners, err := bindListeners(ctx, options, server, metadataHandler, tlsConfig)
 	if err != nil {
 		return nil, core.Listeners{}, err
 	}
@@ -433,30 +448,41 @@ func runBaseURL(listen string) string {
 	return "http://" + net.JoinHostPort(host, port)
 }
 
-// bindListeners binds HTTP, gRPC, and optionally the metadata listener. Any
-// already-bound listener is closed when a later bind fails.
-func bindListeners(ctx context.Context, options serveOptions, server *core.Server, metadataHandler http.Handler) (core.Listeners, error) {
+// bindListeners binds HTTP, gRPC, and optionally the gRPC TLS and metadata
+// listeners. Any already-bound listener is closed when a later bind fails.
+func bindListeners(ctx context.Context, options serveOptions, server *core.Server, metadataHandler http.Handler, tlsConfig *tls.Config) (core.Listeners, error) {
 	var listen net.ListenConfig
-	listener, err := listen.Listen(ctx, "tcp", options.listen)
-	if err != nil {
-		return core.Listeners{}, fmt.Errorf("unable to bind the requested HTTP listener: %w: %w", err, errListen)
+	var listeners core.Listeners
+	for _, bind := range []struct {
+		name, address string
+		target        *net.Listener
+		enabled       bool
+	}{
+		{"HTTP", options.listen, &listeners.HTTP, true},
+		{"gRPC", options.grpcListen, &listeners.GRPC, true},
+		{"gRPC TLS", options.grpcTLSListen, &listeners.GRPCTLS, tlsConfig != nil},
+		{"metadata", options.metadataListen, &listeners.Metadata, metadataHandler != nil},
+	} {
+		if !bind.enabled {
+			continue
+		}
+		listener, err := listen.Listen(ctx, "tcp", bind.address)
+		if err != nil {
+			for _, bound := range []net.Listener{listeners.HTTP, listeners.GRPC, listeners.GRPCTLS} {
+				if bound != nil {
+					_ = bound.Close()
+				}
+			}
+			return core.Listeners{}, fmt.Errorf("unable to bind the requested %s listener: %w: %w", bind.name, err, errListen)
+		}
+		*bind.target = listener
 	}
-	grpcListener, err := listen.Listen(ctx, "tcp", options.grpcListen)
-	if err != nil {
-		_ = listener.Close()
-		return core.Listeners{}, fmt.Errorf("unable to bind the requested gRPC listener: %w: %w", err, errListen)
+	if tlsConfig != nil {
+		listeners.GRPCTLS = tls.NewListener(listeners.GRPCTLS, tlsConfig)
 	}
-	listeners := core.Listeners{HTTP: listener, GRPC: grpcListener}
-	if metadataHandler == nil {
-		return listeners, nil
+	if metadataHandler != nil {
+		server.Metadata = &http.Server{Handler: metadataHandler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
 	}
-	listeners.Metadata, err = listen.Listen(ctx, "tcp", options.metadataListen)
-	if err != nil {
-		_ = listener.Close()
-		_ = grpcListener.Close()
-		return core.Listeners{}, fmt.Errorf("unable to bind the requested metadata listener: %w: %w", err, errListen)
-	}
-	server.Metadata = &http.Server{Handler: metadataHandler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
 	return listeners, nil
 }
 

@@ -14,6 +14,7 @@ services:
       # Redis and public-IP Cloud SQL instances listen on ports from this
       # range; the entry point publishes the same numbers on host loopback.
       GCP_LOCAL_DATA_PORTS: ${GCP_LOCAL_DATA_PORTS:?Use the gcp-local CLI}
+      GCP_LOCAL_GRPC_TLS_PORT: ${GCP_LOCAL_GRPC_TLS_PORT:?Use the gcp-local CLI}
     networks: [backend]
     volumes:
       - type: bind
@@ -26,6 +27,13 @@ services:
         source: ${GCP_LOCAL_DIRECTORY:?Use the gcp-local CLI}/iam.json
         target: /config/iam.json
         read_only: true
+        bind:
+          create_host_path: false
+      # The core writes the gRPC TLS CA and server key here on first start;
+      # the key never leaves the environment directory.
+      - type: bind
+        source: ${GCP_LOCAL_DIRECTORY:?Use the gcp-local CLI}/tls
+        target: /tls
         bind:
           create_host_path: false
     read_only: true
@@ -46,12 +54,14 @@ services:
     environment:
       GCP_LOCAL_PORT: ${GCP_LOCAL_PORT:?Use the gcp-local CLI}
       GCP_LOCAL_DATA_PORTS: ${GCP_LOCAL_DATA_PORTS:?Use the gcp-local CLI}
+      GCP_LOCAL_GRPC_TLS_PORT: ${GCP_LOCAL_GRPC_TLS_PORT:?Use the gcp-local CLI}
     depends_on:
       gcp-local:
         condition: service_healthy
     ports:
       - "127.0.0.1:${GCP_LOCAL_PORT:?Use the gcp-local CLI}:4566"
       - "127.0.0.1:${GCP_LOCAL_GRPC_PORT:?Use the gcp-local CLI}:4567"
+      - "127.0.0.1:${GCP_LOCAL_GRPC_TLS_PORT:?Use the gcp-local CLI}:${GCP_LOCAL_GRPC_TLS_PORT:?Use the gcp-local CLI}"
       - "127.0.0.1:${GCP_LOCAL_DATA_PORTS:?Use the gcp-local CLI}:${GCP_LOCAL_DATA_PORTS:?Use the gcp-local CLI}"
     volumes:
       - ./packaging/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro

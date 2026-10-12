@@ -121,8 +121,9 @@ func (s *Server) healthCode() int {
 
 // Listeners carries the bound sockets Serve owns. Serve binds none of them
 // itself; cancellation drains both transports under a shared deadline, then
-// forcibly closes remaining HTTP requests and gRPC streams.
-type Listeners struct{ HTTP, GRPC, Metadata net.Listener }
+// forcibly closes remaining HTTP requests and gRPC streams. GRPCTLS is an
+// optional TLS listener served by the same gRPC server, handlers, and auth.
+type Listeners struct{ HTTP, GRPC, GRPCTLS, Metadata net.Listener }
 
 // errListeners rejects an incomplete listener pairing.
 var errListeners = errors.New("supply http/grpc listeners and pair the metadata handler/listener")
@@ -184,7 +185,7 @@ func (s *Server) validate(listeners Listeners) error {
 
 // close releases every supplied listener.
 func (l Listeners) close() {
-	for _, listener := range []net.Listener{l.HTTP, l.GRPC, l.Metadata} {
+	for _, listener := range []net.Listener{l.HTTP, l.GRPC, l.GRPCTLS, l.Metadata} {
 		if listener != nil {
 			_ = listener.Close()
 		}
@@ -205,12 +206,17 @@ func (s *Server) drainBackends() error {
 // Serve results arrive on, with the number of transports started.
 func (s *Server) serve(listeners Listeners) (<-chan error, int) {
 	count := 2
-	if listeners.Metadata != nil {
-		count++
+	for _, optional := range []net.Listener{listeners.GRPCTLS, listeners.Metadata} {
+		if optional != nil {
+			count++
+		}
 	}
 	served := make(chan error, count)
 	go func() { served <- s.HTTP.Serve(listeners.HTTP) }()
 	go func() { served <- s.GRPC.Serve(listeners.GRPC) }()
+	if listeners.GRPCTLS != nil {
+		go func() { served <- s.GRPC.Serve(listeners.GRPCTLS) }()
+	}
 	if listeners.Metadata != nil {
 		go func() { served <- s.Metadata.Serve(listeners.Metadata) }()
 	}

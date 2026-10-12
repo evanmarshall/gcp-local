@@ -38,6 +38,7 @@ from google.cloud.firestore_v1.services.firestore import FirestoreClient
 PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
 HTTP = os.environ["GCP_LOCAL_HTTP"]
 GRPC = os.environ["GCP_LOCAL_GRPC"]
+GRPC_TLS = os.environ["GCP_LOCAL_GRPC_TLS"]
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 PAYLOAD = b"hello from python"
 REVISION_IMAGE = "client-matrix/revision:1"
@@ -283,9 +284,10 @@ def run_iam():
     client.delete_service_account(name=name)
 
 
-# The handwritten Spanner, Bigtable, and Logging clients take no channel, so
-# they get the gRPC address the public way and keep their own credentials.
-GRPC_OPTIONS = ClientOptions(api_endpoint=GRPC)
+# The handwritten Spanner, Bigtable, and Logging clients take no channel and
+# open TLS, so they get the gateway's TLS address and keep their own
+# credentials; GRPC_DEFAULT_SSL_ROOTS_FILE_PATH names the environment's CA.
+GRPC_OPTIONS = ClientOptions(api_endpoint=GRPC_TLS)
 
 
 def run_spanner():
@@ -372,7 +374,9 @@ def run_logging():
     logger.log_text("hello from python", severity="INFO")
     log_filter = f'logName="projects/{PROJECT}/logs/python-matrix"'
     entries = [entry.payload for entry in client.list_entries(filter_=log_filter)]
-    assert entries == ["hello from python"], entries
+    # The first write also logs the client's instrumentation diagnostic entry.
+    written = [p for p in entries if "logging.googleapis.com/diagnostic" not in p]
+    assert written == ["hello from python"], entries
     other = cloud_logging.Client(
         project=PROJECT, credentials=credentials(denied=True), client_options=GRPC_OPTIONS
     )

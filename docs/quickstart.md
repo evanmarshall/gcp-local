@@ -39,13 +39,15 @@ Options go before the command: `--directory`, `--port`, `--data-ports FIRST-LAST
 | --- | --- |
 | `GCP_LOCAL_ENDPOINT` | `http://127.0.0.1:4566` (all REST APIs) |
 | `GCP_LOCAL_GRPC_ENDPOINT` | `127.0.0.1:4567` (Pub/Sub, Bigtable, Spanner, Firestore, Cloud Logging, Secret Manager v1, Cloud Tasks v2, Cloud KMS, Cloud Run v2) |
+| `GCP_LOCAL_GRPC_TLS_ENDPOINT` | `127.0.0.1:4584`: the same gRPC services over TLS, for Node.js and Python's Spanner, Bigtable, and Logging clients ([gRPC over TLS](clients.md#grpc-over-tls)) |
+| `GCP_LOCAL_GRPC_TLS_CA` | `<directory>/tls/ca.pem`, the environment's own CA certificate |
 | `GCP_LOCAL_DATA_PORTS` | `4568-4583`: one port per Redis or public-IP Cloud SQL instance |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `<directory>/identity/adc.json` (default directory `.gcp-local/environment`) |
 | `GOOGLE_CLOUD_PROJECT` | `gcp-local-test` |
 | `GCP_LOCAL_PROJECT_NUMBER` | A stable 12-digit number derived from the project ID |
 | `GCP_LOCAL_TERRAFORM_CREDENTIALS` | `<directory>/identity/terraform-adc.json`, the ADC marked for Terraform |
 
-The data-port range follows `--port`: `--port 14566` gives 14568-14583. A second environment needs a base port at least 18 away. `--data-ports` sets up to 64 ports. Connect to Redis and Cloud SQL on the port the API reports ([Memorystore](memorystore.md#endpoint-and-auth-semantics), [Cloud SQL](cloudsql.md#connect-from-the-host)).
+The data-port range follows `--port`: `--port 14566` gives 14568-14583, and the gRPC TLS port is the next one (14584). A second environment needs a base port at least 19 away. `--data-ports` sets up to 64 ports. Connect to Redis and Cloud SQL on the port the API reports ([Memorystore](memorystore.md#endpoint-and-auth-semantics), [Cloud SQL](cloudsql.md#connect-from-the-host)).
 
 ## Use it from an application
 
@@ -118,15 +120,15 @@ docker run --detach --name gcp-local \
   --user "$(id -u):$(id -g)" --read-only --tmpfs /tmp:size=256m,mode=1777 \
   --cap-drop ALL --security-opt no-new-privileges:true \
   --publish 127.0.0.1:4566:4566 --publish 127.0.0.1:4567:4567 \
-  --publish 127.0.0.1:4568-4583:4568-4583 \
+  --publish 127.0.0.1:4568-4583:4568-4583 --publish 127.0.0.1:4584:4584 \
   --env GCP_LOCAL_PORT=4566 \
   --env GCP_LOCAL_HOST_DIRECTORY="$(pwd -P)/.gcp-local/docker" \
   --volume "$(pwd -P)/.gcp-local/docker:/state" \
   ghcr.io/evanmarshall/gcp-local:VERSION
 ```
 
-- Port mappings must use the same number on both sides. The data range must match `GCP_LOCAL_DATA_PORTS` (default: the 16 ports after `GCP_LOCAL_PORT + 1`).
-- Optional variables: `GCP_LOCAL_DATA_PORTS`, `GCP_LOCAL_PROJECT` (default `gcp-local-test`), `GCP_LOCAL_WORKLOADS` (comma-separated, e.g. `worker`).
+- Port mappings must use the same number on both sides. The data range must match `GCP_LOCAL_DATA_PORTS` (default: the 16 ports after `GCP_LOCAL_PORT + 1`) and the TLS port `GCP_LOCAL_GRPC_TLS_PORT` (default `GCP_LOCAL_PORT + 18`).
+- Optional variables: `GCP_LOCAL_DATA_PORTS`, `GCP_LOCAL_GRPC_TLS_PORT`, `GCP_LOCAL_PROJECT` (default `gcp-local-test`), `GCP_LOCAL_WORKLOADS` (comma-separated, e.g. `worker`).
 - Wait for `docker inspect --format '{{.State.Health.Status}}' gcp-local` to print `healthy`.
 - `gcp-local --directory .gcp-local/docker status|env` and the examples work. `reset`, `down`, and `logs` don't; use `docker restart` (clears state) and `docker rm --force`.
 - The container is on Docker's default bridge network, not an internal backend network.

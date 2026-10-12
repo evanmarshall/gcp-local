@@ -17,7 +17,7 @@ python3 scripts/local_env.py up      # builds and starts the environment
 python3 scripts/local_env.py env     # prints the endpoint, project, and credential file
 ```
 
-HTTP is on `http://127.0.0.1:4566` and gRPC on `127.0.0.1:4567`. The project is `gcp-local-test`, and a generated developer identity holds explicit IAM grants. `reset` wipes all data, `down` stops everything, and `logs` shows recent output.
+HTTP is on `http://127.0.0.1:4566` and gRPC on `127.0.0.1:4567` (TLS on `127.0.0.1:4584`). The project is `gcp-local-test`, and a generated developer identity holds explicit IAM grants. `reset` wipes all data, `down` stops everything, and `logs` shows recent output.
 
 Point a client library at it with the generated credential file:
 

@@ -4,19 +4,62 @@ Point each client at gcp-local with [local ADC](local-identity.md) and the setti
 
 ## Settings
 
-Set `GOOGLE_APPLICATION_CREDENTIALS` to the local `adc.json` and `GOOGLE_CLOUD_PROJECT` to its project. Never set `*_EMULATOR_HOST`: it makes clients anonymous, and the gateway refuses anonymous calls. REST is `http://127.0.0.1:4566`; gRPC is `127.0.0.1:4567`, plaintext.
+Set `GOOGLE_APPLICATION_CREDENTIALS` to the local `adc.json` and `GOOGLE_CLOUD_PROJECT` to its project. Never set `*_EMULATOR_HOST`: it makes clients anonymous, and the gateway refuses anonymous calls. REST is `http://127.0.0.1:4566`; gRPC is `127.0.0.1:4567` (plaintext) and `127.0.0.1:4584` ([TLS](#grpc-over-tls)).
 
 | Client | REST services | gRPC services |
 | --- | --- | --- |
 | Go | `option.WithEndpoint("http://127.0.0.1:4566/storage/v1/")`; BigQuery `.../bigquery/v2/` | `option.WithGRPCConn(conn)`: insecure transport plus a per-RPC credential from ADC whose `RequireTransportSecurity()` is false (`grpcOption` in `tests/clients/go/main.go`). The libraries' own credentials refuse to travel without TLS |
-| Python | `client_options={"api_endpoint": "http://127.0.0.1:4566"}` | Generated clients: `transport=Client.get_transport_class("grpc")(channel=...)` with `secure_authorized_channel(credentials, Request(), "127.0.0.1:4567", ssl_credentials=grpc.local_channel_credentials())`. Firestore: set `_firestore_api_internal` ([Firestore](firestore.md)). Handwritten Spanner, Bigtable, and Logging clients take no channel: not possible ([#54](https://github.com/evanmarshall/gcp-local/issues/54)) |
-| Node.js | `{apiEndpoint: "http://127.0.0.1:4566", useAuthWithCustomEndpoint: true}`; without the second option Storage and BigQuery drop credentials. Storage uploads need `{resumable: false}` ([Storage](storage.md)). `@googleapis/iam`: `rootUrl: "http://127.0.0.1:4566/"` | Not possible: grpc-js sends call credentials only over TLS ([#54](https://github.com/evanmarshall/gcp-local/issues/54)) |
+| Python | `client_options={"api_endpoint": "http://127.0.0.1:4566"}` | Generated clients: `transport=Client.get_transport_class("grpc")(channel=...)` with `secure_authorized_channel(credentials, Request(), "127.0.0.1:4567", ssl_credentials=grpc.local_channel_credentials())`. Firestore: set `_firestore_api_internal` ([Firestore](firestore.md)). Handwritten Spanner, Bigtable, and Logging clients: `client_options={"api_endpoint": "127.0.0.1:4584"}` with `GRPC_DEFAULT_SSL_ROOTS_FILE_PATH` set ([TLS](#grpc-over-tls)) |
+| Node.js | `{apiEndpoint: "http://127.0.0.1:4566", useAuthWithCustomEndpoint: true}`; without the second option Storage and BigQuery drop credentials. Storage uploads need `{resumable: false}` ([Storage](storage.md)). `@googleapis/iam`: `rootUrl: "http://127.0.0.1:4566/"` | `{apiEndpoint: "127.0.0.1", port: 4584, sslCreds}` ([TLS](#grpc-over-tls)). Pub/Sub: `{apiEndpoint: "127.0.0.1:4584", emulatorMode: false, sslCreds}` |
 | gcloud | `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=adc.json`, `CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE=http://127.0.0.1:4566/storage/v1/`, and `..._PUBSUB`, `..._SECRETMANAGER`, `..._CLOUDKMS` set to `http://127.0.0.1:4566/`. Authentication fails ([#53](https://github.com/evanmarshall/gcp-local/issues/53)) | None |
 | rclone | `endpoint = http://127.0.0.1:4566/storage/v1/` and `env_auth = true` | None |
 
 - gRPC is served for Pub/Sub, Firestore, Secret Manager, Cloud Tasks v2, Cloud Run v2, the Spanner and Bigtable data planes, and Logging. Default gRPC clients for Cloud KMS, Spanner and Bigtable admin, and IAM admin fail; each has an issue in the coverage table.
 - The local token service issues only `cloud-platform` and Storage's scopes, and most client libraries request others by default ([#52](https://github.com/evanmarshall/gcp-local/issues/52)). Load ADC with the `cloud-platform` scope and pass it to the client, as every runner does.
 - Turn off client metrics exporters, which would call `monitoring.googleapis.com`: Go Spanner `DisableNativeMetrics`, Go Bigtable `NoopMetricsProvider`, Python Spanner `disable_builtin_metrics`, Node Spanner `disableBuiltInMetrics`, Node Bigtable `metricsEnabled: false`.
+
+## gRPC over TLS
+
+grpc-js and the handwritten Python Spanner, Bigtable, and Logging clients send credentials only over TLS. They use the TLS port, which serves the same gRPC services with the same authentication and IAM as 4567, and trust the environment's own CA.
+
+| Setting | Packaged environment (`gcp-local env`) | `bin/gcp-local` |
+| --- | --- | --- |
+| Endpoint | `GCP_LOCAL_GRPC_TLS_ENDPOINT` (`127.0.0.1:4584`) | `-grpc-tls-listen 127.0.0.1:4584` |
+| CA certificate | `GCP_LOCAL_GRPC_TLS_CA` (`<directory>/tls/ca.pem`) | `ca.pem` in `-grpc-tls-dir DIR` ([runtime](runtime.md#flags)) |
+
+Python handwritten clients take the CA from gRPC's default-roots variable:
+
+```sh
+export GRPC_DEFAULT_SSL_ROOTS_FILE_PATH="$GCP_LOCAL_GRPC_TLS_CA"
+```
+
+```python
+spanner.Client(project=project, credentials=credentials,
+               client_options={"api_endpoint": "127.0.0.1:4584"})
+```
+
+Node.js clients take channel credentials built from the CA and ADC. `google-auth-library` returns a `Headers` object that grpc-js does not read, so convert it:
+
+```js
+import {readFileSync} from 'node:fs';
+import {GoogleAuth} from 'google-auth-library';
+import {grpc} from 'google-gax';
+
+const auth = await new GoogleAuth({scopes: ['https://www.googleapis.com/auth/cloud-platform']}).getClient();
+const sslCreds = grpc.credentials.combineChannelCredentials(
+  grpc.credentials.createSsl(readFileSync(process.env.GCP_LOCAL_GRPC_TLS_CA)),
+  grpc.credentials.createFromGoogleCredential({
+    getRequestHeaders: async url => Object.fromEntries(await auth.getRequestHeaders(url)),
+  }),
+);
+const client = new SecretManagerServiceClient({apiEndpoint: '127.0.0.1', port: 4584, sslCreds});
+```
+
+Go clients keep the plaintext setup above. `cmd/gcp-local/tls_test.go` dials the TLS port with `credentials.NewTLS` and the CA in `RootCAs`; no Go client library is tested against it.
+
+- Each environment creates its own CA on first start. Its private key is discarded after it signs the server certificate, and it is name-constrained to `localhost` and `gcp-local`. The server key stays in the environment directory (mode 0600).
+- The certificate names `localhost`, `gcp-local`, `127.0.0.1`, and `::1`, and expires after 825 days; delete the `tls` directory and restart to replace it.
+- Don't disable certificate verification; trust `ca.pem` instead.
 
 ## The matrix
 

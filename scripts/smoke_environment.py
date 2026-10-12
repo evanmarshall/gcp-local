@@ -37,8 +37,8 @@ from smoke_support import exchange, free_ports  # noqa: E402
 
 from gcp_local.bootstrap import SERVICES  # noqa: E402
 
-# Each environment publishes HTTP, gRPC, and 16 data-plane ports from its base port.
-PORT_BLOCK = 18
+# Each environment publishes HTTP, gRPC, 16 data-plane ports, and gRPC TLS from its base port.
+PORT_BLOCK = 19
 
 # One read per packaged provider (Cloud Run, Connectivity Tests, and project
 # IAM included). The developer's explicit grants must allow each; an enrolled
@@ -195,6 +195,8 @@ for family,address in ((socket.AF_INET,('192.0.2.1',443)),(socket.AF_INET6,('200
     )[0]
     assert entrypoint["NetworkSettings"]["Ports"]["4566/tcp"][0]["HostIp"] == "127.0.0.1"
     assert entrypoint["NetworkSettings"]["Ports"]["4567/tcp"][0]["HostIp"] == "127.0.0.1"
+    tls = f"{configuration['grpc_tls_port']}/tcp"
+    assert entrypoint["NetworkSettings"]["Ports"][tls][0]["HostIp"] == "127.0.0.1"
 
 
 def verify_examples(directory: Path) -> None:
@@ -652,6 +654,25 @@ def verify_dataplane(directory: Path) -> None:
             assert allowed == grpc.StatusCode.OK, (method, allowed)
             denied = grpc_status(channel, method, request, ungranted, stream=stream)
             assert denied == grpc.StatusCode.PERMISSION_DENIED, (method, denied)
+    verify_grpc_tls(env, developer, ungranted)
+
+
+def verify_grpc_tls(env: dict[str, str], developer: str, ungranted: str | None) -> None:
+    """Call gRPC over TLS through HAProxy's TCP pass-through, trusting this environment's CA."""
+    method = "/google.cloud.secretmanager.v1.SecretManagerService/ListSecrets"
+    request = field(1, b"projects/" + env["GOOGLE_CLOUD_PROJECT"].encode())
+    trusted = grpc.ssl_channel_credentials(Path(env["GCP_LOCAL_GRPC_TLS_CA"]).read_bytes())
+    with grpc.secure_channel(env["GCP_LOCAL_GRPC_TLS_ENDPOINT"], trusted) as channel:
+        assert grpc_status(channel, method, request, developer, stream=False) == grpc.StatusCode.OK
+        if ungranted is not None:
+            denied = grpc_status(channel, method, request, ungranted, stream=False)
+            assert denied == grpc.StatusCode.PERMISSION_DENIED, denied
+    # Without the CA (gRPC's public roots only), the handshake fails before any handler runs.
+    with grpc.secure_channel(
+        env["GCP_LOCAL_GRPC_TLS_ENDPOINT"], grpc.ssl_channel_credentials()
+    ) as channel:
+        untrusted = grpc_status(channel, method, request, developer, stream=False)
+        assert untrusted == grpc.StatusCode.UNAVAILABLE, untrusted
 
 
 def verify_standalone(image: str, temporary: Path) -> None:
@@ -668,6 +689,7 @@ def verify_standalone(image: str, temporary: Path) -> None:
             "--cap-drop=ALL", "--security-opt", "no-new-privileges:true",
             "--publish", f"127.0.0.1:{port}:{port}",
             "--publish", f"127.0.0.1:{port + 1}:4567",
+            "--publish", f"127.0.0.1:{port + 18}:{port + 18}",
             # The default data-plane range follows the gRPC port.
             "--publish", f"127.0.0.1:{port + 2}-{port + 17}:{port + 2}-{port + 17}",
             "--env", f"GCP_LOCAL_PORT={port}",
@@ -694,6 +716,8 @@ def verify_standalone(image: str, temporary: Path) -> None:
         assert cli(state, "reset", check=False).returncode != 0, "reset managed a docker run"
         verify_examples(state)
         verify_redis(state, auth=False)
+        env, tokens = environment_tokens(state)
+        verify_grpc_tls(env, tokens["developer"], None)
     finally:
         subprocess.run([DOCKER, "rm", "--force", name], capture_output=True, check=False)
 
@@ -774,6 +798,9 @@ def main() -> int:
             verify_cloudsql(first)
             verify_redis(second, auth=False)
             verify_dataplane(first)
+            # Each environment has its own CA.
+            authorities = {(path / "tls/ca.pem").read_bytes() for path in (first, second)}
+            assert len(authorities) == 2, "Two environments share a gRPC TLS CA"
             # Bind a port to require a visible startup failure
             # without affecting the working environment.
             with socket.socket() as occupied:
@@ -792,7 +819,8 @@ def main() -> int:
             teardown(directories)
     print(
         "Packaged workflow passed: local ADC/Storage and Pub/Sub, Spanner and Bigtable "
-        "rows, every packaged service with IAM enforced, Redis and Cloud SQL from the host, "
+        "rows, every packaged service with IAM enforced, gRPC over TLS with a per-environment CA, "
+        "Redis and Cloud SQL from the host, "
         "isolated reset, failed startup, "
         "portable doctor, standalone docker run, and teardown."
     )

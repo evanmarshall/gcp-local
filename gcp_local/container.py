@@ -17,8 +17,10 @@ from pathlib import Path
 
 from gcp_local.bootstrap import (
     SERVICE_FLAG,
+    TLS_DIRECTORY,
     check_data_ports,
     default_data_ports,
+    default_grpc_tls_port,
     initialize,
     load,
     parse_data_ports,
@@ -28,6 +30,8 @@ CORE = "/gcp-local"
 PYTHON = "/usr/local/bin/python3"
 STATE = Path("/state")
 CONFIG = Path("/config")
+# Compose mounts the environment's writable tls directory here.
+TLS = Path("/tls")
 PASSWD_IMAGE = Path("/etc/passwd.image")
 PASSWD = Path("/tmp/passwd")  # noqa: S108 -- the container's private tmpfs
 # The default packaged Cloud Run runtime: revisions run as processes inside
@@ -45,6 +49,18 @@ def port() -> int:
     return int(value)
 
 
+def grpc_tls_port() -> int:
+    """Read the gRPC TLS port; it matches the published host port."""
+    value = os.environ.get("GCP_LOCAL_GRPC_TLS_PORT")
+    if value is None:
+        return default_grpc_tls_port(port())
+    if not re.fullmatch(r"[0-9]{4,5}", value) or not 1024 <= int(value) <= 65535:
+        raise SystemExit("GCP_LOCAL_GRPC_TLS_PORT must be a port between 1024 and 65535")
+    if int(value) in {port(), 4567}:
+        raise SystemExit("GCP_LOCAL_GRPC_TLS_PORT must differ from the HTTP and gRPC ports")
+    return int(value)
+
+
 def data_ports() -> tuple[int, int]:
     """Read the published data-plane range; it matches the host ports one to one."""
     value = os.environ.get("GCP_LOCAL_DATA_PORTS")
@@ -52,18 +68,22 @@ def data_ports() -> tuple[int, int]:
     try:
         ports = parse_data_ports(value) if value else default_data_ports(http)
         # Inside the container the gRPC gateway always listens on 4567.
-        return check_data_ports(ports, http, 4567)
+        return check_data_ports(ports, http, 4567, grpc_tls_port())
     except ValueError as error:
         raise SystemExit("GCP_LOCAL_DATA_PORTS: " + str(error)) from None
 
 
-def core_arguments(identity: Path, iam: Path) -> list[str]:
+def core_arguments(identity: Path, iam: Path, tls: Path) -> list[str]:
     """Build the core command line for the packaged runtime."""
     first, last = data_ports()
     arguments = [
         CORE,
         f"-listen=0.0.0.0:{port()}",
         "-grpc-listen=0.0.0.0:4567",
+        # The same gRPC server over TLS, for clients that send credentials only
+        # over TLS. The core creates the CA and server key in tls on first start.
+        f"-grpc-tls-listen=0.0.0.0:{grpc_tls_port()}",
+        f"-grpc-tls-dir={tls}",
         # Redis and public-IP Cloud SQL instances get ports from this range.
         # The core binds them on the container's interfaces; the entry point
         # (or docker run --publish) maps the same numbers on host loopback.
@@ -134,6 +154,7 @@ def standalone() -> list[str]:
             value["mode"] != "standalone"
             or value["port"] != port()
             or value["data_ports"] != list(data_ports())
+            or value["grpc_tls_port"] != grpc_tls_port()
         ):
             raise SystemExit("This /state directory belongs to another port or environment")
     else:
@@ -151,7 +172,7 @@ def standalone() -> list[str]:
             )
         except ValueError as error:
             raise SystemExit(str(error)) from None
-    return core_arguments(STATE / "identity/server.json", STATE / "iam.json")
+    return core_arguments(STATE / "identity/server.json", STATE / "iam.json", STATE / TLS_DIRECTORY)
 
 
 def write_passwd(image: Path = PASSWD_IMAGE, target: Path = PASSWD) -> None:
@@ -179,7 +200,7 @@ def main(argv: Sequence[str]) -> int:
     if mode == "standalone":
         arguments = standalone()
     elif mode == "serve":
-        arguments = core_arguments(CONFIG / "identity.json", CONFIG / "iam.json")
+        arguments = core_arguments(CONFIG / "identity.json", CONFIG / "iam.json", TLS)
     elif mode == "health":
         arguments = [CORE, "health", f"-endpoint=http://127.0.0.1:{port()}"]
     else:

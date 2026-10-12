@@ -98,10 +98,15 @@ def test_service_flag_selects_every_reported_provider():
 
 def test_launcher_flags(monkeypatch, tmp_path):
     monkeypatch.setenv("GCP_LOCAL_PORT", "15566")
+    monkeypatch.delenv("GCP_LOCAL_GRPC_TLS_PORT", raising=False)
     monkeypatch.delenv("GCP_LOCAL_RUN_DOCKER_SOCKET", raising=False)
-    arguments = container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+    arguments = container.core_arguments(
+        tmp_path / "identity.json", tmp_path / "iam.json", tmp_path / "tls"
+    )
     assert arguments[0] == "/gcp-local"
     assert "-listen=0.0.0.0:15566" in arguments
+    assert "-grpc-tls-listen=0.0.0.0:15584" in arguments
+    assert f"-grpc-tls-dir={tmp_path / 'tls'}" in arguments
     assert "-services=" + bootstrap.SERVICE_FLAG in arguments
     assert (
         "-run-process=gcp-local/workflow:latest="
@@ -131,9 +136,16 @@ def test_data_ports_are_configurable_and_bounded(tmp_path):
     directory.mkdir(mode=0o700)
     value = bootstrap.initialize(directory, 14566, "synthetic-project", data_ports=(25000, 25003))
     assert bootstrap.data_port_range(value) == "25000-25003"
-    for ports in [(14566, 14570), (14560, 14567), (25000, 25064), (25010, 25000), (80, 90)]:
+    for ports in [
+        (14566, 14570),
+        (14560, 14567),
+        (14580, 14590),
+        (25000, 25064),
+        (25010, 25000),
+        (80, 90),
+    ]:
         with pytest.raises(ValueError, match="data ports"):
-            bootstrap.check_data_ports(ports, 14566, 14567)
+            bootstrap.check_data_ports(ports, 14566, 14567, 14584)
     with pytest.raises(ValueError, match="FIRST-LAST"):
         bootstrap.parse_data_ports("6379")
 
@@ -147,8 +159,11 @@ def test_manifests_without_data_ports_use_the_default(initialized):
 
 def test_launcher_publishes_the_data_port_range(monkeypatch, tmp_path):
     monkeypatch.setenv("GCP_LOCAL_PORT", "15566")
+    monkeypatch.delenv("GCP_LOCAL_GRPC_TLS_PORT", raising=False)
     monkeypatch.delenv("GCP_LOCAL_DATA_PORTS", raising=False)
-    arguments = container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+    arguments = container.core_arguments(
+        tmp_path / "identity.json", tmp_path / "iam.json", tmp_path / "tls"
+    )
     assert "-data-ports=15568-15583" in arguments
     assert "-data-listen=0.0.0.0" in arguments
     monkeypatch.setenv("GCP_LOCAL_DATA_PORTS", "20000-20007")
@@ -175,13 +190,19 @@ def test_launcher_docker_mode_requires_its_label_and_network(monkeypatch, tmp_pa
     monkeypatch.delenv("GCP_LOCAL_RUN_ENVIRONMENT", raising=False)
     monkeypatch.delenv("GCP_LOCAL_RUN_DOCKER_NETWORK", raising=False)
     with pytest.raises(SystemExit, match="GCP_LOCAL_RUN_ENVIRONMENT"):
-        container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+        container.core_arguments(
+            tmp_path / "identity.json", tmp_path / "iam.json", tmp_path / "tls"
+        )
     monkeypatch.setenv("GCP_LOCAL_RUN_ENVIRONMENT", "gcp-local-0123456789abcdef")
     monkeypatch.setenv("GCP_LOCAL_RUN_DOCKER_NETWORK", "bad network")
     with pytest.raises(SystemExit, match="GCP_LOCAL_RUN_DOCKER_NETWORK"):
-        container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+        container.core_arguments(
+            tmp_path / "identity.json", tmp_path / "iam.json", tmp_path / "tls"
+        )
     monkeypatch.setenv("GCP_LOCAL_RUN_DOCKER_NETWORK", "gcp-local-0123456789abcdef_backend")
-    arguments = container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+    arguments = container.core_arguments(
+        tmp_path / "identity.json", tmp_path / "iam.json", tmp_path / "tls"
+    )
     assert arguments[-3:] == [
         "-run-docker-socket=/var/run/docker.sock",
         "-run-docker-network=gcp-local-0123456789abcdef_backend",
@@ -266,3 +287,44 @@ def test_env_names_the_in_network_endpoint_in_docker_mode(initialized):
     env = environment.application_env(docker_mode(value))
     assert env["GCP_LOCAL_RUN_ENDPOINT"] == "http://gcp-local:14566"
     assert env["GCP_LOCAL_RUN_GRPC_ENDPOINT"] == "gcp-local:4567"
+
+
+def test_grpc_tls_port_follows_the_data_range(initialized):
+    directory, value = initialized
+    assert value["grpc_tls_port"] == 14584
+    tls = directory / "tls"
+    assert tls.is_dir() and tls.stat().st_mode & 0o777 == 0o700
+    env = environment.application_env(value)
+    assert env["GCP_LOCAL_GRPC_TLS_ENDPOINT"] == "127.0.0.1:14584"
+    assert env["GCP_LOCAL_GRPC_TLS_CA"] == str(directory / "tls/ca.pem")
+
+
+def test_manifests_without_a_grpc_tls_port_use_the_default(initialized):
+    directory, value = initialized
+    del value["grpc_tls_port"]
+    bootstrap.private_json(directory / "environment.json", value)
+    assert bootstrap.load(directory)["grpc_tls_port"] == 14584
+    bootstrap.private_json(directory / "environment.json", {**value, "grpc_tls_port": 14567})
+    with pytest.raises(ValueError, match="gRPC TLS port"):
+        bootstrap.load(directory)
+
+
+def test_load_refuses_shared_tls_material(initialized):
+    directory, _ = initialized
+    key = directory / "tls/server-key.pem"
+    key.write_text("private")
+    key.chmod(0o644)
+    with pytest.raises(ValueError, match="owner-only"):
+        bootstrap.load(directory)
+    key.chmod(0o600)
+    assert bootstrap.load(directory)["grpc_tls_port"] == 14584
+
+
+def test_launcher_grpc_tls_port_is_bounded(monkeypatch):
+    monkeypatch.setenv("GCP_LOCAL_PORT", "15566")
+    monkeypatch.setenv("GCP_LOCAL_GRPC_TLS_PORT", "20000")
+    assert container.grpc_tls_port() == 20000
+    for value in ("80", "4567", "15566"):
+        monkeypatch.setenv("GCP_LOCAL_GRPC_TLS_PORT", value)
+        with pytest.raises(SystemExit, match="GCP_LOCAL_GRPC_TLS_PORT"):
+            container.grpc_tls_port()

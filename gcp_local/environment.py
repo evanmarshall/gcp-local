@@ -23,9 +23,11 @@ from gcp_local import IMAGE_REPOSITORY, __version__
 from gcp_local.bootstrap import (
     IMAGE_PATTERN,
     SERVICES,
+    TLS_DIRECTORY,
     compose_project,
     data_port_range,
     default_data_ports,
+    default_grpc_tls_port,
     initialize,
     load,
     parse_data_ports,
@@ -155,6 +157,7 @@ def compose(
             "GCP_LOCAL_DIRECTORY": str(value["directory"]),
             "GCP_LOCAL_PORT": str(value["port"]),
             "GCP_LOCAL_GRPC_PORT": str(value["grpc_port"]),
+            "GCP_LOCAL_GRPC_TLS_PORT": str(value["grpc_tls_port"]),
             "GCP_LOCAL_DATA_PORTS": data_port_range(value),
             "GCP_LOCAL_UID": str(value["uid"]),
             "GCP_LOCAL_GID": str(value["gid"]),
@@ -245,6 +248,9 @@ def application_env(value: dict[str, object]) -> dict[str, str]:
         "GOOGLE_CLOUD_PROJECT": str(value["project"]),
         "GCP_LOCAL_ENDPOINT": f"http://127.0.0.1:{value['port']}",
         "GCP_LOCAL_GRPC_ENDPOINT": f"127.0.0.1:{value['grpc_port']}",
+        # The same gRPC gateway over TLS, signed by this environment's own CA.
+        "GCP_LOCAL_GRPC_TLS_ENDPOINT": f"127.0.0.1:{value['grpc_tls_port']}",
+        "GCP_LOCAL_GRPC_TLS_CA": str(Path(str(value["directory"])) / TLS_DIRECTORY / "ca.pem"),
         # Redis and public-IP Cloud SQL instances report ports from this range.
         "GCP_LOCAL_DATA_PORTS": data_port_range(value),
         "GCP_LOCAL_PROJECT_NUMBER": str(value["project_number"]),
@@ -329,6 +335,7 @@ def prepare(directory: Path, args: argparse.Namespace) -> dict[str, object]:
             "version": None,
             "image": "legacy",
             "data_ports": list(default_data_ports(int(old["port"]))),
+            "grpc_tls_port": default_grpc_tls_port(int(old["port"])),
         }
     else:
         value = load(directory, check_credentials=args.action in {"up", "reset", "env"})
@@ -381,6 +388,8 @@ def start(args: argparse.Namespace, value: dict[str, object], directory: Path) -
         raise ValueError(
             "Select an image and Cloud Run Docker mode with up; reset reuses the running selection"
         )
+    # Compose mounts it for the core's TLS material; older environments lack it.
+    (directory / TLS_DIRECTORY).mkdir(mode=0o700, exist_ok=True)
     flags = ["--force-recreate"] if args.action == "reset" else []
     compose(
         value,
@@ -408,6 +417,7 @@ def start(args: argparse.Namespace, value: dict[str, object], directory: Path) -
                 "services": SERVICES,
                 "endpoint": application_env(value)["GCP_LOCAL_ENDPOINT"],
                 "grpc_endpoint": application_env(value)["GCP_LOCAL_GRPC_ENDPOINT"],
+                "grpc_tls_endpoint": application_env(value)["GCP_LOCAL_GRPC_TLS_ENDPOINT"],
                 "data_ports": data_port_range(value),
             }
         )

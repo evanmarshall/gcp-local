@@ -425,7 +425,7 @@ def packaged_run(directory: Path, workdir: Path, image: str = WORKER_IMAGE,
     With a neighbor, the environment runs in Cloud Run Docker mode and the
     neighbor's revision container must survive this environment's reset.
     """
-    port = free_ports(18)  # HTTP, gRPC, and the data ports
+    port = free_ports(19)  # HTTP, gRPC, the data ports, and gRPC TLS
     mode = ("--cloud-run-docker",) if neighbor else ()
     print(environment(directory, "up", *mode, "--port", str(port), "--project", PROJECT,
                       "--workload", WORKER_EMAIL.split("@")[0]).strip().splitlines()[-1])
@@ -498,7 +498,7 @@ def packaged(*, cloud_run_docker: bool) -> int:
         try:
             if neighbor:
                 environment(neighbor, "up", "--cloud-run-docker", "--port",
-                            str(free_ports(18)))
+                            str(free_ports(19)))
                 deploy_neighbor(neighbor, image)
             packaged_run(directory, workdir, image, neighbor)
         finally:

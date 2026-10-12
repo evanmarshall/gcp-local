@@ -103,9 +103,9 @@
       "package": "@google-cloud/pubsub",
       "transport": "gRPC",
       "expect": "xfail",
-      "issue": 54,
-      "gap": "grpc-js sends no call credentials over plaintext gRPC",
-      "match": "Cannot compose insecure credentials"
+      "issue": 55,
+      "gap": "StreamingPull refuses protocol_version",
+      "match": "field protocol_version"
     },
     {
       "service": "pubsub",
@@ -136,10 +136,7 @@
       "client": "node",
       "package": "@google-cloud/firestore",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 54,
-      "gap": "grpc-js sends no call credentials over plaintext gRPC",
-      "match": "Cannot compose insecure credentials"
+      "expect": "pass"
     },
     {
       "service": "firestore",
@@ -160,10 +157,7 @@
       "client": "node",
       "package": "@google-cloud/secret-manager",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 54,
-      "gap": "grpc-js sends no call credentials over plaintext gRPC",
-      "match": "Cannot compose insecure credentials"
+      "expect": "pass"
     },
     {
       "service": "secretmanager",
@@ -194,10 +188,7 @@
       "client": "node",
       "package": "@google-cloud/kms",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 54,
-      "gap": "grpc-js sends no call credentials over plaintext gRPC",
-      "match": "Cannot compose insecure credentials"
+      "expect": "pass"
     },
     {
       "service": "cloudkms",
@@ -228,10 +219,7 @@
       "client": "node",
       "package": "@google-cloud/tasks",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 54,
-      "gap": "grpc-js sends no call credentials over plaintext gRPC",
-      "match": "Cannot compose insecure credentials"
+      "expect": "pass"
     },
     {
       "service": "cloudtasks",
@@ -294,9 +282,9 @@
       "package": "@google-cloud/spanner",
       "transport": "gRPC",
       "expect": "xfail",
-      "issue": 54,
-      "gap": "grpc-js sends no call credentials over plaintext gRPC",
-      "match": "Cannot compose insecure credentials"
+      "issue": 61,
+      "gap": "no admin gRPC listener",
+      "match": "unknown service google.spanner.admin.instance.v1.InstanceAdmin"
     },
     {
       "service": "spanner",
@@ -304,9 +292,9 @@
       "package": "google-cloud-spanner",
       "transport": "gRPC",
       "expect": "xfail",
-      "issue": 54,
-      "gap": "the handwritten client only dials TLS; the gateway is plaintext",
-      "match": "Ssl handshake failed"
+      "issue": 61,
+      "gap": "no admin gRPC listener",
+      "match": "unknown service google.spanner.admin.instance.v1.InstanceAdmin"
     },
     {
       "service": "bigtable",
@@ -324,9 +312,9 @@
       "package": "@google-cloud/bigtable",
       "transport": "gRPC",
       "expect": "xfail",
-      "issue": 54,
-      "gap": "grpc-js sends no call credentials over plaintext gRPC",
-      "match": "Cannot compose insecure credentials"
+      "issue": 62,
+      "gap": "no admin gRPC listener",
+      "match": "unknown service google.bigtable.admin.v2.BigtableInstanceAdmin"
     },
     {
       "service": "bigtable",
@@ -334,9 +322,9 @@
       "package": "google-cloud-bigtable",
       "transport": "gRPC",
       "expect": "xfail",
-      "issue": 54,
-      "gap": "the handwritten client only dials TLS; the gateway is plaintext",
-      "match": "Ssl handshake failed"
+      "issue": 62,
+      "gap": "no admin gRPC listener",
+      "match": "unknown service google.bigtable.admin.v2.BigtableInstanceAdmin"
     },
     {
       "service": "logging",
@@ -350,20 +338,14 @@
       "client": "node",
       "package": "@google-cloud/logging",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 54,
-      "gap": "grpc-js sends no call credentials over plaintext gRPC",
-      "match": "Cannot compose insecure credentials"
+      "expect": "pass"
     },
     {
       "service": "logging",
       "client": "python",
       "package": "google-cloud-logging",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 54,
-      "gap": "the handwritten client only dials TLS; the gateway is plaintext",
-      "match": "Ssl handshake failed"
+      "expect": "pass"
     },
     {
       "service": "iam",

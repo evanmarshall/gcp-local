@@ -20,6 +20,7 @@ curl --fail http://127.0.0.1:4566/_local/health
 ## Flags
 
 - With no `-services`, no provider is registered and every API method returns `UNIMPLEMENTED` (HTTP 501). `-services` takes comma-separated keys; `SERVICE_FLAG` in `gcp_local/bootstrap.py` is the full list. `bin/gcp-local -h` lists every flag.
+- `-grpc-tls-listen 127.0.0.1:4584 -grpc-tls-dir DIR` adds a TLS listener for the same gRPC server. On first start the core creates `DIR` (mode 0700) with `ca.pem`, `server.pem`, and `server-key.pem` (mode 0600); later starts reuse them ([gRPC over TLS](clients.md#grpc-over-tls)).
 - `-identity-config` and `-iam-config` take explicit owner-only files ([local identity](local-identity.md), [IAM](iam.md)).
 - Emulator-backed providers need absolute backend paths (`-pubsub-java`, `-pubsub-jar`, `-firestore-jar`, `-spanner-emulator`, `-redis-server`, `-cloudsql-postgres`). The [packaged environment](quickstart.md) sets all of them.
 

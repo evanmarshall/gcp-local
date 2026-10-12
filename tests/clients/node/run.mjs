@@ -3,6 +3,7 @@
 // starts the emulator and runs `node run.mjs SERVICE` once per service; the
 // process exits 0 when the workflow passes and prints the failing step otherwise.
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {BigQuery} from '@google-cloud/bigquery';
 import {Bigtable} from '@google-cloud/bigtable';
 import {Firestore} from '@google-cloud/firestore';
@@ -26,20 +27,32 @@ const scopes = ['https://www.googleapis.com/auth/cloud-platform'];
 const owner = new GoogleAuth({scopes});
 const denied = new GoogleAuth({scopes, keyFilename: process.env.GCP_LOCAL_DENIED_ADC});
 
-// The one setting every gRPC client needs. The gateway is plaintext loopback,
-// and grpc-js attaches call credentials only to a TLS channel, so composing
-// ADC with an insecure channel throws "Cannot compose insecure credentials".
+const authClients = new Map([[owner, await owner.getClient()], [denied, await denied.getClient()]]);
+
+// The one setting every gRPC client needs. grpc-js attaches call credentials
+// only to a TLS channel, so clients use the gateway's TLS port with channel
+// credentials that trust the environment's CA and carry ADC. Passing them
+// explicitly also overrides the plaintext channel Bigtable picks for any
+// custom endpoint.
+const ca = readFileSync(process.env.GCP_LOCAL_GRPC_TLS_CA);
 function grpcOptions(auth) {
-  const [apiEndpoint, port] = process.env.GCP_LOCAL_GRPC.split(':');
+  const client = authClients.get(auth);
+  const [apiEndpoint, port] = process.env.GCP_LOCAL_GRPC_TLS.split(':');
   const sslCreds = grpc.credentials.combineChannelCredentials(
-    grpc.credentials.createInsecure(),
-    grpc.credentials.createFromGoogleCredential(auth),
+    grpc.credentials.createSsl(ca),
+    // grpc-js copies a plain header object; google-auth-library returns Headers.
+    grpc.credentials.createFromGoogleCredential({
+      getRequestHeaders: async url => Object.fromEntries(await client.getRequestHeaders(url)),
+    }),
   );
   return {projectId: project, apiEndpoint, port: Number(port), sslCreds};
 }
 
+// Pub/Sub reads the port from apiEndpoint and treats any host outside
+// googleapis.com as an anonymous plaintext emulator unless emulatorMode is false.
+const pubsubOptions = auth => ({...grpcOptions(auth), apiEndpoint: process.env.GCP_LOCAL_GRPC_TLS, emulatorMode: false});
+
 // JSON API clients skip authentication on a custom endpoint unless told not to.
-const authClients = new Map([[owner, await owner.getClient()], [denied, await denied.getClient()]]);
 const restOptions = auth => ({projectId: project, apiEndpoint: http, useAuthWithCustomEndpoint: true, authClient: authClients.get(auth)});
 
 async function expectDenied(step, call) {
@@ -89,7 +102,7 @@ async function bigquery() {
 }
 
 async function pubsub() {
-  const client = new PubSub(grpcOptions(owner));
+  const client = new PubSub(pubsubOptions(owner));
   const [topic] = await client.createTopic('node-matrix');
   const [subscription] = await topic.createSubscription('node-matrix');
   await topic.publishMessage({data: Buffer.from('hello from node')});
@@ -106,7 +119,7 @@ async function pubsub() {
   assert.equal(received, 'hello from node', 'receive');
   const [topics] = await client.getTopics();
   assert.ok(topics.some(t => t.name === topic.name), 'list topics');
-  const other = new PubSub(grpcOptions(denied));
+  const other = new PubSub(pubsubOptions(denied));
   await expectDenied('ungranted publish', () => other.topic('node-matrix').publishMessage({data: Buffer.from('no')}));
   await subscription.delete();
   await topic.delete();
@@ -220,7 +233,9 @@ async function logging() {
   const log = client.log('node-matrix');
   await log.write(log.entry({resource: {type: 'global'}}, 'hello from node'));
   const [entries] = await client.getEntries({filter: `logName="projects/${project}/logs/node-matrix"`});
-  assert.deepEqual(entries.map(e => e.data), ['hello from node'], 'list entries');
+  // The first write also logs the client's instrumentation diagnostic entry.
+  const written = entries.map(e => e.data).filter(data => !data['logging.googleapis.com/diagnostic']);
+  assert.deepEqual(written, ['hello from node'], 'list entries');
   const [logs] = await client.getLogs();
   assert.ok(logs.some(l => l.name === 'node-matrix'), 'list logs');
   const other = new Logging(grpcOptions(denied));

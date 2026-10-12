@@ -27,6 +27,7 @@ from gcp_local.bootstrap import DEVELOPER_ROLES  # noqa: E402 -- needs the repos
 PROJECT = "client-matrix"
 HTTP = "http://127.0.0.1:4566"
 GRPC = "127.0.0.1:4567"
+GRPC_TLS = "127.0.0.1:4584"
 SERVICES = (
     "bigquery,bigtable,cloudtasks,firestore,iam,kms,logging,pubsub,"
     "resourcemanager,run,secretmanager,spanner,storage"
@@ -100,6 +101,8 @@ def start_core(directory: Path, log: Path) -> subprocess.Popen:
         "-services=" + SERVICES,
         f"-identity-config={directory / 'server.json'}",
         f"-iam-config={directory / 'iam.json'}",
+        f"-grpc-tls-listen={GRPC_TLS}",
+        f"-grpc-tls-dir={directory / 'tls'}",
         f"-pubsub-java={java}",
         f"-pubsub-jar={os.environ['GCP_LOCAL_PUBSUB_JAR']}",
         f"-firestore-java={java}",
@@ -125,7 +128,7 @@ def start_core(directory: Path, log: Path) -> subprocess.Popen:
     raise SystemExit("gcp-local did not become healthy")
 
 
-def client_environment(files: dict[str, Path], home: Path) -> dict[str, str]:
+def client_environment(files: dict[str, Path], home: Path, ca: Path) -> dict[str, str]:
     """Give clients local ADC and the emulator addresses, and nothing ambient."""
     return {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
@@ -136,6 +139,11 @@ def client_environment(files: dict[str, Path], home: Path) -> dict[str, str]:
         "GOOGLE_CLOUD_PROJECT": PROJECT,
         "GCP_LOCAL_HTTP": HTTP,
         "GCP_LOCAL_GRPC": GRPC,
+        "GCP_LOCAL_GRPC_TLS": GRPC_TLS,
+        "GCP_LOCAL_GRPC_TLS_CA": str(ca),
+        # gRPC's default roots for clients that open their own TLS channel
+        # (docs/clients.md); Node passes the CA explicitly.
+        "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH": str(ca),
         "CLOUDSDK_CONFIG": str(home / "gcloud"),
         "GOOGLE_API_USE_CLIENT_CERTIFICATE": "false",
         "GOOGLE_API_USE_MTLS_ENDPOINT": "never",
@@ -227,7 +235,7 @@ def main() -> int:
         home.mkdir()
         core = start_core(directory, args.output / "gcp-local.log")
         try:
-            env = client_environment(files, home)
+            env = client_environment(files, home, directory / "tls/ca.pem")
             for combo in combos:
                 result = run_combo(combo, commands[combo["client"]], env, logs)
                 results.append(result)

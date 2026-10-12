@@ -92,7 +92,7 @@ RUN set -eu; ldconfig; \
 RUN set -eu; cp /etc/passwd /etc/passwd.image; ln -sf /tmp/passwd /etc/passwd
 USER 65532:65532
 ENV GCP_LOCAL_PORT=4566
-EXPOSE 4566 4567
+EXPOSE 4566 4567 4584
 HEALTHCHECK --interval=2s --timeout=4s --retries=30 CMD ["/usr/local/bin/python3", "-I", "-m", "gcp_local.container", "health"]
 # Default: a standalone environment in the /state bind mount (docs/quickstart.md).
 # The Compose environment runs "serve" with read-only configuration mounts.
