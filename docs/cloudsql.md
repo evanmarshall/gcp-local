@@ -1,6 +1,6 @@
 # Cloud SQL for PostgreSQL
 
-The Cloud SQL provider serves a slice of the Cloud SQL Admin **v1beta4** REST API at `/sql/v1beta4/projects/{project}/...` (select it with `-services=...,cloudsql`). Each Cloud SQL instance is one real PostgreSQL server; databases and built-in users are real objects in that server. A local connector forwards PostgreSQL wire traffic only after an IAM check of `cloudsql.instances.connect`. Status: **locally verified, no real-GCP recording, and blocked on unrecorded role snapshots** (see [Roles](#roles)).
+The Cloud SQL provider serves a slice of the Cloud SQL Admin **v1beta4** REST API at `/sql/v1beta4/projects/{project}/...` (select it with `-services=...,cloudsql`). Each Cloud SQL instance is one real PostgreSQL server; databases and built-in users are real objects in that server. Clients reach it on the instance's published public-IP port with a database password ([Connect from the host](#connect-from-the-host)), or through a connector that also checks `cloudsql.instances.connect` ([Connector](#connector)). Status: **locally verified, no real-GCP recording, and blocked on unrecorded role snapshots** (see [Roles](#roles)).
 
 ## Why v1beta4
 
@@ -15,7 +15,7 @@ Google's discovery documents serve Cloud SQL Admin v1 at `/v1/projects/{project}
 | `users.insert/list/delete` | Built-in users only: `CREATE ROLE … LOGIN CREATEDB CREATEROLE IN ROLE cloudsqlsuperuser PASSWORD …`; the list reads `pg_roles` login roles. PostgreSQL refuses to drop a role that owns objects. |
 | `operations.get/list` | `sql#operation` resources (`CREATE`, `UPDATE`, `DELETE`, `CREATE_DATABASE`, `DELETE_DATABASE`, `CREATE_USER`, `DELETE_USER`), newest first, filterable by `instance`, bounded to 1,000 per project. |
 
-Instances report `state: RUNNABLE`, `connectionName` `project:region:instance` (region defaults to `us-central1`), `backendType: SECOND_GEN`, and `databaseInstalledVersion` from the pinned binary (for example `POSTGRES_16_15`). `ipAddresses` holds one `127.0.0.1` entry, typed `PRIMARY`, or `PRIVATE` when `ipv4Enabled` is false and `privateNetwork` is set. That address is a placeholder: the server listens on no TCP port, and clients connect through a connector. Private-IP/PSA placement is a design target that is not modeled.
+Instances report `state: RUNNABLE`, `connectionName` `project:region:instance` (region defaults to `us-central1`), `backendType: SECOND_GEN`, and `databaseInstalledVersion` from the pinned binary (for example `POSTGRES_16_15`). `ipAddresses` holds one `127.0.0.1` entry, typed `PRIMARY`, or `PRIVATE` when `ipv4Enabled` is false and `privateNetwork` is set. A `PRIMARY` entry carries a `port` field when the instance is published (a gcp-local extension; GCP always uses 5432 and has no such field). A `PRIVATE` address is not reachable from the host. Private-IP/PSA placement is not modeled.
 
 Mutations complete before the response, so every returned operation is `DONE` (GCP returns `PENDING` and completes later). Unsupported shapes fail with 501 `UNIMPLEMENTED` rather than being ignored: other database engines, replicas (`masterInstanceName`, `replicaConfiguration`, `failoverReplica`), `settings.databaseFlags`, patch fields beyond the three above, list `filter`/`pageToken`, and user types other than `BUILT_IN` (IAM database authentication).
 
@@ -31,9 +31,26 @@ Every method is authorized with the shared IAM engine before any backend start o
 | Server process, data directory, databases, roles, table data | The instance's PostgreSQL server |
 | Instance references for policy inheritance | Shared index, published after the server is running and removed after it stops |
 
-A project's servers share one backend lifecycle (instance names are unique per project). Each server runs from the pinned binaries under a private `0700` temporary directory with an environment of only `PATH`, `HOME`/`TMPDIR`, `LC_ALL`, and `LD_LIBRARY_PATH`; no credentials, ADC, or proxies reach it. Servers start with `listen_addresses=''` and a `0700` Unix socket inside that directory, so no TCP port exists to bypass the connector. `initdb` uses SCRAM-only local authentication (`--auth-local=scram-sha-256 --auth-host=reject`). The internal superuser `cloudsqladmin` has a random per-server password held only in gcp-local's memory; the default `postgres` user is a `cloudsqlsuperuser` member whose password is the insert's `rootPassword` (without one it cannot log in). Durability settings (`fsync`, `synchronous_commit`, `full_page_writes`) are off for speed.
+A project's servers share one backend lifecycle (instance names are unique per project). Each server runs from the pinned binaries under a private `0700` temporary directory with an environment of only `PATH`, `HOME`/`TMPDIR`, `LC_ALL`, and `LD_LIBRARY_PATH`; no credentials, ADC, or proxies reach it. Servers start with `listen_addresses=''` and a `0700` Unix socket inside that directory; only gcp-local's published port and connectors forward to it. `initdb` uses SCRAM-only local authentication (`--auth-local=scram-sha-256 --auth-host=reject`). The internal superuser `cloudsqladmin` has a random per-server password held only in gcp-local's memory; the default `postgres` user is a `cloudsqlsuperuser` member whose password is the insert's `rootPassword` (without one it cannot log in). Durability settings (`fsync`, `synchronous_commit`, `full_page_writes`) are off for speed.
 
-Deleting an instance stops its server (connector sessions to it are closed) and removes its data. Reset closes the project's connector sessions, stops all its servers, removes their directory, then clears metadata, operations, and references; other projects are untouched. A server that exits unexpectedly fails the project's next readiness probe and requires reset. Nothing persists across restarts. PostgreSQL refuses to run as root: when gcp-local is root, `-cloudsql-run-as uid:gid` (an unprivileged user that can read the install) is required, and the servers and `initdb` run as that user.
+Deleting an instance closes its published port and sessions, stops its server (connector sessions to it are closed), and removes its data. Reset closes the project's sessions, stops all its servers, removes their directory, closes their published ports, then clears metadata, operations, and references; other projects are untouched. A server that exits unexpectedly fails the project's next readiness probe and requires reset. Nothing persists across restarts. PostgreSQL refuses to run as root: when gcp-local is root, `-cloudsql-run-as uid:gid` (an unprivileged user that can read the install) is required, and the servers and `initdb` run as that user.
+
+## Connect from the host
+
+In the packaged environment, every public-IP instance (the default, `ipv4Enabled: true`) gets a `127.0.0.1` port from the environment's data-plane range (`GCP_LOCAL_DATA_PORTS` in `gcp-local env`, 4568-4583 by default). Connect with a built-in user and the password set through the API:
+
+```sh
+# instances.get returns "ipAddresses": [{"type": "PRIMARY", "ipAddress": "127.0.0.1", "port": 4568}, ...]
+PGPASSWORD=root-password psql 'host=127.0.0.1 port=4568 user=postgres dbname=postgres'
+```
+
+This mirrors public-IP access in Cloud SQL: no IAM check per connection, PostgreSQL's SCRAM password authentication for every user, and the internal `cloudsqladmin` role refused. `postgres` can log in only after `rootPassword` is set on insert; other users come from `users.insert`.
+
+- The port is allocated per instance, lowest free first, and released on delete. A full range returns 429 `RESOURCE_EXHAUSTED`; widen it with `up --data-ports FIRST-LAST` on a new directory (at most 64 ports).
+- Delete and reset close the port and every open session on it.
+- TLS is declined: `sslmode=require` fails; use `disable` or `prefer`. Authorized networks are not checked.
+- Private-IP-only instances get no port; use a connector.
+- Outside the packaged environment, publishing is off unless the core runs with `-data-ports FIRST-LAST` (and `-data-listen`, default `127.0.0.1`).
 
 ## Connector
 
@@ -51,7 +68,7 @@ A connector is a loopback TCP listener bound at startup to one connection name a
 3. refuses the internal `cloudsqladmin` role;
 4. forwards the startup packet and all later bytes to the server's private socket.
 
-**Enforced:** the connect permission per new connection, including IAM conditions, deny rules, and principal access boundaries evaluated by the engine; instance existence and region; no raw TCP path to PostgreSQL. **Still applies:** PostgreSQL's own SCRAM password authentication for the database user. **Not enforced or modeled:** the identity is the operator's local binding, not a credential presented per connection; IAM database authentication (IAM users as database users) is a later gap; established sessions are not re-authorized after an IAM change (new connections are); TLS, the Auth Proxy's ephemeral certificates, `connectSettings`/`generateEphemeralCert`, authorized networks, and network reachability (VPC/PSA) are not modeled; process-level isolation is not a container boundary, and a process running as the server user can reach the socket directly. Cloud Run's `/cloudsql` socket integration is not implemented.
+**Enforced:** the connect permission per new connection, including IAM conditions, deny rules, and principal access boundaries evaluated by the engine; instance existence and region; PostgreSQL itself listens on no TCP port. A published public-IP port, when configured, is a separate path with no IAM check, as in Cloud SQL. **Still applies:** PostgreSQL's own SCRAM password authentication for the database user. **Not enforced or modeled:** the identity is the operator's local binding, not a credential presented per connection; IAM database authentication (IAM users as database users) is a later gap; established sessions are not re-authorized after an IAM change (new connections are); TLS, the Auth Proxy's ephemeral certificates, `connectSettings`/`generateEphemeralCert`, authorized networks, and network reachability (VPC/PSA) are not modeled; process-level isolation is not a container boundary, and a process running as the server user can reach the socket directly. Cloud Run's `/cloudsql` socket integration is not implemented.
 
 ## Roles
 
@@ -73,7 +90,7 @@ The installer ignores ambient proxies, verifies each artifact's size and SHA-256
 sh scripts/check_cloudsql.sh   # real PostgreSQL, loopback-only runner; skips until roles are recorded
 ```
 
-`check_cloudsql.sh` drives real servers: a denied insert starts no backend, real databases/roles, SQL through the authorized connector as a created user, `28P01` for a wrong password, refusal of a principal without `cloudsql.instances.connect`, project isolation with a POSTGRES_15 peer instance, and reset closing an open session and removing the server's data. Unit tests cover authorization before backend start, patch/settings-version/deletion-protection behavior, operations, isolation, reset, connector refusal paths, and the SCRAM client against the RFC 7677 vector.
+`check_cloudsql.sh` drives real servers: a denied insert starts no backend, real databases/roles, SQL through the authorized connector as a created user, `28P01` for a wrong password, refusal of a principal without `cloudsql.instances.connect`, the same SQL, `28P01`, and `cloudsqladmin` refusal on the published public-IP port, project isolation with a POSTGRES_15 peer instance, reset closing an open session, the published port, and the server's data, and delete closing a public-IP session and port. Unit tests cover port allocation, exhaustion (429), and reuse, authorization before backend start, patch/settings-version/deletion-protection behavior, operations, isolation, reset, connector refusal paths, and the SCRAM client against the RFC 7677 vector.
 
 The bounded live recorder is [gcp_validation/cloudsql.py](../gcp_validation/cloudsql.py) with [tests/conformance/cloudsql](../tests/conformance/cloudsql) (scenario `cloudsql-postgres-instance-admin`): one `db-f1-micro` `ENTERPRISE` `POSTGRES_16` instance in `us-central1`, owned manifest written before creation, labeled ownership checks, deletion-protection round trip, one database and one user, the `denied` identity's project-level 403s, and cleanup that disables protection before deleting. It has **not** been run against GCP, so there is no recording and no fidelity claim; error reasons and messages above are unrecorded. Its scope file uses `services: ["cloudsql"]` with limits `max_instances 1`, `max_databases 1`, `max_users 1`, `max_run_seconds 2700`.
 
@@ -91,5 +108,9 @@ fills (`gceZone`, `geminiConfig`, `maintenanceVersion`, `serverCaCert`, `service
 their presence is recorded. The PostgreSQL wire protocol and the connector are covered by the
 `cloudsqlintegration` test against real PostgreSQL, not by a cloud recording.
 
-The packaged environment includes `cloudsql`; connectors are configured per instance with
-`-cloudsql-connector`, so the packaged admin API works but no connector is opened by default.
+The packaged environment publishes public-IP instances on the data-plane range
+([Connect from the host](#connect-from-the-host)); it opens no connector, because
+`-cloudsql-connector` binds a fixed instance at startup. `scripts/smoke_environment.py` creates an
+instance and a user, connects from the host with a password, checks `28P01` for a wrong one, and
+requires delete to end the open session and close the port. The port field is not part of the
+recording.

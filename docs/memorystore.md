@@ -42,7 +42,16 @@ Delete stops that server and removes its directory before the metadata is droppe
 
 ## Endpoint and AUTH semantics
 
-The Redis endpoint is a **protocol endpoint, not the HTTP gateway**. Each instance listens on its own `127.0.0.1` port, reported in `host`/`port`. In GCP, `host` is a private VPC address and `port` is `6379`. Locally, `host` is always `127.0.0.1` and `port` is the allocated loopback port, so clients must read both from the API rather than assume `6379`.
+Connect a Redis client to the `host` and `port` the API reports. `host` is always `127.0.0.1`; `port` is not `6379` (in GCP, `host` is a private VPC address and `port` is `6379`).
+
+```sh
+redis-cli -h 127.0.0.1 -p 4568 -a "$AUTH_STRING" PING   # port from instances.get, string from getAuthString
+```
+
+- **Packaged environment:** each instance gets a port from the environment's data-plane range (`GCP_LOCAL_DATA_PORTS` in `gcp-local env`, 4568-4583 by default), published on host loopback. The lowest free port is used and released on delete. A full range returns 429 `RESOURCE_EXHAUSTED`; widen it with `up --data-ports FIRST-LAST` on a new directory (at most 64 ports).
+- **Delete and reset** close the port and every open session on it.
+- **Without `-data-ports`** (a bare `gcp-local` run), `port` is the server's own random loopback port.
+- Idle connections through the packaged entry point close after one hour.
 
 Memorystore does not evaluate IAM per Redis connection. A connection is governed by network reachability (the client must be on the authorized VPC) plus, when `authEnabled` is true, the instance's AUTH string. gcp-local enforces the AUTH part and nothing else:
 
@@ -75,7 +84,7 @@ sh scripts/check_redis.sh                                       # real redis-ser
 
 Unit tests cover authorization before any backend start (denied, viewer, and anonymous callers start nothing), the create/get/list/patch/delete/getAuthString/operations lifecycle and wire shapes, validation and explicit gaps, project and region isolation, reset clearing only its scope, compensation when publication or launch fails, pagination, and the production dependency on recorded roles. `TestProductionPlansNeedRecordedRoles` asserts that, without the snapshots, registration with the real IAM engine fails closed. After the snapshots are committed, it instead requires registration to succeed.
 
-`check_redis.sh` runs `TestRealRedisLifecycle` against the real server with network access limited to loopback. A denied create starts no backend. On the AUTH-enabled instance, `NOAUTH` and `WRONGPASS` are enforced, and `SET`/`GET` succeed after `AUTH` with the string from `getAuthString`. `CONFIG`, `SHUTDOWN`, `ACL`, `CLIENT`, and `BGSAVE` return `NOPERM`. An AUTH-disabled instance answers without credentials. A memory patch changes the server's `maxmemory` and keeps the data. Delete closes the port. Reset closes the selected scope's ports while another project's server keeps answering.
+`check_redis.sh` runs `TestRealRedisLifecycle` and `TestRealRedisPublishedPort` against the real server with network access limited to loopback. A denied create starts no backend. On the AUTH-enabled instance, `NOAUTH` and `WRONGPASS` are enforced, and `SET`/`GET` succeed after `AUTH` with the string from `getAuthString`. `CONFIG`, `SHUTDOWN`, `ACL`, `CLIENT`, and `BGSAVE` return `NOPERM`. An AUTH-disabled instance answers without credentials. A memory patch changes the server's `maxmemory` and keeps the data. Delete closes the port. Reset closes the selected scope's ports while another project's server keeps answering. Through a published range, the API reports the range's first port, AUTH is enforced the same way, a full range returns 429 without creating the instance, delete ends an open session and closes the port, and reset closes the rest.
 
 The `memorystore-redis-instance-admin` scenario ([gcp_validation/memorystore.py](../gcp_validation/memorystore.py)) is written for a later authorized recording. It creates one labeled Basic Tier 1 GB `REDIS_7_2` instance in `us-central1` with AUTH enabled, and enforces limits of one instance, 1 GB, and 2,400 s. The run writes an owner-only manifest before creating the instance, and cleanup deletes only that labeled instance and waits for a 404. The scenario records shapes only: never the AUTH string, private host, or port. It has **not** been run against GCP. Without a committed recording it reports `unverified`, so it is not yet part of `check_rest_recordings.sh`.
 
@@ -98,5 +107,8 @@ the recorder now pins `locationId`. Values of service-managed fields the local m
 (`maintenanceVersion`, `nodes`, `persistenceConfig`, `persistenceIamIdentity`, `readReplicasMode`,
 `reservedIpRange`) are stand-ins; only their presence is recorded.
 
-The packaged environment includes `redis`; each instance's server listens on loopback inside the core
-container, so host clients can drive the admin API but not the Redis protocol port yet.
+In the packaged environment, host clients reach each instance on its reported port
+([Endpoint and AUTH semantics](#endpoint-and-auth-semantics)). `scripts/smoke_environment.py`
+creates an AUTH-enabled instance, checks `NOAUTH` and `WRONGPASS` from the host, runs `SET`/`GET`
+after `AUTH`, and requires delete to end the session and close the port; it repeats this without AUTH
+in a second environment and in a standalone `docker run`.

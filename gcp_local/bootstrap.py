@@ -76,6 +76,51 @@ DEVELOPER_ROLES = [
 
 LOCAL_UNIVERSE = "gcp-local.invalid"
 
+# Redis and public-IP Cloud SQL instances each take one port from the
+# environment's data-plane range, published on host loopback. The default
+# range is the 16 ports after the HTTP and gRPC ports (4568-4583 for 4566).
+DATA_PORT_COUNT = 16
+MAX_DATA_PORTS = 64
+
+
+def default_data_ports(port: int) -> tuple[int, int]:
+    """Return the default data-plane range for an HTTP port."""
+    return port + 2, port + 1 + DATA_PORT_COUNT
+
+
+def parse_data_ports(text: str) -> tuple[int, int]:
+    """Parse a FIRST-LAST range; bounds are checked by check_data_ports."""
+    match = re.fullmatch(r"([0-9]{4,5})-([0-9]{4,5})", text)
+    if not match:
+        raise ValueError("Select data ports as FIRST-LAST, for example 4568-4583")
+    return int(match[1]), int(match[2])
+
+
+def check_data_ports(ports: Sequence[int], port: int, grpc_port: int) -> tuple[int, int]:
+    """Require a bounded range that avoids the environment's HTTP and gRPC ports."""
+    first, last = ports
+    if (
+        type(first) is not int
+        or type(last) is not int
+        or not 1024 <= first <= last <= 65535
+        or last - first >= MAX_DATA_PORTS
+        or first <= port <= last
+        or first <= grpc_port <= last
+    ):
+        raise ValueError(
+            f"Select at most {MAX_DATA_PORTS} data ports between 1024 and 65535 "
+            "that exclude the HTTP and gRPC ports"
+        )
+    return first, last
+
+
+def data_port_range(value: dict[str, object]) -> str:
+    """Render the environment's data-plane range as FIRST-LAST."""
+    ports = value["data_ports"]
+    if not isinstance(ports, list) or len(ports) != 2:
+        raise ValueError("Invalid environment data ports")
+    return f"{ports[0]}-{ports[1]}"
+
 
 def private_json(path: Path, value: dict[str, object]) -> None:
     """Write JSON to path atomically with owner-only permissions."""
@@ -207,6 +252,7 @@ def initialize(
     workloads: Sequence[str] = (),
     mode: str = "compose",
     recorded: Path | None = None,
+    data_ports: Sequence[int] | None = None,
 ) -> dict[str, object]:
     """Create identity, IAM, and the manifest in an empty private directory."""
     recorded = recorded or directory
@@ -221,6 +267,7 @@ def initialize(
     grpc_port = port + 1
     if grpc_port > 65535:
         raise ValueError("Select a base port that leaves room for the gRPC gateway")
+    data = check_data_ports(data_ports or default_data_ports(port), port, grpc_port)
     principal = "serviceAccount:developer@" + project + ".iam.gserviceaccount.com"
     number = project_number(project)
     write_identity(
@@ -239,6 +286,7 @@ def initialize(
         "directory": str(recorded),
         "port": port,
         "grpc_port": grpc_port,
+        "data_ports": list(data),
         "project": project,
         "project_number": number,
         "workloads": list(workloads),
@@ -315,4 +363,9 @@ def load(
         )
     ):
         raise ValueError("Invalid environment port, project, image, or source version")
+    # Manifests written before the data-plane range existed use the default.
+    data = value.get("data_ports") or default_data_ports(port)
+    if not isinstance(data, list | tuple) or len(data) != 2:
+        raise ValueError("Invalid environment data ports")
+    value["data_ports"] = list(check_data_ports(data, port, grpc_port))
     return value

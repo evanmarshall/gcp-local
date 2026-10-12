@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -24,6 +26,9 @@ type Provider struct {
 	engine   *iam.Engine
 	catalog  *state.Store[catalog]
 	releases map[string]string
+	pool     *dataplane.Pool
+	publicMu sync.Mutex
+	public   map[string]*dataplane.Listener
 	clock    func() time.Time
 }
 
@@ -40,9 +45,14 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	for version, dist := range versions {
 		releases[version] = dist.release
 	}
-	return newProvider(registry, manager, index, engine, releases, func(state.Scope) (backend.Backend, error) {
+	provider, err := newProvider(registry, manager, index, engine, releases, func(state.Scope) (backend.Backend, error) {
 		return newFleet(versions, config.RunAs), nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	provider.pool = config.Publish
+	return provider, nil
 }
 
 // newProvider wires the provider with an arbitrary backend factory (tests use a fake fleet).
@@ -54,13 +64,15 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		return nil, err
 	}
 	p := &Provider{manager: manager, index: index, engine: engine, releases: releases, clock: time.Now,
-		catalog: state.NewStore(newCatalog, state.GlobalScope)}
+		catalog: state.NewStore(newCatalog, state.GlobalScope), public: map[string]*dataplane.Listener{}}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
 		New:      factory,
 		// The manager stops every server of the project (discarding its data
-		// directories) before this hook clears metadata and references.
+		// directories) before this hook closes its published ports and clears
+		// metadata and references.
 		AfterReset: func(scope state.Scope) error {
+			p.closeProjectPublic(scope.Project)
 			if err := p.catalog.Reset(scope); err != nil {
 				return fmt.Errorf("clear the Cloud SQL scope: %w", err)
 			}

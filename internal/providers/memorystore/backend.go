@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
 )
 
 // ServerVersion is the pinned official Redis source release (toolchains/redis.json).
@@ -43,8 +44,12 @@ var (
 )
 
 // Config locates the redis-server built by scripts/install_redis.py.
+// Publish, when set, gives every instance a forwarding port from the
+// data-plane range; the API then reports that port instead of the server's
+// private loopback port.
 type Config struct {
-	Server string
+	Server  string
+	Publish *dataplane.Pool
 }
 
 // validate checks the binary and that it reports the pinned release.
@@ -96,12 +101,25 @@ type fleet struct {
 	servers   map[string]*server
 }
 
-// server is one redis-server process bound to a loopback port.
+// server is one redis-server process bound to a loopback port, and its
+// published forwarder when the data-plane range is configured.
 type server struct {
 	process   *backend.Process
 	directory string
 	address   string
 	admin     string
+	published *dataplane.Listener
+}
+
+// stop closes the published port (ending forwarded sessions), then stops the process.
+func (s *server) stop(ctx context.Context) error {
+	if s.published != nil {
+		s.published.Close()
+	}
+	if err := s.process.Stop(ctx); err != nil {
+		return fmt.Errorf("stop redis-server: %w", err)
+	}
+	return nil
 }
 
 func newFleet(config Config) *fleet { return &fleet{config: config} }
@@ -139,7 +157,7 @@ func (f *fleet) Stop(ctx context.Context) error {
 	defer f.mu.Unlock()
 	var failures []error
 	for id, current := range f.servers {
-		if err := current.process.Stop(ctx); err != nil {
+		if err := current.stop(ctx); err != nil {
 			failures = append(failures, fmt.Errorf("stop redis instance %s: %w", id, err))
 		}
 	}
@@ -177,14 +195,21 @@ func (f *fleet) launch(ctx context.Context, id string, spec launchSpec) (int, er
 		_ = os.RemoveAll(current.directory)
 		return 0, fmt.Errorf("start redis-server: %w", err)
 	}
-	if err := waitReady(ctx, current.process); err != nil {
+	err = waitReady(ctx, current.process)
+	if err == nil && f.config.Publish != nil {
+		current.published, err = f.config.Publish.Open(ctx, dataplane.Forward(current.address))
+	}
+	if err != nil {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = current.process.Stop(cleanup)
 		_ = os.RemoveAll(current.directory)
-		return 0, err
+		return 0, err //nolint:wrapcheck // waitReady wraps; the pool's sentinel stays matchable
 	}
 	f.servers[id] = current
+	if current.published != nil {
+		return current.published.Port(), nil
+	}
 	return port, nil
 }
 
@@ -322,8 +347,8 @@ func (f *fleet) remove(ctx context.Context, id string) error {
 	if current == nil {
 		return errUnknownServer
 	}
-	if err := current.process.Stop(ctx); err != nil {
-		return fmt.Errorf("stop redis-server: %w", err)
+	if err := current.stop(ctx); err != nil {
+		return err
 	}
 	delete(f.servers, id)
 	if err := os.RemoveAll(current.directory); err != nil {

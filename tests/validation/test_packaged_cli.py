@@ -1,6 +1,7 @@
 """The packaged CLI's image selection, generated state, and in-image launcher."""
 
 import json
+import os
 import re
 
 import pytest
@@ -116,3 +117,53 @@ def test_standalone_requires_the_host_directory(monkeypatch):
     monkeypatch.delenv("GCP_LOCAL_HOST_DIRECTORY", raising=False)
     with pytest.raises(SystemExit, match="GCP_LOCAL_HOST_DIRECTORY"):
         container.standalone()
+
+
+def test_data_ports_default_after_the_grpc_port(initialized):
+    directory, value = initialized
+    assert value["data_ports"] == [14568, 14583]
+    assert bootstrap.load(directory)["data_ports"] == [14568, 14583]
+    assert environment.application_env(value)["GCP_LOCAL_DATA_PORTS"] == "14568-14583"
+
+
+def test_data_ports_are_configurable_and_bounded(tmp_path):
+    directory = tmp_path / "environment"
+    directory.mkdir(mode=0o700)
+    value = bootstrap.initialize(directory, 14566, "synthetic-project", data_ports=(25000, 25003))
+    assert bootstrap.data_port_range(value) == "25000-25003"
+    for ports in [(14566, 14570), (14560, 14567), (25000, 25064), (25010, 25000), (80, 90)]:
+        with pytest.raises(ValueError, match="data ports"):
+            bootstrap.check_data_ports(ports, 14566, 14567)
+    with pytest.raises(ValueError, match="FIRST-LAST"):
+        bootstrap.parse_data_ports("6379")
+
+
+def test_manifests_without_data_ports_use_the_default(initialized):
+    directory, value = initialized
+    del value["data_ports"]
+    bootstrap.private_json(directory / "environment.json", value)
+    assert bootstrap.load(directory)["data_ports"] == [14568, 14583]
+
+
+def test_launcher_publishes_the_data_port_range(monkeypatch, tmp_path):
+    monkeypatch.setenv("GCP_LOCAL_PORT", "15566")
+    monkeypatch.delenv("GCP_LOCAL_DATA_PORTS", raising=False)
+    arguments = container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+    assert "-data-ports=15568-15583" in arguments
+    assert "-data-listen=0.0.0.0" in arguments
+    monkeypatch.setenv("GCP_LOCAL_DATA_PORTS", "20000-20007")
+    assert container.data_ports() == (20000, 20007)
+    monkeypatch.setenv("GCP_LOCAL_DATA_PORTS", "4560-4570")
+    with pytest.raises(SystemExit, match="GCP_LOCAL_DATA_PORTS"):
+        container.data_ports()
+
+
+def test_launcher_adds_the_running_uid_to_passwd(tmp_path):
+    image, target = tmp_path / "passwd.image", tmp_path / "passwd"
+    image.write_text("root:x:0:0:root:/root:/bin/bash\n")
+    container.write_passwd(image, target)
+    lines = target.read_text().splitlines()
+    assert lines[0] == "root:x:0:0:root:/root:/bin/bash"
+    assert lines[1].split(":")[2:4] == [str(os.getuid()), str(os.getgid())]
+    container.write_passwd(image, target)
+    assert len(target.read_text().splitlines()) == 2

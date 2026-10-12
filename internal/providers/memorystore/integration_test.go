@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
@@ -24,28 +25,7 @@ import (
 // process, and reset stops only the selected scope's servers. Authorization
 // uses the test authorizer because the roles/redis.* snapshots are unrecorded.
 func TestRealRedisLifecycle(t *testing.T) {
-	interfaces, err := net.Interfaces()
-	must(t, err)
-	if os.Getenv("GCP_LOCAL_ISOLATED") != "1" || len(interfaces) != 1 || interfaces[0].Name != "lo" {
-		t.Fatal("Run actual Redis tests in the loopback-only runner")
-	}
-	config := Config{Server: os.Getenv("GCP_LOCAL_REDIS_SERVER")}
-	must(t, config.validate(context.Background()))
-	h := &harness{t: t, index: state.NewIndex(), auth: newFakeAuthorizer(), fakes: map[state.Scope]*fakeDriver{}}
-	h.auth.grant(testProject, principal(adminToken), adminPermissions)
-	h.auth.grant(peerProject, principal(peerToken), adminPermissions)
-	h.manager = backend.NewManager(30*time.Second, 10*time.Second)
-	t.Cleanup(func() { must(t, h.manager.Shutdown(context.Background())) })
-	registry := gateway.NewRegistry()
-	h.provider, err = newProvider(registry, h.manager, h.index, h.auth, func(state.Scope) (backend.Backend, error) {
-		return newFleet(config), nil
-	})
-	must(t, err)
-	h.gate = gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
-		return gateway.Principal{State: gateway.Authenticated, Subject: principal(token),
-			Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
-	})
-
+	h := realHarness(t, nil)
 	h.expect(h.create(peerToken, testProject, testRegion, testInstance, basic(nil)), http.StatusForbidden)
 	if status := h.manager.Status(); len(status) != 0 {
 		t.Fatalf("a denied request started a backend: %+v", status)
@@ -75,6 +55,64 @@ func TestRealRedisLifecycle(t *testing.T) {
 	expectClosed(t, openAddress)
 	h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"/open", nil), http.StatusNotFound)
 	expectReply(t, client(t, endpoint(t, peer)), "PONG", "PING")
+}
+
+// TestRealRedisPublishedPort checks the data-plane range: the API reports the
+// published port, AUTH still applies through it, and delete and reset close it.
+func TestRealRedisPublishedPort(t *testing.T) {
+	pool, err := dataplane.Parse("16300-16301", "127.0.0.1")
+	must(t, err)
+	h := realHarness(t, pool)
+	secured := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{keyAuthEnabled: true})), http.StatusOK)
+	address := endpoint(t, secured)
+	if address != "127.0.0.1:16300" {
+		t.Fatalf("published endpoint = %s; want the first port of the range", address)
+	}
+	auth, _ := h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"/"+testInstance+"/authString", nil), http.StatusOK)["authString"].(string)
+	exerciseAuth(t, address, auth)
+	open := endpoint(t, h.expect(h.create(adminToken, testProject, testRegion, "open", basic(nil)), http.StatusOK))
+	expectReply(t, client(t, open), "PONG", "PING")
+	exhausted := h.create(adminToken, testProject, testRegion, "third", basic(nil))
+	h.expect(exhausted, http.StatusTooManyRequests)
+	h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"/third", nil), http.StatusNotFound)
+
+	session := client(t, address)
+	expectReply(t, session, "OK", "AUTH", auth)
+	h.expect(h.invoke(adminToken, http.MethodDelete, testInstances+"/"+testInstance, nil), http.StatusOK)
+	if _, err := session.do("PING"); err == nil {
+		t.Fatal("a forwarded session survived instance deletion")
+	}
+	expectClosed(t, address)
+	must(t, h.manager.Reset(context.Background(), backend.Key{Service: serviceName, Scope: scopeOf(testProject, testRegion)}))
+	expectClosed(t, open)
+}
+
+// realHarness wires the provider to the pinned redis-server, refusing to run
+// outside the loopback-only runner.
+func realHarness(t *testing.T, pool *dataplane.Pool) *harness {
+	t.Helper()
+	interfaces, err := net.Interfaces()
+	must(t, err)
+	if os.Getenv("GCP_LOCAL_ISOLATED") != "1" || len(interfaces) != 1 || interfaces[0].Name != "lo" {
+		t.Fatal("Run actual Redis tests in the loopback-only runner")
+	}
+	config := Config{Server: os.Getenv("GCP_LOCAL_REDIS_SERVER"), Publish: pool}
+	must(t, config.validate(context.Background()))
+	h := &harness{t: t, index: state.NewIndex(), auth: newFakeAuthorizer(), fakes: map[state.Scope]*fakeDriver{}}
+	h.auth.grant(testProject, principal(adminToken), adminPermissions)
+	h.auth.grant(peerProject, principal(peerToken), adminPermissions)
+	h.manager = backend.NewManager(30*time.Second, 10*time.Second)
+	t.Cleanup(func() { must(t, h.manager.Shutdown(context.Background())) })
+	registry := gateway.NewRegistry()
+	h.provider, err = newProvider(registry, h.manager, h.index, h.auth, func(state.Scope) (backend.Backend, error) {
+		return newFleet(config), nil
+	})
+	must(t, err)
+	h.gate = gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
+		return gateway.Principal{State: gateway.Authenticated, Subject: principal(token),
+			Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
+	})
+	return h
 }
 
 // exerciseAuth checks AUTH enforcement and the documented blocked commands.

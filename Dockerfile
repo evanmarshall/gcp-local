@@ -86,6 +86,10 @@ COPY examples/workflow/worker.py /opt/gcp-local/workflow/worker.py
 RUN set -eu; ldconfig; \
     python3 -I -m compileall -q --invalidation-mode unchecked-hash /usr/local/lib/python3.12/site-packages/gcp_local; \
     python3 -I -c "import gcp_local.container, http.server, json, ssl, urllib.request"
+# The container runs as the host user's UID, which has no passwd entry, and
+# PostgreSQL's initdb refuses such a user. /etc/passwd points at the tmpfs;
+# the launcher writes it from the image's copy plus the running UID.
+RUN set -eu; cp /etc/passwd /etc/passwd.image; ln -sf /tmp/passwd /etc/passwd
 USER 65532:65532
 ENV GCP_LOCAL_PORT=4566
 EXPOSE 4566 4567

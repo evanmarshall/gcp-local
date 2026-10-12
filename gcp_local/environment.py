@@ -24,8 +24,11 @@ from gcp_local.bootstrap import (
     IMAGE_PATTERN,
     SERVICES,
     compose_project,
+    data_port_range,
+    default_data_ports,
     initialize,
     load,
+    parse_data_ports,
     private_json,
 )
 
@@ -144,6 +147,7 @@ def compose(
             "GCP_LOCAL_DIRECTORY": str(value["directory"]),
             "GCP_LOCAL_PORT": str(value["port"]),
             "GCP_LOCAL_GRPC_PORT": str(value["grpc_port"]),
+            "GCP_LOCAL_DATA_PORTS": data_port_range(value),
             "GCP_LOCAL_UID": str(value["uid"]),
             "GCP_LOCAL_GID": str(value["gid"]),
             "GCP_LOCAL_VERSION": str(value.get("version") or "image"),
@@ -183,6 +187,8 @@ def application_env(value: dict[str, object]) -> dict[str, str]:
         "GOOGLE_CLOUD_PROJECT": str(value["project"]),
         "GCP_LOCAL_ENDPOINT": f"http://127.0.0.1:{value['port']}",
         "GCP_LOCAL_GRPC_ENDPOINT": f"127.0.0.1:{value['grpc_port']}",
+        # Redis and public-IP Cloud SQL instances report ports from this range.
+        "GCP_LOCAL_DATA_PORTS": data_port_range(value),
         "GCP_LOCAL_PROJECT_NUMBER": str(value["project_number"]),
         "GCP_LOCAL_TERRAFORM_CREDENTIALS": str(identity / "terraform-adc.json"),
     }
@@ -254,18 +260,27 @@ def prepare(directory: Path, args: argparse.Namespace) -> dict[str, object]:
             args.port if args.port is not None else 4566,
             args.project or "gcp-local-test",
             workloads=args.workload or [],
+            data_ports=parse_data_ports(args.data_ports) if args.data_ports else None,
         )
     elif args.action == "down" and (old := legacy(directory)) is not None:
-        return {**old, "mode": "compose", "workloads": [], "version": None, "image": "legacy"}
+        return {
+            **old,
+            "mode": "compose",
+            "workloads": [],
+            "version": None,
+            "image": "legacy",
+            "data_ports": list(default_data_ports(int(old["port"]))),
+        }
     else:
         value = load(directory, check_credentials=args.action in {"up", "reset", "env"})
     if (
         (args.port is not None and args.port != value["port"])
         or (args.project is not None and args.project != value["project"])
+        or (args.data_ports is not None and args.data_ports != data_port_range(value))
         or (args.workload and sorted(args.workload) != sorted(value["workloads"]))
     ):
         raise ValueError(
-            "Port/project/workloads are fixed for this directory; select a new directory"
+            "Port/data ports/project/workloads are fixed for this directory; select a new directory"
         )
     if value["mode"] == "standalone" and args.action not in {"status", "env"}:
         raise ValueError(
@@ -324,6 +339,7 @@ def start(args: argparse.Namespace, value: dict[str, object], directory: Path) -
                 "services": SERVICES,
                 "endpoint": application_env(value)["GCP_LOCAL_ENDPOINT"],
                 "grpc_endpoint": application_env(value)["GCP_LOCAL_GRPC_ENDPOINT"],
+                "data_ports": data_port_range(value),
             }
         )
     )
@@ -354,6 +370,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--version", action="version", version="gcp-local " + __version__)
     result.add_argument("--directory", type=Path, default=Path.cwd() / ".gcp-local/environment")
     result.add_argument("--port", type=int, help="Initial loopback HTTP port; default 4566")
+    result.add_argument(
+        "--data-ports",
+        metavar="FIRST-LAST",
+        help="Initial loopback range for Redis and Cloud SQL instances (at most 64 ports); "
+        "default: the 16 ports after the gRPC port",
+    )
     result.add_argument("--project", help="Initial synthetic project; default gcp-local-test")
     result.add_argument(
         "--workload",

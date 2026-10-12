@@ -14,6 +14,8 @@ func TestVersionAndInvalidConfiguration(t *testing.T) {
 		code int
 	}{
 		{[]string{"-version"}, 0}, {[]string{"-shutdown-timeout=0"}, 2}, {[]string{"unexpected"}, 2}, {[]string{"-unknown"}, 2},
+		{[]string{"-data-ports=6379-6380", "-version"}, 0}, {[]string{"-data-ports=80-90"}, 2},
+		{[]string{"-data-ports=4568-4583", "-data-listen=localhost"}, 2},
 	} {
 		var output bytes.Buffer
 		if code := run(context.Background(), tc.args, &output, &output); code != tc.code {

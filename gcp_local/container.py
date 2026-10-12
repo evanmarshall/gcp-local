@@ -15,12 +15,21 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from gcp_local.bootstrap import SERVICE_FLAG, initialize, load
+from gcp_local.bootstrap import (
+    SERVICE_FLAG,
+    check_data_ports,
+    default_data_ports,
+    initialize,
+    load,
+    parse_data_ports,
+)
 
 CORE = "/gcp-local"
 PYTHON = "/usr/local/bin/python3"
 STATE = Path("/state")
 CONFIG = Path("/config")
+PASSWD_IMAGE = Path("/etc/passwd.image")
+PASSWD = Path("/tmp/passwd")  # noqa: S108 -- the container's private tmpfs
 # The packaged Cloud Run runtime: revisions run as processes inside the core's
 # container. Only the bundled workflow worker image is mapped; other images
 # are refused (container-in-container is not supported).
@@ -36,12 +45,30 @@ def port() -> int:
     return int(value)
 
 
+def data_ports() -> tuple[int, int]:
+    """Read the published data-plane range; it matches the host ports one to one."""
+    value = os.environ.get("GCP_LOCAL_DATA_PORTS")
+    http = port()
+    try:
+        ports = parse_data_ports(value) if value else default_data_ports(http)
+        # Inside the container the gRPC gateway always listens on 4567.
+        return check_data_ports(ports, http, 4567)
+    except ValueError as error:
+        raise SystemExit("GCP_LOCAL_DATA_PORTS: " + str(error)) from None
+
+
 def core_arguments(identity: Path, iam: Path) -> list[str]:
     """Build the core command line for the packaged runtime."""
+    first, last = data_ports()
     arguments = [
         CORE,
         f"-listen=0.0.0.0:{port()}",
         "-grpc-listen=0.0.0.0:4567",
+        # Redis and public-IP Cloud SQL instances get ports from this range.
+        # The core binds them on the container's interfaces; the entry point
+        # (or docker run --publish) maps the same numbers on host loopback.
+        f"-data-ports={first}-{last}",
+        "-data-listen=0.0.0.0",
         "-services=" + SERVICE_FLAG,
         f"-identity-config={identity}",
         f"-iam-config={iam}",
@@ -82,7 +109,11 @@ def standalone() -> list[str]:
     recorded = Path(host)
     if (STATE / "environment.json").exists():
         value = load(STATE, recorded=recorded)
-        if value["mode"] != "standalone" or value["port"] != port():
+        if (
+            value["mode"] != "standalone"
+            or value["port"] != port()
+            or value["data_ports"] != list(data_ports())
+        ):
             raise SystemExit("This /state directory belongs to another port or environment")
     else:
         project = os.environ.get("GCP_LOCAL_PROJECT", "gcp-local-test")
@@ -95,15 +126,35 @@ def standalone() -> list[str]:
                 workloads=workloads,
                 mode="standalone",
                 recorded=recorded,
+                data_ports=data_ports(),
             )
         except ValueError as error:
             raise SystemExit(str(error)) from None
     return core_arguments(STATE / "identity/server.json", STATE / "iam.json")
 
 
+def write_passwd(image: Path = PASSWD_IMAGE, target: Path = PASSWD) -> None:
+    """Give the running UID a passwd entry on the tmpfs.
+
+    The image links /etc/passwd to ``target``. PostgreSQL's initdb refuses a
+    UID without an entry, and the container runs as the host user's UID.
+    """
+    if not image.is_file():
+        return
+    entries = image.read_text()
+    uid, gid = os.getuid(), os.getgid()
+    if not any(line.split(":")[2:3] == [str(uid)] for line in entries.splitlines()):
+        entries += f"gcp-local:x:{uid}:{gid}:gcp-local:/tmp:/usr/sbin/nologin\n"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    with os.fdopen(os.open(target, flags, 0o644), "w") as output:
+        output.write(entries)
+
+
 def main(argv: Sequence[str]) -> int:
     """Dispatch the launcher modes and exec the core."""
     mode = argv[0] if argv else "standalone"
+    if mode in {"standalone", "serve"}:
+        write_passwd()
     if mode == "standalone":
         arguments = standalone()
     elif mode == "serve":

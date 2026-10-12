@@ -100,14 +100,18 @@ func (p *Provider) OpenConnector(ctx context.Context, spec ConnectorSpec) (*Conn
 			if err != nil {
 				return
 			}
-			connector.wait.Go(func() { p.serve(lifetime, target, conn) })
+			connector.wait.Go(func() { p.serve(lifetime, target, conn, p.admit) })
 		}
 	})
 	return connector, nil
 }
 
-// serve authorizes and forwards one client connection.
-func (p *Provider) serve(ctx context.Context, target connectorTarget, client net.Conn) {
+// admission decides whether one connection may reach the instance; it
+// returns a SQLSTATE and message on refusal.
+type admission func(ctx context.Context, target connectorTarget, user string) (string, string)
+
+// serve admits and forwards one client connection.
+func (p *Provider) serve(ctx context.Context, target connectorTarget, client net.Conn, admit admission) {
 	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(startupTimeout))
 	reader := bufio.NewReader(client)
@@ -115,7 +119,7 @@ func (p *Provider) serve(ctx context.Context, target connectorTarget, client net
 	if err != nil {
 		return
 	}
-	if code, message := p.admit(ctx, target, user); code != "" {
+	if code, message := admit(ctx, target, user); code != "" {
 		_, _ = client.Write(errorResponse(code, message))
 		return
 	}
@@ -156,6 +160,13 @@ func (p *Provider) admit(ctx context.Context, target connectorTarget, user strin
 	if err != nil {
 		return "28000", "gcp-local: " + target.principal.Subject + " is not authorized to connect (decision " + decision.ID + "): " + iamReason(err)
 	}
+	return p.reachable(ctx, target, user)
+}
+
+// reachable checks the instance's existence and region and refuses the
+// internal administrative role. PostgreSQL's own password authentication
+// follows for every other user.
+func (p *Provider) reachable(_ context.Context, target connectorTarget, user string) (string, string) {
 	record, ok := p.lookup(target.project, target.instance)
 	if !ok || record.Region != target.region {
 		return "08004", "gcp-local: the Cloud SQL instance " + target.project + ":" + target.region + ":" + target.instance + " does not exist"

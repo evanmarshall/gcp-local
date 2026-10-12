@@ -58,8 +58,8 @@ Full, runnable examples are in [`examples/`](examples/), including Pub/Sub over 
 | [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries |
 | [Firestore](docs/firestore.md) | Official Google emulator | Single documents; no queries or transactions |
 | [BigQuery](docs/bigquery.md) | gcp-local | Streaming inserts, simple SELECT |
-| [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | Admin API; connections need manual setup |
-| [Memorystore for Redis](docs/memorystore.md) | Real Redis | Admin API; Redis reachable inside the container |
+| [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | PostgreSQL clients on `127.0.0.1` with a user password |
+| [Memorystore for Redis](docs/memorystore.md) | Real Redis | Redis clients on the reported host and port, with AUTH |
 | [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Invocation; packaged environment runs the bundled worker only |
 | [Spanner](docs/spanner.md) | Official Google emulator | Admin and schema only |
 | [Bigtable](docs/bigtable.md) | Official Google emulator code | Admin only |
@@ -81,6 +81,7 @@ Fidelity is tested, not assumed: scenarios are recorded once against a dedicated
 - State lives in memory; `reset` and `down` discard it.
 - Cloud Storage buckets must use uniform bucket-level access, enforced public access prevention, and no soft-delete retention.
 - Cloud Run in the packaged environment runs only the bundled example worker; running your own images requires the Docker runtime ([details](docs/cloudrun.md)).
+- Redis and Cloud SQL instances listen on `127.0.0.1` ports from a 16-port range (4568-4583 by default), not on 6379 or 5432; read the port from the API. Neither accepts TLS ([Cloud SQL](docs/cloudsql.md#connect-from-the-host), [Memorystore](docs/memorystore.md#endpoint-and-auth-semantics)).
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.
 - Networking verdicts are analytical (like Connectivity Tests), not real packet routing.
 

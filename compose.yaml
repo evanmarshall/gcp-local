@@ -11,6 +11,9 @@ services:
     command: [serve]
     environment:
       GCP_LOCAL_PORT: ${GCP_LOCAL_PORT:?Use the gcp-local CLI}
+      # Redis and public-IP Cloud SQL instances listen on ports from this
+      # range; the entry point publishes the same numbers on host loopback.
+      GCP_LOCAL_DATA_PORTS: ${GCP_LOCAL_DATA_PORTS:?Use the gcp-local CLI}
     networks: [backend]
     volumes:
       - type: bind
@@ -42,12 +45,14 @@ services:
     command: [haproxy, -W, -db, -f, /usr/local/etc/haproxy/haproxy.cfg]
     environment:
       GCP_LOCAL_PORT: ${GCP_LOCAL_PORT:?Use the gcp-local CLI}
+      GCP_LOCAL_DATA_PORTS: ${GCP_LOCAL_DATA_PORTS:?Use the gcp-local CLI}
     depends_on:
       gcp-local:
         condition: service_healthy
     ports:
       - "127.0.0.1:${GCP_LOCAL_PORT:?Use the gcp-local CLI}:4566"
       - "127.0.0.1:${GCP_LOCAL_GRPC_PORT:?Use the gcp-local CLI}:4567"
+      - "127.0.0.1:${GCP_LOCAL_DATA_PORTS:?Use the gcp-local CLI}:${GCP_LOCAL_DATA_PORTS:?Use the gcp-local CLI}"
     volumes:
       - ./packaging/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     networks: [frontend, backend]

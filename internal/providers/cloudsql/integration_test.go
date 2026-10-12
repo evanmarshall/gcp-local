@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -63,7 +64,10 @@ func TestPostgresThroughConnector(t *testing.T) {
 	h.manager = backend.NewManager(30*time.Second, 20*time.Second)
 	t.Cleanup(func() { must(t, h.manager.Shutdown(context.Background())) })
 	registry := gateway.NewRegistry()
-	h.provider, err = New(context.Background(), registry, h.manager, h.index, h.engine, realConfig(t))
+	config := realConfig(t)
+	config.Publish, err = dataplane.Parse("16400-16401", "127.0.0.1")
+	must(t, err)
+	h.provider, err = New(context.Background(), registry, h.manager, h.index, h.engine, config)
 	must(t, err)
 	h.gate = gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: principal(token), Scopes: []string{cloudPlatform}}, nil
@@ -124,6 +128,20 @@ func TestPostgresThroughConnector(t *testing.T) {
 		t.Fatalf("administrative connection = %v", err)
 	}
 
+	published := h.publishedAddress(testInstance)
+	direct, err := dialPostgres(ctx, "tcp", published, "app_user", "app", "app-secret'\\")
+	must(t, err)
+	if rows, err := direct.query(ctx, "SELECT count(*) FROM items"); err != nil || rows[0][0] != "2" {
+		t.Fatalf("public-IP session = %v, %v", rows, err)
+	}
+	if _, err := dialPostgres(ctx, "tcp", published, "app_user", "app", "wrong"); !errors.As(err, &refused) || refused.Code != "28P01" {
+		t.Fatalf("public-IP wrong password = %v", err)
+	}
+	if _, err := dialPostgres(ctx, "tcp", published, adminRole, "postgres", "guess"); !errors.As(err, &refused) || refused.Code != "28000" {
+		t.Fatalf("public-IP administrative connection = %v", err)
+	}
+	direct.close()
+
 	// The role owns a table, so PostgreSQL refuses to drop it until the database goes.
 	h.expect(h.invoke(adminToken, http.MethodDelete, testPath+"/users?name=app_user", nil), http.StatusBadRequest)
 	h.expect(h.invoke(adminToken, http.MethodDelete, testPath+"/databases/app", nil), http.StatusOK)
@@ -150,7 +168,16 @@ func TestPostgresThroughConnector(t *testing.T) {
 	if got := len(fleetRoots(t)); got != before+1 {
 		t.Fatalf("reset left %d backend roots, want %d", got, before+1)
 	}
+	expectRefused(t, published)
 	h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusNotFound)
-	h.expect(h.invoke(peerToken, http.MethodGet, peer+"/"+testInstance, nil), http.StatusOK)
+	peerInstance := h.expect(h.invoke(peerToken, http.MethodGet, peer+"/"+testInstance, nil), http.StatusOK)
+	peerPort, _ := object(t, peerInstance["ipAddresses"].([]any)[0])["port"].(float64)
+	peerAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(peerPort)))
+	peerSession, err := dialPostgres(ctx, "tcp", peerAddress, defaultUser, "postgres", "root-secret")
+	must(t, err)
 	h.expect(h.invoke(peerToken, http.MethodDelete, peer+"/"+testInstance, nil), http.StatusOK)
+	if _, err := peerSession.query(ctx, "SELECT 1"); err == nil {
+		t.Fatal("a public-IP session survived instance deletion")
+	}
+	expectRefused(t, peerAddress)
 }

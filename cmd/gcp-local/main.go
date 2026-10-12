@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
@@ -113,6 +114,8 @@ type serveOptions struct {
 	spannerEmulator, spannerLibraries  string
 	redisServer                        string
 	cloudsql                           cloudSQLOptions
+	dataPorts, dataListen              string
+	dataPlane                          *dataplane.Pool
 	metadataPrincipal                  string
 	showVersion                        bool
 }
@@ -137,6 +140,8 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.cloudsql.postgres, "cloudsql-postgres", "", "absolute root of the checksum-pinned PostgreSQL installs (Linux only)")
 	flags.StringVar(&options.cloudsql.runAs, "cloudsql-run-as", "", "uid:gid the PostgreSQL servers run as; required when gcp-local runs as root")
 	flags.Var(connectorList{&options.cloudsql.connectors}, "cloudsql-connector", "project:region:instance,principal,loopback-address; repeatable")
+	flags.StringVar(&options.dataPorts, "data-ports", "", "FIRST-LAST port range that publishes Redis and public-IP Cloud SQL instances; empty publishes none")
+	flags.StringVar(&options.dataListen, "data-listen", "127.0.0.1", "IP address the data-plane ports bind")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
 	flags.StringVar(&options.runSocket, "run-docker-socket", "", "Docker engine socket for Cloud Run containers; empty refuses launch")
 	flags.Var(processMap{&options.runProcess}, "run-process", "dockerless revision launch: image=command; repeatable; commands run as local processes")
@@ -147,6 +152,12 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 		fmt.Fprintln(errors, "Supply valid flags and a positive shutdown timeout")
 		return serveOptions{}, false
 	}
+	pool, err := dataplane.Parse(options.dataPorts, options.dataListen)
+	if err != nil {
+		fmt.Fprintln(errors, err)
+		return serveOptions{}, false
+	}
+	options.dataPlane = pool
 	return options, true
 }
 
@@ -410,7 +421,7 @@ func assembleMemorystore(ctx context.Context, options serveOptions, selected map
 	if !selected["redis"] {
 		return nil
 	}
-	config := memorystoreprovider.Config{Server: options.redisServer}
+	config := memorystoreprovider.Config{Server: options.redisServer, Publish: options.dataPlane}
 	if _, err := memorystoreprovider.New(ctx, registry, server.Backends, index, engine, config); err != nil {
 		return fmt.Errorf("register the Memorystore provider: %w", err)
 	}
@@ -600,6 +611,7 @@ func (m processMap) Set(value string) error {
 type cloudSQLOptions struct {
 	postgres, runAs string
 	connectors      []string
+	publish         *dataplane.Pool
 }
 
 // errCloudSQLFlags rejects malformed Cloud SQL flag values.
@@ -617,7 +629,9 @@ func (c connectorList) Set(value string) error {
 
 // assembleCloudSQLService adapts assembleCloudSQL to the backend assembly loop.
 func assembleCloudSQLService(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	return assembleCloudSQL(ctx, options.cloudsql, selected, registry, server, index, engine)
+	cloudsql := options.cloudsql
+	cloudsql.publish = options.dataPlane
+	return assembleCloudSQL(ctx, cloudsql, selected, registry, server, index, engine)
 }
 
 // assembleCloudSQL registers the Cloud SQL provider and opens its connectors.
@@ -625,7 +639,7 @@ func assembleCloudSQL(ctx context.Context, options cloudSQLOptions, selected map
 	if !selected["cloudsql"] {
 		return nil
 	}
-	config := cloudsqlprovider.Config{Root: options.postgres}
+	config := cloudsqlprovider.Config{Root: options.postgres, Publish: options.publish}
 	if options.runAs != "" {
 		uid, gid, found := strings.Cut(options.runAs, ":")
 		user, userErr := strconv.ParseUint(uid, 10, 32)

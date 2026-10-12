@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Exercise packaged startup, standard local ADC, isolated reset, and teardown."""
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -80,10 +84,21 @@ def cli(
 
 
 def unused_port() -> int:
-    """Reserve an ephemeral loopback port and release it."""
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+    """Find a base port whose HTTP, gRPC, and 16 data-plane ports are all free."""
+    for _ in range(100):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            base = sock.getsockname()[1]
+        if base + 17 > 65535:  # the highest TCP port
+            continue
+        try:
+            for port in range(base, base + 18):
+                with socket.socket() as sock:
+                    sock.bind(("127.0.0.1", port))
+        except OSError:
+            continue
+        return base
+    raise AssertionError("No free block of 18 loopback ports")
 
 
 def client_for(directory: Path) -> tuple[storage.Client, requests.Session, requests.Session]:
@@ -299,6 +314,221 @@ def verify_services(directory: Path) -> None:
     assert covered == set(SERVICES), sorted(set(SERVICES) - covered)
 
 
+class WireError(Exception):
+    """A protocol-level refusal from Redis or PostgreSQL."""
+
+
+def resp_call(sock: socket.socket, *args: str) -> str:
+    """Send one RESP command and return a simple, bulk, or integer reply."""
+    sock.sendall(
+        b"*%d\r\n" % len(args)
+        + b"".join(b"$%d\r\n%s\r\n" % (len(arg.encode()), arg.encode()) for arg in args)
+    )
+    reader = sock.makefile("rb")
+    line = reader.readline().rstrip(b"\r\n")
+    if not line:
+        raise ConnectionError("Redis closed the connection")
+    if line[:1] == b"-":
+        raise WireError(line[1:].decode())
+    if line[:1] == b"$":
+        size = int(line[1:])
+        return "" if size < 0 else reader.read(size + 2)[:-2].decode()
+    return line[1:].decode()
+
+
+def pg_message(kind: bytes, body: bytes) -> bytes:
+    """Frame one typed PostgreSQL frontend message."""
+    return kind + struct.pack("!I", len(body) + 4) + body
+
+
+def pg_read(sock: socket.socket) -> tuple[bytes, bytes]:
+    """Read one typed backend message."""
+    header = b""
+    while len(header) < 5:
+        chunk = sock.recv(5 - len(header))
+        if not chunk:
+            raise ConnectionError("PostgreSQL closed the connection")
+        header += chunk
+    size = struct.unpack("!I", header[1:])[0] - 4
+    body = b""
+    while len(body) < size:
+        chunk = sock.recv(size - len(body))
+        if not chunk:
+            raise ConnectionError("PostgreSQL closed the connection")
+        body += chunk
+    if header[:1] == b"E":
+        fields = {item[:1]: item[1:].decode() for item in body.split(b"\0") if item}
+        raise WireError(fields.get(b"C", "") + " " + fields.get(b"M", ""))
+    return header[:1], body
+
+
+def scram_reply(password: str, first_bare: str, server_first: str) -> tuple[str, bytes]:
+    """Compute the SCRAM-SHA-256 client-final message and the expected server signature."""
+    attributes = dict(item.split("=", 1) for item in server_first.split(","))
+    salted = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), base64.b64decode(attributes["s"]), int(attributes["i"])
+    )
+    client_key = hmac.digest(salted, b"Client Key", "sha256")
+    without_proof = "c=biws,r=" + attributes["r"]
+    message = f"{first_bare},{server_first},{without_proof}".encode()
+    signature = hmac.digest(hashlib.sha256(client_key).digest(), message, "sha256")
+    proof = bytes(a ^ b for a, b in zip(client_key, signature, strict=True))
+    server_key = hmac.digest(salted, b"Server Key", "sha256")
+    final = without_proof + ",p=" + base64.b64encode(proof).decode()
+    return final, hmac.digest(server_key, message, "sha256")
+
+
+def pg_connect(port: int, user: str, password: str) -> socket.socket:
+    """Open a PostgreSQL session with SCRAM-SHA-256, declining TLS as the server does."""
+    sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+    params = f"user\0{user}\0database\0postgres\0\0".encode()
+    sock.sendall(struct.pack("!II", len(params) + 8, 196608) + params)
+    first_bare = "n=,r=" + base64.b64encode(os.urandom(18)).decode()
+    expected = b""
+    while True:
+        kind, body = pg_read(sock)
+        code = struct.unpack("!I", body[:4])[0] if kind == b"R" else None
+        if code == 10:  # AuthenticationSASL
+            initial = ("n,," + first_bare).encode()
+            sock.sendall(
+                pg_message(b"p", b"SCRAM-SHA-256\0" + struct.pack("!I", len(initial)) + initial)
+            )
+        elif code == 11:  # AuthenticationSASLContinue
+            final, expected = scram_reply(password, first_bare, body[4:].decode())
+            sock.sendall(pg_message(b"p", final.encode()))
+        elif code == 12:  # AuthenticationSASLFinal
+            assert body[4:].decode() == "v=" + base64.b64encode(expected).decode()
+        elif kind == b"Z":
+            return sock
+
+
+def pg_query(sock: socket.socket, sql: str) -> list[list[str]]:
+    """Run one simple query and return its text rows."""
+    sock.sendall(pg_message(b"Q", sql.encode() + b"\0"))
+    rows = []
+    while True:
+        kind, body = pg_read(sock)
+        if kind == b"D":
+            row, offset = [], 2
+            for _ in range(struct.unpack("!H", body[:2])[0]):
+                size = struct.unpack("!i", body[offset : offset + 4])[0]
+                row.append(body[offset + 4 : offset + 4 + size].decode())
+                offset += 4 + size
+            rows.append(row)
+        elif kind == b"Z":
+            return rows
+
+
+def expect_closed(port: int, probe: bytes) -> None:
+    """Require a published port to give no protocol answer.
+
+    HAProxy may accept the TCP connection, but it closes it when nothing in
+    the core listens on that port.
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.sendall(probe)
+            assert sock.recv(1) == b"", f"port {port} still answers after deletion"
+    except (ConnectionError, TimeoutError):
+        pass
+
+
+def developer_token(directory: Path) -> tuple[str, str, str]:
+    """Return the endpoint, project, and a developer access token for one environment."""
+    env = json.loads(cli(directory, "env").stdout)
+    endpoint = env["GCP_LOCAL_ENDPOINT"]
+    principals = json.loads((directory / "identity/server.json").read_text())["principals"]
+    developer = next(p for p in principals if p["subject"].startswith("serviceAccount:developer@"))
+    return endpoint, env["GOOGLE_CLOUD_PROJECT"], exchange(endpoint, developer["subject_token"])
+
+
+def api(endpoint: str, token: str, method: str, path: str, body: object = None) -> dict:
+    """Call the local API as the developer and require success."""
+    data = None if body is None else json.dumps(body).encode()
+    request = HTTPRequest(  # noqa: S310 -- the environment's loopback endpoint
+        endpoint + path,
+        data=data,
+        method=method,
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+    )
+    try:
+        with build_opener(ProxyHandler({})).open(request, timeout=180) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        message = f"{method} {path}: {error.code} {error.read()[:500]!r}"
+        raise AssertionError(message) from None
+
+
+def verify_redis(directory: Path, *, auth: bool = True) -> None:
+    """Create a Memorystore instance, use it from the host, and require delete to close it."""
+    endpoint, project, token = developer_token(directory)
+    base = f"/v1/projects/{project}/locations/us-central1/instances"
+    first, last = json.loads((directory / "environment.json").read_text())["data_ports"]
+    created = api(
+        endpoint, token, "POST", base + "?instanceId=smoke-redis",
+        {"tier": "BASIC", "memorySizeGb": 1, "authEnabled": auth},
+    )["response"]  # fmt: skip
+    assert created["host"] == "127.0.0.1", created
+    assert first <= created["port"] <= last, created
+    port = created["port"]
+    with socket.create_connection(("127.0.0.1", port), timeout=10) as session:
+        if auth:
+            secret = api(endpoint, token, "GET", base + "/smoke-redis/authString")["authString"]
+            for args, refusal in (
+                (("PING",), "NOAUTH"),
+                (("AUTH", "not-the-auth-string"), "WRONGPASS"),
+            ):
+                try:
+                    resp_call(session, *args)
+                    raise AssertionError(f"Redis accepted {args[0]} without AUTH")
+                except WireError as error:
+                    assert str(error).startswith(refusal), error
+            assert resp_call(session, "AUTH", secret) == "OK"
+        assert resp_call(session, "SET", "greeting", "from the host") == "OK"
+        assert resp_call(session, "GET", "greeting") == "from the host"
+        api(endpoint, token, "DELETE", base + "/smoke-redis")
+        try:
+            resp_call(session, "PING")
+            raise AssertionError("A Redis session survived instance deletion")
+        except (ConnectionError, OSError):
+            pass
+    expect_closed(port, b"*1\r\n$4\r\nPING\r\n")
+
+
+def verify_cloudsql(directory: Path) -> None:
+    """Create a Cloud SQL instance and user, connect with a password, and delete it."""
+    endpoint, project, token = developer_token(directory)
+    base = f"/sql/v1beta4/projects/{project}/instances"
+    api(endpoint, token, "POST", base, {
+        "name": "smoke-pg", "region": "us-central1", "databaseVersion": "POSTGRES_16",
+        "rootPassword": "smoke-root", "settings": {"tier": "db-f1-micro"},
+    })  # fmt: skip
+    api(endpoint, token, "POST", base + "/smoke-pg/users", {"name": "app", "password": "app-pw"})
+    instance = api(endpoint, token, "GET", base + "/smoke-pg")
+    primary = next(item for item in instance["ipAddresses"] if item["type"] == "PRIMARY")
+    assert primary["ipAddress"] == "127.0.0.1", primary
+    first, last = json.loads((directory / "environment.json").read_text())["data_ports"]
+    port = primary["port"]
+    assert first <= port <= last, primary
+    try:
+        pg_connect(port, "app", "wrong").close()
+        raise AssertionError("PostgreSQL accepted a wrong password")
+    except WireError as error:
+        assert str(error).startswith("28P01"), error
+    session = pg_connect(port, "app", "app-pw")
+    try:
+        assert pg_query(session, "SELECT current_user, 40 + 2") == [["app", "42"]]
+        api(endpoint, token, "DELETE", base + "/smoke-pg")
+        try:
+            pg_query(session, "SELECT 1")
+            raise AssertionError("A PostgreSQL session survived instance deletion")
+        except (ConnectionError, OSError, WireError):
+            pass
+    finally:
+        session.close()
+    expect_closed(port, struct.pack("!II", 8, 80877103))
+
+
 def verify_standalone(image: str, temporary: Path) -> None:
     """Run the image with docker run alone and require the SDK examples to pass."""
     state = temporary / "standalone"
@@ -313,6 +543,8 @@ def verify_standalone(image: str, temporary: Path) -> None:
             "--cap-drop=ALL", "--security-opt", "no-new-privileges:true",
             "--publish", f"127.0.0.1:{port}:{port}",
             "--publish", f"127.0.0.1:{port + 1}:4567",
+            # The default data-plane range follows the gRPC port.
+            "--publish", f"127.0.0.1:{port + 2}-{port + 17}:{port + 2}-{port + 17}",
             "--env", f"GCP_LOCAL_PORT={port}",
             "--env", f"GCP_LOCAL_HOST_DIRECTORY={state}",
             "--volume", f"{state}:/state",
@@ -336,6 +568,7 @@ def verify_standalone(image: str, temporary: Path) -> None:
         assert status["providers"] == SERVICES
         assert cli(state, "reset", check=False).returncode != 0, "reset managed a docker run"
         verify_examples(state)
+        verify_redis(state, auth=False)
     finally:
         subprocess.run([DOCKER, "rm", "--force", name], capture_output=True, check=False)
 
@@ -429,6 +662,9 @@ def main() -> int:
             create(fresh).delete(retry=None, timeout=5)
             verify_examples(first)
             verify_services(first)
+            verify_redis(first)
+            verify_cloudsql(first)
+            verify_redis(second, auth=False)
             # Bind a port to require a visible startup failure
             # without affecting the working environment.
             with socket.socket() as occupied:
@@ -447,8 +683,8 @@ def main() -> int:
             teardown(directories)
     print(
         "Packaged workflow passed: local ADC/Storage and Pub/Sub, every packaged service "
-        "with IAM enforced, isolated reset, failed startup, portable doctor, standalone "
-        "docker run, and teardown."
+        "with IAM enforced, Redis and Cloud SQL from the host, isolated reset, failed startup, "
+        "portable doctor, standalone docker run, and teardown."
     )
     return 0
 

@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
@@ -37,6 +39,9 @@ func (p *Provider) create(ctx context.Context, request *gateway.RESTRequest, sco
 			return status.Errorf(codes.AlreadyExists, "Resource '%s' already exists", instanceName(scope, record.ID))
 		}
 		port, err := current.launch(ctx, record.ID, launchSpec{AuthString: record.AuthString, MemoryGB: record.MemorySizeGB})
+		if errors.Is(err, dataplane.ErrExhausted) {
+			return status.Error(codes.ResourceExhausted, "gcp-local: every published data-plane port is in use; delete an instance or widen the range")
+		}
 		if err != nil {
 			return fmt.Errorf("launch the Redis server: %w", err)
 		}

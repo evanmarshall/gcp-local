@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
 )
 
 // pinned are the SHA-256 checksums of the installed server binaries per
@@ -44,9 +45,12 @@ const maxPinnedFile = 64 << 20
 // Config locates the installed binaries: Root holds one directory per major
 // version (Root/16, Root/15), as scripts/install_postgres.py lays them out.
 // RunAs is the unprivileged user the servers run as when gcp-local runs as root.
+// Publish, when set, gives every public-IP instance a port from the
+// data-plane range.
 type Config struct {
-	Root  string
-	RunAs *syscall.Credential
+	Root    string
+	RunAs   *syscall.Credential
+	Publish *dataplane.Pool
 }
 
 // distribution is one verified major version.

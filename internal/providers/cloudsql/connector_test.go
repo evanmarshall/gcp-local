@@ -25,8 +25,15 @@ const loopbackAny = "127.0.0.1:0"
 // the connector answers.
 func dialConnector(t *testing.T, connector *Connector, user string) []byte {
 	t.Helper()
+	return dialStartup(t, connector.listener.Addr().String(), user)
+}
+
+// dialStartup sends an SSL request and a startup packet to address and
+// returns the answer.
+func dialStartup(t *testing.T, address, user string) []byte {
+	t.Helper()
 	dialer := net.Dialer{Timeout: time.Second}
-	conn, err := dialer.DialContext(t.Context(), "tcp", connector.listener.Addr().String())
+	conn, err := dialer.DialContext(t.Context(), "tcp", address)
 	must(t, err)
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))

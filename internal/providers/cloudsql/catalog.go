@@ -19,6 +19,8 @@ type instanceRecord struct {
 	DeletionProtection, IPv4                             bool
 	SettingsVersion                                      int64
 	Created                                              time.Time
+	// Port is the published data-plane port of a public-IP instance, or 0.
+	Port int
 }
 
 // operationRecord is one completed sql#operation.
@@ -91,13 +93,18 @@ func (r instanceRecord) wire(project string, release string) map[string]any {
 	if r.Edition != "" {
 		settings["edition"] = r.Edition
 	}
+	address := map[string]any{"type": ipType, "ipAddress": loopbackIPv4}
+	if r.Port > 0 {
+		// gcp-local extension: GCP serves PostgreSQL on 5432 and has no port
+		// field; locally each instance has its own published port.
+		address["port"] = r.Port
+	}
 	value := map[string]any{
 		keyKind: "sql#instance", keyName: r.Name, pathProject: project, "region": r.Region, "databaseVersion": r.Version,
 		"state": statusRunnable, "backendType": "SECOND_GEN", "instanceType": "CLOUD_SQL_INSTANCE",
 		"connectionName": project + ":" + r.Region + ":" + r.Name, keySelfLink: instanceLink(project, r.Name),
 		"createTime": r.Created.UTC().Format(time.RFC3339Nano), "etag": r.etag(),
-		"ipAddresses": []any{map[string]any{"type": ipType, "ipAddress": loopbackIPv4},
-			map[string]any{"type": "OUTGOING", "ipAddress": loopbackIPv4}}, keySettings: settings,
+		"ipAddresses": []any{address, map[string]any{"type": "OUTGOING", "ipAddress": loopbackIPv4}}, keySettings: settings,
 		// Recorded (cloudsql-postgres-instance-admin): GCP always returns these
 		// service-managed fields; the values are local stand-ins, only presence is compared.
 		"gceZone": r.Region + "-a", "geminiConfig": map[string]any{"entitled": false},

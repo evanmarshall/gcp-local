@@ -19,8 +19,8 @@ What each service supports and how it is verified. Every service authenticates c
 | `firestore` | [Firestore](firestore.md) | Official emulator | 7 | 60 | Partial: single documents only; no queries, transactions, or batch writes | firestore-document-lifecycle | TestAccFirestoreDocument |
 | `spanner` | [Spanner](spanner.md) | Official emulator | 21 | 99 | No: admin and schema only; SQL reads and writes are not routed | spanner-instance-database-admin | TestAccSpannerInstanceAndDatabase |
 | `bigtable` | [Bigtable](bigtable.md) | Official emulator code (bttest) | 17 | 82 | No: instance and table admin only; row reads and writes are not routed | bigtable-instance-table-admin | none |
-| `cloudsql` | [Cloud SQL for PostgreSQL](cloudsql.md) | Real PostgreSQL per instance | 14 | 85 | Partial: PostgreSQL through a manually configured connector; none in the packaged environment | cloudsql-postgres-instance-admin | none |
-| `redis` | [Memorystore for Redis](memorystore.md) | Real Redis per instance | 8 | 47 | Partial: Redis with AUTH, reachable only inside the container | memorystore-redis-instance-admin | none |
+| `cloudsql` | [Cloud SQL for PostgreSQL](cloudsql.md) | Real PostgreSQL per instance | 14 | 85 | Yes: PostgreSQL on a published `127.0.0.1` port with a user password; no TLS | cloudsql-postgres-instance-admin | none |
+| `redis` | [Memorystore for Redis](memorystore.md) | Real Redis per instance | 8 | 47 | Yes: Redis on the reported `127.0.0.1` port, with AUTH; no TLS | memorystore-redis-instance-admin | none |
 | `bigquery` | [BigQuery](bigquery.md) | gcp-local | 18 | 47 | Partial: streaming inserts and single-table SELECT with an equality filter | bigquery-dataset-rows-query | TestAccBigQueryDatasetAndTable |
 | `secretmanager` | [Secret Manager](secretmanager.md) | gcp-local | 15 | 36 | Yes: secret versions and payload access | secretmanager-access-lifecycle | TestAccSecretManagerSecretAndVersion |
 | `cloudkms` | [Cloud KMS](cloudkms.md) | gcp-local | 20 | 87 | Yes: symmetric encrypt and decrypt | cloudkms-symmetric-key-lifecycle | TestAccKMSKeyRingCryptoKey |

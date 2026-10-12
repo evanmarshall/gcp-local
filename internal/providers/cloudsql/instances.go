@@ -3,6 +3,7 @@ package cloudsql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
@@ -122,15 +124,11 @@ func (p *Provider) insertInstance(call gateway.Call, request *gateway.RESTReques
 			conflict = true
 			return nil
 		}
-		if err := fleet.create(ctx, serverSpec{Instance: record.Name, Version: record.Version, RootPassword: body.RootPassword}); err != nil {
-			return err
-		}
-		if err := p.publish(project, record); err != nil {
-			_ = fleet.remove(context.WithoutCancel(ctx), record.Name)
-			return err
-		}
-		return nil
+		return p.start(ctx, fleet, project, record, body.RootPassword)
 	})
+	if errors.Is(err, dataplane.ErrExhausted) {
+		return apiError(http.StatusTooManyRequests, "RESOURCE_EXHAUSTED", "", "gcp-local: every published data-plane port is in use; delete an instance or widen the range"), nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +136,30 @@ func (p *Provider) insertInstance(call gateway.Call, request *gateway.RESTReques
 		return apiError(http.StatusConflict, "ALREADY_EXISTS", "instanceAlreadyExists", "The Cloud SQL instance already exists."), nil
 	}
 	return p.complete(call, project, "CREATE", record.Name, started)
+}
+
+// start creates the instance's server and published port, then indexes and
+// stores the instance. A failure removes whatever was started.
+func (p *Provider) start(ctx context.Context, fleet driver, project string, record instanceRecord, rootPassword string) error {
+	if err := fleet.create(ctx, serverSpec{Instance: record.Name, Version: record.Version, RootPassword: rootPassword}); err != nil {
+		return err
+	}
+	listener, err := p.openPublic(ctx, project, record)
+	if err == nil && listener != nil {
+		record.Port = listener.Port()
+	}
+	if err == nil {
+		err = p.publish(project, record)
+	}
+	if err != nil {
+		if listener != nil {
+			listener.Close()
+		}
+		_ = fleet.remove(context.WithoutCancel(ctx), record.Name)
+		return err
+	}
+	p.trackPublic(project, record.Name, listener)
+	return nil
 }
 
 // publish indexes a created instance and stores its metadata.
@@ -289,6 +311,7 @@ func (p *Provider) deleteInstance(call gateway.Call, request *gateway.RESTReques
 				"The instance is protected. Please disable the deletion protection and try again.")
 			return nil
 		}
+		p.closePublic(project, name)
 		if err := fleet.remove(ctx, name); err != nil {
 			return err
 		}
