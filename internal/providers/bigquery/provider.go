@@ -100,13 +100,14 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	authorized := call
 	authorized.Method = p.ownJobCheck(call, request, scope)
-	decision, authorizeErr := p.engine.Authorize(authorized, target, nil)
-	if authorizeErr != nil && status.Code(authorizeErr) == codes.Unimplemented {
-		// A deleted target still reads 404 through the project anchor: the
-		// project's policies govern resources that no longer exist.
+	if _, indexed := p.index.Get(target.Name); !indexed {
+		// A deleted or absent dataset still reads 404 through the project
+		// anchor: the project's policies govern resources that do not exist.
+		// An indexed target never falls back, so an engine refusal such as an
+		// unsupported policy stays closed.
 		target = iam.Target{Name: provider.ProjectResource(scope.Project)}
-		decision, authorizeErr = p.engine.Authorize(authorized, target, nil)
 	}
+	decision, authorizeErr := p.engine.Authorize(authorized, target, nil)
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
@@ -139,8 +140,10 @@ func stampDecision(response *gateway.RESTResponse, id string) {
 const headerDecision = "X-Gcp-Local-Decision-Id"
 
 // resolve derives the scope and IAM target for one request. Dataset methods
-// authorize against the dataset resource; table and row methods authorize
-// against the parent dataset, matching the real surface's hierarchy.
+// authorize against the dataset resource. Table, row, and table IAM methods
+// authorize against the table, whose policy inherits the dataset's; a table
+// that does not exist authorizes against its dataset, so only callers with
+// dataset access learn it is absent.
 func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
 	project := request.Path["project"]
 	scope := provider.ProjectScope(project)
@@ -160,17 +163,14 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 		methodTablesCreate, methodTablesList:
 		target.Name = datasetResource(project, dataset)
 		return scope, target, nil
-	case methodRowsInsert:
-		if !uid.MatchString(table) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
-		}
-		target.Name = tableResource(project, dataset, table)
-		return scope, target, nil
 	default:
 		if !uid.MatchString(table) {
 			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
 		}
-		target.Name = datasetResource(project, dataset)
+		target.Name = tableResource(project, dataset, table)
+		if _, ok := p.index.Get(target.Name); !ok {
+			target.Name = datasetResource(project, dataset)
+		}
 		return scope, target, nil
 	}
 }

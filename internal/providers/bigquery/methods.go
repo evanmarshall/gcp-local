@@ -31,7 +31,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		// Recorded: dataset IAM methods need allowlisting; access is per table.
 		return provider.WireError(400, "INVALID_ARGUMENT", "This feature requires allowlisting."), nil
 	case methodTablesGetIam, methodTablesSetIam:
-		return p.tableIam(call, request, target)
+		return p.tableIam(call, request, scope)
 	case methodDatasetsDelete:
 		return p.datasetsDelete(request, scope)
 	default:
@@ -240,9 +240,13 @@ func (s *scopeState) takeDataset(dataset string, contents bool) []string {
 // unindexTables removes deleted tables from the resource index.
 func (p *Provider) unindexTables(scope state.Scope, dataset string, tables []string) error {
 	for _, table := range tables {
-		if err := p.index.Remove(serviceName, scope, tableResource(scope.Project, dataset, table)); err != nil {
+		resource := tableResource(scope.Project, dataset, table)
+		if err := p.index.Remove(serviceName, scope, resource); err != nil {
 			return fmt.Errorf("unregister the table: %w", err)
 		}
+		// A deleted table's policy goes with it; a new table of the same name
+		// starts with none.
+		p.engine.Forget(resource)
 	}
 	return nil
 }
@@ -375,14 +379,12 @@ func (p *Provider) tablesDelete(request *gateway.RESTRequest, scope state.Scope)
 	if p.tableLocked(scope, dataset, table) == nil {
 		return nil, provider.NotFound(kindTable, table)
 	}
-	var indexErr error
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		delete(s.tables, tableKey(dataset, table))
-		indexErr = p.index.Remove(serviceName, scope, tableResource(scope.Project, dataset, table))
 		return nil
 	})
-	if indexErr != nil {
-		return nil, fmt.Errorf("unregister the table: %w", indexErr)
+	if err := p.unindexTables(scope, dataset, []string{table}); err != nil {
+		return nil, err
 	}
 	return &gateway.RESTResponse{Status: 204}, nil
 }
@@ -438,10 +440,16 @@ func (p *Provider) rowsList(request *gateway.RESTRequest, scope state.Scope) (*g
 	}}, nil
 }
 
-// tableIam reads or writes the table's stored IAM policy.
-func (p *Provider) tableIam(call gateway.Call, request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
+// tableIam reads or writes the table's own IAM policy, which inherits the
+// dataset's through the index ancestry; it never touches the dataset policy.
+func (p *Provider) tableIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	dataset, table := request.Path["datasetId"], request.Path["tableId"]
+	if p.tableLocked(scope, dataset, table) == nil {
+		return nil, provider.NotFound(kindTable, table)
+	}
+	resource := tableResource(scope.Project, dataset, table)
 	if call.Method == methodTablesGetIam {
-		policy, err := p.engine.GetPolicy(target.Name)
+		policy, err := p.engine.GetPolicy(resource)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "read the table policy: %v", err)
 		}
@@ -453,7 +461,7 @@ func (p *Provider) tableIam(call gateway.Call, request *gateway.RESTRequest, tar
 	if json.Unmarshal(request.JSON, &envelope) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
 	}
-	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
+	policy, err := p.engine.SetPolicy(resource, envelope.Policy)
 	if err != nil {
 		if _, ok := status.FromError(err); ok {
 			return nil, err //nolint:wrapcheck // already a wire status
