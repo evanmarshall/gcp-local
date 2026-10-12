@@ -41,6 +41,7 @@ Permissions follow [Bigtable access control](https://docs.cloud.google.com/bigta
 
 - `roles/bigtable.user` and `roles/bigtable.admin` hold every data permission; `roles/bigtable.viewer` holds none.
 - Instance bindings apply to its tables. A missing table returns 404 only to callers with the permission on its instance.
+- An admin call racing a delete of its table or instance reads 404, never 501. An admin call without valid credentials gets 401.
 
 ## Verification
 

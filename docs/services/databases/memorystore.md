@@ -27,24 +27,25 @@ redis-cli -h 127.0.0.1 -p 4568 -a "$AUTH_STRING" PING   # string from getAuthStr
 
 | Method | Permission | Notes |
 | --- | --- | --- |
-| `instances.create` | `redis.instances.create` | Returns a completed operation once the server answers `PING` |
-| `instances.get`, `instances.list` | `redis.instances.get`, `.list` | `pageSize`/`pageToken` |
+| `instances.create` | `redis.instances.create` | Returns an operation once the server answers `PING` |
+| `instances.get`, `instances.list` | `redis.instances.get`, `.list` | `pageSize` (default and maximum 1,000) and opaque `pageToken`, ordered by name; an invalid token is 400 |
 | `instances.patch` | `redis.instances.update` | `displayName`, `labels`, `memorySizeGb`; memory change keeps data |
 | `instances.delete` | `redis.instances.delete` | Discards the keyspace |
 | `instances.getAuthString` | `redis.instances.getAuthString` | `{}` when AUTH is off |
-| `operations.get`, `operations.list` | `redis.operations.get`, `.list` | Newest 1,000 kept |
+| `operations.get`, `operations.list` | `redis.operations.get`, `.list` | Creation order, newest 1,000 kept |
+| `operations.cancel`, `operations.delete` | `redis.operations.cancel`, `.delete` | Cancel marks `cancelRequested`; the finished work still completes. Not recorded |
 
-Instances report `tier: BASIC`, `redisVersion: REDIS_7_2`, `state: READY`, and `connectMode: DIRECT_PEERING`. Operations are `done: true` immediately; GCP takes minutes.
+Instances report `tier: BASIC`, `redisVersion: REDIS_7_2`, `state: READY`, and `connectMode: DIRECT_PEERING`. Operations report `done: false` for 500 ms, then `done: true` with the response; GCP takes minutes. The instance is `READY` as soon as the operation is returned.
 
 ## IAM
 
-Permissions follow [Memorystore access control](https://docs.cloud.google.com/memorystore/docs/redis/access-control). There are no instance-level policies; every check targets the project. Roles: `roles/redis.admin`, `.editor`, `.viewer`; only Admin has `redis.instances.getAuthString`. IAM is not checked per Redis connection, as in GCP: the AUTH string is the only connection control.
+Permissions follow [Memorystore access control](https://docs.cloud.google.com/memorystore/docs/redis/access-control). There are no instance-level policies; every check targets the project. A denial is 403 `Permission 'P' denied on 'R'`, naming the addressed instance, operation, or location, with no `details`, as GCP returns. Roles: `roles/redis.admin`, `.editor`, `.viewer`; only Admin has `redis.instances.getAuthString`. IAM is not checked per Redis connection, as in GCP: the AUTH string is the only connection control.
 
 ## Verification
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `memorystore-redis-instance-admin` | 2026-10-12 | Create, get, list, patch, delete operations and metadata; instance fields; AUTH string shape; denied read, getAuthString, and delete; 409 duplicate; 400 patch without mask; 404 after delete |
+| `memorystore-redis-instance-admin` | 2026-10-12 | Create, get, list, patch, delete operations and metadata; instance fields; AUTH string shape; denied read, getAuthString, and delete with their messages and empty `details`; invalid page token (400 with a `BadRequest` on `pageToken`) and negative page size; 409 duplicate; 400 patch without mask; 404 after delete |
 
 Service-managed fields such as `maintenanceVersion`, `nodes`, and `reservedIpRange` have stand-in values; only their presence is recorded.
 
@@ -58,6 +59,7 @@ sh scripts/check/backend/redis.sh             # real redis-server: AUTH, NOPERM,
 ## Gaps
 
 - Redis connections, AUTH, and published ports are not recorded.
+- An unknown Instance field is 400 with a `BadRequest` violation; a mistyped one is 400 naming its path.
 - 501 for `STANDARD_HA`, other Redis versions, TLS, `PRIVATE_SERVICE_ACCESS`, `redisConfigs`, replicas, persistence, maintenance policy, CMEK, reserved IP ranges, tags, `operations.list` filters, and the `-` location wildcard.
 - Not routed: clusters, backups, import/export, failover, upgrade.
 - Network reachability is not modeled: anything on host loopback can connect. `authorizedNetwork` is stored, not checked.

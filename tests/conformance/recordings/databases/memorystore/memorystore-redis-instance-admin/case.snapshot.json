@@ -1,6 +1,6 @@
 {
   "memorystore-redis-instance-admin": {
-    "recorded-date": "12-10-2026, 18:06:27",
+    "recorded-date": "12-10-2026, 23:12:42",
     "recorded-content": {
       "instance-operation": {
         "done": true,
@@ -98,18 +98,48 @@
       },
       "denied-read": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "Permission 'redis.instances.get' denied on 'projects/<project>/locations/us-central1/instances/<instance>'",
         "status": "PERMISSION_DENIED"
       },
       "denied-auth-string": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "Permission 'redis.instances.getAuthString' denied on 'projects/<project>/locations/us-central1/instances/<instance>'",
         "status": "PERMISSION_DENIED"
       },
       "denied-delete": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "Permission 'redis.instances.delete' denied on 'projects/<project>/locations/us-central1/instances/<instance>'",
         "status": "PERMISSION_DENIED"
+      },
+      "list-invalid-token": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "invalid page token",
+                "field": "pageToken"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "The request was invalid: invalid page token",
+        "status": "INVALID_ARGUMENT"
+      },
+      "list-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid argument: 'page_size'",
+        "status": "INVALID_ARGUMENT"
       },
       "update-operation": {
         "done": true,

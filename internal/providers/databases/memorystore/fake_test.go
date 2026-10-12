@@ -19,7 +19,7 @@ import (
 // stand in for the roles/redis.* snapshots until those are recorded from GCP;
 // the production provider registers its plans only with the real IAM engine.
 var (
-	adminPermissions  = []string{"redis.instances.create", "redis.instances.get", "redis.instances.list", "redis.instances.update", "redis.instances.delete", "redis.instances.getAuthString", "redis.operations.get", "redis.operations.list"}
+	adminPermissions  = []string{"redis.instances.create", "redis.instances.get", "redis.instances.list", "redis.instances.update", "redis.instances.delete", "redis.instances.getAuthString", "redis.operations.get", "redis.operations.list", "redis.operations.cancel", "redis.operations.delete"}
 	viewerPermissions = []string{"redis.instances.get", "redis.instances.list", "redis.operations.get", "redis.operations.list"}
 )
 

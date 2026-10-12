@@ -10,6 +10,7 @@ from gcp_validation.services.messaging.cloudscheduler import run_scenario
     versions={'sdk': 'urllib;google-auth/2.56.2', 'provider': 'not-applicable',
               'backend': 'not-applicable'},
     contract_files=(
+        'gcp_validation/errors.py',
         'gcp_validation/services/messaging/cloudscheduler.py',
         'gcp_validation/live_rest.py',
         'gcp_validation/sandbox.py',

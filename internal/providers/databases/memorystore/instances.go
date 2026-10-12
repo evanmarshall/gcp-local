@@ -1,7 +1,6 @@
 package memorystore
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -9,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
 // Instance field names shared by rendering, decoding, and update masks.
 const (
 	fieldDisplayName = "displayName"
+	fieldCreateTime  = "createTime"
 	fieldLabels      = "labels"
 	fieldMemory      = "memorySizeGb"
 	fieldVersion     = "redisVersion"
@@ -52,7 +53,7 @@ func (i instance) wire(scope state.Scope) map[string]any {
 		"host":                  loopbackHost,
 		"port":                  i.Port,
 		"state":                 stateReady,
-		"createTime":            i.Created.Format(time.RFC3339Nano),
+		fieldCreateTime:         i.Created.Format(time.RFC3339Nano),
 		"authorizedNetwork":     i.Network,
 		"connectMode":           i.ConnectMode,
 		"transitEncryptionMode": i.TransitEncryptionMode,
@@ -91,19 +92,18 @@ type instanceBody struct {
 	AuthorizedNetwork     string            `json:"authorizedNetwork"`
 }
 
-// Field classes of the v1 Instance schema in the pinned discovery document.
-var (
-	modeledFields = set(fieldDisplayName, fieldLabels, "locationId", fieldVersion, fieldTier, fieldMemory,
-		"authEnabled", "transitEncryptionMode", "connectMode", "authorizedNetwork")
+// instanceFields are the v1 Instance schema fields of the pinned discovery
+// document that instanceBody lacks.
+var instanceFields = provider.Fields{
 	// Output-only fields are ignored on input, as the service does.
-	outputFields = set("name", "host", "port", "state", "createTime", "currentLocationId", "statusMessage",
+	OutputOnly: []string{"name", "host", "port", "state", fieldCreateTime, "currentLocationId", "statusMessage",
 		"nodes", "readEndpoint", "readEndpointPort", "persistenceIamIdentity", "serverCaCerts",
-		"maintenanceSchedule", "satisfiesPzs", "satisfiesPzi", "availableMaintenanceVersions")
+		"maintenanceSchedule", "satisfiesPzs", "satisfiesPzi", "availableMaintenanceVersions"},
 	// Writable fields this slice does not model: an empty value is accepted, anything else is a gap.
-	unmodeledFields = set("alternativeLocationId", "customerManagedKey", "maintenancePolicy", "maintenanceVersion",
+	Unmodeled: []string{"alternativeLocationId", "customerManagedKey", "maintenancePolicy", "maintenanceVersion",
 		"persistenceConfig", "readReplicasMode", "redisConfigs", "replicaCount", "reservedIpRange",
-		"secondaryIpRange", "suspensionReasons", "tags")
-)
+		"secondaryIpRange", "suspensionReasons", "tags"},
+}
 
 func set(values ...string) map[string]bool {
 	result := make(map[string]bool, len(values))
@@ -113,39 +113,11 @@ func set(values ...string) map[string]bool {
 	return result
 }
 
-// emptyJSON reports a JSON value that leaves a field at its default.
-func emptyJSON(raw json.RawMessage) bool {
-	switch string(bytes.TrimSpace(raw)) {
-	case "null", `""`, "{}", "[]", "0", "false":
-		return true
-	default:
-		return false
-	}
-}
-
-// decodeInstance checks every field class, then decodes the modeled subset.
+// decodeInstance decodes the modeled subset of an Instance body.
 func decodeInstance(raw json.RawMessage) (instanceBody, error) {
-	var fields map[string]json.RawMessage
-	if len(bytes.TrimSpace(raw)) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return instanceBody{}, invalid("Invalid JSON payload received: the body must be an Instance object")
-	}
-	for name, value := range fields {
-		switch {
-		case modeledFields[name], outputFields[name]:
-		case unmodeledFields[name]:
-			if !emptyJSON(value) {
-				return instanceBody{}, gap(fmt.Sprintf("Instance field %s is not modeled", name))
-			}
-		default:
-			return instanceBody{}, invalid("Invalid JSON payload received. Unknown name %q: Cannot find field.", name)
-		}
-	}
 	var body instanceBody
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return instanceBody{}, invalid("Invalid JSON payload received: %v", err)
+	if err := provider.DecodeJSON(raw, "instance", &body, gap, instanceFields); err != nil {
+		return instanceBody{}, err
 	}
 	return body, nil
 }

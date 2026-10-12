@@ -104,7 +104,7 @@ func realHarness(t *testing.T, pool *dataplane.Pool) *harness {
 	h.manager = backend.NewManager(30*time.Second, 10*time.Second)
 	t.Cleanup(func() { must(t, h.manager.Shutdown(context.Background())) })
 	registry := gateway.NewRegistry()
-	h.provider, err = newProvider(registry, h.manager, h.index, h.auth, func(state.Scope) (backend.Backend, error) {
+	h.provider, err = newProvider(registry, h.manager, h.index, h.auth, 0, func(state.Scope) (backend.Backend, error) {
 		return newFleet(config), nil
 	})
 	must(t, err)

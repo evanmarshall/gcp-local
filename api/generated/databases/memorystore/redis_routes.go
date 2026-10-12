@@ -11,6 +11,8 @@ var RedisRoutes = []contract.Route{
 	{Method: "redis.projects.locations.instances.patch", Verb: "PATCH", Path: "/v1/projects/{project}/locations/{location}/instances/{instance}", JSONBody: true, Media: false},
 	{Method: "redis.projects.locations.instances.list", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}/instances", JSONBody: false, Media: false},
 	{Method: "redis.projects.locations.instances.create", Verb: "POST", Path: "/v1/projects/{project}/locations/{location}/instances", JSONBody: true, Media: false},
+	{Method: "redis.projects.locations.operations.cancel", Verb: "POST", Path: "/v1/projects/{project}/locations/{location}/operations/{operation}:cancel", JSONBody: false, Media: false},
+	{Method: "redis.projects.locations.operations.delete", Verb: "DELETE", Path: "/v1/projects/{project}/locations/{location}/operations/{operation}", JSONBody: false, Media: false},
 	{Method: "redis.projects.locations.operations.get", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}/operations/{operation}", JSONBody: false, Media: false},
 	{Method: "redis.projects.locations.operations.list", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}/operations", JSONBody: false, Media: false},
 }

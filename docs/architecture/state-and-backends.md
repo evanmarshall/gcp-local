@@ -24,6 +24,49 @@ The index exists for IAM ancestry and cross-service references. It never copies 
 - A request racing a delete gets `NOT_FOUND`, not the engine's "unverified target" refusal. A metadata-only provider checks the target's existence and calls `Authorize` inside one `With` callback (the engine never re-enters a store). A provider that publishes its index after a backend call resolves the target again when `provider.Unverified` reports that refusal, then authorizes once more.
 - Each provider's `concurrency_test.go` hammers create, get, update, and delete of one resource from parallel clients with `providertest.Hammer`; `-race` fails it when state escapes the lock.
 
+## Provider helpers
+
+New and changed provider code uses the helpers in `internal/providers/provider`. Cloud Scheduler uses `Nearest`, `DecodeProto`, and `Page`; Memorystore uses `Gate`, `DecodeJSON`, `Page`, and `Operations`; Bigtable's admin methods use `Nearest`.
+
+| Helper | Use |
+| --- | --- |
+| `Gate{Engine, Index, Message, Domain}` | One per provider. `Message` is the service's recorded 403 format (`LacksPermission`, `PermissionDeniedOn`). `Domain` adds ErrorInfo `IAM_PERMISSION_DENIED` with `permission`/`resource` metadata; leave it empty unless a recorded denial has details. |
+| `Nearest(gate, store, scope, call, resource, candidates...)` | Authorize at the first indexed candidate (most specific first, project last) under the scope lock. Returns the decision, the target, and the refusal to return as is: 401, 403, or a wrapped engine refusal. |
+| `gate.Check(call, target, resource)` | Authorize one fixed target the same way. |
+| `WithDecision(response, decision)` | Stamp the decision ID header on the executed response. |
+| `DecodeProto(body, root, message, gap, unmodeled...)` | Decode a body a proto message describes. Unknown name or wrong type: 400 with a BadRequest violation in GCP's transcoder wording. A listed unmodeled field set to a non-default value: `gap`. |
+| `DecodeJSON(body, root, &value, gap, Fields{Unmodeled, OutputOnly})` | Decode into a Go struct. List every schema field the struct lacks: unmodeled ones are `gap` unless null or default, output-only ones are dropped, any other name is GCP's 400. |
+| `Page(items, query, Paging{Default, Max, InvalidToken, NegativeSize}, gap, handled...)` | One page of already ordered items and the next token. Opaque tokens; a bad token or negative size returns the service's recorded refusal; `filter`/`orderBy` is a gap unless named in `handled`. |
+| `ListBody(field, items, next)` | The list response, omitting empty fields. |
+| `NewOperations(validate, latency, metadata)` | A scoped `google.longrunning` store: `Start`, `Finish`, `Get`, `List`, `Cancel`, `Delete`, `Wait`, `Reset`. `done` is false until `Finish` and `latency` have both passed. |
+| `ErrorInfo`, `FieldViolation`, `BadRequest` | Status errors with details; the gateway renders them in the REST `details` array and gRPC carries them natively. |
+
+Authorize and execute:
+
+```go
+decision, target, err := provider.Nearest(p.gate, p.scopes, scope, call, jobName(project, location, id),
+	jobResource(project, location, id), provider.ProjectResource(project))
+if err != nil {
+	return nil, err // 401, 403, or a wrapped engine refusal
+}
+call.Resource = target.Name
+response, err := p.execute(call, request)
+if err != nil {
+	return nil, err
+}
+return provider.WithDecision(response, decision), nil
+```
+
+`Nearest` holds the scope lock while it picks and checks the target, so every index change of the service's resources must hold the same lock (`store.With(scope, ...)`). A request racing a delete then authorizes at the parent and reads 404, never the engine's 501 for an unindexed target.
+
+Run a mutation as an operation: `Start` before the work, `Finish` with the response (`"@type"` included) after it, and `Delete` the operation if the request fails synchronously. Serve `operations.get`/`list`/`cancel`/`delete` from the store.
+
+Limits:
+
+- Recorded denials of Cloud Scheduler and Memorystore carry no `details`, and their wording differs (`cloudscheduler-job-lifecycle`, `memorystore-redis-instance-admin`). No recording yet shows a service's ErrorInfo domain; record one before setting `Domain`.
+- Page-token and page-size refusals differ per service; set `Paging` from the service's recording.
+- Page tokens aren't bound to the other list parameters.
+
 ## Backend lifecycle
 
 1. Register a definition with a scope validator, a driver factory, and an `AfterReset` hook.

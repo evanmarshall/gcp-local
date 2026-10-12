@@ -1061,6 +1061,8 @@ var redisMethods = map[string]bool{
 	"redis.projects.locations.instances.getAuthString": true,
 	"redis.projects.locations.operations.get":          true,
 	"redis.projects.locations.operations.list":         true,
+	"redis.projects.locations.operations.cancel":       true,
+	"redis.projects.locations.operations.delete":       true,
 }
 
 // redisVariables renames discovery path parameters to gateway path variables.

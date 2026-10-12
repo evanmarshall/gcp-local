@@ -3,7 +3,6 @@ package bigtable
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +22,7 @@ type Provider struct {
 	manager *backend.Manager
 	index   *state.Index
 	engine  *iam.Engine
+	gate    provider.Gate
 	scopes  *state.Store[scopeState]
 	clock   func() time.Time
 	// operations numbers instance and table operation names.
@@ -41,6 +41,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	p := &Provider{
 		manager: manager, index: index, engine: engine,
+		gate:   provider.Gate{Engine: engine, Index: index, Message: deniedMessage},
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
@@ -98,23 +99,15 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Bigtable request")
 	}
-	scope, target, err := p.resolve(call, request)
+	scope, candidates, err := p.resolve(call, request)
 	if err != nil {
 		return nil, err
 	}
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
-	if provider.Unverified(authorizeErr) {
-		if scope, target, err = p.resolve(call, request); err != nil {
-			return nil, err
-		}
-		decision, authorizeErr = p.engine.Authorize(call, target, nil)
-	}
-	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-		}
-		return provider.Denied(decision, target.Name), nil
+	// Table and instance deletes unindex under the scope lock Nearest holds,
+	// so a request racing one reads 404, never an unverified target.
+	decision, target, err := provider.Nearest(p.gate, p.scopes, scope, call, "", candidates...)
+	if err != nil {
+		return nil, err
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -122,46 +115,40 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
-// resolve derives the scope and IAM target for one request from provider
-// state and the shared index only; it never calls the backend. Instance methods
+// deniedMessage is the 403 message: the permission, then the resource.
+const deniedMessage = "The caller does not have %s access to %s."
+
+// resolve derives the scope and the IAM target candidates, most specific
+// first, for one request; it never calls the backend. Instance methods
 // authorize against the instance; list and create methods against the project.
 // Table methods authorize against a published table, or against its instance
 // when the table is not published, so absence is reported only to callers that
 // hold the permission.
-func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
+func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, []string, error) {
 	project := request.Path["project"]
 	scope := provider.ProjectScope(project)
-	target := iam.Target{Name: provider.ProjectResource(project)}
+	candidates := []string{provider.ProjectResource(project)}
 	instance, table := request.Path["instance"], request.Path["table"]
 	switch call.Method {
 	case methodInstancesCreate, methodInstancesList:
-		return scope, target, nil
+		return scope, candidates, nil
 	case methodInstancesGet, methodInstancesUpdate, methodInstancesDelete, methodInstancesGetIam, methodInstancesSetIam,
 		methodClustersList, methodClustersGet, methodTablesCreate, methodTablesList:
 		if err := p.existingInstance(scope, instance); err != nil {
-			return scope, target, err
+			return scope, nil, err
 		}
-		target.Name = instanceResource(project, instance)
-		return scope, target, nil
+		return scope, append([]string{instanceResource(project, instance)}, candidates...), nil
 	default:
 		if !tableID.MatchString(table) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
+			return scope, nil, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
 		}
 		if err := p.existingInstance(scope, instance); err != nil {
-			return scope, target, err
+			return scope, nil, err
 		}
-		target.Name = instanceResource(project, instance)
-		if resource, found := p.index.Get(tableResource(project, instance, table)); found && resource.Scope == scope {
-			target.Name = resource.Name
-		}
-		return scope, target, nil
+		return scope, append([]string{tableResource(project, instance, table), instanceResource(project, instance)}, candidates...), nil
 	}
 }
 

@@ -68,7 +68,7 @@ func newHarness(t *testing.T) *harness {
 	h.manager = backend.NewManager(time.Second, time.Second)
 	registry := gateway.NewRegistry()
 	var err error
-	h.provider, err = newProvider(registry, h.manager, h.index, h.auth, func(scope state.Scope) (backend.Backend, error) {
+	h.provider, err = newProvider(registry, h.manager, h.index, h.auth, 0, func(scope state.Scope) (backend.Backend, error) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		fake := newFakeDriver()
@@ -157,9 +157,10 @@ func TestDeniedCallsStartNoBackend(t *testing.T) {
 	h := newHarness(t)
 	denied := h.expect(h.create(peerToken, testProject, testRegion, testInstance, basic(nil)), http.StatusForbidden)
 	message, _ := denied["error"].(map[string]any)["message"].(string)
-	want := "Permission 'redis.instances.create' denied on resource '//redis.googleapis.com/projects/demo-redis/locations/us-central1' (or it may not exist)."
-	if message != want {
-		t.Fatalf("denial message = %q", message)
+	// GCP's wording, with no details (memorystore-redis-instance-admin).
+	want := "Permission 'redis.instances.create' denied on 'projects/demo-redis/locations/us-central1'"
+	if message != want || object(t, denied["error"])["details"] != nil {
+		t.Fatalf("denial = %v", denied)
 	}
 	h.expect(h.create("", testProject, testRegion, testInstance, basic(nil)), http.StatusUnauthorized)
 	h.expect(h.create(viewerToken, testProject, testRegion, testInstance, basic(nil)), http.StatusForbidden)
@@ -361,15 +362,22 @@ func TestListPagination(t *testing.T) {
 		h.expect(h.create(adminToken, testProject, testRegion, id, basic(nil)), http.StatusOK)
 	}
 	first := h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"?pageSize=2", nil), http.StatusOK)
-	if items, _ := first["instances"].([]any); len(items) != 2 || first["nextPageToken"] != "2" {
+	token, _ := first["nextPageToken"].(string)
+	if items, _ := first["instances"].([]any); len(items) != 2 || token == "" {
 		t.Fatalf("first page = %v", first)
 	}
-	second := h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"?pageSize=2&pageToken=2", nil), http.StatusOK)
+	second := h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"?pageSize=2&pageToken="+token, nil), http.StatusOK)
 	items, _ := second["instances"].([]any)
 	if len(items) != 1 || object(t, items[0])["name"] != "projects/demo-redis/locations/us-central1/instances/c" || second["nextPageToken"] != nil {
 		t.Fatalf("second page = %v", second)
 	}
-	h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"?pageToken=9", nil), http.StatusBadRequest)
+	// GCP's refusals (memorystore-redis-instance-admin).
+	for query, want := range map[string]string{"pageToken=9": "The request was invalid: invalid page token", "pageSize=-1": "Invalid argument: 'page_size'"} {
+		refused := h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"?"+query, nil), http.StatusBadRequest)
+		if message, _ := refused["error"].(map[string]any)["message"].(string); message != want {
+			t.Errorf("%s: %v", query, refused)
+		}
+	}
 }
 
 // TestProductionPlansNeedRecordedRoles documents the provenance dependency:
@@ -387,7 +395,7 @@ func TestProductionPlansNeedRecordedRoles(t *testing.T) {
 		{Role: "roles/redis.admin", Members: []string{principal(adminToken)}}}})
 	manager := backend.NewManager(time.Second, time.Second)
 	t.Cleanup(func() { must(t, manager.Shutdown(context.Background())) })
-	_, err = newProvider(gateway.NewRegistry(), manager, index, engine, func(state.Scope) (backend.Backend, error) {
+	_, err = newProvider(gateway.NewRegistry(), manager, index, engine, 0, func(state.Scope) (backend.Backend, error) {
 		return newFakeDriver(), nil
 	})
 	if roleErr != nil {
@@ -398,4 +406,30 @@ func TestProductionPlansNeedRecordedRoles(t *testing.T) {
 		return
 	}
 	must(t, err)
+}
+
+// TestOperationsReportProgress covers the shared operation store: a create's
+// operation is not done until the latency passes, cancel of finished work
+// lets it complete, and delete forgets it.
+func TestOperationsReportProgress(t *testing.T) {
+	h := newHarness(t)
+	h.provider.operations = provider.NewOperations(validScope, 50*time.Millisecond, operationMetadata)
+	created := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(nil)), http.StatusOK)
+	name, _ := created["name"].(string)
+	if created["done"] != false || created["response"] != nil || object(t, created["metadata"])["endTime"] != nil {
+		t.Fatalf("a fresh operation reported done: %v", created)
+	}
+	path := "/v1/" + name
+	h.expect(h.invoke(viewerToken, http.MethodPost, path+":cancel", nil), http.StatusForbidden)
+	h.expect(h.invoke(adminToken, http.MethodPost, path+":cancel", nil), http.StatusOK)
+	time.Sleep(60 * time.Millisecond)
+	done := h.expect(h.invoke(viewerToken, http.MethodGet, path, nil), http.StatusOK)
+	checkOperation(t, done, "create", instanceType)
+	if object(t, done["metadata"])["cancelRequested"] != true {
+		t.Fatalf("cancel was not recorded: %v", done)
+	}
+	h.expect(h.invoke(viewerToken, http.MethodDelete, path, nil), http.StatusForbidden)
+	h.expect(h.invoke(adminToken, http.MethodDelete, path, nil), http.StatusOK)
+	h.expect(h.invoke(adminToken, http.MethodGet, path, nil), http.StatusNotFound)
+	h.expect(h.invoke(adminToken, http.MethodPost, path+":cancel", nil), http.StatusNotFound)
 }

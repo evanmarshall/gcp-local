@@ -3,11 +3,9 @@ package memorystore
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -34,53 +32,79 @@ func (p *Provider) create(ctx context.Context, request *gateway.RESTRequest, sco
 			return nil, err
 		}
 	}
-	var result operation
-	err = p.use(ctx, scope, func(ctx context.Context, current driver) error {
-		if _, found := p.lookup(scope, record.ID); found {
-			return status.Errorf(codes.AlreadyExists, "Resource '%s' already exists", instanceName(scope, record.ID))
-		}
-		port, err := current.launch(ctx, record.ID, launchSpec{AuthString: record.AuthString, MemoryGB: record.MemorySizeGB})
-		if errors.Is(err, dataplane.ErrExhausted) {
-			return status.Error(codes.ResourceExhausted, "gcp-local: every published data-plane port is in use; delete an instance or widen the range")
-		}
-		if err != nil {
-			return fmt.Errorf("launch the Redis server: %w", err)
-		}
-		record.Port, record.Created = port, p.clock().UTC()
-		result, err = p.publish(scope, record)
-		if err != nil {
-			_ = current.remove(context.WithoutCancel(ctx), record.ID)
+	return p.operate(scope, instanceName(scope, record.ID), verbCreate, func() (map[string]any, error) {
+		var wire map[string]any
+		err := p.use(ctx, scope, func(ctx context.Context, current driver) error {
+			var err error
+			wire, err = p.launch(ctx, scope, current, record)
 			return err
-		}
-		return nil
+		})
+		return wire, err
 	})
+}
+
+// launch starts a new instance's server and publishes it, returning the
+// instance as an operation response; call it inside use.
+func (p *Provider) launch(ctx context.Context, scope state.Scope, current driver, record instance) (map[string]any, error) {
+	if _, found := p.lookup(scope, record.ID); found {
+		return nil, status.Errorf(codes.AlreadyExists, "Resource '%s' already exists", instanceName(scope, record.ID))
+	}
+	port, err := current.launch(ctx, record.ID, launchSpec{AuthString: record.AuthString, MemoryGB: record.MemorySizeGB})
+	if errors.Is(err, dataplane.ErrExhausted) {
+		return nil, status.Error(codes.ResourceExhausted, "gcp-local: every published data-plane port is in use; delete an instance or widen the range")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("launch the Redis server: %w", err)
+	}
+	record.Port, record.Created = port, p.clock().UTC()
+	if err := p.publish(scope, record); err != nil {
+		_ = current.remove(context.WithoutCancel(ctx), record.ID)
+		return nil, err
+	}
+	return instanceResponse(record.wire(scope)), nil
+}
+
+// paging is the list methods' page sizes and recorded refusals
+// (memorystore-redis-instance-admin records instances.list).
+var paging = provider.Paging{Default: maxPageSize, Max: maxPageSize,
+	InvalidToken: provider.BadRequest("The request was invalid: invalid page token", "pageToken", "invalid page token"),
+	NegativeSize: provider.Invalid("Invalid argument: 'page_size'")}
+
+// operate runs a mutation as a long-running operation: the operation starts
+// before the work and finishes with its response. A refused mutation leaves
+// no operation and returns its error.
+func (p *Provider) operate(scope state.Scope, target, verb string, work func() (map[string]any, error)) (*gateway.RESTResponse, error) {
+	id, err := p.operations.Start(scope, target, verb)
 	if err != nil {
 		return nil, err
 	}
-	return ok(result.wire(scope)), nil
+	response, err := work()
+	if err != nil {
+		_ = p.operations.Delete(scope, id)
+		return nil, err
+	}
+	p.operations.Finish(scope, id, response, nil)
+	return p.operation(scope, id)
 }
 
-// publish stores a new instance and its create operation, then its index reference.
-func (p *Provider) publish(scope state.Scope, record instance) (operation, error) {
+// publish stores a new instance, then its index reference.
+func (p *Provider) publish(scope state.Scope, record instance) error {
 	name := instanceName(scope, record.ID)
-	result := p.newOperation(name, verbCreate, record.wire(scope))
 	if err := p.catalog.With(scope, func(value *catalog) error {
 		value.instances[record.ID] = record.clone()
-		value.remember(result)
 		return nil
 	}); err != nil {
-		return operation{}, fmt.Errorf("store the instance: %w", err)
+		return fmt.Errorf("store the instance: %w", err)
 	}
 	if err := p.index.Put(serviceName, state.Resource{Name: fullName(name), Service: serviceName, Kind: "instance",
 		Parent: provider.ProjectResource(scope.Project), Scope: scope}); err != nil {
 		_ = p.catalog.With(scope, func(value *catalog) error {
 			delete(value.instances, record.ID)
-			value.operations = value.operations[:len(value.operations)-1]
 			return nil
 		})
-		return operation{}, fmt.Errorf("index the instance: %w", err)
+		return fmt.Errorf("index the instance: %w", err)
 	}
-	return result, nil
+	return nil
 }
 
 // lookup copies one instance record.
@@ -143,15 +167,15 @@ func (p *Provider) list(ctx context.Context, request *gateway.RESTRequest, scope
 		return nil, err
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
-	start, end, next, err := page(request.Query, len(records))
+	page, next, err := provider.Page(records, request.Query, paging, gap)
 	if err != nil {
 		return nil, err
 	}
-	items := make([]map[string]any, 0, end-start)
-	for _, record := range records[start:end] {
+	items := make([]map[string]any, 0, len(page))
+	for _, record := range page {
 		items = append(items, record.wire(scope))
 	}
-	return ok(listBody("instances", items, next)), nil
+	return ok(provider.ListBody("instances", items, next)), nil
 }
 
 // patch applies the masked fields; a memory change resizes the running server.
@@ -165,115 +189,74 @@ func (p *Provider) patch(ctx context.Context, request *gateway.RESTRequest, scop
 		return nil, err
 	}
 	id := request.Path[pathInstance]
-	var result operation
-	err = p.use(ctx, scope, func(ctx context.Context, current driver) error {
-		record, found := p.lookup(scope, id)
-		if !found {
-			return notFound(instanceName(scope, id))
-		}
-		updated, err := applyPatch(record, body, paths)
-		if err != nil {
-			return err
-		}
-		if updated.MemorySizeGB != record.MemorySizeGB {
-			if err := current.resize(ctx, id, updated.MemorySizeGB); err != nil {
-				return fmt.Errorf("resize the Redis server: %w", err)
+	return p.operate(scope, instanceName(scope, id), verbUpdate, func() (map[string]any, error) {
+		var wire map[string]any
+		err := p.use(ctx, scope, func(ctx context.Context, current driver) error {
+			record, found := p.lookup(scope, id)
+			if !found {
+				return notFound(instanceName(scope, id))
 			}
-		}
-		result = p.newOperation(instanceName(scope, id), verbUpdate, updated.wire(scope))
-		return p.catalog.With(scope, func(value *catalog) error {
-			value.instances[id] = updated.clone()
-			value.remember(result)
-			return nil
+			updated, err := applyPatch(record, body, paths)
+			if err != nil {
+				return err
+			}
+			if updated.MemorySizeGB != record.MemorySizeGB {
+				if err := current.resize(ctx, id, updated.MemorySizeGB); err != nil {
+					return fmt.Errorf("resize the Redis server: %w", err)
+				}
+			}
+			wire = instanceResponse(updated.wire(scope))
+			return p.catalog.With(scope, func(value *catalog) error {
+				value.instances[id] = updated.clone()
+				return nil
+			})
 		})
+		return wire, err
 	})
-	if err != nil {
-		return nil, err
-	}
-	return ok(result.wire(scope)), nil
 }
 
 // remove stops the instance's server, then drops its metadata and reference.
 func (p *Provider) remove(ctx context.Context, id string, scope state.Scope) (*gateway.RESTResponse, error) {
-	var result operation
-	err := p.use(ctx, scope, func(ctx context.Context, current driver) error {
-		if _, found := p.lookup(scope, id); !found {
-			return notFound(instanceName(scope, id))
-		}
-		if err := current.remove(ctx, id); err != nil {
-			return fmt.Errorf("stop the Redis server: %w", err)
-		}
-		name := instanceName(scope, id)
-		result = p.newOperation(name, verbDelete, nil)
-		if err := p.catalog.With(scope, func(value *catalog) error {
-			delete(value.instances, id)
-			value.remember(result)
+	name := instanceName(scope, id)
+	return p.operate(scope, name, verbDelete, func() (map[string]any, error) {
+		err := p.use(ctx, scope, func(ctx context.Context, current driver) error {
+			if _, found := p.lookup(scope, id); !found {
+				return notFound(name)
+			}
+			if err := current.remove(ctx, id); err != nil {
+				return fmt.Errorf("stop the Redis server: %w", err)
+			}
+			if err := p.catalog.With(scope, func(value *catalog) error {
+				delete(value.instances, id)
+				return nil
+			}); err != nil {
+				return fmt.Errorf("remove the instance: %w", err)
+			}
+			if err := p.index.Remove(serviceName, scope, fullName(name)); err != nil {
+				return fmt.Errorf("unindex the instance: %w", err)
+			}
 			return nil
-		}); err != nil {
-			return fmt.Errorf("remove the instance: %w", err)
-		}
-		if err := p.index.Remove(serviceName, scope, fullName(name)); err != nil {
-			return fmt.Errorf("unindex the instance: %w", err)
-		}
-		return nil
+		})
+		return map[string]any{"@type": emptyType}, err
 	})
-	if err != nil {
-		return nil, err
-	}
-	return ok(result.wire(scope)), nil
 }
 
-func (p *Provider) operation(ctx context.Context, id string, scope state.Scope) (*gateway.RESTResponse, error) {
-	var body map[string]any
-	err := p.use(ctx, scope, func(context.Context, driver) error {
-		return p.catalog.With(scope, func(value *catalog) error {
-			for _, record := range value.operations {
-				if record.ID == id {
-					body = record.wire(scope)
-					return nil
-				}
-			}
-			return notFound(provider.OperationName(scope, id))
-		})
-	})
+// operation renders one operation of the scope.
+func (p *Provider) operation(scope state.Scope, id string) (*gateway.RESTResponse, error) {
+	body, err := p.operations.Get(scope, id)
 	if err != nil {
 		return nil, err
 	}
 	return ok(body), nil
 }
 
-func (p *Provider) operations(ctx context.Context, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	if request.Query.Get("filter") != "" {
-		return nil, gap("operations.list filter")
-	}
-	var items []map[string]any
-	var next string
-	err := p.use(ctx, scope, func(context.Context, driver) error {
-		return p.catalog.With(scope, func(value *catalog) error {
-			start, end, token, err := page(request.Query, len(value.operations))
-			if err != nil {
-				return err
-			}
-			for _, record := range value.operations[start:end] {
-				items = append(items, record.wire(scope))
-			}
-			next = token
-			return nil
-		})
-	})
+// listOperations renders one page of the scope's operations in creation order.
+func (p *Provider) listOperations(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	body, err := p.operations.List(scope, request.Query, paging, gap)
 	if err != nil {
 		return nil, err
 	}
-	return ok(listBody("operations", items, next)), nil
-}
-
-// newOperation records a completed operation at the provider clock.
-func (p *Provider) newOperation(target, verb string, response map[string]any) operation {
-	now := p.clock().UTC()
-	raw := make([]byte, 8)
-	_, _ = rand.Read(raw)
-	id := "operation-" + strconv.FormatInt(now.UnixMilli(), 10) + "-" + hex.EncodeToString(raw)
-	return operation{ID: id, Target: target, Verb: verb, Created: now, Ended: now, Response: response}
+	return ok(body), nil
 }
 
 // newAuthString returns a fresh UUID-shaped AUTH string.

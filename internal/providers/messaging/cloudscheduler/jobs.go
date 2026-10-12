@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/url"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -90,14 +90,13 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest) (*ga
 	return nil, gap("this method is not implemented")
 }
 
-// decodeJob reads a REST job body. Unknown fields are refused, as GCP does.
+// decodeJob reads a REST job body, refusing names and values GCP's
+// transcoder refuses (recording cloudscheduler-job-lifecycle). App Engine
+// targets are a coverage gap.
 func decodeJob(body []byte) (*schedulerpb.Job, error) {
 	job := &schedulerpb.Job{}
-	if len(body) == 0 {
-		return job, nil
-	}
-	if err := protojson.Unmarshal(body, job); err != nil {
-		return nil, provider.Invalid("Invalid job: " + err.Error())
+	if err := provider.DecodeProto(body, "job", job, gap, "appEngineHttpTarget"); err != nil {
+		return nil, err
 	}
 	return job, nil
 }
@@ -151,17 +150,19 @@ func (p *Provider) createJob(call gateway.Call, request *gateway.RESTRequest, sc
 		if document, renderErr = render(job); renderErr != nil {
 			return renderErr
 		}
+		// The job and its index entry arrive together, so authorize finds
+		// every stored job indexed.
+		if err := p.index.Put(serviceName, state.Resource{
+			Name: jobResource(scope.Project, location, id), Service: serviceName, Kind: "job",
+			Parent: provider.ProjectResource(scope.Project), Scope: scope,
+		}); err != nil {
+			return fmt.Errorf("index the job: %w", err)
+		}
 		s.jobs[key] = record
 		return nil
 	})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // status errors carry the wire status
-	}
-	if err := p.index.Put(serviceName, state.Resource{
-		Name: jobResource(scope.Project, location, id), Service: serviceName, Kind: "job",
-		Parent: provider.ProjectResource(scope.Project), Scope: scope,
-	}); err != nil {
-		return nil, fmt.Errorf("index the job: %w", err)
+		return nil, err //nolint:wrapcheck // a wire status or the wrapped index error
 	}
 	p.launch(scope, key)
 	return &gateway.RESTResponse{JSON: document}, nil
@@ -227,75 +228,41 @@ func (p *Provider) resume(record *jobRecord) error {
 	return nil
 }
 
-// listJobs returns one page of the location's jobs in name order. The page
-// token is the offset of the next page.
+// paging is ListJobs' page sizes and recorded refusals.
+var paging = provider.Paging{Default: maxPageSize, Max: maxPageSize,
+	InvalidToken: provider.Invalid("Invalid page_token"), NegativeSize: provider.Invalid("ListJobsRequest.pageSize cannot be negative.")}
+
+// listJobs returns one page of the location's jobs in name order.
 func (p *Provider) listJobs(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	size, offset, err := pageWindow(request.Query.Get("pageSize"), request.Query.Get("pageToken"))
-	if err != nil {
-		return nil, err
-	}
-	var jobs []*schedulerpb.Job
-	total := 0
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		jobs, total = locationPage(s, request.Path["location"], offset, size)
+	location := request.Path["location"]
+	var items []map[string]any
+	var next string
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		keys := make([]string, 0, len(s.jobs))
+		for key := range s.jobs {
+			if strings.HasPrefix(key, location+"/") {
+				keys = append(keys, key)
+			}
+		}
+		slices.Sort(keys)
+		page, token, err := provider.Page(keys, request.Query, paging, gap)
+		if err != nil {
+			return err
+		}
+		for _, key := range page {
+			document, err := render(s.jobs[key].job)
+			if err != nil {
+				return err
+			}
+			items = append(items, document)
+		}
+		next = token
 		return nil
 	})
-	items := make([]any, 0, len(jobs))
-	for _, job := range jobs {
-		document, err := render(job)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, document)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
 	}
-	response := map[string]any{}
-	if len(items) > 0 {
-		response["jobs"] = items
-	}
-	if offset+size < total {
-		response["nextPageToken"] = strconv.Itoa(offset + size)
-	}
-	return &gateway.RESTResponse{JSON: response}, nil
-}
-
-// locationPage copies one page of a location's jobs in name order and counts
-// them all; call it under the scope lock.
-func locationPage(s *scopeState, location string, offset, size int) ([]*schedulerpb.Job, int) {
-	keys := make([]string, 0, len(s.jobs))
-	for key := range s.jobs {
-		if strings.HasPrefix(key, location+"/") {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	var page []*schedulerpb.Job
-	for i := offset; i < len(keys) && i < offset+size; i++ {
-		page = append(page, proto.CloneOf(s.jobs[keys[i]].job))
-	}
-	return page, len(keys)
-}
-
-// pageWindow validates the page size (default and maximum 500) and token.
-func pageWindow(sizeText, token string) (int, int, error) {
-	size := maxPageSize
-	if sizeText != "" {
-		parsed, err := strconv.Atoi(sizeText)
-		if err != nil || parsed < 0 {
-			return 0, 0, provider.Invalid("Invalid pageSize " + sizeText)
-		}
-		if parsed > 0 && parsed < maxPageSize {
-			size = parsed
-		}
-	}
-	offset := 0
-	if token != "" {
-		parsed, err := strconv.Atoi(token)
-		if err != nil || parsed < 0 {
-			return 0, 0, provider.Invalid("Invalid pageToken")
-		}
-		offset = parsed
-	}
-	return size, offset, nil
+	return &gateway.RESTResponse{JSON: provider.ListBody("jobs", items, next)}, nil
 }
 
 // deleteJob removes one job and stops its worker. GCP returns an empty body.

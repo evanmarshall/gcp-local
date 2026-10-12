@@ -11,6 +11,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from gcp_validation.config import Target
+from gcp_validation.errors import detailed
 from gcp_validation.evidence import Inconclusive, now
 from gcp_validation.live_rest import LiveScope, Observations, OwnedRun, Response, RestClient
 from gcp_validation.sandbox import Sandbox
@@ -209,10 +210,11 @@ def observe_lifecycle(fixture: JobsFixture, snapshot: object, created: Response,
                                    'schedule_time_is_next': is_next(created.json(), 0, 0),
                                    'user_update_time_set': parse_time(
                                        created.json().get('userUpdateTime')) is not None})
-    snapshot.match('denied-get', observe.error(fixture.call('GET', fixture.job, actor='denied')))
+    denied_get = fixture.call('GET', fixture.job, actor='denied')
+    snapshot.match('denied-get', detailed(observe, denied_get))
     denied = fixture.create(fixture.topic + '-denied', fixture.pubsub_body(), actor='denied')
-    snapshot.match('denied-create', observe.error(denied))
-    snapshot.match('denied-run', observe.error(fixture.run(fixture.job, actor='denied')))
+    snapshot.match('denied-create', detailed(observe, denied))
+    snapshot.match('denied-run', detailed(observe, fixture.run(fixture.job, actor='denied')))
     snapshot.match('fetched', observe.select(fixture.call('GET', fixture.job), JOB_FIELDS))
     listed = client.request('fixture', 'GET', f'{fixture.parent}/jobs', timeout=fixture.remaining())
     names = [job.get('name', '') for job in listed.json().get('jobs', [])]
@@ -258,6 +260,46 @@ def observe_http_targets(fixture: JobsFixture, snapshot: object, observe: Observ
     return http_job
 
 
+def observe_lists(fixture: JobsFixture, snapshot: object, observe: Observations) -> None:
+    """Observe list order and paging over the two owned jobs, and refused page parameters."""
+    path = f'{fixture.parent}/jobs'
+
+    def listing(**query: str) -> Response:
+        return fixture.client.request('fixture', 'GET', path, query=query or None,
+                                      timeout=fixture.remaining())
+
+    # Other jobs may share the sandbox location; only the owned pair's order is
+    # recorded. The Pub/Sub job was created first and sorts last by name.
+    names = [job.get('name', '') for job in listing().json().get('jobs', [])]
+    owned = [observe.text(name.rsplit('/', 1)[-1]) for name in names
+             if name.rsplit('/', 1)[-1] in (fixture.job, fixture.topic + '-http')]
+    first = listing(pageSize='1')
+    token = first.json().get('nextPageToken', '')
+    second = listing(pageSize='1', pageToken=token)
+    snapshot.match('list-paged', {
+        'owned_order': owned, 'first_status': first.status,
+        'first_count': len(first.json().get('jobs', [])), 'first_has_next': bool(token),
+        'second_status': second.status, 'second_count': len(second.json().get('jobs', []))})
+    snapshot.match('list-invalid-token', detailed(observe, listing(pageToken='not-a-page-token')))
+    snapshot.match('list-negative-size', detailed(observe, listing(pageSize='-1')))
+
+
+def observe_decoding(fixture: JobsFixture, snapshot: object, observe: Observations) -> None:
+    """Observe refused bodies: unknown names at two depths and a mistyped value.
+
+    Each reuses a job ID the run already owns; a refused creation leaves nothing.
+    """
+    body = fixture.pubsub_body()
+    unknown = fixture.create(fixture.topic + '-cron', {**body, 'unknownField': 'x'})
+    snapshot.match('unknown-field', detailed(observe, unknown))
+    nested = {**body, 'pubsubTarget': {**body['pubsubTarget'], 'unknownField': 'x'}}
+    snapshot.match('unknown-nested-field',
+                   detailed(observe, fixture.create(fixture.topic + '-zone', nested)))
+    mistyped = {**body, 'retryConfig': {'retryCount': 'many'}}
+    snapshot.match('mistyped-field',
+                   detailed(observe, fixture.create(fixture.topic + '-oidc', mistyped)))
+
+
 def run_scenario(fixture: JobsFixture, snapshot: object, created: Response) -> None:
     """Make the same selected observations in local, recording, and revalidation runs."""
     client = fixture.client
@@ -270,6 +312,8 @@ def run_scenario(fixture: JobsFixture, snapshot: object, created: Response) -> N
     snapshot.match('attempted', {'fields': sorted(attempted), 'state': attempted.get('state'),
                                  'status': observe.value(attempted.get('status'))})
     http_job = observe_http_targets(fixture, snapshot, observe)
+    observe_lists(fixture, snapshot, observe)
+    observe_decoding(fixture, snapshot, observe)
     for label, job in (('deleted-pubsub', fixture.job), ('deleted-http', http_job)):
         deleted = fixture.call('DELETE', job)
         snapshot.match(label, {'http_status': deleted.status, 'body': deleted.json()})

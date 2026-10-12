@@ -81,11 +81,15 @@ linters:
       # gRPC status errors carry the wire status the peer must read, and context
       # cancellation/deadline must stay comparable with errors.Is, so wrapping
       # any of these would itself be the defect. The shared provider package's
-      # Invalid, NotFound, and DecodeObject return such status errors too. Every
-      # other returned error is wrapped with diagnostic context.
+      # request, list, authorization, and operation helpers return such status
+      # errors too (docs/architecture/state-and-backends.md#provider-helpers).
+      # Every other returned error is wrapped with diagnostic context.
       ignore-sig-regexps:
         - 'status\.(Error|Errorf)\(c '
-        - 'internal/providers/provider\.(Invalid|NotFound|DecodeObject)\('
+        - 'internal/providers/provider\.(Invalid|NotFound|DecodeObject|DecodeProto|DecodeJSON|ErrorInfo|FieldViolation)\('
+        - 'internal/providers/provider\.(Page|Nearest)\['
+        - 'internal/providers/provider\.Gate\)\.(Check|Denial)\('
+        - 'internal/providers/provider\.Operations\)\.(Start|Get|List|Cancel|Delete|Wait|Reset)\('
         # Pub/Sub request validation and schema rules return the INVALID_ARGUMENT,
         # FAILED_PRECONDITION, and coverage-gap statuses clients read on the wire;
         # wrapping them would change the wire status message.

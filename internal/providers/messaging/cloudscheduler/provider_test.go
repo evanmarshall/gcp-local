@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -311,9 +312,11 @@ func TestHTTPTargetDefaultsAndPaging(t *testing.T) {
 		"attemptDeadline": "180s", "retryConfig": nil,
 	})
 	h.create("second", map[string]any{"schedule": "*/5 * * * *", "pubsubTarget": map[string]any{"topicName": "projects/" + testProject + "/topics/t", "attributes": map[string]any{"a": "b"}}})
+	// Jobs list in name order (recorded).
 	code, page := h.call("actor", http.MethodGet, basePath+"?pageSize=1", nil)
-	expect(t, "first page", code, page, 200, map[string]any{"nextPageToken": "1", "jobs": []any{h.get("http")}})
-	code, page = h.call("actor", http.MethodGet, basePath+"?pageSize=1&pageToken=1", nil)
+	token, _ := page["nextPageToken"].(string)
+	expect(t, "first page", code, page, 200, map[string]any{"jobs": []any{h.get("http")}})
+	code, page = h.call("actor", http.MethodGet, basePath+"?pageSize=1&pageToken="+token, nil)
 	expect(t, "second page", code, page, 200, map[string]any{"nextPageToken": nil, "jobs": []any{h.get("second")}})
 }
 
@@ -517,14 +520,12 @@ func TestRefusalsAndTheirMessages(t *testing.T) {
 		message                 string
 	}{
 		{"anonymous", "", http.MethodGet, basePath + "/existing", nil, 401, "Request had invalid authentication credentials."},
-		{"denied get", "stranger", http.MethodGet, basePath + "/existing", nil, 403,
-			"The caller does not have cloudscheduler.jobs.get access to //cloudscheduler.googleapis.com/" + jobName("existing") + "."},
+		{"denied get", "stranger", http.MethodGet, basePath + "/existing", nil, 403, denial("cloudscheduler.jobs.get", jobName("existing"))},
+		{"denied get of a missing job", "stranger", http.MethodGet, basePath + "/missing", nil, 403, denial("cloudscheduler.jobs.get", jobName("missing"))},
 		{"denied create", "stranger", http.MethodPost, basePath, map[string]any{"name": jobName("x"), "schedule": "* * * * *", "pubsubTarget": topic}, 403,
-			"The caller does not have cloudscheduler.jobs.create access to " + projectName + "."},
-		{"viewer cannot run", "viewer", http.MethodPost, basePath + "/existing:run", map[string]any{}, 403,
-			"The caller does not have cloudscheduler.jobs.run access to //cloudscheduler.googleapis.com/" + jobName("existing") + "."},
-		{"viewer cannot resume", "viewer", http.MethodPost, basePath + "/existing:resume", map[string]any{}, 403,
-			"The caller does not have cloudscheduler.jobs.enable access to //cloudscheduler.googleapis.com/" + jobName("existing") + "."},
+			denial("cloudscheduler.jobs.create", "projects/"+testProject+"/locations/"+testLocation)},
+		{"viewer cannot run", "viewer", http.MethodPost, basePath + "/existing:run", map[string]any{}, 403, denial("cloudscheduler.jobs.run", jobName("existing"))},
+		{"viewer cannot resume", "viewer", http.MethodPost, basePath + "/existing:resume", map[string]any{}, 403, denial("cloudscheduler.jobs.enable", jobName("existing"))},
 		{"actAs", "actor", http.MethodPost, basePath, map[string]any{"name": jobName("a"), "schedule": "* * * * *",
 			"httpTarget": map[string]any{"uri": "https://example.invalid", "oidcToken": map[string]any{"serviceAccountEmail": email("other")}}}, 403,
 			"The caller lacks iam.serviceAccounts.actAs on " + email("other")},
@@ -532,7 +533,13 @@ func TestRefusalsAndTheirMessages(t *testing.T) {
 			"httpTarget": map[string]any{"uri": "https://example.invalid", "oauthToken": map[string]any{"serviceAccountEmail": email("ghost")}}}, 501,
 			"Cloud Scheduler coverage gap: token service accounts must be declared same-project local service accounts"},
 		{"app engine", "actor", http.MethodPost, basePath, map[string]any{"name": jobName("ae"), "schedule": "* * * * *",
-			"appEngineHttpTarget": map[string]any{"relativeUri": "/"}}, 501, "Cloud Scheduler coverage gap: App Engine HTTP targets are not implemented"},
+			"appEngineHttpTarget": map[string]any{"relativeUri": "/"}}, 501, "Cloud Scheduler coverage gap: appEngineHttpTarget is not modeled"},
+		{"unknown field", "actor", http.MethodPost, basePath, map[string]any{"name": jobName("f"), "schedule": "* * * * *", "pubsubTarget": topic, "bogus": 1}, 400,
+			`Invalid JSON payload received. Unknown name "bogus" at 'job': Cannot find field.`},
+		{"mistyped field", "actor", http.MethodPost, basePath, map[string]any{"name": jobName("m"), "schedule": "* * * * *", "pubsubTarget": topic,
+			"retryConfig": map[string]any{"retryCount": "many"}}, 400, `Invalid value at 'job.retry_config.retry_count' (TYPE_INT32), "many"`},
+		{"invalid page token", "actor", http.MethodGet, basePath + "?pageToken=not-a-page-token", nil, 400, "Invalid page_token"},
+		{"negative page size", "actor", http.MethodGet, basePath + "?pageSize=-1", nil, 400, "ListJobsRequest.pageSize cannot be negative."},
 		{"english schedule", "actor", http.MethodPost, basePath, map[string]any{"name": jobName("en"), "schedule": "every 5 minutes", "pubsubTarget": topic}, 501,
 			"Cloud Scheduler coverage gap: English-like schedules are not implemented; use unix-cron"},
 		{"bad cron", "actor", http.MethodPost, basePath, map[string]any{"name": jobName("c"), "schedule": "not a schedule", "pubsubTarget": topic}, 400,
@@ -561,10 +568,28 @@ func TestRefusalsAndTheirMessages(t *testing.T) {
 			t.Errorf("%s = %d %q, want %d %q", tc.name, code, errorMessage(document), tc.code, tc.message)
 		}
 	}
-	if code, document := h.call("actor", http.MethodPost, basePath, map[string]any{"name": jobName("f"), "schedule": "* * * * *", "pubsubTarget": topic, "bogus": 1}); code != 400 ||
-		!strings.HasPrefix(errorMessage(document), "Invalid job: ") {
-		t.Errorf("unknown field = %d %v", code, document)
+}
+
+// TestRefusalDetails matches GCP: denials carry no details; body refusals
+// carry a BadRequest naming the field (recorded).
+func TestRefusalDetails(t *testing.T) {
+	h := newHarness(t, nil)
+	h.create("existing", map[string]any{"schedule": "0 0 1 1 *", "pubsubTarget": map[string]any{"topicName": "projects/" + testProject + "/topics/t", "data": "eA=="}})
+	if _, document := h.call("stranger", http.MethodGet, basePath+"/existing", nil); strings.Contains(fmt.Sprint(document), "details") {
+		t.Errorf("denial details = %v", document)
 	}
+	_, document := h.call("actor", http.MethodPost, basePath, map[string]any{"name": "projects/" + testProject + "/locations/" + testLocation + "/jobs/f", "pubsubTarget": map[string]any{"topicName": "t", "bogus": 1}})
+	wire, _ := document["error"].(map[string]any)
+	details, _ := wire["details"].([]any)
+	if len(details) != 1 || !reflect.DeepEqual(details[0], map[string]any{"@type": "type.googleapis.com/google.rpc.BadRequest", "fieldViolations": []any{map[string]any{
+		"field": "job.pubsub_target", "description": `Invalid JSON payload received. Unknown name "bogus" at 'job.pubsub_target': Cannot find field.`}}}) {
+		t.Errorf("unknown nested field = %v", document)
+	}
+}
+
+// denial is GCP's Cloud Scheduler 403 message (recorded).
+func denial(permission, resource string) string {
+	return `The principal (user or service account) lacks IAM permission "` + permission + `" for the resource "` + resource + `" (or the resource may not exist).`
 }
 
 func TestServiceAgentNeedsTheProjectNumber(t *testing.T) {

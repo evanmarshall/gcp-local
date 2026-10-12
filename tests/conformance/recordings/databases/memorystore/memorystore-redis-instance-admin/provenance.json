@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T18:06:27.834360+00:00",
+  "recorded_at": "2026-10-12T23:12:42.660338+00:00",
   "scenario": {
     "id": "memorystore-redis-instance-admin",
     "service": "redis",
     "transport": "rest-v1",
-    "revision": "c1e3aa48dd95da08df88982d4b5737e70c10273cb0266ef7e473f366c62099eb",
+    "revision": "1ce42050c4971d081b13130127ec966c712f57bb7363e85448725d8fea5b5b77",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "40edc2d5145d3d95b053fe303f351f12d46e6799f89d19ee9cdff386135fd4f3",
+  "snapshot_sha256": "00687b3bb1769744fc502bfbcec9cbc980958084a583a4126cd0d39040ab4b61",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,7 +22,8 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/databases/memorystore.py": "df7a2630a3899da6d5ffa7424f9e1817f4a445376b504198533829cd23eebe68",
+      "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
+      "gcp_validation/services/databases/memorystore.py": "d0838dac9a38dad6d15c36541dd0cb6d5a20d2c3abe89eccf97416172a79e749",
       "gcp_validation/services/compute/networking.py": "a17ea6b5766e41d4b63ab7b5ee3fd2509432d6b003d0973083c04dce3dd193c4",
       "gcp_validation/live_paths.py": "9f6dcf0382d5be6ce5039f0f0bcff07f7c02c9c087deb9f5885f5a9834a5a1d7",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",

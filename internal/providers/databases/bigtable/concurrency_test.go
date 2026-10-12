@@ -51,3 +51,29 @@ func TestConcurrentInstanceRequests(t *testing.T) {
 		}
 	})
 }
+
+// TestTablePolicyRacingRecreate races policy reads against deleting and
+// recreating the table and its instance. Authorization picks the table or its instance and
+// checks it under the scope lock that unindexing holds, so a read sees 200 or
+// 404, never 501 for a target unindexed mid-check.
+func TestTablePolicyRacingRecreate(t *testing.T) {
+	h := newHarness(t)
+	instance := testInstances + "/" + testInstance
+	table := instance + "/tables/" + testTable
+	h.instance()
+	providertest.Hammer(t, h.gate, testToken, 16, 40, func(worker int) []providertest.Request {
+		if worker%4 == 0 {
+			return []providertest.Request{
+				{Method: http.MethodPost, Path: testInstances, Body: createBody(), Want: []int{200, 409}},
+				{Method: http.MethodPost, Path: instance + "/tables", Body: map[string]any{"tableId": testTable}, Want: []int{200, 404, 409}},
+				{Method: http.MethodDelete, Path: table, Want: []int{200, 404}},
+				{Method: http.MethodDelete, Path: instance, Want: []int{200, 404}},
+			}
+		}
+		return []providertest.Request{
+			{Method: http.MethodPost, Path: table + ":getIamPolicy", Body: map[string]any{}, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: instance + ":getIamPolicy", Body: map[string]any{}, Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: table, Want: []int{200, 404}},
+		}
+	})
+}

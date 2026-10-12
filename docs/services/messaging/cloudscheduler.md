@@ -21,14 +21,14 @@ job, _ := client.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: "projects/
 
 | Method | Notes |
 | --- | --- |
-| `create` | Unknown fields are refused. An empty name gets a generated numeric ID. Duplicate names are `ALREADY_EXISTS` |
+| `create` | An unknown or mistyped field is 400 with a `BadRequest` violation, worded as GCP's. An empty name gets a generated numeric ID. Duplicate names are `ALREADY_EXISTS` |
 | `get`, `delete` | Delete stops the job's worker |
-| `list` | `pageSize` (default and maximum 500) and `pageToken` |
+| `list` | Name order. `pageSize` (default and maximum 500) and an opaque `pageToken`; an invalid token or negative size is 400 |
 | `patch` | `updateMask` takes top-level and nested paths (`retryConfig.retryCount`); without a mask every field the body sets is updated. Output fields in the mask are `INVALID_ARGUMENT` |
 | `pause`, `resume` | Pausing a paused job succeeds. A paused job has no `scheduleTime`; resume schedules the next time from now |
 | `run` | Runs the job now, also when paused (not recorded); the response is the job before the run |
 
-Locations, CMEK config, and operations methods return `UNIMPLEMENTED`. An anonymous call gets 401.
+Locations, CMEK config, and operations methods return `UNIMPLEMENTED`. An anonymous call gets 401. A denied call gets 403 `The principal (user or service account) lacks IAM permission "P" for the resource "R" (or the resource may not exist).` with no `details`, as GCP returns; R is the job, or the location for create and list.
 
 ## Schedules and runs
 
@@ -61,7 +61,7 @@ Locations, CMEK config, and operations methods return `UNIMPLEMENTED`. An anonym
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `cloudscheduler-job-lifecycle` | 2026-10-12 | Pub/Sub job create with retry defaults and a New York schedule, denied get, create, and run, list, pause (twice), resume, masked patch, run and its attempt status, an OIDC HTTP job's defaults, OIDC and OAuth without `actAs`, invalid schedule and time zone, delete, 404 |
+| `cloudscheduler-job-lifecycle` | 2026-10-12 | Pub/Sub job create with retry defaults and a New York schedule, denied get, create, and run, list, pause (twice), resume, masked patch, run and its attempt status, an OIDC HTTP job's defaults, OIDC and OAuth without `actAs`, invalid schedule and time zone, delete, 404; denial messages and their empty `details`, list name order and paging, invalid page token and negative page size, unknown and mistyped fields with their `BadRequest` violations |
 
 ```sh
 sh scripts/check/recordings.sh

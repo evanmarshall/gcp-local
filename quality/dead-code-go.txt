@@ -1,3 +1,4 @@
 # Unreachable functions that are deliberate, each with the contract that requires it.
 # Delete the function instead of adding a line here whenever the contract does not hold.
 internal/backend/manager.go: Manager.Reset # lifecycle hook documented in docs/architecture/state-and-backends.md; provider reset tests verify AfterReset clears state only after backend reset succeeds
+internal/providers/provider/operations.go: Operations.Wait # google.longrunning.Operations.WaitOperation for the gRPC operation services adopting the store (#82-#89); TestOperationWaitTimesOutAndCancels verifies it

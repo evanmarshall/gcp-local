@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:58:44.087878+00:00",
+  "recorded_at": "2026-10-12T23:17:14.570731+00:00",
   "scenario": {
     "id": "cloudscheduler-job-lifecycle",
     "service": "cloudscheduler",
     "transport": "rest-v1",
-    "revision": "0372ede70726ca798601c222910b80ca314f1cac1af8ca68b6755a39192cd254",
+    "revision": "2fdfcd8702e0315760a50c7fd561cb22c8cd017b62117a099082b45d25777b0f",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "a91d0af88d01a63c782fd0bdfafb89fca8c1a6a60b63ba52bf8e327d8e992c8a",
+  "snapshot_sha256": "142d68b1ca4acb8d1ab43a55734c361e329a547d4a2e8bce515563c025d497a4",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,7 +22,8 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/messaging/cloudscheduler.py": "e30206d3c25ff7f8a1ca4cb080eea028c950903b7498076b8e988585b20b1ae4",
+      "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
+      "gcp_validation/services/messaging/cloudscheduler.py": "2985fda760e19abfa76f02f9eb163a2d689e1ba7cc7ea488a1582929f2fd717e",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "tests/conformance/messaging/cloudscheduler/conftest.py": "8c2707dd2bef551080073dafe3315bf70d2856e22bcca5d0ab473430460d72a7"

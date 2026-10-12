@@ -89,6 +89,7 @@ type Config struct {
 type Provider struct {
 	index    *state.Index
 	engine   *iam.Engine
+	gate     provider.Gate
 	registry *gateway.Registry
 	scopes   *state.Store[scopeState]
 	config   Config
@@ -111,6 +112,8 @@ func New(_ context.Context, config Config, registry *gateway.Registry, manager *
 	}
 	p := &Provider{
 		index: index, engine: engine, registry: registry, config: config, clock: config.Clock,
+		// GCP's Cloud Scheduler denials carry no details (recorded).
+		gate:   provider.Gate{Engine: engine, Index: index, Message: provider.LacksPermission},
 		scopes: state.NewStore(newScopeState, state.GlobalScope), client: &http.Client{},
 		workers: map[string]context.CancelFunc{},
 	}
@@ -203,39 +206,29 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	decision, target, err := p.authorize(call, request)
 	if err != nil {
-		code := status.Code(err)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, err)
-		}
-		if call.Principal.State != gateway.Authenticated {
-			return provider.WireError(401, "UNAUTHENTICATED", "Request had invalid authentication credentials."), nil
-		}
-		return provider.Denied(decision, target.Name), nil
+		return nil, err
 	}
 	call.Resource = target.Name
 	response, err := p.execute(call, request)
 	if err != nil {
 		return nil, err
 	}
-	response.Headers = http.Header{}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
-// authorize checks the method on its job, whose ancestry is the project; a
-// job that is not indexed authorizes on the project and then reads 404.
+// authorize checks the method on its job, whose ancestry is the project, or
+// on the project for create, list, and a job that isn't indexed (which then
+// reads 404). create and delete change the index under the scope lock that
+// Nearest holds. A denial names the job, or the location for create and list.
 func (p *Provider) authorize(call gateway.Call, request *gateway.RESTRequest) (iam.Decision, iam.Target, error) {
-	project := iam.Target{Name: provider.ProjectResource(request.Path["project"])}
-	target := project
-	if job := request.Path["job"]; job != "" {
-		target = iam.Target{Name: jobResource(request.Path["project"], request.Path["location"], job)}
+	project, location, job := request.Path["project"], request.Path["location"], request.Path["job"]
+	candidates := []string{provider.ProjectResource(project)}
+	resource := "projects/" + project + "/locations/" + location
+	if job != "" {
+		candidates = []string{jobResource(project, location, job), candidates[0]}
+		resource = jobName(project, location, job)
 	}
-	decision, err := p.engine.Authorize(call, target, nil)
-	if target != project && status.Code(err) == codes.Unimplemented {
-		target = project
-		decision, err = p.engine.Authorize(call, target, nil)
-	}
-	return decision, target, err //nolint:wrapcheck // callers read the IAM status code
+	return provider.Nearest(p.gate, p.scopes, provider.ProjectScope(project), call, resource, candidates...)
 }
 
 // authorizeActAs requires iam.serviceAccounts.actAs on a token account before
@@ -257,6 +250,4 @@ func (p *Provider) authorizeActAs(call gateway.Call, project, email string) erro
 }
 
 // gap reports an unimplemented slice boundary.
-func gap(message string) error {
-	return status.Error(codes.Unimplemented, "Cloud Scheduler coverage gap: "+message)
-}
+var gap = provider.CoverageGap("Cloud Scheduler")

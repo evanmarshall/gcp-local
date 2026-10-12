@@ -15,8 +15,10 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/protoadapt"
 )
 
 // WireError renders the Google API error body {"error":{code,status,message}}.
@@ -69,6 +71,37 @@ func NotFound(kind, name string) error {
 // Invalid rejects a request with INVALID_ARGUMENT and the given message.
 func Invalid(message string) error {
 	return status.Error(codes.InvalidArgument, message)
+}
+
+// ErrorInfo returns a status error carrying a google.rpc.ErrorInfo detail,
+// which the gateway renders in the REST error's "details" and gRPC clients
+// read from the status.
+func ErrorInfo(code codes.Code, message, reason, domain string, metadata map[string]string) error {
+	return withDetail(status.New(code, message), &errdetails.ErrorInfo{Reason: reason, Domain: domain, Metadata: metadata})
+}
+
+// FieldViolation rejects a request with INVALID_ARGUMENT whose message is
+// description, carrying a google.rpc.BadRequest that names field, as GCP's
+// JSON transcoder does. field is the request's proto path ("job.retry_config"),
+// or "" when the violation has no field.
+func FieldViolation(field, description string) error {
+	return BadRequest(description, field, description)
+}
+
+// BadRequest rejects a request with INVALID_ARGUMENT and message, carrying a
+// google.rpc.BadRequest whose one violation names field and description.
+func BadRequest(message, field, description string) error {
+	violation := &errdetails.BadRequest_FieldViolation{Field: field, Description: description}
+	return withDetail(status.New(codes.InvalidArgument, message), &errdetails.BadRequest{FieldViolations: []*errdetails.BadRequest_FieldViolation{violation}})
+}
+
+// withDetail attaches one detail. WithDetails fails only for an OK status.
+func withDetail(base *status.Status, detail protoadapt.MessageV1) error {
+	detailed, err := base.WithDetails(detail)
+	if err != nil {
+		return base.Err()
+	}
+	return detailed.Err()
 }
 
 // InstanceName is the relative name of a project-level instance (Spanner, Bigtable).

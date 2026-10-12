@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -26,11 +25,13 @@ type authorizer interface {
 
 // Provider is the authorization gate and metadata owner in front of the Redis servers.
 type Provider struct {
-	manager *backend.Manager
-	index   *state.Index
-	engine  authorizer
-	catalog *state.Store[catalog]
-	clock   func() time.Time
+	manager    *backend.Manager
+	index      *state.Index
+	engine     authorizer
+	gate       provider.Gate
+	catalog    *state.Store[catalog]
+	operations *provider.Operations
+	clock      func() time.Time
 }
 
 // errRolesUnrecorded explains why registration fails without role snapshots.
@@ -44,13 +45,14 @@ func New(ctx context.Context, registry *gateway.Registry, manager *backend.Manag
 	if err := config.validate(ctx); err != nil {
 		return nil, err
 	}
-	return newProvider(registry, manager, index, engine, func(state.Scope) (backend.Backend, error) {
+	return newProvider(registry, manager, index, engine, operationLatency, func(state.Scope) (backend.Backend, error) {
 		return newFleet(config), nil
 	})
 }
 
-// newProvider wires the provider with an arbitrary backend factory (tests use a fake driver).
-func newProvider(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine authorizer, factory func(state.Scope) (backend.Backend, error)) (*Provider, error) {
+// newProvider wires the provider with an operation latency and an arbitrary
+// backend factory (tests use a fake driver).
+func newProvider(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine authorizer, latency time.Duration, factory func(state.Scope) (backend.Backend, error)) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil || factory == nil {
 		return nil, errProviderShape
 	}
@@ -58,7 +60,8 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		return nil, err
 	}
 	p := &Provider{manager: manager, index: index, engine: engine, clock: time.Now,
-		catalog: state.NewStore(newCatalog, validScope)}
+		gate:    provider.Gate{Engine: engine, Message: provider.PermissionDeniedOn},
+		catalog: state.NewStore(newCatalog, validScope), operations: provider.NewOperations(validScope, latency, operationMetadata)}
 	if err := p.registerBackend(factory); err != nil {
 		return nil, err
 	}
@@ -78,7 +81,7 @@ func (p *Provider) registerBackend(factory func(state.Scope) (backend.Backend, e
 		// The manager stops every Redis server in the scope (discarding their
 		// keyspaces) before this hook clears instance metadata and references.
 		AfterReset: func(scope state.Scope) error {
-			if err := p.catalog.Reset(scope); err != nil {
+			if err := errors.Join(p.catalog.Reset(scope), p.operations.Reset(scope)); err != nil {
 				return fmt.Errorf("clear the Memorystore scope: %w", err)
 			}
 			p.index.RemoveScope(serviceName, scope)
@@ -108,9 +111,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, status.Error(codes.Internal, "Invalid Memorystore request")
 	}
 	project, location := request.Path[pathProject], request.Path[pathLocation]
-	decision, err := p.engine.Authorize(call, iam.Target{Name: provider.ProjectResource(project)}, nil)
+	// Memorystore has no instance-level policies; every check is on the
+	// project. A denial names the addressed resource (recorded).
+	decision, err := p.gate.Check(call, iam.Target{Name: provider.ProjectResource(project)}, addressed(call.Method, request.Path))
 	if err != nil {
-		return refusal(call, request, decision, err)
+		return nil, err
 	}
 	scope := state.Scope{Project: project, Location: location}
 	if location == "-" {
@@ -124,41 +129,16 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
-// refusal renders a denied or unauthenticated call. Other authorization
-// failures (unsupported shapes) stay errors and never reach a backend.
-func refusal(call gateway.Call, request *gateway.RESTRequest, decision iam.Decision, err error) (any, error) {
-	switch status.Code(err) {
-	case codes.PermissionDenied:
-		permission := permissions[call.Method]
-		for _, check := range decision.Checks {
-			if !check.Allowed {
-				permission = check.Permission
-				break
-			}
-		}
-		return provider.WireError(http.StatusForbidden, "PERMISSION_DENIED", fmt.Sprintf(
-			"Permission '%s' denied on resource '%s' (or it may not exist).", permission, fullName(addressed(call.Method, request.Path)))), nil
-	case codes.Unauthenticated:
-		return nil, err
-	default:
-		return nil, fmt.Errorf("authorize %s: %w", call.Method, err)
-	}
-}
-
-// addressed names the resource a request acts on, for error messages.
+// addressed names the resource a request acts on, which a denial reports.
 func addressed(method string, path map[string]string) string {
 	scope := state.Scope{Project: path[pathProject], Location: path[pathLocation]}
 	switch method {
 	case methodCreate, methodList:
 		return "projects/" + scope.Project + "/locations/" + scope.Location
-	case methodOperationGet:
+	case methodOperationGet, methodOperationStop, methodOperationDrop:
 		return provider.OperationName(scope, path[pathOperation])
 	case methodOperationList:
 		return "projects/" + scope.Project + "/locations/" + scope.Location
@@ -183,12 +163,25 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.remove(ctx, request.Path[pathInstance], scope)
 	case methodAuthString:
 		return p.authString(ctx, request.Path[pathInstance], scope)
-	case methodOperationGet:
-		return p.operation(ctx, request.Path[pathOperation], scope)
-	case methodOperationList:
-		return p.operations(ctx, request, scope)
 	default:
-		return nil, gap("method " + call.Method)
+		return p.executeOperation(call.Method, request, scope)
+	}
+}
+
+// executeOperation dispatches one authorized operations method.
+func (p *Provider) executeOperation(method string, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	id := request.Path[pathOperation]
+	switch method {
+	case methodOperationGet:
+		return p.operation(scope, id)
+	case methodOperationList:
+		return p.listOperations(request, scope)
+	case methodOperationStop:
+		return empty(p.operations.Cancel(scope, id))
+	case methodOperationDrop:
+		return empty(p.operations.Delete(scope, id))
+	default:
+		return nil, gap("method " + method)
 	}
 }
 

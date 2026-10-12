@@ -1,6 +1,6 @@
 {
   "cloudscheduler-job-lifecycle": {
-    "recorded-date": "12-10-2026, 17:58:44",
+    "recorded-date": "12-10-2026, 23:17:14",
     "recorded-content": {
       "job-created": {
         "attemptDeadline": null,
@@ -44,17 +44,23 @@
       },
       "denied-get": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "The principal (user or service account) lacks IAM permission \"cloudscheduler.jobs.get\" for the resource \"projects/<project>/locations/us-central1/jobs/<topic>-pubsub\" (or the resource may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "denied-create": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "The principal (user or service account) lacks IAM permission \"cloudscheduler.jobs.create\" for the resource \"projects/<project>/locations/us-central1\" (or the resource may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "denied-run": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "The principal (user or service account) lacks IAM permission \"cloudscheduler.jobs.run\" for the resource \"projects/<project>/locations/us-central1/jobs/<topic>-pubsub\" (or the resource may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "fetched": {
@@ -275,6 +281,82 @@
       "invalid-time-zone": {
         "code": 400,
         "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "list-paged": {
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "owned_order": [
+          "<topic>-http",
+          "<topic>-pubsub"
+        ],
+        "second_count": 1,
+        "second_status": 200
+      },
+      "list-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page_token",
+        "status": "INVALID_ARGUMENT"
+      },
+      "list-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "ListJobsRequest.pageSize cannot be negative.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\" at 'job': Cannot find field.",
+                "field": "job"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\" at 'job': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-nested-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\" at 'job.pubsub_target': Cannot find field.",
+                "field": "job.pubsub_target"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\" at 'job.pubsub_target': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "mistyped-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'job.retry_config.retry_count' (TYPE_INT32), \"many\"",
+                "field": "job.retry_config.retry_count"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'job.retry_config.retry_count' (TYPE_INT32), \"many\"",
         "status": "INVALID_ARGUMENT"
       },
       "deleted-pubsub": {

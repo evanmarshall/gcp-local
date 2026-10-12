@@ -33,6 +33,8 @@ const (
 	methodAuthString    = "redis.projects.locations.instances.getAuthString"
 	methodOperationGet  = "redis.projects.locations.operations.get"
 	methodOperationList = "redis.projects.locations.operations.list"
+	methodOperationStop = "redis.projects.locations.operations.cancel"
+	methodOperationDrop = "redis.projects.locations.operations.delete"
 )
 
 // permissions follows the documented Memorystore for Redis access-control rows.
@@ -46,6 +48,8 @@ var permissions = map[string]string{
 	methodAuthString:    "redis.instances.getAuthString",
 	methodOperationGet:  "redis.operations.get",
 	methodOperationList: "redis.operations.list",
+	methodOperationStop: "redis.operations.cancel",
+	methodOperationDrop: "redis.operations.delete",
 }
 
 // Path variables bound by the generated routes.
@@ -69,7 +73,6 @@ const (
 	loopbackHost       = "127.0.0.1"
 	maxBasicMemoryGB   = 300
 	maxPageSize        = 1000
-	maxOperations      = 1000
 	operationType      = "type.googleapis.com/google.cloud.redis.v1.OperationMetadata"
 	instanceType       = "type.googleapis.com/google.cloud.redis.v1.Instance"
 	emptyType          = "type.googleapis.com/google.protobuf.Empty"

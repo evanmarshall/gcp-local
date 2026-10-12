@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from gcp_validation.config import Target
+from gcp_validation.errors import detailed
 from gcp_validation.evidence import Inconclusive, SnapshotCase, now
 from gcp_validation.live_rest import LiveScope, Observations, OwnedRun, Response, RestClient
 from gcp_validation.sandbox import Sandbox
@@ -213,10 +214,14 @@ def run_scenario(fixture: InstanceFixture, snapshot: SnapshotCase, created: Resp
     created = fixture.finish(created)
     snapshot.match('instance-operation', operation(created))
     observe_instance(fixture, observe, snapshot)
-    snapshot.match('denied-read', observe.error(fixture.call('GET', actor='denied')))
+    snapshot.match('denied-read', detailed(observe, fixture.call('GET', actor='denied')))
     snapshot.match('denied-auth-string',
-                   observe.error(fixture.call('GET', '/authString', actor='denied')))
-    snapshot.match('denied-delete', observe.error(fixture.call('DELETE', actor='denied')))
+                   detailed(observe, fixture.call('GET', '/authString', actor='denied')))
+    snapshot.match('denied-delete', detailed(observe, fixture.call('DELETE', actor='denied')))
+    for label, query in (('list-invalid-token', {'pageToken': 'not-a-page-token'}),
+                         ('list-negative-size', {'pageSize': '-1'})):
+        snapshot.match(label, detailed(observe, client.request('fixture', 'GET', fixture.base,
+                                                               query=query)))
     update = {'displayName': 'gcp-local renamed', 'labels': {**fixture.labels, 'stage': 'patched'}}
     patched = fixture.finish(fixture.call('PATCH', query={'updateMask': 'displayName,labels'},
                                           body=update))

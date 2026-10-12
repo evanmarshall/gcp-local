@@ -101,11 +101,9 @@ func parseZone(name string) (*time.Location, error) {
 }
 
 // normalizeTarget requires exactly one supported target and fills its
-// defaults. App Engine targets are a coverage gap.
+// defaults. decodeJob refuses App Engine targets.
 func normalizeTarget(job *schedulerpb.Job, project string) error {
 	switch {
-	case job.GetAppEngineHttpTarget() != nil:
-		return gap("App Engine HTTP targets are not implemented")
 	case job.GetPubsubTarget() != nil:
 		// Pub/Sub targets have no attempt deadline (recorded).
 		job.AttemptDeadline = nil
