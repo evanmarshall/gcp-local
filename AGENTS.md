@@ -30,7 +30,7 @@ Skills live in `.agents/skills/`.
 - **Local identity only** ([local identity](docs/local-identity.md)). Runtime identity config is explicit and private. Never load the real-cloud `.env`, gcloud config, or ambient ADC into the emulator.
 - **No anonymous shortcuts.** Never use an emulator's anonymous SDK mode (`PUBSUB_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST`) or the test-only credential adapter to claim IAM support.
 - **Recordings are evidence.** Update them only through the recorder; never edit expected values to match the emulator. Changing a scenario's `contract_files` invalidates its recording. Keep credentials and sensitive payloads out of fixtures, logs, and Git.
-- **Cloud spending needs explicit scope.** Normal development is local and deterministic. Live recording needs an authorized sandbox and cost scope; permission to edit code isn't that. Never fall back to real GCP when local emulation is missing.
+- **Record scenarios against GCP; it's encouraged.** The owner pre-authorizes live recording in the sandbox project ([sandbox guide](docs/gcp-sandbox.md)) when a run's estimated total cost, including anything that keeps billing afterwards, is under $10. Estimate it before running and report it. Above $10, or outside the sandbox, ask first. Normal development stays local and deterministic; never fall back to real GCP when local emulation is missing.
 - **Separate claims.** Functional support, IAM verification, and analytical reachability are different claims. Report only the checks you ran.
 - **Quality gate.** Never add new Go or Python findings to the `quality/` baselines; fix or delete the code.
 - **Update [coverage](docs/coverage.md)** when behavior changes.

@@ -18,7 +18,13 @@ Start from a concrete scenario and existing recordings. Read [validation](../../
 
 ## Live runs
 
-Confirm the task authorizes cloud execution and names a sandbox and cost scope. If not, build the local test or recorder and report the missing verification. Never touch production or ambient credentials. Cleanup must cover every resource, including after a failed run.
+Recording is encouraged: a scenario that only runs locally is unverified. The owner pre-authorizes live runs that meet all of these:
+
+- Only the sandbox project and its peer project from the [sandbox guide](../../../docs/gcp-sandbox.md), through the recorder with `--gcp-profile` and a live scope file. Never production, never ambient credentials, never organization-level changes.
+- Estimated total cost under $10, including anything that keeps billing after the run (KMS key versions until destruction, instances that outlive cleanup). Estimate before running; report the estimate and what was created.
+- Temporary grants and enabled APIs are listed, and grants are removed after the run. Cleanup covers every resource, including after a failed run; verify nothing is left.
+
+Above $10, or anything else live, ask first. Record, review the candidate for sensitive data, promote, revalidate, then compare locally.
 
 ## Permission probes
 
