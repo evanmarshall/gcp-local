@@ -106,7 +106,7 @@ func TestDenyPrincipalIdentifiers(t *testing.T) {
 	v2 := "principal://iam.googleapis.com/projects/-/serviceAccounts/fixture@project-a.iam.gserviceaccount.com"
 	mustSet(t, engine, object().Parent, iam.Policy{Version: 3, DenyRules: []iam.DenyRule{{DeniedPrincipals: []string{v2}, DeniedPermissions: []string{"storage.googleapis.com/objects.get"}}}})
 	denied(t, engine, read, "a v2 service-account deny did not match:")
-	for _, unsupported := range []string{"principalSet://goog/group/team@example.com", "principalSet://all", "group:team@example.com"} {
+	for _, unsupported := range []string{"principalSet://all", "domain:example.com", "principalSet://goog/cloudIdentityCustomerId/C01"} {
 		_, err := engine.SetPolicy(object().Parent, iam.Policy{Version: 3, DenyRules: []iam.DenyRule{{DeniedPrincipals: []string{unsupported}, DeniedPermissions: []string{testObjectGet}}}})
 		if status.Code(err) != codes.Unimplemented {
 			t.Fatalf("%s was accepted: %v", unsupported, err)

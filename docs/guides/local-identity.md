@@ -38,6 +38,10 @@ Set each client's API endpoint to `http://127.0.0.1:4566` and keep the SDK's nor
 - Tokens die when the core restarts.
 - `GET /_local/identity` reports the caller's state, subject, project, and scopes. Unknown or expired tokens get 401.
 
+## Groups and domains
+
+Group and domain membership is declared in the `-iam-config` file's `directory`, not in `server.json`, and is never read from Google: [groups and domains](../architecture/iam.md#groups-and-domains). An enrolled principal needs no change to be a group member; the directory names it.
+
 ## OAuth scopes
 
 The token service issues only scopes from an allowlist taken from [Google's OAuth 2.0 scope reference](https://developers.google.com/identity/protocols/oauth2/scopes): `cloud-platform` and scopes narrower than it, plus identity scopes that grant no API call. An exchange or metadata token request naming any other scope is refused with `invalid_scope` and the scope's name. An enrollment's `scopes` must come from the list and restrict its tokens to those scopes.

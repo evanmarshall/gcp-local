@@ -109,11 +109,14 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	if policy.PAB != nil && (owner.Service != "resourcemanager" || owner.Kind == "") {
 		return Policy{}, status.Error(codes.InvalidArgument, "A principal access boundary binds only to a project, folder, or organization principal set")
 	}
-	denies, err := e.compileDenies(policy.DenyRules)
+	e.mu.Lock()
+	directory := e.directory
+	e.mu.Unlock()
+	denies, err := e.compileDenies(policy.DenyRules, directory)
 	if err != nil {
 		return Policy{}, err
 	}
-	conditions, err := e.compileBindings(policy.Bindings)
+	conditions, err := e.compileBindings(policy.Bindings, directory)
 	if err != nil {
 		return Policy{}, err
 	}
@@ -167,13 +170,14 @@ const (
 
 // compileDenies validates each deny rule's principals and permissions and
 // compiles its optional denial condition. An identifier or permission the
-// engine cannot match is refused, so a rule never silently fails to deny.
-func (e *Engine) compileDenies(rules []DenyRule) ([]storedDeny, error) {
+// engine cannot match is refused, so a rule never silently fails to deny; a
+// group must be in the directory, which can't change once policies exist.
+func (e *Engine) compileDenies(rules []DenyRule, directory directory) ([]storedDeny, error) {
 	var compiled []storedDeny
 	for _, rule := range rules {
 		for _, principal := range append(append([]string(nil), rule.DeniedPrincipals...), rule.ExceptionPrincipals...) {
-			if !denyPrincipalSupported(principal) {
-				return nil, status.Error(codes.Unimplemented, "Deny principal identifier is unsupported: "+principal)
+			if err := checkDenyPrincipal(principal, directory); err != nil {
+				return nil, err
 			}
 		}
 		denied, err := e.denyPermissions(rule.DeniedPermissions)
@@ -196,6 +200,19 @@ func (e *Engine) compileDenies(rules []DenyRule) ([]storedDeny, error) {
 		compiled = append(compiled, deny)
 	}
 	return compiled, nil
+}
+
+// checkDenyPrincipal refuses a deny principal the engine can't match: a
+// group outside the directory, or an unsupported identifier.
+func checkDenyPrincipal(principal string, directory directory) error {
+	if strings.HasPrefix(principal, "group:") || strings.HasPrefix(principal, groupSetPrefix) {
+		_, err := directory.checkMember(principal)
+		return err
+	}
+	if !denyPrincipalSupported(principal) {
+		return status.Error(codes.Unimplemented, "Deny principal identifier is unsupported: "+principal)
+	}
+	return nil
 }
 
 // denyPrincipalSupported accepts the public set, GCP's v2 user and service
@@ -232,7 +249,7 @@ func (e *Engine) denyPermissions(permissions []string) ([]string, error) {
 
 // compileBindings validates each binding in order and compiles its condition.
 // Guards are keyed by the binding's own position in the policy.
-func (e *Engine) compileBindings(bindings []Binding) ([]conditionGuard, error) {
+func (e *Engine) compileBindings(bindings []Binding, directory directory) ([]conditionGuard, error) {
 	var guards []conditionGuard
 	for index, binding := range bindings {
 		if len(binding.Condition) > 0 {
@@ -245,7 +262,7 @@ func (e *Engine) compileBindings(bindings []Binding) ([]conditionGuard, error) {
 		if _, ok := e.roles[binding.Role]; !ok {
 			return nil, status.Error(codes.Unimplemented, "Role is outside the pinned supported role set")
 		}
-		if err := validateMembers(binding.Members); err != nil {
+		if err := validateMembers(binding.Members, directory); err != nil {
 			return nil, err
 		}
 	}
@@ -274,18 +291,30 @@ func publicOrDeleted(member string) bool {
 	return isPublicMember(member) || deletedMember.MatchString(member)
 }
 
-// validateMembers accepts the public principals and user/service-account emails.
-func validateMembers(members []string) error {
+// validateMembers accepts the public principals, user/service-account
+// emails, and the directory's groups and domains.
+func validateMembers(members []string, directory directory) error {
 	if len(members) == 0 || len(members) > 1000 {
 		return status.Error(codes.InvalidArgument, "Supply one to one thousand members per binding")
 	}
 	for _, member := range members {
-		if publicOrDeleted(member) {
-			continue
+		if err := checkMember(member, directory); err != nil {
+			return err
 		}
-		if (!strings.HasPrefix(member, "user:") && !strings.HasPrefix(member, "serviceAccount:")) || !strings.Contains(member, "@") || strings.ContainsAny(member, " \r\n\t") {
-			return status.Error(codes.Unimplemented, "IAM member type is unsupported")
-		}
+	}
+	return nil
+}
+
+// checkMember validates one allow-policy member.
+func checkMember(member string, directory directory) error {
+	if publicOrDeleted(member) {
+		return nil
+	}
+	if handled, err := directory.checkMember(member); handled {
+		return err
+	}
+	if (!strings.HasPrefix(member, "user:") && !strings.HasPrefix(member, "serviceAccount:")) || !strings.Contains(member, "@") || strings.ContainsAny(member, " \r\n\t") {
+		return status.Error(codes.Unimplemented, "IAM member type is unsupported")
 	}
 	return nil
 }

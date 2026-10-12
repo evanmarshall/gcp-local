@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Sixteen scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
+Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Seventeen scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -107,6 +107,7 @@ All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/
 | `storage-multipart-query-name` | 2026-10-12 | Multipart upload with name in query, generation changes |
 | `storage-python-sdk` | 2026-10-12 | Three upstream Python Storage tests, pagination, guarded cleanup |
 | `storage-iam-conditions` | 2026-10-12 | Version-3 conditional `objectViewer`; conditional binding rejected in a version-1 policy |
+| `storage-iam-directory` | 2026-10-12 | Bucket policy refusals for a nonexistent group (`group:` and `principalSet://goog/group/`) and domain, a `group:` naming a service account, empty group and domain; policy unchanged |
 | `storage-resumable-signed-url` | 2026-10-12 | Resumable session, status query, cancel and a request after it, signed PUT and GET, tampered, expired, and wrong-method URLs |
 | `storage-bucket-policy-only` | 2026-10-12 | Bucket create with only `bucketPolicyOnly`; both names and their `lockedTime` on create and read |
 | `storage-go-client-projection` | 2026-10-12 | The Go client's `projection=full` bucket and object calls, object `patch`, an undefined query option, an invalid projection |

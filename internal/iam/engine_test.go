@@ -84,6 +84,12 @@ const (
 
 func setup(t *testing.T) (*iam.Engine, *state.Index) {
 	t.Helper()
+	return setupWith(t, iam.Directory{})
+}
+
+// setupWith is setup with a local group directory declared before any policy.
+func setupWith(t *testing.T, directory iam.Directory) (*iam.Engine, *state.Index) {
+	t.Helper()
 	index := state.NewIndex()
 	resources := []state.Resource{
 		{Name: org, Service: resourceManagerService, Kind: "organization", Scope: state.Scope{Location: state.Global}},
@@ -102,6 +108,9 @@ func setup(t *testing.T) (*iam.Engine, *state.Index) {
 	}
 	engine, err := iam.New(index)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.SetDirectory(directory); err != nil {
 		t.Fatal(err)
 	}
 	if err := storage.RegisterPermissions(engine); err != nil {
@@ -254,7 +263,7 @@ func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 		{iam.Policy{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{allowed}, Condition: json.RawMessage(testBadCondition)}}}, codes.InvalidArgument},
 		{iam.Policy{Version: 3, Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{allowed}, Condition: json.RawMessage(testBadCondition)}}}, codes.InvalidArgument},
 		{iam.Policy{Bindings: []iam.Binding{{Role: "roles/unknown", Members: []string{allowed}}}}, codes.Unimplemented},
-		{iam.Policy{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{"group:unknown@local"}}}}, codes.Unimplemented},
+		{iam.Policy{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{"principal://goog/subject/a@example.com"}}}}, codes.Unimplemented},
 	} {
 		if _, err := engine.SetPolicy(object().Parent, refused.policy); status.Code(err) != refused.code {
 			t.Fatal(err)
@@ -652,5 +661,143 @@ func TestPlansExportsCopiesForOnePrefix(t *testing.T) {
 	plans[accessPermission].Baseline[0] = "changed"
 	if engine.Plans("secretmanager.")[accessPermission].Baseline[0] != accessPermission {
 		t.Fatal("Plans returned shared rule storage")
+	}
+}
+
+// Directory fixtures: team contains bob and the nested leads group, leads
+// contains the nested service account and team again (a cycle), and only
+// example.com is a declared domain.
+const (
+	teamGroup     = "group:Team@Example.com"
+	leadsGroupSet = "principalSet://goog/group/leads@example.com"
+	bob           = "user:bob@example.com"
+	carol         = "user:carol@example.com"
+	nestedAccount = "serviceAccount:nested@project-a.iam.gserviceaccount.com"
+)
+
+func testDirectory() iam.Directory {
+	return iam.Directory{Domains: []string{"example.com"}, Groups: map[string][]string{
+		"team@example.com":  {"user:Bob@example.com", "group:leads@example.com"},
+		"leads@example.com": {nestedAccount, "group:team@example.com"},
+		"other@example.com": {carol},
+	}}
+}
+
+// group:, principalSet://goog/group/, and domain: members grant through the
+// declared directory, transitively and case-insensitively, and to nobody else.
+func TestDirectoryMembersGrant(t *testing.T) {
+	cases := []struct {
+		member, subject string
+		granted         bool
+	}{
+		{teamGroup, bob, true},
+		{teamGroup, nestedAccount, true},
+		{teamGroup, carol, false},
+		{leadsGroupSet, nestedAccount, true},
+		{leadsGroupSet, bob, true}, // through the team/leads cycle
+		{"domain:Example.com", carol, true},
+		{"domain:example.com", "user:dave@other.example", false},
+		{"domain:example.com", nestedAccount, false},
+	}
+	for _, c := range cases {
+		engine, _ := setupWith(t, testDirectory())
+		set(t, engine, object().Parent, testViewerRole, c.member)
+		decision, err := engine.Authorize(call(testObjectGet, c.subject, testProject), object(), nil)
+		if c.granted && (err != nil || decision.Checks[0].Member != c.member) {
+			t.Fatalf("%s did not grant %s: %+v %v", c.member, c.subject, decision, err)
+		}
+		if !c.granted && status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("%s granted %s: %v", c.member, c.subject, err)
+		}
+	}
+}
+
+// A conditional group binding grants only when its condition holds.
+func TestDirectoryMemberConditions(t *testing.T) {
+	engine, _ := setupWith(t, testDirectory())
+	mustSet(t, engine, object().Parent, iam.Policy{Version: 3, Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{teamGroup},
+		Condition: condition(t, `resource.name.startsWith("projects/_/buckets/bucket-a/objects/public-")`)}}})
+	read := call(testObjectGet, bob, testProject)
+	if _, err := engine.Authorize(read, namedObject("public-a.txt"), nil); err != nil {
+		t.Fatal("conditional group grant:", err)
+	}
+	if _, err := engine.Authorize(read, namedObject("private.txt"), nil); status.Code(err) != codes.PermissionDenied {
+		t.Fatal("condition outside its prefix granted:", err)
+	}
+}
+
+// A deny rule naming a group denies its nested members over an allow; a group
+// exception exempts its members from that rule only.
+func TestDirectoryGroupDeny(t *testing.T) {
+	engine, _ := setupWith(t, testDirectory())
+	set(t, engine, object().Parent, testViewerRole, nestedAccount, bob)
+	deny := iam.DenyRule{DeniedPrincipals: []string{"principalSet://goog/group/team@example.com"}, DeniedPermissions: []string{testObjectGet}}
+	mustSet(t, engine, projectA, projectAdmin(iam.Policy{DenyRules: []iam.DenyRule{deny}}))
+	denied(t, engine, call(testObjectGet, nestedAccount, testProject), "a nested group member escaped the deny:")
+	deny.ExceptionPrincipals = []string{"group:leads@example.com"}
+	mustSet(t, engine, projectA, projectAdmin(iam.Policy{DenyRules: []iam.DenyRule{deny}}))
+	grantedBy(t, engine, call(testObjectGet, nestedAccount, testProject), object().Parent, "group exception")
+	denied(t, engine, call(testObjectGet, carol, testProject), "a non-member was granted:")
+}
+
+// Group and domain members outside the directory are refused at write time
+// with GCP's errors (storage-iam-directory), in allow bindings and deny rules,
+// so no stored policy names a group that grants or denies nothing.
+func TestDirectoryRefusesUnknownMembers(t *testing.T) {
+	engine, _ := setupWith(t, testDirectory())
+	refusals := map[string]string{
+		"group:missing@example.com":             "Group missing@example.com does not exist.",
+		"principalSet://goog/group/missing@x.y": "Group missing@x.y does not exist.",
+		"group:":                                "The reference to a group identity in the IAM policy is empty.",
+		"group:a@p.iam.gserviceaccount.com": `Principal a@p.iam.gserviceaccount.com is of type "serviceAccount". The principal should appear as ` +
+			`"serviceAccount:a@p.iam.gserviceaccount.com". See https://cloud.google.com/iam/help/members/types for additional documentation.`,
+		"domain:missing.invalid": "Domain missing.invalid does not exist.",
+		"domain:":                ` is an invalid domain name because the piece "" does not match the pattern [a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?.`,
+	}
+	for member, message := range refusals {
+		_, err := engine.SetPolicy(object().Parent, iam.Policy{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{member}}}})
+		if status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != message {
+			t.Fatalf("%s: %v", member, err)
+		}
+	}
+	_, err := engine.SetPolicy(projectA, iam.Policy{Version: 3, DenyRules: []iam.DenyRule{{DeniedPrincipals: []string{fixture},
+		ExceptionPrincipals: []string{"group:missing@example.com"}, DeniedPermissions: []string{testObjectGet}}}})
+	if status.Convert(err).Message() != "Group missing@example.com does not exist." {
+		t.Fatal("deny rule with an unknown group:", err)
+	}
+	grantedBy(t, engine, call(testObjectGet, fixture, testProject), projectA, "a refused deny policy was stored")
+}
+
+// The directory is fixed before any policy and must be resolvable.
+func TestDirectoryDeclaration(t *testing.T) {
+	engine, _ := setup(t)
+	if err := engine.SetDirectory(testDirectory()); err == nil {
+		t.Fatal("a directory replaced one that stored policies resolve against")
+	}
+	for _, bad := range []iam.Directory{
+		{Groups: map[string][]string{"team@example.com": {"group:undeclared@example.com"}}},
+		{Groups: map[string][]string{"team@example.com": {"domain:example.com"}}},
+		{Groups: map[string][]string{"team@example.com": {"allUsers"}}},
+		{Groups: map[string][]string{"not-an-email": {bob}}},
+		{Groups: map[string][]string{"agent@p.iam.gserviceaccount.com": {bob}}},
+		{Groups: map[string][]string{"team@example.com": {bob}, "TEAM@example.com": {bob}}},
+		{Domains: []string{"exa mple.com"}},
+	} {
+		fresh, err := iam.New(state.NewIndex())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := fresh.SetDirectory(bad); err == nil {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "iam.json")
+	mustWriteFile(t, path, mustMarshal(t, iam.Config{
+		Resources: []state.Resource{{Name: projectA, Kind: kindProject, Service: resourceManagerService, Scope: state.Scope{Project: testProject, Location: state.Global}}},
+		Policies:  map[string]iam.Policy{projectA: {Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{teamGroup}}}}},
+		Directory: testDirectory(),
+	}))
+	if _, _, err := iam.Load(path); err != nil {
+		t.Fatal("bootstrap with a directory:", err)
 	}
 }

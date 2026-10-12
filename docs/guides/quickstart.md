@@ -92,6 +92,19 @@ The generated developer identity gets these project-level grants. An identity wi
 | Compute networking, Connectivity Tests | `roles/compute.admin`, `roles/networkmanagement.admin` |
 | Cloud Run | `roles/run.admin` |
 
+## Groups and domains
+
+To grant roles to `group:` or `domain:` members, declare them in the environment's `iam.json` (`.gcp-local/environment/iam.json`, or `iam.json` in the `docker run` state directory) and restart with `reset` (`docker restart` for `docker run`). Add a `directory` object next to `resources` and `policies`:
+
+```json
+"directory": {
+  "domains": ["example.com"],
+  "groups": {"developers@example.com": ["serviceAccount:developer@gcp-local-test.iam.gserviceaccount.com"]}
+}
+```
+
+A policy naming an undeclared group or domain is refused, as GCP refuses one that doesn't exist. [Groups and domains](../architecture/iam.md#groups-and-domains) has the rules.
+
 ## Cloud Run in the packaged environment
 
 By default, revisions run as processes inside the container. Only the image `gcp-local/workflow:latest` runs; it maps to the bundled [workflow worker](../../examples/workflow/worker.py), and other images are refused.

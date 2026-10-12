@@ -64,6 +64,9 @@ type Decision struct {
 	conditions conditionContext
 	// publicPrevented is the target's PublicPrevented; never serialized.
 	publicPrevented bool
+	// memberships are the directory members naming the principal; never
+	// serialized.
+	memberships map[string]bool
 }
 
 // Signal records one non-IAM policy family's observation on a decision.
@@ -86,6 +89,7 @@ type Engine struct {
 	decisions   map[string]Decision
 	order       []string
 	signingKeys map[string]map[string]signingKey
+	directory   directory
 }
 
 // errPlanExists rejects a second permission plan for one method.
@@ -184,6 +188,7 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 	decision.publicPrevented = target.PublicPrevented
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	decision.memberships = e.directory.memberships(decision.Principal)
 	finish := func(outcome, reason string, code codes.Code) (Decision, error) {
 		decision.Outcome = outcome
 		decision.Reason = reason
@@ -416,7 +421,7 @@ func (e *Engine) collectChecks(decision *Decision, permissions []string, ancesto
 // bindings for one permission, returning the recorded check.
 func (e *Engine) evaluatePermission(decision *Decision, ancestors []state.Resource, permission string, principal gateway.Principal) Check {
 	check := Check{Permission: permission, Target: decision.Method, Policies: []string{}}
-	if denyMatch := e.denialPhase(ancestors, permission, principal, decision.conditions, &check); denyMatch != "" {
+	if denyMatch := e.denialPhase(ancestors, permission, principal, decision, &check); denyMatch != "" {
 		check.Conditions = append(check.Conditions, "denied by "+denyMatch)
 		return check
 	}
@@ -431,7 +436,7 @@ func (e *Engine) evaluatePermission(decision *Decision, ancestors []state.Resour
 func (e *Engine) matchBindings(check *Check, policyName, permission string, principal gateway.Principal, decision *Decision) {
 	stored := e.policies[policyName]
 	for index, binding := range stored.policy.Bindings {
-		member := firstMember(binding, principal, decision.publicPrevented)
+		member := firstMember(binding, principal, decision)
 		if member == "" || !e.roles[binding.Role][permission] {
 			continue
 		}
@@ -451,14 +456,16 @@ func (e *Engine) matchBindings(check *Check, policyName, permission string, prin
 	}
 }
 
-// firstMember returns the effective member of a binding for the principal.
-// With public principals prevented, only the principal's own member counts.
-func firstMember(binding Binding, principal gateway.Principal, publicPrevented bool) string {
+// firstMember returns the effective member of a binding for the principal:
+// its own member, a public principal, or a directory group or domain that
+// contains it. With public principals prevented, the public ones don't count.
+func firstMember(binding Binding, principal gateway.Principal, decision *Decision) string {
 	for _, member := range binding.Members {
-		if publicPrevented && isPublicMember(member) {
+		if decision.publicPrevented && isPublicMember(member) {
 			continue
 		}
-		if member == memberAllUsers || (principal.State == gateway.Authenticated && (member == principal.Subject || member == memberAllAuthenticated)) {
+		if member == memberAllUsers || (principal.State == gateway.Authenticated && (member == principal.Subject || member == memberAllAuthenticated)) ||
+			decision.memberships[strings.ToLower(member)] {
 			return member
 		}
 	}
@@ -523,12 +530,12 @@ func (e *Engine) Decision(id string) (Decision, bool) {
 // denialPhase evaluates every deny rule at every ancestor independently and
 // returns the first that applies. An exception exempts the principal from its
 // own rule only.
-func (e *Engine) denialPhase(ancestors []state.Resource, permission string, principal gateway.Principal, attributes conditionContext, check *Check) string {
+func (e *Engine) denialPhase(ancestors []state.Resource, permission string, principal gateway.Principal, decision *Decision, check *Check) string {
 	match := ""
 	for _, ancestor := range ancestors {
 		check.Policies = append(check.Policies, ancestor.Name)
 		for index, deny := range e.policies[ancestor.Name].denies {
-			if match == "" && deny.applies(permission, principal, attributes, check) {
+			if match == "" && deny.applies(permission, principal, decision, check) {
 				match = fmt.Sprintf("deny rule %d on %s", index, ancestor.Name)
 			}
 		}
@@ -538,8 +545,8 @@ func (e *Engine) denialPhase(ancestors []state.Resource, permission string, prin
 
 // applies reports whether one deny rule denies the check. GCP applies a rule
 // whose denial condition is true or cannot be evaluated.
-func (d storedDeny) applies(permission string, principal gateway.Principal, attributes conditionContext, check *Check) bool {
-	identities := denyIdentities(principal)
+func (d storedDeny) applies(permission string, principal gateway.Principal, decision *Decision, check *Check) bool {
+	identities := denyIdentities(principal, decision.memberships)
 	if !permissionDenied(permission, d.rule) || !slices.ContainsFunc(d.rule.DeniedPrincipals, identities) {
 		return false
 	}
@@ -550,7 +557,7 @@ func (d storedDeny) applies(permission string, principal gateway.Principal, attr
 	if d.condition == nil {
 		return true
 	}
-	matched, err := d.condition.evaluate(attributes)
+	matched, err := d.condition.evaluate(decision.conditions)
 	switch {
 	case err != nil:
 		check.Conditions = append(check.Conditions, "denial condition "+d.condition.title+" could not be evaluated; the rule applies")
@@ -577,9 +584,10 @@ func permissionDenied(permission string, rule DenyRule) bool {
 const publicPrincipalSet = "principalSet://goog/public:all"
 
 // denyIdentities returns a matcher for the deny-policy identifiers that name
-// the principal: the public set, GCP's v2 identifiers, and the allow-policy
-// member form the local engine also accepts.
-func denyIdentities(principal gateway.Principal) func(string) bool {
+// the principal: the public set, GCP's v2 identifiers, the allow-policy
+// member form the local engine also accepts, and the groups containing it
+// (memberships; deny rules can't name a domain).
+func denyIdentities(principal gateway.Principal, memberships map[string]bool) func(string) bool {
 	names := map[string]bool{publicPrincipalSet: true}
 	if principal.State == gateway.Authenticated {
 		names[principal.Subject] = true
@@ -590,7 +598,7 @@ func denyIdentities(principal gateway.Principal) func(string) bool {
 			names[serviceAccountIdentifierPrefix+email] = true
 		}
 	}
-	return func(identifier string) bool { return names[identifier] }
+	return func(identifier string) bool { return names[identifier] || memberships[strings.ToLower(identifier)] }
 }
 
 // pabViolation enforces principal access boundaries. A service account

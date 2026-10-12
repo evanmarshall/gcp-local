@@ -1,0 +1,84 @@
+{
+  "storage-iam-directory": {
+    "recorded-date": "12-10-2026, 22:55:20",
+    "recorded-content": {
+      "missing-group": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Group gcp-local-missing-group@example.com does not exist.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "missing-group-principal-set": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Group gcp-local-missing-group@example.com does not exist.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "group-names-service-account": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Principal <allowed> is of type \"serviceAccount\". The principal should appear as \"serviceAccount:<allowed>\". See https://cloud.google.com/iam/help/members/types for additional documentation.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "empty-group": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The reference to a group identity in the IAM policy is empty.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "missing-domain": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Domain gcp-local-missing.invalid does not exist.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "empty-domain": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": " is an invalid domain name because the piece \"\" does not match the pattern [a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "policy-unchanged": {
+        "etag_unchanged": true
+      },
+      "denied-caller": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/object.txt' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

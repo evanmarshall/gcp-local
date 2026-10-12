@@ -34,6 +34,8 @@ type Config struct {
 	OrgPolicies map[string]OrgPolicyDeclaration `json:"org_policies,omitempty"`
 	// Perimeters declares VPC-SC perimeters by name over listed resources.
 	Perimeters map[string][]string `json:"vpcsc_perimeters,omitempty"`
+	// Directory declares the local groups and domains policies may name.
+	Directory Directory `json:"directory,omitzero"`
 }
 
 // OrgPolicyDeclaration is one resource's constraint set with a dry-run mode.
@@ -54,6 +56,9 @@ func Load(path string) (*Engine, *state.Index, error) {
 	index := state.NewIndex()
 	engine, err := New(index)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := engine.SetDirectory(config.Directory); err != nil {
 		return nil, nil, err
 	}
 	seen := map[string]bool{}
