@@ -57,8 +57,12 @@ WORKER_IMAGE = "gcp-local/workflow:latest"
 WORKER_EMAIL = "worker@" + PROJECT + ".iam.gserviceaccount.com"
 DEVELOPER = "serviceAccount:developer@" + PROJECT + ".iam.gserviceaccount.com"
 WORKER_SOURCE = str(REPO / "examples/workflow/worker.py")
+# Revisions get a minimal environment, so the worker needs an interpreter that
+# runs without one: setup-python's build needs LD_LIBRARY_PATH and otherwise
+# loads the system libpython against its own stdlib. The worker is stdlib-only.
+WORKER_PYTHON = "/usr/bin/python3" if Path("/usr/bin/python3").exists() else "python3"
 # Matches a revision process, not the core whose flags name the same file.
-WORKER_PROCESS = "^python3 " + WORKER_SOURCE
+WORKER_PROCESS = "^" + WORKER_PYTHON + " " + WORKER_SOURCE
 PGREP = shutil.which("pgrep") or "/usr/bin/pgrep"
 PKILL = shutil.which("pkill") or "/usr/bin/pkill"
 TERRAFORM = REPO / ".tools/terraform/bin/terraform"
@@ -459,7 +463,8 @@ def main() -> int:
     core = start_core(binary, write_iam(secrets_dir), identity_path, port=SERVE_SOCKET,
                       services="storage,pubsub,run,iam", pubsub_java=java,
                       pubsub_jar=str(REPO / ".tools/pubsub/emulator.jar"),
-                      extra_flags=("--run-process", WORKER_IMAGE + "=python3 " + WORKER_SOURCE))
+                      extra_flags=("--run-process",
+                                   WORKER_IMAGE + "=" + WORKER_PYTHON + " " + WORKER_SOURCE))
     try:
         credentials, _ = google.auth.load_credentials_from_file(
             str(adc), scopes=["https://www.googleapis.com/auth/cloud-platform"])
