@@ -10,12 +10,20 @@ second plan must be empty, and destroy must leave no listed resources.
 Revisions run through the process runtime, so the acceptance needs no
 container engine. Terraform only ever sees loopback
 endpoints, a reserved universe domain, and local external-account ADC.
+
+With --packaged, the same workflow runs against the packaged environment
+started with the documented ``scripts/local_env.py up`` (host Docker; the
+revision runs as a process inside the core container). Instead of destroy,
+``reset`` must leave every workflow resource kind empty and no worker running,
+and ``down`` must remove the environment's containers.
 """
 
+import argparse
 import json
 import os
 import secrets
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -24,7 +32,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import google.auth
 import grpc
@@ -54,6 +62,10 @@ WORKER_PROCESS = "^python3 " + WORKER_SOURCE
 PGREP = shutil.which("pgrep") or "/usr/bin/pgrep"
 PKILL = shutil.which("pkill") or "/usr/bin/pkill"
 TERRAFORM = REPO / ".tools/terraform/bin/terraform"
+DOCKER = shutil.which("docker") or "docker"
+# The packaged image's bundled worker command (gcp_local/container.py maps it).
+# A revision's command line starts with it; the core's own flags only name it.
+PACKAGED_WORKER = "/usr/local/bin/python3 -I /opt/gcp-local/workflow/worker.py"
 # How long a refused delivery must stay refused before the grant is restored.
 REFUSAL_WINDOW = 8.0
 
@@ -110,10 +122,17 @@ def write_identity(directory: Path) -> tuple[Path, Path, Path]:
     return server, sdk_adc, private_file(directory, "terraform-adc.json", json.dumps(adc))
 
 
-def api(token: str, method: str, path: str) -> tuple[int, Any]:
+class Local(NamedTuple):
+    """One local core: its loopback HTTP base and the developer's access token."""
+
+    base: str
+    token: str
+
+
+def api(local: Local, method: str, path: str) -> tuple[int, Any]:
     """Issue one authenticated request against the local core."""
-    head = urllib.request.Request(BASE + path, method=method)  # noqa: S310 -- fixed loopback base
-    head.add_header("Authorization", "Bearer " + token)
+    head = urllib.request.Request(local.base + path, method=method)  # noqa: S310 -- loopback base
+    head.add_header("Authorization", "Bearer " + local.token)
     try:
         with urllib.request.urlopen(head, timeout=30) as response:  # noqa: S310 -- fixed loopback base
             payload = response.read()
@@ -184,16 +203,16 @@ def publish(publisher: pubsub_v1.PublisherClient, payload: str, message_id: str)
     assert future.result(timeout=15), "publish failed"
 
 
-def object_status(token: str, message_id: str) -> tuple[int, bytes]:
+def object_status(local: Local, message_id: str) -> tuple[int, bytes]:
     """Read one stored object as the developer."""
-    return api(token, "GET", "/storage/v1/b/" + BUCKET + "/o/" + message_id + ".txt?alt=media")
+    return api(local, "GET", "/storage/v1/b/" + BUCKET + "/o/" + message_id + ".txt?alt=media")
 
 
-def expect_object(token: str, message_id: str, payload: str, deadline: float = 60) -> None:
+def expect_object(local: Local, message_id: str, payload: str, deadline: float = 60) -> None:
     """Wait for the worker to store the message payload."""
     end = time.time() + deadline
     while time.time() < end:
-        code, body = object_status(token, message_id)
+        code, body = object_status(local, message_id)
         if code == 200:
             assert body.decode() == payload, body
             return
@@ -201,42 +220,42 @@ def expect_object(token: str, message_id: str, payload: str, deadline: float = 6
     raise AssertionError("The worker did not store the object: " + message_id)
 
 
-def expect_absent(token: str, message_id: str) -> None:
+def expect_absent(local: Local, message_id: str) -> None:
     """Require the object to stay absent for the whole refusal window."""
     end = time.time() + REFUSAL_WINDOW
     while time.time() < end:
-        code, _ = object_status(token, message_id)
+        code, _ = object_status(local, message_id)
         assert code == 404, "a refused delivery still stored " + message_id
         time.sleep(1)
 
 
 def storage_denial(terraform: Terraform, publisher: pubsub_v1.PublisherClient,
-                   token: str) -> None:
+                   local: Local) -> None:
     """Revoke the worker's object grant, expect no write, restore, expect recovery."""
     terraform.apply(grant_worker_storage=False)
     publish(publisher, "denied-payload", "denied-msg")
-    expect_absent(token, "denied-msg")
+    expect_absent(local, "denied-msg")
     terraform.apply(grant_worker_storage=True)
     # The refused message is redelivered and now succeeds.
-    expect_object(token, "denied-msg", "denied-payload")
+    expect_object(local, "denied-msg", "denied-payload")
     publish(publisher, "restored-payload", "restored-msg")
-    expect_object(token, "restored-msg", "restored-payload")
+    expect_object(local, "restored-msg", "restored-payload")
 
 
 def invoker_denial(terraform: Terraform, publisher: pubsub_v1.PublisherClient,
-                   token: str) -> None:
+                   local: Local) -> None:
     """Revoke run.invoker from the push identity; the push stops at invocation."""
     terraform.apply(grant_push_invoker=False)
     # The worker's Storage grant is intact, so a delivery that reached the
     # worker would store the object: its absence places the refusal at the
     # invocation check, the only boundary this toggle changes.
     publish(publisher, "uninvoked-payload", "uninvoked-msg")
-    expect_absent(token, "uninvoked-msg")
+    expect_absent(local, "uninvoked-msg")
     terraform.apply(grant_push_invoker=True)
-    expect_object(token, "uninvoked-msg", "uninvoked-payload")
+    expect_object(local, "uninvoked-msg", "uninvoked-payload")
 
 
-def assert_empty(token: str) -> None:
+def assert_empty(local: Local, after: str = "destroy") -> None:
     """List every workflow resource kind through the local API; all must be gone."""
     listings = {
         "buckets": "/storage/v1/b?project=" + PROJECT,
@@ -246,13 +265,13 @@ def assert_empty(token: str) -> None:
         "accounts": "/v1/projects/" + PROJECT + "/serviceAccounts",
     }
     for kind, path in listings.items():
-        code, body = api(token, "GET", path)
+        code, body = api(local, "GET", path)
         assert code == 200, kind + " listing failed: " + str(code) + " " + body.decode()[:200]
         document = json.loads(body or b"{}")
         leftovers = [value for key, value in document.items()
                      if isinstance(value, list) and key != "unreachable" and value]
-        assert not leftovers, kind + " survived destroy: " + json.dumps(leftovers)[:400]
-        print("after destroy:", kind, "listing is empty")
+        assert not leftovers, kind + " survived " + after + ": " + json.dumps(leftovers)[:400]
+        print("after " + after + ":", kind, "listing is empty")
 
 
 def assert_no_revisions() -> None:
@@ -278,37 +297,159 @@ def install_tools() -> tuple[Path, str]:
     return binary, java
 
 
-def run_workflow(terraform: Terraform, credentials: google.auth.credentials.Credentials,
-                 sdk_adc: Path) -> None:
-    """Apply, exercise both denial boundaries, re-plan, destroy, and list."""
+def exercise(terraform: Terraform, credentials: google.auth.credentials.Credentials,
+             local: Local, grpc_target: str) -> None:
+    """Deliver one message, then exercise both denial boundaries and re-plan."""
+    # Refresh before the channel exists: the on-demand refresh inside the
+    # gRPC auth interceptor fails and the SDK retries it forever.
+    channel = secure_authorized_channel(
+        credentials, Request(), grpc_target, ssl_credentials=grpc.local_channel_credentials())
+    publisher = pubsub_v1.PublisherClient(transport=PublisherGrpcTransport(channel=channel))
+    publish(publisher, "workflow-payload", "wf-msg-1")
+    expect_object(local, "wf-msg-1", "workflow-payload")
+    print("published message stored by the worker")
+    storage_denial(terraform, publisher, local)
+    print("storage grant removed: write refused; restored: redelivery stored")
+    invoker_denial(terraform, publisher, local)
+    print("invoker grant removed: push refused at invocation; restored: delivered")
+    terraform.assert_no_changes()
+    print("second plan: no changes")
+    channel.close()
+
+
+def provision(terraform: Terraform, sdk_adc: Path) -> None:
+    """Initialize, check the local-only guards, and apply the example."""
     terraform.run("init")
     # The SDK ADC file lacks the local universe marker, so it doubles as a
     # credential the configuration must refuse.
     terraform.assert_local_only(sdk_adc)
     print("guards: variable validation refused a non-loopback endpoint and unmarked ADC")
     terraform.apply()
-    token = credentials.token
-    # Refresh before the channel exists: the on-demand refresh inside the
-    # gRPC auth interceptor fails and the SDK retries it forever.
-    channel = secure_authorized_channel(
-        credentials, Request(), "127.0.0.1:" + str(PUBSUB_GRPC_PORT),
-        ssl_credentials=grpc.local_channel_credentials())
-    publisher = pubsub_v1.PublisherClient(transport=PublisherGrpcTransport(channel=channel))
-    publish(publisher, "workflow-payload", "wf-msg-1")
-    expect_object(token, "wf-msg-1", "workflow-payload")
-    print("published message stored by the worker")
-    storage_denial(terraform, publisher, token)
-    print("storage grant removed: write refused; restored: redelivery stored")
-    invoker_denial(terraform, publisher, token)
-    print("invoker grant removed: push refused at invocation; restored: delivered")
-    terraform.assert_no_changes()
-    print("second plan: no changes")
+
+
+def run_workflow(terraform: Terraform, credentials: google.auth.credentials.Credentials,
+                 sdk_adc: Path) -> None:
+    """Apply, exercise both denial boundaries, re-plan, destroy, and list."""
+    provision(terraform, sdk_adc)
+    local = Local(BASE, credentials.token)
+    exercise(terraform, credentials, local, "127.0.0.1:" + str(PUBSUB_GRPC_PORT))
     terraform.run("destroy", "-auto-approve")
-    assert_empty(token)
+    assert_empty(local)
+
+
+def environment(directory: Path, action: str, *options: str) -> str:
+    """Run one documented packaged-environment command and return its output."""
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts/local_env.py"), "--directory", str(directory),
+         *options, action],
+        capture_output=True, text=True, timeout=1800, check=False)
+    if result.returncode:
+        raise AssertionError("local_env.py " + action + " failed:\n"
+                             + result.stdout[-4000:] + result.stderr[-4000:])
+    return result.stdout
+
+
+def free_port_pair() -> int:
+    """Pick a loopback port whose successor (the gRPC gateway) is also free."""
+    for _ in range(50):
+        with socket.socket() as first:
+            first.bind(("127.0.0.1", 0))
+            port = first.getsockname()[1]
+            if port >= 65535:
+                continue
+            with socket.socket() as second:
+                try:
+                    second.bind(("127.0.0.1", port + 1))
+                except OSError:
+                    continue
+                return port
+    raise AssertionError("No free loopback port pair")
+
+
+def packaged_workers(container: str) -> list[str]:
+    """List the bundled worker processes running inside the core container."""
+    top = subprocess.run([DOCKER, "top", container, "-o", "pid,args"], capture_output=True,
+                         text=True, check=True, timeout=30)
+    rows = [line.split(None, 1) for line in top.stdout.splitlines()[1:]]
+    return [row[1] for row in rows if len(row) == 2 and row[1].startswith(PACKAGED_WORKER)]
+
+
+def packaged_credentials(adc: str) -> google.auth.credentials.Credentials:
+    """Load and refresh the environment's developer ADC."""
+    credentials, _ = google.auth.load_credentials_from_file(
+        adc, scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    credentials.refresh(Request())
+    return credentials
+
+
+def packaged_run(directory: Path, workdir: Path) -> None:
+    """Start the packaged environment, run the workflow, reset, and verify it is empty."""
+    port = free_port_pair()
+    print(environment(directory, "up", "--port", str(port), "--project", PROJECT,
+                      "--workload", WORKER_EMAIL.split("@")[0]).strip().splitlines()[-1])
+    env = json.loads(environment(directory, "env"))
+    base = env["GCP_LOCAL_ENDPOINT"]
+    container = json.loads((directory / "environment.json").read_text())["compose_project"]
+    container += "-gcp-local-1"
+    credentials = packaged_credentials(env["GOOGLE_APPLICATION_CREDENTIALS"])
+    terraform = Terraform(workdir, {
+        "endpoint": base, "credentials_file": env["GCP_LOCAL_TERRAFORM_CREDENTIALS"],
+        "project": PROJECT, "project_number": env["GCP_LOCAL_PROJECT_NUMBER"],
+        "region": REGION, "bucket": BUCKET, "worker_image": WORKER_IMAGE,
+        # The revision runs inside the core container, where the core listens
+        # on the same port the host sees.
+        "worker_storage_endpoint": base + "/storage/v1",
+    })
+    provision(terraform, Path(env["GOOGLE_APPLICATION_CREDENTIALS"]))
+    exercise(terraform, credentials, Local(base, credentials.token),
+             env["GCP_LOCAL_GRPC_ENDPOINT"])
+    assert packaged_workers(container), "the worker revision is not running in the core container"
+    print("the worker revision runs as a process inside the packaged core container")
+    # No destroy: reset alone must discard everything the workflow created.
+    environment(directory, "reset")
+    credentials = packaged_credentials(env["GOOGLE_APPLICATION_CREDENTIALS"])
+    assert_empty(Local(base, credentials.token), after="reset")
+    assert not packaged_workers(container), "a worker revision survived reset"
+    print("after reset: no revision process remains")
+
+
+def packaged() -> int:
+    """Run the workflow against the packaged environment, then reset and tear it down."""
+    subprocess.run([sys.executable, str(REPO / "scripts/install_terraform.py")],
+                   check=True, capture_output=True, text=True)
+    assert TERRAFORM.is_file(), "The pinned Terraform is missing"
+    with tempfile.TemporaryDirectory(prefix="gcp-local-packaged-") as temporary:
+        root = Path(temporary).resolve()
+        root.chmod(stat.S_IRWXU)
+        directory = root / "environment"
+        workdir = root / "terraform"
+        workdir.mkdir()
+        try:
+            packaged_run(directory, workdir)
+        finally:
+            down = subprocess.run(
+                [sys.executable, str(REPO / "scripts/local_env.py"), "--directory",
+                 str(directory), "down"], capture_output=True, text=True, check=False)
+            project = (json.loads((directory / "environment.json").read_text())["compose_project"]
+                       if (directory / "environment.json").exists() else None)
+        assert down.returncode == 0, down.stdout + down.stderr
+        if project:
+            remaining = subprocess.check_output(
+                [DOCKER, "ps", "-aq", "--filter", "label=com.docker.compose.project=" + project],
+                text=True)
+            assert not remaining.strip(), "down left a packaged container"
+    print("after down: no packaged container remains")
+    print("packaged workflow acceptance passed")
+    return 0
 
 
 def main() -> int:
     """Run the Terraform-driven workflow acceptance and clean everything up."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--packaged", action="store_true",
+                        help="run against the packaged Docker environment (scripts/local_env.py)")
+    if parser.parse_args().packaged:
+        return packaged()
     binary, java = install_tools()
     secrets_dir = Path(tempfile.mkdtemp(prefix="gcp-local-workflow-"))
     identity_path, adc, terraform_adc = write_identity(secrets_dir)

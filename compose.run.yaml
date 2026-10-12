@@ -1,21 +1,12 @@
 # Optional override for Cloud Run container execution: mounts the local Docker
 # engine socket so the run provider can start revision containers. Container
 # execution is opt-in because it grants the core access to the host engine.
+# The CLI does not apply it; the packaged default runs the bundled workflow
+# worker image as a process inside the core container.
 services:
   gcp-local:
-    command:
-      - -listen=0.0.0.0:4566
-      - -grpc-listen=0.0.0.0:4567
-      - -services=storage,pubsub,run
-      - -identity-config=/config/identity.json
-      - -iam-config=/config/iam.json
-      - -pubsub-java=/usr/bin/java
-      - -pubsub-jar=/opt/pubsub/emulator.jar
-      - -firestore-java=/usr/bin/java
-      - -firestore-jar=/opt/firestore/emulator.jar
-      - -spanner-emulator=/opt/spanner/emulator_main
-      - -spanner-libraries=/opt/spanner/lib
-      - -run-docker-socket=/var/run/docker.sock
+    environment:
+      GCP_LOCAL_RUN_DOCKER_SOCKET: /var/run/docker.sock
     volumes:
       - type: bind
         source: /var/run/docker.sock

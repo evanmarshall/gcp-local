@@ -1,0 +1,7 @@
+# Source-checkout override: build the runtime image instead of pulling one.
+services:
+  gcp-local:
+    build:
+      context: .
+      args:
+        GCP_LOCAL_VERSION: ${GCP_LOCAL_VERSION:?Use the gcp-local CLI}

@@ -47,6 +47,8 @@ ignore = [
 "skills/**" = ["INP", "T20"]
 "examples/**" = ["D102", "INP", "S101", "S104", "S310", "T20"]
 "conftest.py" = ["INP"]
+# The packaged CLI reports its results on stdout like the scripts it replaces.
+"gcp_local/environment.py" = ["T20"]
 # The vulture whitelist is a declaration file: bare names are undefined loads on purpose.
 "quality/vulture-whitelist.py" = ["ALL"]
 

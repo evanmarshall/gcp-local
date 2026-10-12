@@ -71,6 +71,17 @@ PATTERNS = {
         "google_firestore_",
     ),
 }
+# Detected service names that differ from the runtime's health provider names.
+PROVIDERS = {"cloud-run": "run", "secret-manager": "secretmanager"}
+# Evidence level per detected service; see the checkout's docs/quickstart.md.
+LOCAL_SUPPORT = {
+    "storage": "partial-recorded-slice",
+    "pubsub": "partial-recorded-slice",
+    "secret-manager": "single-recorded-scenario",
+    "bigquery": "single-recorded-scenario",
+    "firestore": "single-recorded-scenario",
+    "cloud-run": "local-only-slice",
+}
 ENDPOINT_VARIABLES = (
     "STORAGE_EMULATOR_HOST",
     "PUBSUB_EMULATOR_HOST",
@@ -206,10 +217,7 @@ def inspect(root: Path) -> dict[str, object]:
             {
                 "name": name,
                 "detected_from": sorted(paths),
-                "local_support": {
-                    "storage": "partial-recorded-slice",
-                    "pubsub": "local-only-slice",
-                }.get(name, "not-implemented"),
+                "local_support": LOCAL_SUPPORT.get(name, "not-implemented"),
             }
             for name, paths in sorted(state["services"].items())
         ],
@@ -240,8 +248,8 @@ def inspect(root: Path) -> dict[str, object]:
             "Review detected services and test commands; "
             "detection is heuristic, not compatibility certification.",
             "Keep local endpoints and real-GCP credential profiles separate.",
-            "Start the pinned packaged runtime for Storage and Pub/Sub; Pub/Sub push and broader "
-            "operations still have no cloud-recorded coverage.",
+            "Start the pinned packaged runtime; most services have one cloud-recorded scenario "
+            "and Cloud Run and Pub/Sub push are locally modeled only.",
             "For approved live tests, configure the explicit sandbox profile and Google Cloud CLI.",
         ],
     }
@@ -275,8 +283,11 @@ def doctor(report: dict, endpoint: str) -> None:
             reason="The selected local runtime is unavailable or returned invalid health data",
         )
         return False
-    required = {item["name"] for item in report["services"]}
-    missing = sorted(required - set(providers))
+    missing = sorted(
+        item["name"]
+        for item in report["services"]
+        if PROVIDERS.get(item["name"], item["name"]) not in providers
+    )
     profile.update(
         status="ready" if not missing else "unsupported-services",
         providers=providers,

@@ -1,33 +1,26 @@
+# The packaged environment. Use the gcp-local CLI (or scripts/local_env.py),
+# which supplies every variable below; compose.build.yaml adds the source build.
 services:
   gcp-local:
-    image: ${GCP_LOCAL_IMAGE:?Use scripts/local_env.py}
-    build:
-      context: .
-      args:
-        GCP_LOCAL_VERSION: ${GCP_LOCAL_VERSION:?Use scripts/local_env.py}
-    user: "${GCP_LOCAL_UID:?Use scripts/local_env.py}:${GCP_LOCAL_GID:?Use scripts/local_env.py}"
-    command:
-      - -listen=0.0.0.0:4566
-      - -grpc-listen=0.0.0.0:4567
-      - -services=storage,pubsub,run
-      - -identity-config=/config/identity.json
-      - -iam-config=/config/iam.json
-      - -pubsub-java=/usr/bin/java
-      - -pubsub-jar=/opt/pubsub/emulator.jar
-      - -firestore-java=/usr/bin/java
-      - -firestore-jar=/opt/firestore/emulator.jar
-      - -spanner-emulator=/opt/spanner/emulator_main
-      - -spanner-libraries=/opt/spanner/lib
+    image: ${GCP_LOCAL_IMAGE:?Use the gcp-local CLI}
+    user: "${GCP_LOCAL_UID:?Use the gcp-local CLI}:${GCP_LOCAL_GID:?Use the gcp-local CLI}"
+    # The launcher (gcp_local/container.py) execs the core with the packaged
+    # service list and backend paths. The core listens on the same port the
+    # entry point publishes, so service URIs are valid both on the host and for
+    # the push agent and revision processes inside this container.
+    command: [serve]
+    environment:
+      GCP_LOCAL_PORT: ${GCP_LOCAL_PORT:?Use the gcp-local CLI}
     networks: [backend]
     volumes:
       - type: bind
-        source: ${GCP_LOCAL_DIRECTORY:?Use scripts/local_env.py}/identity/server.json
+        source: ${GCP_LOCAL_DIRECTORY:?Use the gcp-local CLI}/identity/server.json
         target: /config/identity.json
         read_only: true
         bind:
           create_host_path: false
       - type: bind
-        source: ${GCP_LOCAL_DIRECTORY:?Use scripts/local_env.py}/iam.json
+        source: ${GCP_LOCAL_DIRECTORY:?Use the gcp-local CLI}/iam.json
         target: /config/iam.json
         read_only: true
         bind:
@@ -39,20 +32,22 @@ services:
     tmpfs:
       - /tmp:size=256m,mode=1777
     healthcheck:
-      test: [CMD, /gcp-local, health]
+      test: [CMD, /gcp-local, health, "-endpoint=http://127.0.0.1:${GCP_LOCAL_PORT:?Use the gcp-local CLI}"]
       interval: 1s
       timeout: 4s
-      retries: 20
+      retries: 30
   entrypoint:
     image: haproxy:3.2-alpine@sha256:5d97434a423c2533cfeb42874d45cf6d69a840b60334582dfbfd5008e94c80be
     user: "65532:65532"
     command: [haproxy, -W, -db, -f, /usr/local/etc/haproxy/haproxy.cfg]
+    environment:
+      GCP_LOCAL_PORT: ${GCP_LOCAL_PORT:?Use the gcp-local CLI}
     depends_on:
       gcp-local:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${GCP_LOCAL_PORT:?Use scripts/local_env.py}:4566"
-      - "127.0.0.1:${GCP_LOCAL_GRPC_PORT:?Use scripts/local_env.py}:4567"
+      - "127.0.0.1:${GCP_LOCAL_PORT:?Use the gcp-local CLI}:4566"
+      - "127.0.0.1:${GCP_LOCAL_GRPC_PORT:?Use the gcp-local CLI}:4567"
     volumes:
       - ./packaging/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     networks: [frontend, backend]

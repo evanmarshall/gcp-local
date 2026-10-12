@@ -1,11 +1,11 @@
 ---
 name: gcp-local-setup
-description: Set up an existing GCP application repository for local Storage testing with gcp-local, including SDK inspection, startup, readiness, credentials, and cleanup. Use for application onboarding, not emulator provider implementation.
+description: Set up an existing GCP application repository for local GCP testing with gcp-local, including SDK inspection, startup, readiness, credentials, and cleanup. Use for application onboarding, not emulator provider implementation.
 ---
 
 # GCP application setup
 
-Connect this application to gcp-local while preserving its tools and instructions. The packaged workflow supports a recorded slice of private Cloud Storage, an initial Pub/Sub slice, local ADC, and basic IAM. The Pub/Sub slice carries cloud-recorded pull and authorization evidence only; push, streaming, and broader operations have no recorded fidelity claim. Cloud Run, other providers, and broader Storage operations remain unsupported; inspect the application's actual operations before claiming compatibility.
+Connect this application to gcp-local while preserving its tools and instructions. The packaged environment selects every implemented provider with local ADC and explicit local IAM grants for its developer identity. Evidence differs by service: Storage has several cloud-recorded scenarios, most other services one, and Cloud Run and Pub/Sub push are locally modeled only; the checkout's `docs/quickstart.md` lists them. Packaged Cloud Run runs only the bundled workflow worker image. Inspect the application's actual operations before claiming compatibility.
 
 ## Inspect the application
 
@@ -21,7 +21,7 @@ Inspection alone never contacts a service. Add `--doctor --endpoint http://127.0
 
 ## Start and connect the runtime
 
-Use an available committed gcp-local checkout matching this bundle's recorded source revision, or obtain it when needed. Startup needs Python 3.11+ and a running Docker engine with Compose; no GCP account, global Go installation, or real ADC is needed. From the application:
+Use the `gcp-local` CLI when it is installed (`pip install gcp-local`, available after the first release; it takes the same arguments), or an available committed gcp-local checkout matching this bundle's recorded source revision. Startup needs Python 3.11+ and a running Docker engine with Compose; no GCP account, global Go installation, or real ADC is needed. From the application, with a checkout:
 
 ```sh
 python3 /path/to/gcp-local/scripts/local_env.py --directory "$PWD/.gcp-local/environment" up
@@ -29,13 +29,13 @@ python3 /path/to/gcp-local/scripts/local_env.py --directory "$PWD/.gcp-local/env
 python3 /path/to/gcp-local/scripts/local_env.py --directory "$PWD/.gcp-local/environment" env
 ```
 
-Replace the checkout path with its actual location. Initial `up` accepts `--port` and `--project` before the action; separate applications need separate directories and ports. `env` emits JSON with the generated ADC path, synthetic project, and endpoint. Apply these values only to the application's local test process, preserving credentials in its SDK. Override the Storage API endpoint explicitly; avoid switches that replace credentials with anonymous ones. The verified Python lane uses standard local ADC and `client_options={"api_endpoint": endpoint}`. Terraform ADC is verified only in the emulator's workflow acceptance, with a credential-file variant the packaged environment does not generate; do not set it up from this skill.
+Replace the checkout path with its actual location. Initial `up` accepts `--port`, `--project`, and `--workload ACCOUNT_ID` (Cloud Run workload identities) before the action; separate applications need separate directories and ports. `env` emits JSON with the generated ADC path, synthetic project, and endpoint. Apply these values only to the application's local test process, preserving credentials in its SDK. Override the Storage API endpoint explicitly; avoid switches that replace credentials with anonymous ones. The verified Python lane uses standard local ADC and `client_options={"api_endpoint": endpoint}`. For Terraform, use the `GCP_LOCAL_TERRAFORM_CREDENTIALS` file from `env` with the provider settings in the checkout's `docs/workflow.md`; that configuration is verified only by the emulator's workflow acceptance.
 
-Buckets require an explicit location, uniform access, enforced public access prevention, and zero soft-delete duration. The generated developer identity has an explicit local Storage Admin grant. Read the checkout's `docs/storage.md` for operation limits and `docs/quickstart.md` for an SDK example. Keep `.gcp-local/` ignored; never copy generated credentials or server configuration into this skill.
+Buckets require an explicit location, uniform access, enforced public access prevention, and zero soft-delete duration. The generated developer identity has explicit local project grants for each packaged service. Read the checkout's `docs/storage.md` for operation limits and `docs/quickstart.md` for an SDK example. Keep `.gcp-local/` ignored; never copy generated credentials or server configuration into this skill.
 
-For applications using Pub/Sub, read that checkout's `docs/pubsub.md` before setup. The packaged Compose workflow starts it with a pinned Java 17 runtime, the emulator JAR, and explicit local Pub/Sub grants, and publishes its gRPC gateway on loopback. The verified Python transport preserves ADC using loopback gRPC call credentials; keep `PUBSUB_EMULATOR_HOST` unset. A detected publish/subscribe dependency does not prove push compatibility: current push supports authenticated, same-project, numeric loopback HTTP receivers only.
+For applications using Pub/Sub, read that checkout's `docs/pubsub.md` before setup. The packaged environment starts it with a pinned Java 17 runtime and the emulator JAR, and publishes its gRPC gateway on loopback. The verified Python transport preserves ADC using loopback gRPC call credentials; keep `PUBSUB_EMULATOR_HOST` unset. A detected publish/subscribe dependency does not prove push compatibility: current push supports authenticated, same-project, numeric loopback HTTP receivers only.
 
-Use `logs` for startup failures. `reset` recreates only this environment and discards its in-memory resources and bucket grants; use it when the task calls for a clean environment. `down` removes its containers/networks while retaining private local credentials for reuse. Do not reset another application's directory.
+Use `logs` for startup failures. `reset` recreates only this environment and discards its in-memory resources and resource-level grants; use it when the task calls for a clean environment. `down` removes its containers/networks while retaining private local credentials for reuse. Do not reset another application's directory.
 
 ## Select the validation lane
 
@@ -45,4 +45,4 @@ Report detected services, selected directory/endpoint, readiness, tests actually
 
 ## Portability and updates
 
-Inspection scripts and references travel with this folder. Runtime execution separately needs its checkout and Docker. Agents without automatic discovery can read this SKILL.md directly. `.install.json` records the source revision and managed hashes; the source installer previews updates and refuses to overwrite local modifications. Reconcile edited files explicitly before installing an update.
+Inspection scripts and references travel with this folder. Runtime execution separately needs Docker and the CLI or a checkout. Agents without automatic discovery can read this SKILL.md directly. `.install.json` records the source revision and managed hashes; the source installer previews updates and refuses to overwrite local modifications. Reconcile edited files explicitly before installing an update.

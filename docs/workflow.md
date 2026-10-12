@@ -30,11 +30,27 @@ GCP_LOCAL_JAVA=$(readlink -f "$(command -v java)") python3 scripts/run_isolated.
   .venv-tools/bin/python scripts/smoke_workflow.py
 ```
 
-The packaged environment (`scripts/local_env.py`) does not run this workflow:
-`local_env.py` does not apply the `compose.run.yaml` runtime override, grants its developer only Storage and
-Pub/Sub, and its synthetic project number `000000000001` is refused by the push
-identity contract. `local_env.py reset` is therefore not part of this
-acceptance; the smoke's core is private and discarded at the end.
+## Run it in the packaged environment
+
+The same workflow runs against the [packaged environment](quickstart.md) on
+host Docker (Linux or macOS; Python requirements and Terraform as above, no
+Java or Go on the host):
+
+```sh
+.venv-tools/bin/python scripts/smoke_workflow.py --packaged
+```
+
+It starts a private environment with the documented
+`scripts/local_env.py up --project demo-run --workload worker`, reads `env` for
+the endpoints, project number, and Terraform credential file, and runs the
+apply, delivery, both denial boundaries, and the empty second plan below. The
+worker runs as a process inside the core container: the packaged process
+runtime maps `gcp-local/workflow:latest` to the bundled worker, and the core
+listens on the published port so the service URI is the same on the host and
+inside the container. Instead of `terraform destroy`, it runs `reset` and
+requires the local APIs to list no buckets, topics, subscriptions, Cloud Run
+services, or service accounts and the container to run no worker process; then
+`down` must leave no container.
 
 ## What Terraform creates
 
@@ -81,8 +97,9 @@ workflow:
   local issuer grants `cloud-platform` only, so the example sets
   `scopes = ["https://www.googleapis.com/auth/cloud-platform"]`.
 
-`scripts/create_local_identity.py` and the packaged environment do not yet
-write the Terraform variant.
+`scripts/create_local_identity.py` and the packaged environment write this
+variant as `terraform-adc.json` beside `adc.json`; the packaged `env` command
+names it `GCP_LOCAL_TERRAFORM_CREDENTIALS`.
 
 ## Acceptance sequence
 

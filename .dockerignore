@@ -18,3 +18,9 @@
 !cmd/**
 !internal
 !internal/**
+!gcp_local
+!gcp_local/**
+**/__pycache__
+!examples
+!examples/workflow
+!examples/workflow/worker.py

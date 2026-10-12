@@ -1,4 +1,6 @@
-FROM python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS build
+# The static core is cross-compiled on the build platform, so a multi-architecture
+# release does not compile Go under emulation.
+FROM --platform=$BUILDPLATFORM python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS build
 WORKDIR /src
 COPY scripts/install_go.py scripts/install_go.py
 COPY toolchains/go.json toolchains/go.json
@@ -10,7 +12,8 @@ COPY api api
 COPY cmd cmd
 COPY internal internal
 ARG GCP_LOCAL_VERSION=dev
-RUN go build -trimpath -ldflags="-s -w -X main.version=${GCP_LOCAL_VERSION}" -o /gcp-local ./cmd/gcp-local
+ARG TARGETOS TARGETARCH
+RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w -X main.version=${GCP_LOCAL_VERSION}" -o /gcp-local ./cmd/gcp-local
 
 # Downloads the checksum-pinned official Pub/Sub emulator JAR for the runtime stage.
 FROM python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS pubsub
@@ -34,6 +37,16 @@ COPY scripts/install_spanner.py scripts/install_spanner.py
 COPY toolchains/spanner.json toolchains/spanner.json
 RUN python3 scripts/install_spanner.py
 
+# The launcher (gcp_local/container.py) and the bundled workflow worker need
+# Python. The interpreter and standard library come from the same digest-pinned
+# image as the build stage and link against the runtime base's glibc and
+# OpenSSL; pip and unused modules are dropped, and the library is precompiled
+# because the runtime root filesystem is read-only.
+FROM python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS python
+RUN set -eu; cd /usr/local/lib/python3.12; \
+    rm -rf site-packages/pip* ensurepip idlelib tkinter turtledemo lib2to3 pydoc_data; \
+    python3 -m compileall -q --invalidation-mode unchecked-hash /usr/local/lib/python3.12
+
 # The static runtime binary needs no libc, but the Pub/Sub and Firestore backends
 # are JVMs their providers start lazily, so the image carries the pinned JRE and JARs. Java's
 # temporary directory lives on the Compose tmpfs because the root filesystem is read-only.
@@ -45,5 +58,18 @@ COPY --from=firestore /src/.tools/firestore/emulator.jar /opt/firestore/emulator
 # The Spanner emulator (selected with -services=...,spanner) uses the base image's
 # glibc 2.35, libm, and libgcc_s with its own pinned libstdc++ under /opt/spanner/lib.
 COPY --from=spanner /src/.tools/spanner /opt/spanner
+COPY --from=python /usr/local/lib/ /usr/local/lib/
+COPY --from=python /usr/local/bin/python3.12 /usr/local/bin/python3
+COPY gcp_local /usr/local/lib/python3.12/site-packages/gcp_local
+COPY examples/workflow/worker.py /opt/gcp-local/workflow/worker.py
+RUN set -eu; ldconfig; \
+    python3 -I -m compileall -q --invalidation-mode unchecked-hash /usr/local/lib/python3.12/site-packages/gcp_local; \
+    python3 -I -c "import gcp_local.container, http.server, json, ssl, urllib.request"
 USER 65532:65532
-ENTRYPOINT ["/gcp-local"]
+ENV GCP_LOCAL_PORT=4566
+EXPOSE 4566 4567
+HEALTHCHECK --interval=2s --timeout=4s --retries=30 CMD ["/usr/local/bin/python3", "-I", "-m", "gcp_local.container", "health"]
+# Default: a standalone environment in the /state bind mount (docs/quickstart.md).
+# The Compose environment runs "serve" with read-only configuration mounts.
+ENTRYPOINT ["/usr/local/bin/python3", "-I", "-m", "gcp_local.container"]
+CMD ["standalone"]

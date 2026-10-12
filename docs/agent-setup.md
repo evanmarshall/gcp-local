@@ -1,6 +1,6 @@
 # Agent setup for GCP application repositories
 
-The portable [gcp-local-setup skill](../skills/gcp-local-setup/SKILL.md) is for application onboarding. It is separate from the contributor skills used to implement gcp-local providers. The bundle inspects an application, checks explicit local readiness, and guides agents through the [packaged Storage and Pub/Sub workflow](quickstart.md). Runtime execution uses a separate gcp-local checkout and Docker.
+The portable [gcp-local-setup skill](../skills/gcp-local-setup/SKILL.md) is for application onboarding. It is separate from the contributor skills used to implement gcp-local providers. The bundle inspects an application, checks explicit local readiness, and guides agents through the [packaged environment](quickstart.md). Runtime execution uses Docker with either the `gcp-local` CLI (after the first release) or a separate gcp-local checkout.
 
 From a clean, committed gcp-local checkout, preview the installation into an existing application repository:
 
@@ -29,6 +29,6 @@ python3 .agents/skills/gcp-local-setup/scripts/inspect_repo.py --repo . \
 
 The report lists detected SDK/language references, Terraform resource types, candidate test commands, endpoint variable references, and tool availability. It never executes the application or discovered commands and does not read `.env` or credential files. Only `--doctor --endpoint` performs a bounded health request, with proxies and redirects disabled. Inspection is heuristic, limited to 2,000 selected files of at most 1 MiB each; a truncated report calls for additional agent inspection.
 
-Doctor exit code **2** means the explicit endpoint is unavailable or a detected service is missing. With no endpoint, doctor reports unavailable without network access. A healthy Storage provider gives a ready report for Storage-only applications; unsupported services remain listed. This checks readiness and service availability, not SDK operations or IAM fidelity.
+Doctor exit code **2** means the explicit endpoint is unavailable or a detected service is missing. With no endpoint, doctor reports unavailable without network access. A runtime serving every detected service gives a ready report; services it does not serve remain listed. This checks readiness and service availability, not SDK operations or IAM fidelity.
 
 The bundle includes separate local and live profile templates. The live template contains only empty fields and credential-path inputs, uses the [sandbox profile contract](gcp-sandbox.md), and grants no cloud authorization. An application adapter must explicitly choose its endpoint and identity; a missing local service must never trigger a real-GCP fallback.

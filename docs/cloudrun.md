@@ -30,6 +30,10 @@ here is a cloud-fidelity claim yet (#13 tracks that work).
   executor (`--run-docker-socket`) creates, starts, inspects, waits, stops, and
   removes one container per revision. Hosts without a socket refuse every
   launch; restricted guests develop semantics against the fake runtime.
+- The process runtime (`--run-process IMAGE=COMMAND`) runs mapped images as
+  local processes. The [packaged environment](quickstart.md#cloud-run-in-the-packaged-environment)
+  uses it to run only the bundled workflow worker (`gcp-local/workflow:latest`)
+  inside the core container; other images are refused there.
 - Workload environment: `K_SERVICE`, `K_REVISION`, `K_CONFIGURATION`, `PORT`,
   plus the service's configured plain-text environment variables. Workload
   metadata stays bound to the configured service account; the container gets no

@@ -61,7 +61,7 @@ jobs:
 
   packaged-environment:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,8 +71,12 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-sdk.txt -r requirements-pubsub.txt
       - run: docker compose version
-      - name: Verify startup, local ADC Storage and Pub/Sub, isolated reset, failure, and teardown
+      - name: Verify startup, every packaged service under IAM, isolated reset, docker run, failure, and teardown
         run: python scripts/smoke_environment.py
+      - name: Run the Terraform workflow against the packaged environment, then reset and verify it is empty
+        run: python scripts/smoke_workflow.py --packaged
+      - name: Install the built wheel in a fresh venv and drive its gcp-local CLI
+        run: python scripts/smoke_package.py
 
   workflow-acceptance:
     runs-on: ubuntu-latest

@@ -1,0 +1,53 @@
+# Python distribution of the gcp-local environment CLI. The runtime itself is
+# the Go core inside the Docker image; this package only manages that image
+# with Docker Compose. Release automation: .github/workflows/release.yml.
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gcp-local"
+dynamic = ["version"]
+description = "Start, reset, and stop a private local GCP emulator environment with local ADC and IAM."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Testing",
+]
+
+[project.scripts]
+gcp-local = "gcp_local.environment:main"
+
+[project.urls]
+Homepage = "https://github.com/evanmarshall/gcp-local"
+Documentation = "https://github.com/evanmarshall/gcp-local/blob/main/docs/quickstart.md"
+
+[tool.hatch.version]
+path = "gcp_local/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gcp_local"]
+
+# The CLI starts the published image with the same Compose definition a
+# checkout uses; the wheel carries it as package data.
+[tool.hatch.build.targets.wheel.force-include]
+"compose.yaml" = "gcp_local/data/compose.yaml"
+"packaging/haproxy.cfg" = "gcp_local/data/packaging/haproxy.cfg"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/gcp_local",
+  "/compose.yaml",
+  "/packaging/haproxy.cfg",
+  "/README.md",
+  "/pyproject.toml",
+]
+
+# uv run (the documented repository check) must not install this project.
+[tool.uv]
+managed = false

@@ -20,7 +20,10 @@
     "pubsub_backend": "toolchains/pubsub.json",
     "firestore_backend": "toolchains/firestore.json",
     "bigtable_backend": "third_party/bigtable-bttest/manifest.json",
-    "spanner_backend": "toolchains/spanner.json"
+    "spanner_backend": "toolchains/spanner.json",
+    "launcher": "gcp_local/container.py (serve for Compose, standalone for docker run)",
+    "services": "gcp_local/bootstrap.py SERVICES and DEVELOPER_ROLES",
+    "cloud_run": "process runtime; gcp-local/workflow:latest maps to /opt/gcp-local/workflow/worker.py"
   },
   "pubsub": {
     "image": "eclipse-temurin:17-jre-jammy@sha256:8993f1aed8b25fcea7a7047a7949c1866fa558fc6830d938c22c4f13b26be9d7",
@@ -35,7 +38,7 @@
     "version": "Java 17 (Temurin JRE)",
     "emulator": "toolchains/firestore.json",
     "path": "/opt/firestore/emulator.jar",
-    "purpose": "Checksum-pinned official Firestore emulator 1.19.9 (the newest release that runs on Java 17) the provider starts lazily per project; the packaged -services list does not select firestore by default"
+    "purpose": "Checksum-pinned official Firestore emulator 1.19.9 (the newest release that runs on Java 17) the provider starts lazily per project"
   },
   "spanner": {
     "image": "gcr.io/cloud-spanner-emulator/emulator:1.5.58@sha256:c6f3402f2599684f295a0fdefb6fbbbfb18a0e43e309ff5456ccb452a4570a79",
@@ -58,5 +61,18 @@
       "quality/vulture-whitelist.py"
     ],
     "policy_skill": ".agents/skills/gcp-code-quality/SKILL.md"
+  },
+  "python": {
+    "image": "python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3",
+    "version": "Python 3.12.15",
+    "source": "https://hub.docker.com/_/python",
+    "license": "https://docs.python.org/3/license.html",
+    "files": "/usr/local/lib (stdlib and libpython, precompiled; pip, ensurepip, idlelib, tkinter, turtledemo, lib2to3, pydoc_data removed) and /usr/local/bin/python3",
+    "purpose": "Interpreter for the image launcher and the bundled Cloud Run workflow worker; links against the runtime base's glibc and OpenSSL"
+  },
+  "distribution": {
+    "python": "pyproject.toml (hatchling 1.27.0); the wheel carries compose.yaml and packaging/haproxy.cfg as gcp_local/data",
+    "image": "ghcr.io/evanmarshall/gcp-local:VERSION, linux/amd64 and linux/arm64",
+    "release": ".github/workflows/release.yml"
   }
 }

@@ -15,7 +15,7 @@ python3 scripts/create_local_identity.py \
 bin/gcp-local -identity-config .gcp-local/identity/server.json
 ```
 
-The directory is mode `0700`, and `server.json`, `subject.txt`, and `adc.json` are mode `0600`. The creator refuses an existing destination and accepts only an explicit numeric loopback HTTP endpoint. `.gcp-local/` is ignored by Git. The command prints file paths, never credential contents. Supply the server file only to the core; the application needs only its own ADC/subject files.
+The directory is mode `0700`, and `server.json`, `subject.txt`, `adc.json`, and `terraform-adc.json` (the same ADC marked with the local universe domain for Terraform) are mode `0600`. The creator refuses an existing destination and accepts only an explicit numeric loopback HTTP endpoint. `.gcp-local/` is ignored by Git. The command prints file paths, never credential contents. Supply the server file only to the core; the application needs only its own ADC/subject files.
 
 Set these variables in the application's local test environment:
 
@@ -24,7 +24,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="$PWD/.gcp-local/identity/adc.json"
 export GOOGLE_CLOUD_PROJECT=synthetic-project
 ```
 
-Preserve the application's normal SDK credentials and override the API endpoint to `http://127.0.0.1:4566`. Do not enable an emulator switch that disables credentials. The real-GCP `.env`, gcloud configuration, and sandbox ADC files are separate and are not read by the runtime or this generator. The [portable application skill](agent-setup.md) connects this credential flow to the [packaged Storage workflow](quickstart.md).
+Preserve the application's normal SDK credentials and override the API endpoint to `http://127.0.0.1:4566`. Do not enable an emulator switch that disables credentials. The real-GCP `.env`, gcloud configuration, and sandbox ADC files are separate and are not read by the runtime or this generator. The [portable application skill](agent-setup.md) connects this credential flow to the [packaged environment](quickstart.md).
 
 The ADC profile uses `external_account`, a private file-sourced local subject access token, the local audience `//gcp-local/identity`, and `http://127.0.0.1:4566/v1/token`. This audience deliberately has no GCP project number, so the pinned auth library does not perform cloud project discovery. The project is supplied explicitly. A principal name alone is insufficient to mint a token: the subject credential must match its enrollment. The standard Google auth library performs the token exchange; this local issuer does not validate upstream GCP federation JWT/SAML assertions.
 
@@ -56,7 +56,7 @@ Metadata ID tokens, general service-account impersonation/signing APIs, service-
 | Python 3.11/3.12, google-auth 2.56.2, metadata ADC | Both metadata host/IP overrides; one configured account | Discovery, account binding, controlled expiry, automatic refresh |
 | google-cloud-storage 3.10.1 with either credential flow | Explicit API endpoint and credentials; no anonymous emulator switch | Authenticated list calls to a controlled provider fixture before and after refresh |
 
-These are credential/transport checks, not Storage service conformance or real-GCP token-issuer parity. No Go/Java/Node SDK or Pub/Sub emulator-mode identity certification is claimed yet. The google 8.5.0 Terraform provider accepts this ADC shape only with an added `"universe_domain": "gcp-local.invalid"` and `scopes = [cloud-platform]`; the [workflow acceptance](workflow.md#terraform-authentication) is the only evidence. API unknown/expired/anonymous decisions pass to the shared IAM layer in #7; none is promoted to an administrator.
+These are credential/transport checks, not Storage service conformance or real-GCP token-issuer parity. No Go/Java/Node SDK or Pub/Sub emulator-mode identity certification is claimed yet. The google 8.5.0 Terraform provider accepts this ADC shape only with an added `"universe_domain": "gcp-local.invalid"` (the generated `terraform-adc.json`) and `scopes = [cloud-platform]`; the [workflow acceptance](workflow.md#terraform-authentication), local and packaged, is the only evidence. API unknown/expired/anonymous decisions pass to the shared IAM layer in #7; none is promoted to an administrator.
 
 Ordinary Go tests and the built-process smoke check require no Python SDK packages. The integration test additionally needs `requirements-sdk.txt` and runs only in the Linux isolation launcher, which gives the core and SDK subprocess loopback connectivity and blocks cloud egress. Its clock-control route exists only inside the test, never in the built core:
 

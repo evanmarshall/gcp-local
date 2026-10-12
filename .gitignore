@@ -24,3 +24,5 @@ gha-creds-*.json
 bin/
 
 .gcp-local/
+
+dist/
