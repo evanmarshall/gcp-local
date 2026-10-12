@@ -58,7 +58,7 @@ Get the repository and owner IDs with `gh api repos/OWNER/REPO --jq '{id, owner_
 
 ## CI workflow
 
-The `local-github/manual-storage` WIF provider admits only this repository's immutable IDs, `refs/heads/main`, environment `gcp-conformance`, `workflow_dispatch`, and `cloud-conformance.yml`. Its principal set gets Workload Identity User on each account and Service Usage Consumer on the project, nothing else.
+The `local-github/manual-storage` WIF provider admits only this repository's immutable IDs, `refs/heads/main`, and environment `gcp-conformance`, and only two workflows: `cloud-conformance.yml` on `workflow_dispatch`, and `gcp-drift.yml` on `workflow_dispatch` or `schedule`. Its principal set gets Workload Identity User on each account and Service Usage Consumer on the project, nothing else.
 
 Create the GitHub `gcp-conformance` environment, restricted to branch `main`, with these variables (no secrets): `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_REGION`, `GCP_TEST_WIF_PROVIDER`, `GCP_TEST_SERVICE_ACCOUNT`, `GCP_TEST_FIXTURE_SERVICE_ACCOUNT`, `GCP_TEST_DENIED_SERVICE_ACCOUNT`.
 
@@ -70,3 +70,14 @@ gh workflow run cloud-conformance.yml --ref main -f mode=revalidate
 - Runs `test_storage.py` and `test_storage_authorization.py` within the one-bucket limits.
 - Only manual dispatch triggers it. Concurrent jobs queue; don't record from a host at the same time.
 - It retries manifest cleanup after failures and keeps reports, candidates, and manifests as artifacts for 14 days. After a killed runner, download its manifest and run the [cleanup command](validation.md#interrupted-live-runs).
+
+## Weekly drift job
+
+`gcp-drift.yml` runs every Monday and on dispatch. It revalidates each entry in `.github/drift/plan.json` under its committed scope in `.github/drift/`. Those scopes set `scheduled_runs: true`, which authorizes `revalidate` only. A failing run opens or comments on the `GCP drift detected` issue and keeps reports and manifests as artifacts for 30 days.
+
+```sh
+gh workflow run gcp-drift.yml --ref main
+python scripts/live/drift.py --check   # offline: every planned test and scope exists
+```
+
+The fixture account needs standing setup roles for every planned service, since the job can't add grants. A run costs well under $1.

@@ -7,7 +7,7 @@ Recordings are integration tests. Each conformance scenario runs once against a 
 - **It compares a projection, not the full response.** Each scenario records the fields it selects: mostly HTTP and gRPC status codes, allow/deny outcomes, sorted field-name lists, and a few chosen values. Error messages are compared only for Storage. A match means the emulator returns the same codes, decisions, and selected fields for those requests; other response content is unchecked.
 - **It covers only the requests it sends.** Other options, clients, and call orders are unverified until a scenario sends them ([client compatibility](../coverage.md#client-compatibility) shows which clients are tested).
 - **Provenance is integrity, not authenticity.** `provenance.json` hashes prove a recording wasn't changed after review, not that it came from GCP. Most recordings were made from a developer machine; only the Storage scenarios have a CI recording workflow (`cloud-conformance.yml`).
-- **No drift check.** Recordings aren't re-run against GCP on a schedule, so a GCP behavior change goes unnoticed until someone revalidates.
+- **Drift is checked weekly, for cheap scenarios only.** `gcp-drift.yml` revalidates the scenarios in `.github/drift/plan.json` every Monday and opens a `GCP drift detected` issue on failure. Spanner, Bigtable, Cloud SQL, Memorystore, networking, VM, project IAM, and a few Storage scenarios are excluded; a GCP change there goes unnoticed until someone revalidates.
 - **Permission discovery is thin.** One conclusive probe exists ([permission discovery](permission-discovery.md)). Most Terraform cases are local adaptations, not upstream acceptance tests ([Terraform](terraform-compatibility.md)).
 
 ## Modes

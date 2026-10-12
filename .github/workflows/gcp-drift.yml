@@ -1,0 +1,110 @@
+name: Weekly GCP drift
+
+# Revalidates the cheap recorded scenarios against the sandbox once a week so
+# GCP behavior changes surface as a failing run and an open issue. Revalidate
+# only: the scheduled scopes in .github/drift/ never authorize recording.
+on:
+  schedule:
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gcp-local-live-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: gcp-conformance
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_TEST_WIF_PROVIDER: ${{ vars.GCP_TEST_WIF_PROVIDER }}
+      GCP_TEST_LIVE_SCOPE: 'Weekly drift revalidation of the scenarios in .github/drift/plan.json; each runs under its committed scheduled scope; Storage: us-central1, one temporary bucket, at most 10 objects of 1 MiB; cleanup after each run.'
+      GCP_TEST_SERVICE_ACCOUNT: ${{ vars.GCP_TEST_SERVICE_ACCOUNT }}
+      GCP_TEST_FIXTURE_SERVICE_ACCOUNT: ${{ vars.GCP_TEST_FIXTURE_SERVICE_ACCOUNT }}
+      GCP_TEST_DENIED_SERVICE_ACCOUNT: ${{ vars.GCP_TEST_DENIED_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements/cloud.txt -r requirements/services.txt -r requirements/pubsub.txt
+      - id: fixture
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_TEST_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_TEST_FIXTURE_SERVICE_ACCOUNT }}
+          export_environment_variables: false
+      - id: allowed
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_TEST_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_TEST_SERVICE_ACCOUNT }}
+          export_environment_variables: false
+      - id: denied
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_TEST_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_TEST_DENIED_SERVICE_ACCOUNT }}
+          export_environment_variables: false
+      - name: Prepare explicit credential profile
+        env:
+          GCP_TEST_CREDENTIALS_FILE: ${{ steps.allowed.outputs.credentials_file_path }}
+          GCP_TEST_FIXTURE_CREDENTIALS_FILE: ${{ steps.fixture.outputs.credentials_file_path }}
+          GCP_TEST_DENIED_CREDENTIALS_FILE: ${{ steps.denied.outputs.credentials_file_path }}
+        run: python scripts/live/prepare_ci_profile.py --output "$RUNNER_TEMP/gcp-local.env"
+      - name: Revalidate the drift plan
+        run: python scripts/live/drift.py --profile "$RUNNER_TEMP/gcp-local.env"
+      - name: Retry owned Storage cleanup after an interrupted scenario
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/gcp-local.env" ]; then
+            python scripts/live/cleanup_ci.py --profile "$RUNNER_TEMP/gcp-local.env" --allow-live
+          fi
+      - name: Open or update the drift issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body=".artifacts/drift/issue.md"
+          mkdir -p .artifacts/drift
+          { echo "Weekly drift run failed: $RUN_URL"; echo;
+            cat .artifacts/drift/summary.md 2>/dev/null || echo "The run failed before the summary was written."; } > "$body"
+          issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'in:title "GCP drift detected"' --json number -q '.[0].number')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body-file "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "GCP drift detected" --body-file "$body"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: gcp-drift-${{ github.run_id }}
+          retention-days: 30
+          include-hidden-files: true
+          path: |
+            .artifacts/drift/**/coverage.json
+            .artifacts/drift/**/junit.xml
+            .artifacts/drift/summary.md
+            ~/.local/state/gcp-local/${{ env.GCP_PROJECT_ID }}/**/*.json
+      - name: Remove live profile
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gcp-local.env"

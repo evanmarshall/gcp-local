@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "approved": true,
+  "services": [
+    "pubsub"
+  ],
+  "project": "gcp-local-stitchwink-dev",
+  "project_number": "482773321601",
+  "location": "global",
+  "limits": {
+    "max_topics": 1,
+    "max_subscriptions": 1,
+    "max_messages": 10,
+    "max_message_bytes": 1024,
+    "max_run_seconds": 600
+  },
+  "cleanup_required": true,
+  "scheduled_runs": true
+}

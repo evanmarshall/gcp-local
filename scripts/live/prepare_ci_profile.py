@@ -17,10 +17,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     if (
-        os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+        os.environ.get("GITHUB_EVENT_NAME") not in {"workflow_dispatch", "schedule"}
         or os.environ.get("GITHUB_REF") != "refs/heads/main"
     ):
-        parser.error("Only manual main-branch workflows may prepare live credentials")
+        parser.error("Only manual or scheduled main-branch workflows may prepare live credentials")
     fields = {
         name: os.environ[name]
         for name in (

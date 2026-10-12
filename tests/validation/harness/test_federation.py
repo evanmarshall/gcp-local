@@ -157,10 +157,14 @@ def test_provisioning_plan_has_no_caller_storage_grants_or_ambient_project():
         "repository_owner_id == '5678'",
         "ref == 'refs/heads/main'",
         "environment == 'gcp-conformance'",
-        "event_name == 'workflow_dispatch'",
-        "workflow_ref == 'owner/repo/.github/workflows/cloud-conformance.yml@refs/heads/main'",
     ):
         assert "assertion." + claim in condition
+    assert (
+        "((assertion.event_name == 'workflow_dispatch' && assertion.workflow_ref == "
+        "'owner/repo/.github/workflows/cloud-conformance.yml@refs/heads/main') || "
+        "(assertion.event_name in ['workflow_dispatch', 'schedule'] && assertion.workflow_ref == "
+        "'owner/repo/.github/workflows/gcp-drift.yml@refs/heads/main'))"
+    ) in condition
     assert "billing" not in " ".join(" ".join(step["command"]) for step in steps)
     with pytest.raises(ValueError):
         plan(PROJECT, "123456789012", "setup@example.com", "owner/repo' || true", "1234", "5678")
@@ -190,13 +194,16 @@ def test_ci_workflow_is_manual_and_artifacts_exclude_credentials():
             assert len(step["uses"].split("@")[1]) == 40
 
 
+@pytest.mark.parametrize("event", ["workflow_dispatch", "schedule"])
 def test_ci_profile_is_private_explicit_and_never_embeds_credential_contents(
+    event,
     wif, tmp_path, monkeypatch, capsys
 ):
     _, original = wif
     workspace = tmp_path / "checkout"
     workspace.mkdir()
     monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event)
     for name, value in {
         "GCP_PROJECT_ID": PROJECT,
         "GCP_PROJECT_NUMBER": "123456789012",

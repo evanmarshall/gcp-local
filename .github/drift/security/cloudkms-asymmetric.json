@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "approved": true,
+  "services": [
+    "cloudkms"
+  ],
+  "project": "gcp-local-stitchwink-dev",
+  "project_number": "482773321601",
+  "location": "global",
+  "limits": {
+    "max_key_rings": 1,
+    "max_crypto_keys": 2,
+    "max_key_versions": 2,
+    "max_run_seconds": 600
+  },
+  "cleanup_required": true,
+  "scheduled_runs": true
+}

@@ -44,17 +44,30 @@ def plan(
     flags = ["--project=" + project, "--account=" + setup_account, "--quiet"]
     pool = "projects/" + project_number + "/locations/global/workloadIdentityPools/local-github"
     provider = pool + "/providers/manual-storage"
-    workflow = repository + "/.github/workflows/cloud-conformance.yml@refs/heads/main"
+    workflows = repository + "/.github/workflows/"
+    manual = workflows + "cloud-conformance.yml@refs/heads/main"
+    drift = workflows + "gcp-drift.yml@refs/heads/main"
     claims = {
         "repository_id": repository_id,
         "repository_owner_id": owner_id,
         "ref": "refs/heads/main",
         "environment": "gcp-conformance",
         "event_name": "workflow_dispatch",
-        "workflow_ref": workflow,
+        "workflow_ref": manual,
     }
+    fixed = ("repository_id", "repository_owner_id", "ref", "environment")
+    # Manual Storage conformance runs only on dispatch; the weekly drift job
+    # also runs on its schedule. No other workflow or event is admitted.
     condition = " && ".join(
-        "assertion." + key + " == '" + value + "'" for key, value in claims.items()
+        ["assertion." + key + " == '" + claims[key] + "'" for key in fixed]
+        + [
+            "((assertion.event_name == 'workflow_dispatch' && assertion.workflow_ref == '"
+            + manual
+            + "') || (assertion.event_name in ['workflow_dispatch', 'schedule'] && "
+            + "assertion.workflow_ref == '"
+            + drift
+            + "'))"
+        ]
     )
     mapping = ",".join(
         ["google.subject=assertion.sub"]

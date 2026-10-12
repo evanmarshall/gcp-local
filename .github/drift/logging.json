@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "approved": true,
+  "services": [
+    "logging"
+  ],
+  "project": "gcp-local-stitchwink-dev",
+  "project_number": "482773321601",
+  "location": "global",
+  "limits": {
+    "max_entries": 10,
+    "max_run_seconds": 600
+  },
+  "cleanup_required": true,
+  "scheduled_runs": true
+}

@@ -22,9 +22,11 @@ Recording is encouraged: a scenario that only runs locally is unverified. The ow
 
 - Only the sandbox project and its peer project from the [sandbox guide](../../../docs/contributing/gcp-sandbox.md), through the recorder with `--gcp-profile` and a live scope file. Never production, never ambient credentials, never organization-level changes.
 - Estimated total cost under $10, including anything that keeps billing after the run (KMS key versions until destruction, instances that outlive cleanup). Estimate before running; report the estimate and what was created.
-- Temporary grants and enabled APIs are listed, and grants are removed after the run. Cleanup covers every resource, including after a failed run; verify nothing is left.
+- Temporary grants and enabled APIs are listed, and grants are removed after the run, except the fixture account's standing roles for the drift job ([weekly drift job](../../../docs/contributing/gcp-sandbox.md#weekly-drift-job)). Cleanup covers every resource, including after a failed run; verify nothing is left.
 
 Above $10, or anything else live, ask first. Record, review the candidate for sensitive data, promote, revalidate, then compare locally.
+
+When a new scenario is cheap and leaves nothing behind, add it to `.github/drift/plan.json` with a scheduled scope, and keep its fixture role standing.
 
 ## Permission probes
 

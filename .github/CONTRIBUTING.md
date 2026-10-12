@@ -75,7 +75,8 @@ Every other file in `scripts/` supports a check or a documented workflow:
 | `dev/local_env.py`, `dev/create_local_identity.py` | Run a packaged environment; write a local ADC bundle ([quickstart](../docs/guides/quickstart.md), [local identity](../docs/guides/local-identity.md)) |
 | `dev/install_agent_skill.py` | Install the portable skill into an application ([agent setup](../docs/guides/agent-setup.md)) |
 | `live/plan_sandbox.py`, `live/plan_pubsub.py`, `live/record_iam_roles.py` | Live-cloud planning and role recording ([sandbox](../docs/contributing/gcp-sandbox.md), [Pub/Sub](../docs/services/messaging/pubsub.md), [IAM](../docs/architecture/iam.md)) |
-| `live/prepare_ci_profile.py`, `live/cleanup_ci.py` | Used only by the cloud-conformance workflow |
+| `live/prepare_ci_profile.py`, `live/cleanup_ci.py` | Used only by the cloud-conformance and drift workflows |
+| `live/drift.py` | Runs the weekly drift plan ([drift job](../docs/contributing/gcp-sandbox.md#weekly-drift-job)) |
 | `dev/setup_git.sh` | Configure fast-forward defaults and the pre-push hook |
 | `moo/setup.sh`, `moo/install.sh`, `moo/provision.sh`, `moo/smoke.py` | Moo baseline setup and its smoke ([moo guide](../docs/contributing/moo.md)) |
 | `moo/smoke_protocols.py`, `moo/protocol_guest.py`, `moo/smoke_docker.py`, `moo/install_compose.py` | Moo runtime diagnostics ([moo guide](../docs/contributing/moo.md#smoke-checks)) |
