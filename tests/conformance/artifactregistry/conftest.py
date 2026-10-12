@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from gcp_validation.live_rest import RestClient
-from gcp_validation.artifactregistry import LIVE_ENDPOINT, SERVICE, RepositoryFixture, load_scope
+from gcp_validation.services.artifactregistry import (
+    LIVE_ENDPOINT,
+    SERVICE,
+    RepositoryFixture,
+    load_scope,
+)
 
 
 @pytest.fixture

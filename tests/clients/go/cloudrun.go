@@ -7,7 +7,7 @@ import (
 	"cloud.google.com/go/run/apiv2/runpb"
 )
 
-// revisionImage is the image run_clients.py maps to a local revision process.
+// revisionImage is the image scripts/run/clients.py maps to a local revision process.
 const revisionImage = "client-matrix/revision:1"
 
 // runCloudRun deploys a service and waits on its operation, reads and lists

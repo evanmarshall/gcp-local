@@ -11,7 +11,7 @@ import (
 
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
-	"github.com/evanmarshall/gcp-local/api/generated"
+	"github.com/evanmarshall/gcp-local/api/generated/contract"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -113,7 +113,7 @@ func TestTranscodingFailsClosed(t *testing.T) {
 		}
 	}
 	// A binding whose REST route is missing never reaches a provider.
-	binding := generated.Transcoding{RPC: "/google.cloud.secretmanager.v1.SecretManagerService/GetSecret", REST: "secretmanager.secrets.missing",
+	binding := contract.Transcoding{RPC: "/google.cloud.secretmanager.v1.SecretManagerService/GetSecret", REST: "secretmanager.secrets.missing",
 		Verb: "GET", Path: "/v1/{name=projects/*/secrets/*}", Field: "name"}
 	if _, err := g.transcode(ctx, binding, &secretmanagerpb.GetSecretRequest{Name: "projects/p/secrets/s"}); !errors.Is(err, errUntranscodable) {
 		t.Fatalf("unrouted binding = %v", err)

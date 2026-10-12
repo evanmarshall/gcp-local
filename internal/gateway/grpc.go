@@ -22,7 +22,18 @@ import (
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
-	"github.com/evanmarshall/gcp-local/api/generated"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/bigtable"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/firestore"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/spanner"
+	"github.com/evanmarshall/gcp-local/api/generated/logging"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/cloudscheduler"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/cloudtasks"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/pubsub"
+	"github.com/evanmarshall/gcp-local/api/generated/mixin"
+	"github.com/evanmarshall/gcp-local/api/generated/run"
+	"github.com/evanmarshall/gcp-local/api/generated/security/cloudkms"
+	"github.com/evanmarshall/gcp-local/api/generated/security/iam"
+	"github.com/evanmarshall/gcp-local/api/generated/security/secretmanager"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -33,26 +44,26 @@ import (
 
 func (g *Gateway) NewGRPCServer() *grpc.Server {
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(2 << 20))
-	pb.RegisterPublisherServer(server, &generated.PublisherServer{Dispatch: g})
-	pb.RegisterSubscriberServer(server, &generated.SubscriberServer{Dispatch: g})
-	pb.RegisterSchemaServiceServer(server, &generated.SchemaServiceServer{Dispatch: g})
-	iampb.RegisterIAMPolicyServer(server, &generated.IAMPolicyServer{Dispatch: g})
-	spannerpb.RegisterSpannerServer(server, &generated.SpannerServer{Dispatch: g})
-	bigtablepb.RegisterBigtableServer(server, &generated.BigtableServer{Dispatch: g})
-	firestorepb.RegisterFirestoreServer(server, &generated.FirestoreServer{Dispatch: g})
-	loggingpb.RegisterLoggingServiceV2Server(server, &generated.LoggingServiceV2Server{Dispatch: g})
-	secretmanagerpb.RegisterSecretManagerServiceServer(server, &generated.SecretManagerServiceServer{Dispatch: g})
-	cloudtaskspb.RegisterCloudTasksServer(server, &generated.CloudTasksServer{Dispatch: g})
-	schedulerpb.RegisterCloudSchedulerServer(server, &generated.CloudSchedulerServer{Dispatch: g})
-	kmspb.RegisterKeyManagementServiceServer(server, &generated.KeyManagementServiceServer{Dispatch: g})
-	runpb.RegisterServicesServer(server, &generated.ServicesServer{Dispatch: g})
-	runpb.RegisterRevisionsServer(server, &generated.RevisionsServer{Dispatch: g})
-	instancepb.RegisterInstanceAdminServer(server, &generated.InstanceAdminServer{Dispatch: g})
-	databasepb.RegisterDatabaseAdminServer(server, &generated.DatabaseAdminServer{Dispatch: g})
-	btadminpb.RegisterBigtableInstanceAdminServer(server, &generated.BigtableInstanceAdminServer{Dispatch: g})
-	btadminpb.RegisterBigtableTableAdminServer(server, &generated.BigtableTableAdminServer{Dispatch: g})
-	iamadminpb.RegisterIAMServer(server, &generated.IAMServer{Dispatch: g})
-	longrunningpb.RegisterOperationsServer(server, &generated.OperationsServer{Dispatch: g})
+	pb.RegisterPublisherServer(server, &pubsub.PublisherServer{Dispatch: g})
+	pb.RegisterSubscriberServer(server, &pubsub.SubscriberServer{Dispatch: g})
+	pb.RegisterSchemaServiceServer(server, &pubsub.SchemaServiceServer{Dispatch: g})
+	iampb.RegisterIAMPolicyServer(server, &mixin.IAMPolicyServer{Dispatch: g})
+	spannerpb.RegisterSpannerServer(server, &spanner.SpannerServer{Dispatch: g})
+	bigtablepb.RegisterBigtableServer(server, &bigtable.BigtableServer{Dispatch: g})
+	firestorepb.RegisterFirestoreServer(server, &firestore.FirestoreServer{Dispatch: g})
+	loggingpb.RegisterLoggingServiceV2Server(server, &logging.LoggingServiceV2Server{Dispatch: g})
+	secretmanagerpb.RegisterSecretManagerServiceServer(server, &secretmanager.SecretManagerServiceServer{Dispatch: g})
+	cloudtaskspb.RegisterCloudTasksServer(server, &cloudtasks.CloudTasksServer{Dispatch: g})
+	schedulerpb.RegisterCloudSchedulerServer(server, &cloudscheduler.CloudSchedulerServer{Dispatch: g})
+	kmspb.RegisterKeyManagementServiceServer(server, &cloudkms.KeyManagementServiceServer{Dispatch: g})
+	runpb.RegisterServicesServer(server, &run.ServicesServer{Dispatch: g})
+	runpb.RegisterRevisionsServer(server, &run.RevisionsServer{Dispatch: g})
+	instancepb.RegisterInstanceAdminServer(server, &spanner.InstanceAdminServer{Dispatch: g})
+	databasepb.RegisterDatabaseAdminServer(server, &spanner.DatabaseAdminServer{Dispatch: g})
+	btadminpb.RegisterBigtableInstanceAdminServer(server, &bigtable.BigtableInstanceAdminServer{Dispatch: g})
+	btadminpb.RegisterBigtableTableAdminServer(server, &bigtable.BigtableTableAdminServer{Dispatch: g})
+	iamadminpb.RegisterIAMServer(server, &iam.IAMServer{Dispatch: g})
+	longrunningpb.RegisterOperationsServer(server, &mixin.OperationsServer{Dispatch: g})
 	return server
 }
 func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Message) (Call, error) {

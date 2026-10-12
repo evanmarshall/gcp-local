@@ -3,5 +3,5 @@
 __version__ = "0.1.0"
 
 # The registry the release workflow publishes to. Nothing is published until the
-# repository owner configures it; see docs/quickstart.md.
+# repository owner configures it; see docs/guides/quickstart.md.
 IMAGE_REPOSITORY = "ghcr.io/evanmarshall/gcp-local"

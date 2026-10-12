@@ -144,7 +144,7 @@ func (metadataOnly) Reset(context.Context) error { return nil }
 
 // CoverageGap returns the refusal of one service's unmodeled request shapes:
 // UNIMPLEMENTED with "<Service> coverage gap: <what>". Storage keeps its own
-// 400 variant (docs/storage.md).
+// 400 variant (docs/services/storage.md).
 func CoverageGap(service string) func(what string) error {
 	return func(what string) error { return status.Error(codes.Unimplemented, service+" coverage gap: "+what) }
 }

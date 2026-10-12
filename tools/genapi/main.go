@@ -58,46 +58,78 @@ type route struct {
 func main() {
 	check := flag.Bool("check", false, "fail if generated output differs")
 	flag.Parse()
-	write("storage_routes.go", storageRoutes(), *check)
-	write("storage_xml_routes.go", storageXMLRoutes(), *check)
-	write("storage_parameters.go", storageParameters(), *check)
-	write("run_routes.go", runRoutes(), *check)
-	write("compute_routes.go", computeRoutes(), *check)
-	write("secretmanager_routes.go", secretManagerRoutes(), *check)
-	write("cloudkms_routes.go", cloudKMSRoutes(), *check)
-	write("firestore_routes.go", firestoreRoutes(), *check)
-	write("bigquery_routes.go", bigqueryRoutes(), *check)
-	write("pubsub_rest_routes.go", pubsubRestRoutes(), *check)
-	write("pubsub_schema_rest_routes.go", pubsubSchemaRestRoutes(), *check)
-	write("spanner_routes.go", spannerRoutes(), *check)
-	write("bigtable_routes.go", bigtableRoutes(), *check)
-	write("artifactregistry_routes.go", artifactRegistryRoutes(), *check)
-	write("resourcemanager_routes.go", resourceManagerRoutes(), *check)
-	write("iam_routes.go", iamRoutes(), *check)
-	write("cloudtasks_routes.go", cloudTasksRoutes(), *check)
-	write("cloudscheduler_routes.go", cloudSchedulerRoutes(), *check)
-	write("redis_routes.go", redisRoutes(), *check)
-	write("cloudsql_routes.go", cloudSQLRoutes(), *check)
-	write("vertexai_routes.go", vertexAIRoutes(), *check)
-	write("logging_routes.go", loggingRoutes(), *check)
-	write("pubsub_dispatch.go", pubsubDispatch(), *check)
-	write("logging_dispatch.go", loggingDispatch(), *check)
-	write("iam_dispatch.go", iamDispatch(), *check)
-	write("spanner_dispatch.go", dataDispatch(spannerData), *check)
-	write("bigtable_dispatch.go", dataDispatch(bigtableData), *check)
-	write("firestore_dispatch.go", firestoreDispatch(), *check)
-	write("secretmanager_dispatch.go", transcodedDispatch(secretManagerRPC, true), *check)
-	write("cloudtasks_dispatch.go", transcodedDispatch(cloudTasksRPC, false), *check)
-	write("cloudscheduler_dispatch.go", transcodedDispatch(cloudSchedulerRPC, false), *check)
-	write("cloudkms_dispatch.go", transcodedDispatch(cloudKMSRPC, false), *check)
-	write("run_services_dispatch.go", transcodedDispatch(runServicesRPC, false), *check)
-	write("run_revisions_dispatch.go", transcodedDispatch(runRevisionsRPC, false), *check)
-	write("spanner_instance_admin_dispatch.go", transcodedDispatch(spannerInstanceAdminRPC, false), *check)
-	write("spanner_database_admin_dispatch.go", transcodedDispatch(spannerDatabaseAdminRPC, false), *check)
-	write("bigtable_instance_admin_dispatch.go", transcodedDispatch(bigtableInstanceAdminRPC, false), *check)
-	write("bigtable_table_admin_dispatch.go", transcodedDispatch(bigtableTableAdminRPC, false), *check)
-	write("iam_admin_dispatch.go", transcodedDispatch(iamAdminRPC, false), *check)
-	write("operations_dispatch.go", operationsDispatch(), *check)
+	write("contract/contract.go", contractTypes(), *check)
+	write("storage/storage_routes.go", storageRoutes(), *check)
+	write("storage/storage_xml_routes.go", storageXMLRoutes(), *check)
+	write("storage/storage_parameters.go", storageParameters(), *check)
+	write("run/run_routes.go", runRoutes(), *check)
+	write("compute/compute_routes.go", computeRoutes(), *check)
+	write("security/secretmanager/secretmanager_routes.go", secretManagerRoutes(), *check)
+	write("security/cloudkms/cloudkms_routes.go", cloudKMSRoutes(), *check)
+	write("databases/firestore/firestore_routes.go", firestoreRoutes(), *check)
+	write("databases/bigquery/bigquery_routes.go", bigqueryRoutes(), *check)
+	write("messaging/pubsub/pubsub_rest_routes.go", pubsubRestRoutes(), *check)
+	write("messaging/pubsub/pubsub_schema_rest_routes.go", pubsubSchemaRestRoutes(), *check)
+	write("databases/spanner/spanner_routes.go", spannerRoutes(), *check)
+	write("databases/bigtable/bigtable_routes.go", bigtableRoutes(), *check)
+	write("artifactregistry/artifactregistry_routes.go", artifactRegistryRoutes(), *check)
+	write("security/resourcemanager/resourcemanager_routes.go", resourceManagerRoutes(), *check)
+	write("security/iam/iam_routes.go", iamRoutes(), *check)
+	write("messaging/cloudtasks/cloudtasks_routes.go", cloudTasksRoutes(), *check)
+	write("messaging/cloudscheduler/cloudscheduler_routes.go", cloudSchedulerRoutes(), *check)
+	write("databases/memorystore/redis_routes.go", redisRoutes(), *check)
+	write("databases/cloudsql/cloudsql_routes.go", cloudSQLRoutes(), *check)
+	write("vertexai/vertexai_routes.go", vertexAIRoutes(), *check)
+	write("logging/logging_routes.go", loggingRoutes(), *check)
+	write("messaging/pubsub/pubsub_dispatch.go", pubsubDispatch(), *check)
+	write("logging/logging_dispatch.go", loggingDispatch(), *check)
+	write("mixin/iam_dispatch.go", iamDispatch(), *check)
+	write("databases/spanner/spanner_dispatch.go", dataDispatch(spannerData), *check)
+	write("databases/bigtable/bigtable_dispatch.go", dataDispatch(bigtableData), *check)
+	write("databases/firestore/firestore_dispatch.go", firestoreDispatch(), *check)
+	write("security/secretmanager/secretmanager_dispatch.go", transcodedDispatch(secretManagerRPC), *check)
+	write("messaging/cloudtasks/cloudtasks_dispatch.go", transcodedDispatch(cloudTasksRPC), *check)
+	write("messaging/cloudscheduler/cloudscheduler_dispatch.go", transcodedDispatch(cloudSchedulerRPC), *check)
+	write("security/cloudkms/cloudkms_dispatch.go", transcodedDispatch(cloudKMSRPC), *check)
+	write("run/run_services_dispatch.go", transcodedDispatch(runServicesRPC), *check)
+	write("run/run_revisions_dispatch.go", transcodedDispatch(runRevisionsRPC), *check)
+	write("databases/spanner/spanner_instance_admin_dispatch.go", transcodedDispatch(spannerInstanceAdminRPC), *check)
+	write("databases/spanner/spanner_database_admin_dispatch.go", transcodedDispatch(spannerDatabaseAdminRPC), *check)
+	write("databases/bigtable/bigtable_instance_admin_dispatch.go", transcodedDispatch(bigtableInstanceAdminRPC), *check)
+	write("databases/bigtable/bigtable_table_admin_dispatch.go", transcodedDispatch(bigtableTableAdminRPC), *check)
+	write("security/iam/iam_admin_dispatch.go", transcodedDispatch(iamAdminRPC), *check)
+	write("mixin/operations_dispatch.go", operationsDispatch(), *check)
+}
+
+// contractTypes generates the row and dispatch types every service package's
+// tables and stubs share.
+func contractTypes() []byte {
+	return []byte(`// Code generated by tools/genapi; DO NOT EDIT.
+package generated
+import (
+ "context"
+ "google.golang.org/grpc"
+ "google.golang.org/protobuf/proto"
+)
+type Route struct { Method, Verb, Path string; JSONBody, Media bool }
+type PubSubDispatch interface {
+ Unary(context.Context, string, proto.Message) (proto.Message,error)
+ Stream(string, grpc.ServerStream) error
+}
+type RPC struct { Method, ResourceField, ResourcePattern string; Streaming bool; NewRequest, NewResponse func() proto.Message }
+// GRPCDispatch adds server-streaming dispatch: the client sends one request
+// and the provider relays a response stream.
+type GRPCDispatch interface {
+ PubSubDispatch
+ ServerStream(string, proto.Message, grpc.ServerStream) error
+}
+// Transcoding pairs one gRPC method with the REST route whose provider method
+// serves it. Verb, Path, and Body come from the method's primary
+// google.api.http binding; Field is the JSON name of the top-level request
+// field the path binds; Body is "*", "", or a JSON field name. Unserved lists
+// the resource patterns of the method's other bindings, which no route serves.
+type Transcoding struct { RPC, REST, Verb, Path, Field, Body string; Unserved []string }
+`)
 }
 
 // storageRoutes generates the Storage REST route table from the pinned
@@ -109,9 +141,9 @@ func storageRoutes() []byte {
 	routes := storageResourceRoutes(nil, discovery)
 	sort.Slice(routes, func(i, j int) bool { a, b := routes[i], routes[j]; return a.Path+a.Verb < b.Path+b.Verb })
 	var out bytes.Buffer
-	out.WriteString("// Code generated by tools/genapi; DO NOT EDIT.\npackage generated\n\ntype Route struct { Method, Verb, Path string; JSONBody, Media bool }\nvar StorageRoutes = []Route{\n")
+	out.WriteString("// Code generated by tools/genapi; DO NOT EDIT.\npackage generated\n\nimport \"github.com/evanmarshall/gcp-local/api/generated/contract\"\n\nvar StorageRoutes = []contract.Route{\n")
 	for _, r := range routes {
-		fmt.Fprintf(&out, "{%q,%q,%q,%v,%v},\n", r.ID, r.Verb, r.Path, r.JSON, r.Media)
+		fmt.Fprintf(&out, "{Method: %q, Verb: %q, Path: %q, JSONBody: %v, Media: %v},\n", r.ID, r.Verb, r.Path, r.JSON, r.Media)
 	}
 	out.WriteString("}\n")
 	return out.Bytes()
@@ -218,27 +250,16 @@ func pubsubDispatch() []byte {
 package generated
 import (
  "context"
+ "github.com/evanmarshall/gcp-local/api/generated/contract"
  pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
- "google.golang.org/grpc"
  "google.golang.org/grpc/codes"
  "google.golang.org/grpc/status"
  "google.golang.org/protobuf/proto"
  "google.golang.org/protobuf/types/known/emptypb"
 )
-type PubSubDispatch interface {
- Unary(context.Context, string, proto.Message) (proto.Message,error)
- Stream(string, grpc.ServerStream) error
-}
-type RPC struct { Method, ResourceField, ResourcePattern string; Streaming bool; NewRequest, NewResponse func() proto.Message }
-// GRPCDispatch adds server-streaming dispatch: the client sends one request
-// and the provider relays a response stream.
-type GRPCDispatch interface {
- PubSubDispatch
- ServerStream(string, proto.Message, grpc.ServerStream) error
-}
 `)
 	var descriptors bytes.Buffer
-	descriptors.WriteString("var PubSubMethods = []RPC{\n")
+	descriptors.WriteString("var PubSubMethods = []contract.RPC{\n")
 	// SchemaService lives in schema.proto beside the Publisher and Subscriber.
 	var services []protoreflect.ServiceDescriptor
 	for _, file := range []protoreflect.FileDescriptor{pb.File_google_pubsub_v1_pubsub_proto, pb.File_google_pubsub_v1_schema_proto} {
@@ -248,7 +269,7 @@ type GRPCDispatch interface {
 	}
 	for _, service := range services {
 		name := string(service.Name())
-		fmt.Fprintf(&out, "type %sServer struct { pb.Unimplemented%sServer; Dispatch PubSubDispatch }\n", name, name)
+		fmt.Fprintf(&out, "type %sServer struct { pb.Unimplemented%sServer; Dispatch contract.PubSubDispatch }\n", name, name)
 		for j := range service.Methods().Len() {
 			m := service.Methods().Get(j)
 			methodName := string(m.Name())
@@ -325,8 +346,8 @@ func dataDispatch(d dataService) []byte {
 	name := string(d.service.Name())
 	var stubs, descriptors bytes.Buffer
 	usesEmpty := false
-	fmt.Fprintf(&stubs, "type %sServer struct { %s.Unimplemented%sServer; Dispatch GRPCDispatch }\n", name, d.alias, name)
-	fmt.Fprintf(&descriptors, "var %s = []RPC{\n", d.variable)
+	fmt.Fprintf(&stubs, "type %sServer struct { %s.Unimplemented%sServer; Dispatch contract.GRPCDispatch }\n", name, d.alias, name)
+	fmt.Fprintf(&descriptors, "var %s = []contract.RPC{\n", d.variable)
 	typeOf := func(m protoreflect.MessageDescriptor) string {
 		if m.FullName() == "google.protobuf.Empty" {
 			usesEmpty = true
@@ -358,7 +379,7 @@ func dataDispatch(d dataService) []byte {
 		rpcDescriptor(&descriptors, id, field, pattern, streaming, input, output)
 	}
 	descriptors.WriteString("}\n")
-	out := header("// Code generated by tools/genapi; DO NOT EDIT.\npackage generated\nimport (\n \"context\"\n " +
+	out := header("// Code generated by tools/genapi; DO NOT EDIT.\npackage generated\nimport (\n \"context\"\n \"github.com/evanmarshall/gcp-local/api/generated/contract\"\n " +
 		fmt.Sprintf("%q", d.importPath) + "\n \"google.golang.org/grpc/codes\"\n \"google.golang.org/grpc/status\"\n \"google.golang.org/protobuf/proto\"\n")
 	if usesEmpty {
 		out.WriteString(" \"google.golang.org/protobuf/types/known/emptypb\"\n")
@@ -391,15 +412,16 @@ func iamDispatch() []byte {
 package generated
 import (
  "context"
+ "github.com/evanmarshall/gcp-local/api/generated/contract"
  "cloud.google.com/go/iam/apiv1/iampb"
  "google.golang.org/grpc/codes"
  "google.golang.org/grpc/status"
  "google.golang.org/protobuf/proto"
 )
-type IAMPolicyServer struct { iampb.UnimplementedIAMPolicyServer; Dispatch PubSubDispatch }
+type IAMPolicyServer struct { iampb.UnimplementedIAMPolicyServer; Dispatch contract.PubSubDispatch }
 `)
 	var descriptors bytes.Buffer
-	descriptors.WriteString("var IAMMethods = []RPC{\n")
+	descriptors.WriteString("var IAMMethods = []contract.RPC{\n")
 	iamService := iampb.File_google_iam_v1_iam_policy_proto.Services().ByName("IAMPolicy")
 	for i := range iamService.Methods().Len() {
 		m := iamService.Methods().Get(i)
@@ -425,6 +447,7 @@ func firestoreDispatch() []byte {
 package generated
 import (
  "context"
+ "github.com/evanmarshall/gcp-local/api/generated/contract"
  pb "cloud.google.com/go/firestore/apiv1/firestorepb"
  "google.golang.org/grpc"
  "google.golang.org/grpc/codes"
@@ -433,13 +456,13 @@ import (
  "google.golang.org/protobuf/types/known/emptypb"
 )
 type FirestoreDispatch interface {
- PubSubDispatch
+ contract.PubSubDispatch
  ServerStream(string, proto.Message, grpc.ServerStream) error
 }
 type FirestoreServer struct { pb.UnimplementedFirestoreServer; Dispatch FirestoreDispatch }
 `)
 	var descriptors bytes.Buffer
-	descriptors.WriteString("var FirestoreMethods = []RPC{\n")
+	descriptors.WriteString("var FirestoreMethods = []contract.RPC{\n")
 	service := firestorepb.File_google_firestore_v1_firestore_proto.Services().ByName("Firestore")
 	for i := range service.Methods().Len() {
 		m := service.Methods().Get(i)
@@ -542,7 +565,7 @@ func unaryStub(out *bytes.Buffer, server, method, input, output, id string) {
 // rpcDescriptor writes one RPC row: the method's resource selector, whether
 // it streams, and constructors for its request and response messages.
 func rpcDescriptor(out *bytes.Buffer, id, field, pattern string, streaming bool, input, output string) {
-	fmt.Fprintf(out, "{%q,%q,%q,%v,func() proto.Message{return &%s{}},func() proto.Message{return &%s{}}},\n", id, field, pattern, streaming, input, output)
+	fmt.Fprintf(out, "{Method: %q, ResourceField: %q, ResourcePattern: %q, Streaming: %v, NewRequest: func() proto.Message{return &%s{}}, NewResponse: func() proto.Message{return &%s{}}},\n", id, field, pattern, streaming, input, output)
 }
 
 // header starts one generated file buffer.
@@ -583,8 +606,11 @@ func must(err error) {
 	}
 }
 
+// write formats one generated file into api/generated. Templates declare
+// package generated; the file's directory names its package instead.
 func write(name string, raw []byte, check bool) {
-	formatted, err := format.Source(raw)
+	pkg := "package " + filepath.Base(filepath.Dir(name)) + "\n"
+	formatted, err := format.Source(bytes.Replace(raw, []byte("package generated\n"), []byte(pkg), 1))
 	must(err)
 	path := filepath.Join("api/generated", name)
 	if check {
@@ -595,7 +621,8 @@ func write(name string, raw []byte, check bool) {
 		}
 		return
 	}
-	must(os.WriteFile(path, formatted, 0644)) //nolint:gosec // a committed source file needs group/other read
+	must(os.MkdirAll(filepath.Dir(path), 0755)) //nolint:gosec // committed source directories need group/other read
+	must(os.WriteFile(path, formatted, 0644))   //nolint:gosec // a committed source file needs group/other read
 }
 
 // runRoutes generates the Cloud Run v2 route table from the pinned surface.

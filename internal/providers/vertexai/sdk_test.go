@@ -24,7 +24,7 @@ import (
 func TestGoogleGenAISDK(t *testing.T) {
 	interfaces, err := net.Interfaces()
 	if err != nil || os.Getenv("GCP_LOCAL_ISOLATED") != "1" || len(interfaces) != 1 || interfaces[0].Name != "lo" {
-		t.Fatal("Run SDK tests in the loopback-only runner (scripts/check_vertexai.sh)")
+		t.Fatal("Run SDK tests in the loopback-only runner (scripts/check/sdk/vertexai.sh)")
 	}
 	python := os.Getenv("GCP_LOCAL_TEST_PYTHON")
 	if python == "" {

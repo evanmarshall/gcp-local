@@ -1,20 +1,20 @@
 """Shared pieces for bounded live REST recorders: scope, transport, and owned runs."""
 
-from dataclasses import dataclass
 import fcntl
 import json
-from pathlib import Path
 import re
 import time
+from dataclasses import dataclass
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import ProxyHandler, Request, build_opener
 from uuid import uuid4
 
-from .evidence import Inconclusive, check_observation, now
-from .pubsub_scope import private_json
-from .sandbox import inspect_credentials, load_credentials, refresh_credentials
-from .storage import NoRedirects
+from gcp_validation.evidence import Inconclusive, check_observation, now
+from gcp_validation.sandbox import inspect_credentials, load_credentials, refresh_credentials
+from gcp_validation.services.messaging.pubsub_scope import private_json
+from gcp_validation.services.storage.client import NoRedirects
 
 ACTORS = ('fixture', 'allowed', 'denied')
 

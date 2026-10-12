@@ -6,7 +6,7 @@ Use the application's own test tooling. This bundle does not contain an emulator
 
 Existing unit tests can remain offline. Inspect their setup and subprocesses before running them; a test command's name does not establish that it avoids GCP.
 
-Start a private environment with `gcp-local up` or the runtime checkout's `scripts/local_env.py up`, then obtain its ADC/project/endpoint values with `env`. The [local template](local.env.example) shows those fields; do not copy its placeholder credential path verbatim. Keep generated local settings separate from existing application and live-cloud configuration. Recorded and locally modeled coverage differs by service; see the runtime's `docs/quickstart.md`, and `docs/pubsub.md` for Pub/Sub setup. Do not repoint missing local APIs at production or use real credentials as a workaround.
+Start a private environment with `gcp-local up` or the runtime checkout's `scripts/dev/local_env.py up`, then obtain its ADC/project/endpoint values with `env`. The [local template](local.env.example) shows those fields; do not copy its placeholder credential path verbatim. Keep generated local settings separate from existing application and live-cloud configuration. Recorded and locally modeled coverage differs by service; see the runtime's `docs/guides/quickstart.md`, and `docs/services/messaging/pubsub.md` for Pub/Sub setup. Do not repoint missing local APIs at production or use real credentials as a workaround.
 
 ## Explicit live sandbox
 

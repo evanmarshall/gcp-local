@@ -1,5 +1,5 @@
 // Drives one service workflow with the pinned Node.js Google Cloud clients
-// against gcp-local, at each client's default transport. scripts/run_clients.py
+// against gcp-local, at each client's default transport. scripts/run/clients.py
 // starts the emulator and runs `node run.mjs SERVICE` once per service; the
 // process exits 0 when the workflow passes and prints the failing step otherwise.
 import assert from 'node:assert/strict';

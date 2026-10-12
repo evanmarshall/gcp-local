@@ -52,7 +52,7 @@ var spannerData = []string{"spanner.sessions.", "spanner.databases.select", "spa
 // (https://developers.google.com/identity/protocols/oauth2/scopes). Each is a
 // subset of cloud-platform or an identity scope that grants no API call. A
 // scope's coverage follows the scopes its APIs' discovery documents accept;
-// docs/local-identity.md lists the mapping and its approximations.
+// docs/guides/local-identity.md lists the mapping and its approximations.
 var oauthScopes = map[string]oauthScope{
 	// Identity scopes: gcloud and user flows request them; no API accepts them.
 	"openid": {},

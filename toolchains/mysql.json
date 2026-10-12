@@ -1,6 +1,6 @@
 {
   "name": "MySQL Community Server binaries for the Cloud SQL backend",
-  "distribution": "Oracle's generic Linux (glibc 2.28) MySQL Community Server tarballs from dev.mysql.com/downloads, served by cdn.mysql.com; downloaded, not vendored. md5 is the digest dev.mysql.com publishes; sha256 was computed from the same download. scripts/install_mysql.py extracts the server, its private libraries, the ICU data, one component, English error messages, and character sets, then drops non-loadable ELF sections (debug information and symbol tables); binaries holds the digest of the result",
+  "distribution": "Oracle's generic Linux (glibc 2.28) MySQL Community Server tarballs from dev.mysql.com/downloads, served by cdn.mysql.com; downloaded, not vendored. md5 is the digest dev.mysql.com publishes; sha256 was computed from the same download. scripts/install/mysql.py extracts the server, its private libraries, the ICU data, one component, English error messages, and character sets, then drops non-loadable ELF sections (debug information and symbol tables); binaries holds the digest of the result",
   "project": "https://dev.mysql.com/downloads/mysql/",
   "license": "GPL-2.0 with the Universal FOSS Exception for the server; the bundled OpenSSL, protobuf, Abseil, and ICU libraries keep their own licenses (LICENSE file in each tarball)",
   "retrieved_at": "2026-10-12",

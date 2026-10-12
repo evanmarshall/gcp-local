@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/evanmarshall/gcp-local/internal/providers/run/container"
 	"log"
 	"maps"
 	"net"
@@ -29,22 +30,22 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	artifactregistryprovider "github.com/evanmarshall/gcp-local/internal/providers/artifactregistry"
-	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
-	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
-	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
-	cloudschedulerprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudscheduler"
-	cloudsqlprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudsql"
-	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
-	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
-	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/iam"
+	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/bigquery"
+	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/bigtable"
+	cloudsqlprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql"
+	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/firestore"
+	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/memorystore"
+	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/spanner"
 	loggingprovider "github.com/evanmarshall/gcp-local/internal/providers/logging"
-	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
-	pubsubprovider "github.com/evanmarshall/gcp-local/internal/providers/pubsub"
-	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
+	cloudschedulerprovider "github.com/evanmarshall/gcp-local/internal/providers/messaging/cloudscheduler"
+	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/messaging/cloudtasks"
+	pubsubprovider "github.com/evanmarshall/gcp-local/internal/providers/messaging/pubsub"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
-	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
-	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
+	"github.com/evanmarshall/gcp-local/internal/providers/security/cloudkms"
+	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/security/iam"
+	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/resourcemanager"
+	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/security/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	vertexaiprovider "github.com/evanmarshall/gcp-local/internal/providers/vertexai"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
@@ -58,7 +59,7 @@ func main() {
 	flag.Parse()
 	interfaces, err := net.Interfaces()
 	if err != nil || len(interfaces) != 1 || interfaces[0].Name != "lo" || os.Getenv("GCP_LOCAL_ISOLATED") != "1" {
-		log.Fatal("Run the conformance fixture inside scripts/run_isolated.py")
+		log.Fatal("Run the conformance fixture inside scripts/run/isolated.py")
 	}
 	index := state.NewIndex()
 	engine, err := iam.New(index)
@@ -257,10 +258,10 @@ type servingRuntime struct {
 	servers map[string]*http.Server
 }
 
-func (r *servingRuntime) Start(_ context.Context, _ runprovider.StartSpec) (runprovider.Started, error) {
+func (r *servingRuntime) Start(_ context.Context, _ container.StartSpec) (container.Started, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return runprovider.Started{}, fmt.Errorf("listen for the revision: %w", err)
+		return container.Started{}, fmt.Errorf("listen for the revision: %w", err)
 	}
 	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -270,7 +271,7 @@ func (r *servingRuntime) Start(_ context.Context, _ runprovider.StartSpec) (runp
 	r.mu.Lock()
 	r.servers[id] = server
 	r.mu.Unlock()
-	return runprovider.Started{Address: id, Container: id}, nil
+	return container.Started{Address: id, Container: id}, nil
 }
 
 func (r *servingRuntime) Ready(context.Context, string) error { return nil }

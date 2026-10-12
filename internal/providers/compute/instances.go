@@ -17,7 +17,7 @@ import (
 )
 
 // Zonal VM instances exist so Connectivity Tests can name them as endpoints
-// (tests/conformance/recordings/vm-connectivity-nat-peering). An instance has
+// (tests/conformance/recordings/compute/vm-connectivity-nat-peering). An instance has
 // exactly one network interface on a subnetwork and no external address; it
 // gets the lowest free primary internal IP of that subnetwork. Boot disks are
 // rendered on the instance but are not separate disk resources, and nothing

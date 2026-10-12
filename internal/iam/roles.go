@@ -10,7 +10,7 @@ import (
 	"fmt"
 )
 
-//go:embed roles/*.json
+//go:embed roles
 var roleFiles embed.FS
 
 // Role snapshot sentinels.

@@ -80,6 +80,19 @@ SECRET_KEYS = {
 }
 
 
+def baseline_path(root: Path, scenario_id: str) -> Path:
+    """Find a scenario's recording directory, grouped as <group>/<service>/<id> under root.
+
+    A missing recording maps to root/<id>, which then fails as unverified.
+    """
+    found = sorted(
+        path.parent for path in root.rglob("provenance.json") if path.parent.name == scenario_id
+    )
+    if len(found) > 1:
+        raise Unverified(f"Recording {scenario_id} exists in more than one directory")
+    return found[0] if found else root / scenario_id
+
+
 def load_provenance(baseline: Path) -> tuple[dict[str, object], str]:
     """Read a baseline's provenance record, converting any defect to Unverified."""
     try:
@@ -165,7 +178,7 @@ class SnapshotCase:
         self.candidate_dir = Path(candidate_dir)
         self.observations = {}
         self.last_cloud_validation = None
-        self.baseline = Path(baseline_dir) / scenario.id
+        self.baseline = baseline_path(Path(baseline_dir), scenario.id)
         self.manifest = None
         self.context = {}
         if mode not in {"local", "record", "revalidate"}:

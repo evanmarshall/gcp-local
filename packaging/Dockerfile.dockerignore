@@ -1,0 +1,32 @@
+# BuildKit reads this file for builds of packaging/Dockerfile; paths are
+# relative to the build context, the repository root.
+**
+!go.mod
+!go.sum
+!scripts
+!scripts/install/go.py
+!scripts/install/emulator_jar.py
+!toolchains
+!toolchains/go.json
+!toolchains/pubsub.json
+!toolchains/firestore.json
+!scripts/install/spanner.py
+!scripts/install/redis.py
+!scripts/install/postgres.py
+!scripts/install/mysql.py
+!toolchains/spanner.json
+!toolchains/redis.json
+!toolchains/postgres.json
+!toolchains/mysql.json
+!api
+!api/**
+!cmd
+!cmd/**
+!internal
+!internal/**
+!gcp_local
+!gcp_local/**
+**/__pycache__
+!examples
+!examples/workflow
+!examples/workflow/worker.py

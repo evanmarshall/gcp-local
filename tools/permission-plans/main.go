@@ -16,7 +16,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
-	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
+	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 

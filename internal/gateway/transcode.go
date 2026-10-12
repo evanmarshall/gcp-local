@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/evanmarshall/gcp-local/api/generated"
+	"github.com/evanmarshall/gcp-local/api/generated/contract"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -28,7 +28,7 @@ var errUntranscodable = status.Error(codes.Internal, "The gRPC method does not f
 // remaining fields become query parameters. The provider sees the request a
 // REST client would send, so both transports share one implementation,
 // permission plan, and error path.
-func (g *Gateway) transcode(ctx context.Context, binding generated.Transcoding, request proto.Message) (proto.Message, error) {
+func (g *Gateway) transcode(ctx context.Context, binding contract.Transcoding, request proto.Message) (proto.Message, error) {
 	call, err := g.rpcCall(ctx, binding.RPC, request)
 	if err != nil {
 		if pattern, ok := unservedBinding(request, g.rpcs[binding.RPC].ResourceField, binding.Unserved); ok && status.Code(err) == codes.InvalidArgument {
@@ -56,11 +56,11 @@ func (g *Gateway) transcode(ctx context.Context, binding generated.Transcoding, 
 // resource keeps the RPC's own dispatch (Pub/Sub). A shared RPC that no
 // binding serves for an owned resource kind, such as TestIamPermissions on a
 // crypto key, is a coverage gap rather than a Pub/Sub request.
-func (g *Gateway) transcodingFor(method string, request proto.Message) (generated.Transcoding, bool, error) {
+func (g *Gateway) transcodingFor(method string, request proto.Message) (contract.Transcoding, bool, error) {
 	bindings := g.transcoded[method]
 	if !g.shared[method] {
 		if len(bindings) == 0 {
-			return generated.Transcoding{}, false, nil
+			return contract.Transcoding{}, false, nil
 		}
 		return bindings[0], true, nil
 	}
@@ -68,7 +68,7 @@ func (g *Gateway) transcodingFor(method string, request proto.Message) (generate
 	// refuses it.
 	resource, ok := requestResource(request, g.rpcs[method].ResourceField)
 	if !ok {
-		return generated.Transcoding{}, false, nil
+		return contract.Transcoding{}, false, nil
 	}
 	for _, binding := range bindings {
 		if bindResource(&Call{}, resource, bindingPattern(binding)) == nil {
@@ -78,11 +78,11 @@ func (g *Gateway) transcodingFor(method string, request proto.Message) (generate
 	for shared := range g.shared {
 		for _, binding := range g.transcoded[shared] {
 			if pattern := bindingPattern(binding); bindResource(&Call{}, resource, pattern) == nil {
-				return generated.Transcoding{}, false, status.Errorf(codes.Unimplemented, "No provider implements %s for %s resources", method, pattern)
+				return contract.Transcoding{}, false, status.Errorf(codes.Unimplemented, "No provider implements %s for %s resources", method, pattern)
 			}
 		}
 	}
-	return generated.Transcoding{}, false, nil
+	return contract.Transcoding{}, false, nil
 }
 
 // requestResource reads a request's resource selector field.
@@ -92,14 +92,14 @@ func requestResource(request proto.Message, field string) (string, bool) {
 }
 
 // bindingPattern returns the resource pattern of a binding's path variable.
-func bindingPattern(binding generated.Transcoding) string {
+func bindingPattern(binding contract.Transcoding) string {
 	_, pattern, _ := strings.Cut(variables.FindStringSubmatch(binding.Path)[1], "=")
 	return pattern
 }
 
 // rpcResponse renders a provider's REST result as the gRPC response or
 // status, and forwards the IAM decision ID as gRPC header metadata.
-func (g *Gateway) rpcResponse(ctx context.Context, binding generated.Transcoding, result any) (proto.Message, error) {
+func (g *Gateway) rpcResponse(ctx context.Context, binding contract.Transcoding, result any) (proto.Message, error) {
 	response, ok := result.(*RESTResponse)
 	if !ok || response == nil || response.Body != nil {
 		return nil, errUntranscodable
@@ -138,7 +138,7 @@ func unservedBinding(request proto.Message, field string, patterns []string) (st
 
 // restFor renders one gRPC request as the REST request of its paired route
 // and returns that route's unescaped path.
-func (g *Gateway) restFor(binding generated.Transcoding, resource string, request proto.Message) (*RESTRequest, string, error) {
+func (g *Gateway) restFor(binding contract.Transcoding, resource string, request proto.Message) (*RESTRequest, string, error) {
 	fields, err := requestFields(request)
 	if err != nil {
 		return nil, "", err
@@ -176,7 +176,7 @@ func (g *Gateway) restFor(binding generated.Transcoding, resource string, reques
 // splitFields separates the JSON body from the query parameters. A path
 // field stays only inside a body field that contains it (secret.name, or
 // serviceAccount.name under a "*" body).
-func splitFields(binding generated.Transcoding, fields map[string]any) (any, url.Values) {
+func splitFields(binding contract.Transcoding, fields map[string]any) (any, url.Values) {
 	var body any
 	switch binding.Body {
 	case "*":
@@ -201,7 +201,7 @@ func splitFields(binding generated.Transcoding, fields map[string]any) (any, url
 // routeFor finds the binding's REST route for one rendered binding path and
 // returns the route's own path and variable matches. REST and gRPC versions
 // may differ (Cloud Tasks v2 onto v2beta3), so the route keeps its version.
-func (g *Gateway) routeFor(binding generated.Transcoding, rendered string) (*compiledRoute, string, []string) {
+func (g *Gateway) routeFor(binding contract.Transcoding, rendered string) (*compiledRoute, string, []string) {
 	_, suffix, _ := strings.Cut(strings.TrimPrefix(rendered, "/"), "/")
 	for i := range g.routes {
 		route := &g.routes[i]
@@ -218,7 +218,7 @@ func (g *Gateway) routeFor(binding generated.Transcoding, rendered string) (*com
 }
 
 // hasRoute reports whether the binding's REST method has a route on its verb.
-func (g *Gateway) hasRoute(binding generated.Transcoding) bool {
+func (g *Gateway) hasRoute(binding contract.Transcoding) bool {
 	for i := range g.routes {
 		if g.routes[i].contract.Method == binding.REST && g.routes[i].contract.Verb == binding.Verb {
 			return true

@@ -1,0 +1,25 @@
+# SDKs for the local service checks (scripts/check/backend/pubsub.sh, scripts/check/backend/firestore.sh,
+# scripts/check/sdk/logging.sh, scripts/check/sdk/vertexai.sh, scripts/check/sdk/cloudkms.sh, scripts/check/sdk/secretmanager.sh,
+# scripts/check/sdk/cloudtasks.sh, scripts/check/sdk/cloudrun.sh); no live-cloud execution.
+-r pubsub.txt
+google-cloud-firestore==2.34.1
+google-cloud-kms==3.18.0
+google-cloud-secret-manager==2.31.0
+google-cloud-tasks==2.26.0
+google-cloud-run==0.16.1
+google-cloud-logging==3.17.0
+google-cloud-appengine-logging==1.11.0
+google-cloud-audit-log==0.6.2
+google-genai==2.29.0
+annotated-types==0.8.0
+anyio==4.15.1
+distro==1.9.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+pydantic==2.14.1
+pydantic-core==2.50.1
+sniffio==1.3.1
+tenacity==9.1.4
+typing-inspection==0.4.4
+websockets==16.1.1

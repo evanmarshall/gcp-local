@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/evanmarshall/gcp-local/api/generated"
+	storageapi "github.com/evanmarshall/gcp-local/api/generated/storage"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -158,8 +158,8 @@ var credentialOptions = []string{"access_token"}
 // definedOption reports whether the Storage discovery document defines key
 // for method, or this provider serves it.
 func definedOption(method, key string) bool {
-	return slices.Contains(generated.StorageQueryParameters[method], key) ||
-		slices.Contains(generated.StorageGlobalParameters, key) ||
+	return slices.Contains(storageapi.StorageQueryParameters[method], key) ||
+		slices.Contains(storageapi.StorageGlobalParameters, key) ||
 		slices.Contains(credentialOptions, key) ||
 		slices.Contains(universalQueryOptions, key) || slices.Contains(queryOptions[method], key)
 }

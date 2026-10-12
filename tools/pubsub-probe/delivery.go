@@ -13,7 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
-// The provider builds on these emulator behaviors (docs/pubsub.md):
+// The provider builds on these emulator behaviors (docs/services/messaging/pubsub.md):
 // dead-lettering it can switch with UpdateSubscription, an ack-deadline expiry
 // that keeps key order, an unenforced retry backoff, and UNKNOWN for an
 // unparsable filter.

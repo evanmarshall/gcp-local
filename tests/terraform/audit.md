@@ -1,6 +1,6 @@
 # Terraform acceptance adapter audit
 
-The runner uses `terraform-plugin-testing v1.15.0` and the unmodified, checksum-pinned Google provider **8.5.0** executable. It extracts eight exact functions from source revision `70539b4b7bb9ea096987422d9596186417b73f51`; source hashes, the original function text, and MPL-2.0 attribution are committed in `third_party/terraform-provider-google`. `scripts/generate_terraform_tests.py --check` checks the reproducible adaptation. Terraform CLI **1.16.5** and provider release archives are pinned for Linux arm64/amd64 and macOS arm64. The CLI is source-available under BUSL-1.1; the acceptance framework and Google provider are MPL-2.0. Executables are downloaded to ignored `.tools`, never vendored.
+The runner uses `terraform-plugin-testing v1.15.0` and the unmodified, checksum-pinned Google provider **8.5.0** executable. It extracts eight exact functions from source revision `70539b4b7bb9ea096987422d9596186417b73f51`; source hashes, the original function text, and MPL-2.0 attribution are committed in `third_party/terraform-provider-google`. `scripts/dev/generate_terraform_tests.py --check` checks the reproducible adaptation. Terraform CLI **1.16.5** and provider release archives are pinned for Linux arm64/amd64 and macOS arm64. The CLI is source-available under BUSL-1.1; the acceptance framework and Google provider are MPL-2.0. Executables are downloaded to ignored `.tools`, never vendored.
 
 ## Executed helpers and changes
 

@@ -1,0 +1,10 @@
+# Source-checkout override: build the runtime image instead of pulling one.
+services:
+  gcp-local:
+    build:
+      # The build context is the repository root; BuildKit reads
+      # packaging/Dockerfile.dockerignore next to the Dockerfile.
+      context: ..
+      dockerfile: packaging/Dockerfile
+      args:
+        GCP_LOCAL_VERSION: ${GCP_LOCAL_VERSION:?Use the gcp-local CLI}

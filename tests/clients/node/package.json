@@ -2,7 +2,7 @@
   "name": "gcp-local-client-matrix-node",
   "private": true,
   "type": "module",
-  "description": "Drives the pinned Node.js Google Cloud clients against gcp-local; see docs/clients.md.",
+  "description": "Drives the pinned Node.js Google Cloud clients against gcp-local; see docs/contributing/clients.md.",
   "engines": {
     "node": ">=24"
   },

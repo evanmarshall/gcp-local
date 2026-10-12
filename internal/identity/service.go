@@ -198,7 +198,7 @@ func (s *Service) Resolve(ctx context.Context, accessToken string) (gateway.Prin
 func grantedScopes(p principal, requested []string) ([]string, error) {
 	for _, scope := range requested {
 		if !iam.KnownScope(scope) {
-			return nil, fmt.Errorf("%w %.128q: gcp-local issues only the Google OAuth scopes listed in docs/local-identity.md", errRequestedScope, scope)
+			return nil, fmt.Errorf("%w %.128q: gcp-local issues only the Google OAuth scopes listed in docs/guides/local-identity.md", errRequestedScope, scope)
 		}
 		if p.restricted && !slices.Contains(p.scopes, scope) {
 			return nil, fmt.Errorf("%w %.128q", errScopeNotEnrolled, scope)

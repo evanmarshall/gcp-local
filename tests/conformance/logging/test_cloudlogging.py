@@ -1,0 +1,20 @@
+"""This scenario remains unverified until an authorized GCP recording exists."""
+
+import pytest
+
+from gcp_validation.services.cloudlogging import run_scenario
+
+
+@pytest.mark.gcp_scenario(
+    id='logging-entries-lifecycle', service='logging', transport='rest-v2',
+    versions={'sdk': 'urllib;google-auth/2.56.2', 'provider': 'not-applicable',
+              'backend': 'not-applicable'},
+    contract_files=(
+        'gcp_validation/services/cloudlogging.py',
+        'gcp_validation/live_rest.py',
+        'gcp_validation/sandbox.py',
+        'tests/conformance/logging/conftest.py',
+    ),
+)
+def test_cloudlogging(cloudlogging, gcp_snapshot):
+    run_scenario(cloudlogging, gcp_snapshot)

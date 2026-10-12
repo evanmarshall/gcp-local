@@ -1,6 +1,6 @@
 // Command client-matrix drives one service workflow with the pinned Go Cloud
 // client libraries against gcp-local, at each library's default transport.
-// scripts/run_clients.py starts the emulator and runs this once per service:
+// scripts/run/clients.py starts the emulator and runs this once per service:
 //
 //	client-matrix SERVICE
 //
@@ -66,7 +66,7 @@ func main() {
 	}
 }
 
-// env is what run_clients.py hands every runner: the project, the emulator's
+// env is what scripts/run/clients.py hands every runner: the project, the emulator's
 // HTTP and gRPC addresses, and the granted and ungranted identities.
 type env struct {
 	project, http, grpcAddr string

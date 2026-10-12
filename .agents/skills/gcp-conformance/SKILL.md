@@ -5,7 +5,7 @@ description: "Create or review gcp-local conformance fixtures, permission probes
 
 # Gcp Conformance
 
-Start from a concrete scenario and existing recordings. Read [validation](../../../docs/validation.md); for probes, [permission discovery](../../../docs/permission-discovery.md); for Terraform, [Terraform compatibility](../../../docs/terraform-compatibility.md).
+Start from a concrete scenario and existing recordings. Read [validation](../../../docs/contributing/validation.md); for probes, [permission discovery](../../../docs/contributing/permission-discovery.md); for Terraform, [Terraform compatibility](../../../docs/contributing/terraform-compatibility.md).
 
 ## Scenarios
 
@@ -20,7 +20,7 @@ Start from a concrete scenario and existing recordings. Read [validation](../../
 
 Recording is encouraged: a scenario that only runs locally is unverified. The owner pre-authorizes live runs that meet all of these:
 
-- Only the sandbox project and its peer project from the [sandbox guide](../../../docs/gcp-sandbox.md), through the recorder with `--gcp-profile` and a live scope file. Never production, never ambient credentials, never organization-level changes.
+- Only the sandbox project and its peer project from the [sandbox guide](../../../docs/contributing/gcp-sandbox.md), through the recorder with `--gcp-profile` and a live scope file. Never production, never ambient credentials, never organization-level changes.
 - Estimated total cost under $10, including anything that keeps billing after the run (KMS key versions until destruction, instances that outlive cleanup). Estimate before running; report the estimate and what was created.
 - Temporary grants and enabled APIs are listed, and grants are removed after the run. Cleanup covers every resource, including after a failed run; verify nothing is left.
 

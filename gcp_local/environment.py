@@ -36,30 +36,31 @@ from gcp_local.bootstrap import (
 
 DOCKER = shutil.which("docker") or "docker"
 
-# A source checkout holds the package next to the Dockerfile; an installed
-# wheel carries the Compose files as package data instead.
+# A source checkout holds the package next to packaging/, which has the
+# Dockerfile and Compose files; an installed wheel carries the Compose files as
+# package data instead. Either directory is the Compose project directory.
 CHECKOUT = Path(__file__).resolve().parents[1]
 SOURCE_FILES = (
-    "Dockerfile",
-    ".dockerignore",
-    "compose.yaml",
-    "compose.build.yaml",
-    "compose.run.yaml",
+    "packaging/Dockerfile",
+    "packaging/Dockerfile.dockerignore",
+    "packaging/compose.yaml",
+    "packaging/compose.build.yaml",
+    "packaging/compose.run.yaml",
     "packaging/haproxy.cfg",
     "go.mod",
     "go.sum",
-    "scripts/install_go.py",
+    "scripts/install/go.py",
     "toolchains/go.json",
-    "scripts/install_emulator_jar.py",
+    "scripts/install/emulator_jar.py",
     "toolchains/pubsub.json",
     "toolchains/firestore.json",
-    "scripts/install_spanner.py",
+    "scripts/install/spanner.py",
     "toolchains/spanner.json",
-    "scripts/install_redis.py",
+    "scripts/install/redis.py",
     "toolchains/redis.json",
-    "scripts/install_postgres.py",
+    "scripts/install/postgres.py",
     "toolchains/postgres.json",
-    "scripts/install_mysql.py",
+    "scripts/install/mysql.py",
     "toolchains/mysql.json",
     "examples/workflow/worker.py",
 )
@@ -72,16 +73,19 @@ REVISION_LABEL = "gcp-local.environment"
 
 def checkout() -> Path | None:
     """Return the source checkout when this package runs from one."""
-    if all((CHECKOUT / name).is_file() for name in ("Dockerfile", "compose.build.yaml", "go.mod")):
+    if all(
+        (CHECKOUT / name).is_file()
+        for name in ("packaging/Dockerfile", "packaging/compose.build.yaml", "go.mod")
+    ):
         return CHECKOUT
     return None
 
 
 def compose_directory() -> Path:
-    """Locate compose.yaml and packaging/haproxy.cfg for this installation."""
+    """Locate compose.yaml and haproxy.cfg for this installation."""
     root = checkout()
     if root is not None:
-        return root
+        return root / "packaging"
     data = Path(str(resources.files("gcp_local") / "data"))
     if not (data / "compose.yaml").is_file():
         raise ValueError("This gcp-local installation is missing its Compose files")

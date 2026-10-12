@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider/providertest"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -237,5 +239,230 @@ func assertNoListener(t *testing.T, f *fixture, project string) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBucketProjectOwnershipAndGlobalNamespace(t *testing.T) {
+	index := state.NewIndex()
+	catalog := NewCatalog(index)
+	a, b := state.Scope{Project: testProject, Location: state.Global}, state.Scope{Project: peerProject, Location: state.Global}
+	bucket := Bucket{Name: "shared-name", Location: "us-central1"}
+	if err := catalog.PublishBucket(a, bucket); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.PublishBucket(b, bucket); err == nil {
+		t.Fatal("bucket global name collided across projects")
+	}
+	if _, found, err := catalog.Bucket(b, bucket.Name); err != nil || found {
+		t.Fatal("foreign project read bucket")
+	}
+	if catalog.PublishBucket(state.Scope{Project: a.Project, Location: "us-central1"}, bucket) == nil {
+		t.Fatal("placement became a second namespace")
+	}
+	if catalog.PublishBucket(a, Bucket{Name: bucket.Name, Location: "europe-west1"}) == nil {
+		t.Fatal("placement silently changed")
+	}
+	if err := catalog.ForgetBucket(b, bucket.Name); err == nil {
+		t.Fatal("foreign project removed bucket index")
+	}
+	if resource, ok := index.Get(BucketResource(bucket.Name)); !ok || resource.Scope != a {
+		t.Fatal("bucket index changed")
+	}
+}
+
+func TestCatalogResetStaysInItsProject(t *testing.T) {
+	index := state.NewIndex()
+	catalog := NewCatalog(index)
+	a, b := state.Scope{Project: testProject, Location: state.Global}, state.Scope{Project: peerProject, Location: state.Global}
+	bucket := Bucket{Name: "shared-name", Location: "us-central1"}
+	if err := catalog.PublishBucket(a, bucket); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.PublishBucket(b, Bucket{Name: "other-name", Location: "europe-west1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Reset(a); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := catalog.Bucket(a, bucket.Name); found {
+		t.Fatal("reset retained bucket metadata")
+	}
+	if _, found := index.Get(BucketResource(bucket.Name)); found {
+		t.Fatal("reset retained bucket index")
+	}
+	if _, found, _ := catalog.Bucket(b, "other-name"); !found {
+		t.Fatal("reset crossed project")
+	}
+	if _, found := index.Get(BucketResource("other-name")); !found {
+		t.Fatal("reset crossed index scope")
+	}
+}
+
+// bucketBody is the create body of the hammered bucket.
+var bucketBody = map[string]any{
+	"name": "race-bucket", "location": "US-CENTRAL1", "storageClass": "STANDARD",
+	"iamConfiguration": map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": true}, "publicAccessPrevention": "enforced"},
+	"softDeletePolicy": map[string]any{"retentionDurationSeconds": "0"},
+}
+
+// TestConcurrentBucketRequests races bucket insert, get, list, label patch,
+// and delete, plus folder requests inside the bucket; -race fails
+// it if a handler touches catalog state unlocked.
+func TestConcurrentBucketRequests(t *testing.T) {
+	f := setup(t)
+	bucket := "/storage/v1/b/race-bucket"
+	folders := bucket + "/folders"
+	providertest.Hammer(t, f.g, admin, 8, 10, func(int) []providertest.Request {
+		return []providertest.Request{
+			{Method: "POST", Path: "/storage/v1/b?project=" + testProject, Body: bucketBody, Want: []int{200, 409}},
+			{Method: "GET", Path: bucket, Want: []int{200, 404}},
+			{Method: "GET", Path: "/storage/v1/b?project=" + testProject, Want: []int{200}},
+			{Method: "PATCH", Path: bucket, Body: map[string]any{"labels": map[string]any{"worker": "w"}}, Want: []int{200, 404}},
+			{Method: "POST", Path: folders, Body: map[string]any{"name": "reports"}, Want: []int{200, 404, 409}},
+			{Method: "GET", Path: folders + "/reports", Want: []int{200, 404}},
+			{Method: "GET", Path: folders, Want: []int{200, 404}},
+			{Method: "DELETE", Path: folders + "/reports", Want: []int{204, 404}},
+			{Method: "DELETE", Path: bucket, Want: []int{204, 404, 409}},
+		}
+	})
+}
+
+// TestBucketPatchIsAtomic rejects a patch with one unsupported field without
+// applying its labels.
+func TestBucketPatchIsAtomic(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "atomic-bucket", 200)
+	f.request(admin, "PATCH", "/storage/v1/b/atomic-bucket", []byte(`{"labels":{"a":"before"}}`), 200)
+	f.request(admin, "PATCH", "/storage/v1/b/atomic-bucket", []byte(`{"labels":{"a":"after"},"versioning":{"enabled":true}}`), 400)
+	f.request(admin, "PATCH", "/storage/v1/b/atomic-bucket", []byte(`{"labels":{"a":7}}`), 400)
+	if body := f.request(admin, "GET", "/storage/v1/b/atomic-bucket", nil, 200).Body.String(); !strings.Contains(body, `"a":"before"`) {
+		t.Fatalf("a rejected patch changed the bucket: %s", body)
+	}
+}
+
+// TestObjectPatchIsAtomic rejects a patch with one unsupported field without
+// applying the supported one.
+func TestObjectPatchIsAtomic(t *testing.T) {
+	f, _ := patchFixture(t)
+	f.request(admin, "PATCH", patchObjectPath, []byte(`{"contentType":"text/plain","acl":[]}`), 400)
+	if body := f.request(admin, "GET", patchObjectPath, nil, 200).Body.String(); strings.Contains(body, "text/plain") || !strings.Contains(body, `"metageneration":"1"`) {
+		t.Fatalf("a rejected patch changed the object: %s", body)
+	}
+}
+
+// Catalog fixture names.
+const (
+	catalogBucket = "owned"
+	absentBucket  = "absent"
+)
+
+// TestFolderLifecycleAndAuthorization covers the provider-owned folders
+// surface: create, conflict, get, list, delete, and denial.
+func TestFolderLifecycleAndAuthorization(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "hns-bucket", 200)
+	folders := "/storage/v1/b/hns-bucket/folders"
+	created := decodeBody(t, f.request(admin, "POST", folders, []byte(`{"name":"reports"}`), 200).Body.Bytes())
+	if created["name"] != "reports" || created["bucket"] != "hns-bucket" {
+		t.Fatalf("folder = %v", created)
+	}
+	f.request(admin, "POST", folders, []byte(`{"name":"reports"}`), 409)
+	f.request(admin, "POST", folders, []byte(`{"name":""}`), 400)
+	f.request(admin, "POST", folders, []byte(`[]`), 400)
+	f.request(admin, "GET", folders+"/reports", nil, 200)
+	f.request(admin, "GET", folders+"/absent", nil, 404)
+	f.request(admin, "POST", folders, []byte(`{"name":"archive"}`), 200)
+	listed := decodeBody(t, f.request(admin, "GET", folders, nil, 200).Body.Bytes())
+	if items, _ := listed["folders"].([]any); len(items) != 2 {
+		t.Fatalf("folders = %v", listed)
+	}
+
+	f.request("stranger@project-a.test", "GET", folders, nil, 403)
+	f.request("stranger@project-a.test", "POST", folders, []byte(`{"name":"intrusion"}`), 403)
+	f.request("stranger@project-a.test", "DELETE", folders+"/reports", nil, 403)
+	f.request(admin, "GET", "/storage/v1/b/absent-bucket/folders", nil, 404)
+
+	// Folders in another project's bucket are unaffected by this bucket's state.
+	f.bucket(peerProject, "peer-bucket", 200)
+	peer := decodeBody(t, f.request("admin@project-b.test", "GET", "/storage/v1/b/peer-bucket/folders", nil, 200).Body.Bytes())
+	if items, _ := peer["folders"].([]any); len(items) != 0 {
+		t.Fatalf("another bucket listed these folders: %v", peer)
+	}
+
+	f.request(admin, "DELETE", folders+"/reports", nil, 204)
+	f.request(admin, "DELETE", folders+"/reports", nil, 404)
+	f.request(admin, "GET", folders+"/reports", nil, 404)
+}
+
+// TestDeletedBucketDropsItsFolders proves a bucket recreated under the same
+// name does not inherit the deleted bucket's folders.
+func TestDeletedBucketDropsItsFolders(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "reused-bucket", 200)
+	f.request(admin, "POST", "/storage/v1/b/reused-bucket/folders", []byte(`{"name":"stale"}`), 200)
+	f.request(admin, "DELETE", "/storage/v1/b/reused-bucket", nil, 204)
+	f.bucket(testProject, "reused-bucket", 200)
+	f.request(admin, "GET", "/storage/v1/b/reused-bucket/folders/stale", nil, 404)
+}
+
+// TestCatalogFolderAndMetadataOwnership covers the catalog's identity and
+// ownership preconditions and metadata replacement directly.
+func TestCatalogFolderAndMetadataOwnership(t *testing.T) {
+	catalog := NewCatalog(state.NewIndex())
+	a := state.Scope{Project: testProject, Location: state.Global}
+	if err := catalog.UpdateMetadata(a, absentBucket, "{}"); !errors.Is(err, errBucketAbsent) {
+		t.Fatalf("update of an absent bucket = %v", err)
+	}
+	if err := catalog.PublishFolder(a, Folder{Bucket: absentBucket, Name: "f"}); !errors.Is(err, errBucketAbsent) {
+		t.Fatalf("folder in an absent bucket = %v", err)
+	}
+	if err := catalog.PublishFolder(a, Folder{Bucket: "x"}); !errors.Is(err, errBucketIdentity) {
+		t.Fatalf("unnamed folder = %v", err)
+	}
+	if err := catalog.PublishBucket(a, Bucket{Name: catalogBucket}); !errors.Is(err, errBucketIdentity) {
+		t.Fatalf("bucket without placement = %v", err)
+	}
+	if err := catalog.PublishBucket(a, Bucket{Name: catalogBucket, Location: "US"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.UpdateMetadata(a, catalogBucket, `{"labels":{}}`); err != nil {
+		t.Fatal(err)
+	}
+	if bucket, _, _ := catalog.Bucket(a, catalogBucket); bucket.Metadata != `{"labels":{}}` {
+		t.Fatalf("metadata = %q", bucket.Metadata)
+	}
+	if _, _, err := catalog.Bucket(state.Scope{Project: testProject, Location: "asia-east1"}, catalogBucket); err == nil {
+		t.Fatal("a regional scope was accepted for global bucket state")
+	}
+}
+
+// TestCatalogFoldersStayInTheirProject covers folder publication, isolation,
+// and reset.
+func TestCatalogFoldersStayInTheirProject(t *testing.T) {
+	catalog := NewCatalog(state.NewIndex())
+	a, b := state.Scope{Project: testProject, Location: state.Global}, state.Scope{Project: peerProject, Location: state.Global}
+	if err := catalog.PublishBucket(a, Bucket{Name: catalogBucket, Location: "US"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.PublishFolder(a, Folder{Bucket: catalogBucket, Name: "f"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.PublishFolder(b, Folder{Bucket: catalogBucket, Name: "f"}); !errors.Is(err, errBucketAbsent) {
+		t.Fatalf("another project published into this bucket: %v", err)
+	}
+	if _, found, _ := catalog.Folder(b, catalogBucket, "f"); found {
+		t.Fatal("another project read this folder")
+	}
+	if removed, _ := catalog.DeleteFolder(b, catalogBucket, "f"); removed {
+		t.Fatal("another project deleted this folder")
+	}
+	if items, _ := catalog.Folders(a, catalogBucket); len(items) != 1 {
+		t.Fatalf("folders = %v", items)
+	}
+	if err := catalog.Reset(a); err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := catalog.Folders(a, catalogBucket); len(items) != 0 {
+		t.Fatal("reset retained folders")
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/evanmarshall/gcp-local/internal/providers/run/container"
+	"github.com/evanmarshall/gcp-local/internal/providers/run/metadata"
 	"maps"
 	"net/http"
 	"slices"
@@ -307,7 +309,7 @@ type launched struct {
 // launchSpec is everything a revision launch needs, copied out of the store
 // under its lock so the launch itself runs outside it.
 type launchSpec struct {
-	start   StartSpec
+	start   container.StartSpec
 	account string
 }
 
@@ -315,7 +317,7 @@ type launchSpec struct {
 // scope lock.
 func launchSpecOf(record *serviceRecord, revision *revisionRecord) launchSpec {
 	return launchSpec{
-		start: StartSpec{
+		start: container.StartSpec{
 			Image: revision.Template.Container.Image,
 			Port:  revision.Template.Container.Port,
 			Env:   workloadEnv(record, revision),
@@ -327,7 +329,7 @@ func launchSpecOf(record *serviceRecord, revision *revisionRecord) launchSpec {
 // launch starts one revision container with its metadata listener. It never
 // touches the store: a launch can pull an image for minutes.
 func (p *Provider) launch(spec launchSpec) (launched, error) {
-	var gate *peerGate
+	var gate *metadata.PeerGate
 	var release func()
 	if spec.account != "" && p.metadata != nil {
 		subject := "serviceAccount:" + spec.account
@@ -335,7 +337,7 @@ func (p *Provider) launch(spec launchSpec) (launched, error) {
 		if metadataErr != nil {
 			return launched{}, fmt.Errorf("enroll the workload identity %s: %w", subject, metadataErr)
 		}
-		gate = newPeerGate(handler)
+		gate = metadata.NewPeerGate(handler)
 		hostPort, stop, bindErr := p.metabind(gate)
 		if bindErr != nil {
 			return launched{}, fmt.Errorf("bind the workload metadata listener: %w", bindErr)
@@ -352,7 +354,7 @@ func (p *Provider) launch(spec launchSpec) (launched, error) {
 		return launched{}, fmt.Errorf("start the revision container: %w", err)
 	}
 	if gate != nil {
-		gate.allow(started.Peer)
+		gate.Allow(started.Peer)
 	}
 	return launched{container: started.Container, address: started.Address, release: release}, nil
 }

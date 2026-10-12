@@ -5,16 +5,16 @@ description: "Install or repair the moo host prerequisites and provision a crede
 
 # Provision the gcp-local baseline
 
-Install the host tool only when setup is part of the task. Reuse a healthy installation; a failed `moo doctor` needs diagnosis, not replacement of active machines. Details are in [the moo guide](../../../docs/moo.md).
+Install the host tool only when setup is part of the task. Reuse a healthy installation; a failed `moo doctor` needs diagnosis, not replacement of active machines. Details are in [the moo guide](../../../docs/contributing/moo.md).
 
 ```sh
-sh scripts/setup_moo.sh
+sh scripts/moo/setup.sh
 ```
 
 This checks or installs the reviewed moo release, creates the `base` machine, runs the provisioner and tooling tests, and saves the baseline.
 
-- **Keep the baseline complete.** When a check gains a dependency (a package, installer, toolchain, or requirements file), add it to `scripts/provision_moo.sh` and `moo.toml`'s lockfiles in the same change. Never install it only in your own clone. Every Linux check must run in a fresh fork of the baseline without setup.
-- When requirements change, edit `moo.toml`, `scripts/provision_moo.sh`, and the lockfiles. Existing machines don't pick up a new recipe: provision a new name (`sh scripts/setup_moo.sh base-v2`), validate it, then tell contributors to fork it. Don't destroy the old baseline.
+- **Keep the baseline complete.** When a check gains a dependency (a package, installer, toolchain, or requirements file), add it to `scripts/moo/provision.sh` and `moo.toml`'s lockfiles in the same change. Never install it only in your own clone. Every Linux check must run in a fresh fork of the baseline without setup.
+- When requirements change, edit `moo.toml`, `scripts/moo/provision.sh`, and the lockfiles. Existing machines don't pick up a new recipe: provision a new name (`sh scripts/moo/setup.sh base-v2`), validate it, then tell contributors to fork it. Don't destroy the old baseline.
 - Never put real credentials or application data in a baseline. Keep setup idempotent and Git edits on the host.
 - After the setup commit, `moo save base` (or the new name).
 - The guest's Docker default bridge doesn't work; a healthy VM doesn't establish container or network claims.

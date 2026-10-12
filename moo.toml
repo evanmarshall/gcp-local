@@ -3,7 +3,7 @@ base = "debian:bookworm-20260918-slim"
 workdir = "/srv/app"
 
 [recipe]
-lockfiles = ["requirements-tools.txt", "requirements-cloud.txt", "requirements-sdk.txt", "requirements-services.txt", "tests/clients/python/requirements.txt", "tests/clients/node/package-lock.json", "toolchains/clients.json", "toolchains/firestore.json", "toolchains/go.json", "toolchains/mysql.json", "toolchains/postgres.json", "toolchains/pubsub.json", "toolchains/quality.json", "toolchains/redis.json", "toolchains/spanner.json", "toolchains/terraform.json", "go.mod", "go.sum", "scripts/install_go.py", "scripts/provision_moo.sh"]
+lockfiles = ["requirements/tools.txt", "requirements/cloud.txt", "requirements/sdk.txt", "requirements/services.txt", "tests/clients/python/requirements.txt", "tests/clients/node/package-lock.json", "toolchains/clients.json", "toolchains/firestore.json", "toolchains/go.json", "toolchains/mysql.json", "toolchains/postgres.json", "toolchains/pubsub.json", "toolchains/quality.json", "toolchains/redis.json", "toolchains/spanner.json", "toolchains/terraform.json", "go.mod", "go.sum", "scripts/install/go.py", "scripts/moo/provision.sh"]
 
 [resources]
 cpus = 2

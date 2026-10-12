@@ -5,8 +5,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request
 
-from .evidence import Inconclusive
-from .live_rest import Response, RestClient
+from gcp_validation.evidence import Inconclusive
+from gcp_validation.live_rest import Response, RestClient
 
 
 class PrefixClient(RestClient):

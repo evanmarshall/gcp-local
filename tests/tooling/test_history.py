@@ -7,7 +7,7 @@ from pathlib import Path
 GIT = shutil.which("git") or "git"
 PYTHON3 = shutil.which("python3") or "python3"
 
-CHECK = Path(__file__).resolve().parents[2] / "scripts/check_history.py"
+CHECK = Path(__file__).resolve().parents[2] / "scripts/check/history.py"
 HOOK = Path(__file__).resolve().parents[2] / ".githooks/pre-push"
 ZERO = "0" * 40
 
@@ -84,9 +84,9 @@ class HistoryPolicyTests(unittest.TestCase):
     def test_hook_is_invoked_by_git_push(self):
         bare = self.repo / "remote.git"
         self.git("init", "--bare", str(bare))
-        scripts = self.repo / "scripts"
-        scripts.mkdir()
-        (scripts / "check_history.py").write_text(CHECK.read_text())
+        scripts = self.repo / "scripts/check"
+        scripts.mkdir(parents=True)
+        (scripts / "history.py").write_text(CHECK.read_text())
         hooks = self.repo / ".githooks"
         hooks.mkdir()
         hook = hooks / "pre-push"

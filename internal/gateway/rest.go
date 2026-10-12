@@ -11,7 +11,27 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/evanmarshall/gcp-local/api/generated"
+	"github.com/evanmarshall/gcp-local/api/generated/artifactregistry"
+	"github.com/evanmarshall/gcp-local/api/generated/compute"
+	"github.com/evanmarshall/gcp-local/api/generated/contract"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/bigquery"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/bigtable"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/cloudsql"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/firestore"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/memorystore"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/spanner"
+	"github.com/evanmarshall/gcp-local/api/generated/logging"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/cloudscheduler"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/cloudtasks"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/pubsub"
+	"github.com/evanmarshall/gcp-local/api/generated/mixin"
+	"github.com/evanmarshall/gcp-local/api/generated/run"
+	"github.com/evanmarshall/gcp-local/api/generated/security/cloudkms"
+	"github.com/evanmarshall/gcp-local/api/generated/security/iam"
+	"github.com/evanmarshall/gcp-local/api/generated/security/resourcemanager"
+	"github.com/evanmarshall/gcp-local/api/generated/security/secretmanager"
+	"github.com/evanmarshall/gcp-local/api/generated/storage"
+	"github.com/evanmarshall/gcp-local/api/generated/vertexai"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -34,7 +54,7 @@ type RESTResponse struct {
 	Body    io.Reader
 }
 type compiledRoute struct {
-	contract   generated.Route
+	contract   contract.Route
 	expression *regexp.Regexp
 	names      []string
 	multi      []bool // a {name=**} variable spans one or more segments
@@ -46,11 +66,11 @@ type Gateway struct {
 	Registry *Registry
 	resolve  Resolver
 	routes   []compiledRoute
-	rpcs     map[string]generated.RPC
+	rpcs     map[string]contract.RPC
 	// transcoded gRPC methods run through a REST route's provider method. A
 	// shared mixin RPC (IAMPolicy) has one binding per resource kind it
 	// serves; shared marks those RPCs.
-	transcoded map[string][]generated.Transcoding
+	transcoded map[string][]contract.Transcoding
 	shared     map[string]bool
 }
 
@@ -58,26 +78,26 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 	if registry == nil {
 		registry = NewRegistry()
 	}
-	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]generated.RPC{}, transcoded: map[string][]generated.Transcoding{}, shared: map[string]bool{}}
+	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]contract.RPC{}, transcoded: map[string][]contract.Transcoding{}, shared: map[string]bool{}}
 	for _, contract := range contracts() {
 		g.routes = append(g.routes, compileRoute(contract))
 	}
-	for _, rpc := range generated.PubSubMethods {
+	for _, rpc := range pubsub.PubSubMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
-	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods, generated.CloudSchedulerMethods, generated.CloudKMSMethods,
-		generated.RunServicesMethods, generated.RunRevisionsMethods, generated.OperationsMethods,
-		generated.SpannerInstanceAdminMethods, generated.SpannerDatabaseAdminMethods,
-		generated.BigtableInstanceAdminMethods, generated.BigtableTableAdminMethods, generated.IAMAdminMethods} {
+	for _, table := range [][]contract.RPC{mixin.IAMMethods, spanner.SpannerMethods, bigtable.BigtableMethods, secretmanager.SecretManagerMethods, cloudtasks.CloudTasksMethods, cloudscheduler.CloudSchedulerMethods, cloudkms.CloudKMSMethods,
+		run.RunServicesMethods, run.RunRevisionsMethods, mixin.OperationsMethods,
+		spanner.SpannerInstanceAdminMethods, spanner.SpannerDatabaseAdminMethods,
+		bigtable.BigtableInstanceAdminMethods, bigtable.BigtableTableAdminMethods, iam.IAMAdminMethods} {
 		for _, rpc := range table {
 			g.rpcs[rpc.Method] = rpc
 		}
 	}
 	g.addTranscoding()
-	for _, rpc := range generated.FirestoreMethods {
+	for _, rpc := range firestore.FirestoreMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
-	for _, rpc := range generated.LoggingMethods {
+	for _, rpc := range logging.LoggingMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
 	return g
@@ -86,13 +106,13 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 // addTranscoding indexes every transcoded binding by RPC and marks the
 // shared IAMPolicy and Operations mixin RPCs, which pick a binding by resource.
 func (g *Gateway) addTranscoding() {
-	for _, rpc := range append(append([]generated.RPC(nil), generated.IAMMethods...), generated.OperationsMethods...) {
+	for _, rpc := range append(append([]contract.RPC(nil), mixin.IAMMethods...), mixin.OperationsMethods...) {
 		g.shared[rpc.Method] = true
 	}
-	for _, table := range [][]generated.Transcoding{generated.SecretManagerTranscoding, generated.CloudTasksTranscoding, generated.CloudSchedulerTranscoding, generated.CloudKMSTranscoding,
-		generated.RunServicesTranscoding, generated.RunRevisionsTranscoding,
-		generated.SpannerInstanceAdminTranscoding, generated.SpannerDatabaseAdminTranscoding,
-		generated.BigtableInstanceAdminTranscoding, generated.BigtableTableAdminTranscoding, generated.IAMAdminTranscoding} {
+	for _, table := range [][]contract.Transcoding{secretmanager.SecretManagerTranscoding, cloudtasks.CloudTasksTranscoding, cloudscheduler.CloudSchedulerTranscoding, cloudkms.CloudKMSTranscoding,
+		run.RunServicesTranscoding, run.RunRevisionsTranscoding,
+		spanner.SpannerInstanceAdminTranscoding, spanner.SpannerDatabaseAdminTranscoding,
+		bigtable.BigtableInstanceAdminTranscoding, bigtable.BigtableTableAdminTranscoding, iam.IAMAdminTranscoding} {
 		for _, binding := range table {
 			g.transcoded[binding.RPC] = append(g.transcoded[binding.RPC], binding)
 		}
@@ -122,39 +142,39 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // contracts returns the REST route tables, custom-method suffixes first so the
 // generic variable pattern cannot swallow the literal ":method" suffix.
-func contracts() []generated.Route {
-	routes := append(append(append([]generated.Route(nil), generated.StorageRoutes...), generated.RunRoutes...), generated.ComputeRoutes...)
-	routes = append(routes, generated.SecretManagerRoutes...)
-	routes = append(routes, generated.CloudKMSRoutes...)
-	routes = append(routes, generated.FirestoreRoutes...)
-	routes = append(routes, generated.BigQueryRoutes...)
-	routes = append(routes, generated.SpannerRoutes...)
-	routes = append(routes, generated.BigtableRoutes...)
-	routes = append(routes, generated.ArtifactRegistryRoutes...)
-	routes = append(routes, generated.ResourceManagerRoutes...)
-	routes = append(routes, generated.IAMRoutes...)
-	routes = append(routes, generated.CloudTasksRoutes...)
-	routes = append(routes, generated.CloudSchedulerRoutes...)
-	routes = append(routes, generated.CloudSQLRoutes...)
-	routes = append(routes, generated.PubSubRestRoutes...)
-	routes = append(routes, generated.PubSubSchemaRestRoutes...)
-	routes = append(routes, generated.RedisRoutes...)
-	routes = append(routes, generated.VertexAIRoutes...)
-	routes = append(routes, generated.LoggingRoutes...)
+func contracts() []contract.Route {
+	routes := append(append(append([]contract.Route(nil), storage.StorageRoutes...), run.RunRoutes...), compute.ComputeRoutes...)
+	routes = append(routes, secretmanager.SecretManagerRoutes...)
+	routes = append(routes, cloudkms.CloudKMSRoutes...)
+	routes = append(routes, firestore.FirestoreRoutes...)
+	routes = append(routes, bigquery.BigQueryRoutes...)
+	routes = append(routes, spanner.SpannerRoutes...)
+	routes = append(routes, bigtable.BigtableRoutes...)
+	routes = append(routes, artifactregistry.ArtifactRegistryRoutes...)
+	routes = append(routes, resourcemanager.ResourceManagerRoutes...)
+	routes = append(routes, iam.IAMRoutes...)
+	routes = append(routes, cloudtasks.CloudTasksRoutes...)
+	routes = append(routes, cloudscheduler.CloudSchedulerRoutes...)
+	routes = append(routes, cloudsql.CloudSQLRoutes...)
+	routes = append(routes, pubsub.PubSubRestRoutes...)
+	routes = append(routes, pubsub.PubSubSchemaRestRoutes...)
+	routes = append(routes, memorystore.RedisRoutes...)
+	routes = append(routes, vertexai.VertexAIRoutes...)
+	routes = append(routes, logging.LoggingRoutes...)
 	sort.SliceStable(routes, func(i, j int) bool {
 		left, right := strings.Contains(routes[i].Path, ":"), strings.Contains(routes[j].Path, ":")
 		return left && !right
 	})
 	// The XML API's /{bucket}/{object} shape matches almost any path, so it
 	// is tried only after every service route.
-	return append(routes, generated.StorageXMLRoutes...)
+	return append(routes, storage.StorageXMLRoutes...)
 }
 
 // variables is the REST path template variable shape.
 var variables = regexp.MustCompile(`\{([^{}]+)\}`)
 
 // compileRoute turns one wire contract into its match table entry.
-func compileRoute(contract generated.Route) compiledRoute {
+func compileRoute(contract contract.Route) compiledRoute {
 	compiled := compiledRoute{contract: contract}
 	var pattern strings.Builder
 	pattern.WriteString("^")

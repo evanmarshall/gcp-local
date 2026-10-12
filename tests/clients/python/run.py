@@ -1,6 +1,6 @@
 """Drive one service workflow with the pinned Python Google Cloud clients against gcp-local.
 
-scripts/run_clients.py starts the emulator and runs `run.py SERVICE` once per
+scripts/run/clients.py starts the emulator and runs `run.py SERVICE` once per
 service, at each client's default transport. The process exits 0 when the
 workflow passes and prints the failing step otherwise.
 """
@@ -169,7 +169,10 @@ def run_pubsub():
 
 
 def firestore_client(*, denied=False):
-    """Firestore's handwritten client takes no channel; docs/firestore.md sets its private API."""
+    """Firestore's handwritten client takes no channel.
+
+    docs/services/databases/firestore.md sets its private API.
+    """
     client = firestore.Client(project=PROJECT, credentials=credentials(denied=denied))
     client._firestore_api_internal = generated(FirestoreClient, denied=denied)
     return client
@@ -263,7 +266,7 @@ def run_cloudscheduler():
 def run_cloudrun():
     client = generated(run_v2.ServicesClient)
     location = f"projects/{PROJECT}/locations/us-central1"
-    # run_clients.py maps this image to a local revision process.
+    # scripts/run/clients.py maps this image to a local revision process.
     service = run_v2.Service(
         template=run_v2.RevisionTemplate(containers=[run_v2.Container(image=REVISION_IMAGE)])
     )

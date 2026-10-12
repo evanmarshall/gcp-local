@@ -1,4 +1,4 @@
-"""Run after local_env.py up; creates and removes one private local bucket."""
+"""Run after scripts/dev/local_env.py up; creates and removes one private local bucket."""
 
 import argparse
 import json

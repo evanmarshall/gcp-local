@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -16,9 +18,11 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
-
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider/providertest"
+	"github.com/evanmarshall/gcp-local/internal/providers/run/container"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -27,7 +31,7 @@ import (
 // fakeRuntime records container calls and fails launches on demand.
 type fakeRuntime struct {
 	mu       sync.Mutex
-	started  []StartSpec
+	started  []container.StartSpec
 	running  map[string]error
 	stopped  []string
 	failNext error
@@ -38,13 +42,13 @@ func newFakeRuntime() *fakeRuntime {
 	return &fakeRuntime{running: map[string]error{}}
 }
 
-func (f *fakeRuntime) Start(_ context.Context, spec StartSpec) (Started, error) {
+func (f *fakeRuntime) Start(_ context.Context, spec container.StartSpec) (container.Started, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failNext != nil {
 		err := f.failNext
 		f.failNext = nil
-		return Started{}, err
+		return container.Started{}, err
 	}
 	f.started = append(f.started, spec)
 	id := spec.Image + "-container"
@@ -53,7 +57,7 @@ func (f *fakeRuntime) Start(_ context.Context, spec StartSpec) (Started, error) 
 	if address == "" {
 		address = "127.0.0.1:19000"
 	}
-	return Started{Address: address, Container: id, Peer: "127.0.0.1"}, nil
+	return container.Started{Address: address, Container: id, Peer: "127.0.0.1"}, nil
 }
 
 func (f *fakeRuntime) Ready(_ context.Context, container string) error {
@@ -598,8 +602,395 @@ type blockingRuntime struct {
 	entered, release chan struct{}
 }
 
-func (b *blockingRuntime) Start(ctx context.Context, spec StartSpec) (Started, error) {
+func (b *blockingRuntime) Start(ctx context.Context, spec container.StartSpec) (container.Started, error) {
 	b.entered <- struct{}{}
 	<-b.release
 	return b.fakeRuntime.Start(ctx, spec)
+}
+
+func TestInvocationDialsOnlyLocalRevisionAddresses(t *testing.T) {
+	for address, want := range map[string]bool{"127.0.0.1:8080": true, "172.30.0.5" + ":8080": true, "8.8.8.8:80": false, "metadata.google.internal:80": false} {
+		if revisionAddress(address) != want {
+			t.Errorf("%s: want %v", address, want)
+		}
+	}
+}
+
+// TestConcurrentServiceRequests races every service, revision, and operation
+// method on one service while rollouts launch and readiness workers finish
+// them. -race fails it if anything touches a record unlocked, and a request
+// racing a delete must read 404, never an unverified-target 501.
+func TestConcurrentServiceRequests(t *testing.T) {
+	h := newHarness(t)
+	revision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer revision.Close()
+	h.runtime.address = revision.Listener.Addr().String()
+	service := "/v2/" + serviceReference
+	update := map[string]any{"template": map[string]any{"containers": []any{map[string]any{"image": "example.local/svc:2"}}}}
+	policy := map[string]any{"policy": map[string]any{"bindings": []any{map[string]any{
+		"role": "roles/run.invoker", "members": []any{"serviceAccount:invoker@demo-project.iam.gserviceaccount.com"},
+	}}}}
+	providertest.Hammer(t, h.gateway, "fixture-actor", 8, 10, func(int) []providertest.Request {
+		return []providertest.Request{
+			{Method: http.MethodPost, Path: servicesPath, Body: serviceBody(""), Want: []int{200, 409}},
+			{Method: http.MethodGet, Path: service, Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: servicesPath, Want: []int{200}},
+			// A concurrent rollout aborts the slower one (409).
+			{Method: http.MethodPatch, Path: service, Body: update, Want: []int{200, 404, 409}},
+			{Method: http.MethodPost, Path: service + ":setIamPolicy", Body: policy, Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: service + ":getIamPolicy", Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: service + "/revisions", Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: service + "/revisions/svc-00001", Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: "/v2/projects/demo-project/locations/us-central1/operations", Want: []int{200}},
+			{Method: http.MethodGet, Path: "/v2/projects/demo-project/locations/us-central1/operations/rel-svc", Want: []int{200, 404}},
+			{Method: http.MethodDelete, Path: service, Want: []int{200, 404}},
+		}
+	})
+	// The index entry and the service record change together.
+	_, indexed := h.index.Get(serviceResource("demo-project", "us-central1", "svc"))
+	if stored := h.invoke(http.MethodGet, service, nil).Code == http.StatusOK; stored != indexed {
+		t.Fatalf("service stored = %v but indexed = %v", stored, indexed)
+	}
+}
+
+// A recreated service starts with an empty policy, as in GCP: the deleted
+// service's invokers cannot call its successor.
+func TestRecreatedServiceStartsWithEmptyPolicy(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	invoker := "serviceAccount:invoker@demo-project.iam.gserviceaccount.com"
+	if recorder := h.invoke(http.MethodPost, "/v2/"+serviceReference+":setIamPolicy", map[string]any{"policy": map[string]any{
+		"bindings": []any{map[string]any{"role": "roles/run.invoker", "members": []any{invoker}}},
+	}}); recorder.Code != http.StatusOK {
+		t.Fatalf("setIamPolicy = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := h.invoke(http.MethodDelete, "/v2/"+serviceReference, nil); recorder.Code != http.StatusOK {
+		t.Fatalf("delete = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := h.invoke(http.MethodPost, servicesPath, serviceBody("")); recorder.Code != http.StatusOK {
+		t.Fatalf("recreate = %d %s", recorder.Code, recorder.Body.String())
+	}
+	policy := h.invoke(http.MethodGet, "/v2/"+serviceReference+":getIamPolicy", nil)
+	if policy.Code != http.StatusOK || strings.Contains(policy.Body.String(), invoker) {
+		t.Fatalf("recreated service policy = %d %s", policy.Code, policy.Body.String())
+	}
+}
+
+// Test subject identity for the revision metadata listener.
+const (
+	testProjectName   = "demo-project"
+	testWorkerSubject = "serviceAccount:worker@demo-project.iam.gserviceaccount.com"
+	testWorkerToken   = "gls.revision-metadata-subject-token-for-refresh-tests" //nolint:gosec // synthetic enrollment secret
+)
+
+// TestRevisionMetadataServesConfiguredIdentity proves the per-revision metadata
+// listener mints tokens for the revision's configured service account only.
+func TestRevisionMetadataServesConfiguredIdentity(t *testing.T) {
+	subject := testWorkerSubject
+	secret := testWorkerToken
+	identities, err := identity.New(identity.Config{
+		TokenLifetimeSeconds: 300,
+		Principals:           []identity.Enrollment{{Subject: subject, Project: testProjectName, SubjectToken: secret}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("build the identity service: %v", err)
+	}
+	h := newHarness(t)
+	h.declareWorker(t)
+	h.provider.metadata = identities.Metadata
+	h.provider.metabind = func(handler http.Handler) (string, func(), error) {
+		var listen net.ListenConfig
+		listener, err := listen.Listen(context.Background(), "tcp", "127.0.0.1:0")
+		if err != nil {
+			return "", nil, fmt.Errorf("bind the test metadata listener: %w", err)
+		}
+		server := &http.Server{Handler: handler, ReadHeaderTimeout: time.Second}
+		go func() { _ = server.Serve(listener) }()
+		return listener.Addr().String(), func() { _ = server.Close() }, nil
+	}
+	body := map[string]any{
+		keyName: serviceReference,
+		"template": map[string]any{
+			"containers":     []any{map[string]any{"image": imageReference}},
+			"serviceAccount": strings.TrimPrefix(subject, "serviceAccount:"),
+		},
+	}
+	recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/us-central1/services", body)
+	if recorder.Code != 200 {
+		t.Fatalf("create status = %d body %s", recorder.Code, recorder.Body.String())
+	}
+	metadata := boundMetadataHost(h)
+	principal := fetchResolvedPrincipal(t, metadata, identities)
+	if principal.State != gateway.Authenticated || principal.Subject != subject {
+		t.Fatalf("resolved principal = %+v", principal)
+	}
+}
+
+// boundMetadataHost extracts the revision's metadata listener address.
+func boundMetadataHost(h *harness) string {
+	for _, entry := range h.runtime.started[0].Env {
+		if value, found := strings.CutPrefix(entry, "GCE_METADATA_HOST="); found {
+			return value
+		}
+	}
+	h.t.Fatal("no metadata listener bound for the revision")
+	return ""
+}
+
+// fetchResolvedPrincipal mints and resolves one workload token.
+func fetchResolvedPrincipal(t *testing.T, metadata string, identities *identity.Service) gateway.Principal {
+	t.Helper()
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		"http://"+metadata+"/computeMetadata/v1/instance/service-accounts/default/token", nil)
+	request.Header.Set("Metadata-Flavor", "Google")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("metadata token request: %v", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	payload, _ := io.ReadAll(response.Body)
+	var token struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(payload, &token); err != nil {
+		t.Fatalf("decode token response %s: %v", payload, err)
+	}
+	principal, err := identities.Resolve(context.Background(), token.AccessToken)
+	if err != nil {
+		t.Fatalf("resolve the minted token: %v", err)
+	}
+	return principal
+}
+
+// exitingRuntime is the fake runtime whose containers exit only when a test
+// sends their exit error.
+type exitingRuntime struct {
+	*fakeRuntime
+	exits map[string]chan error
+}
+
+func (e *exitingRuntime) exit(container string) chan error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.exits[container] == nil {
+		e.exits[container] = make(chan error, 1)
+	}
+	return e.exits[container]
+}
+
+func (e *exitingRuntime) Ready(ctx context.Context, container string) error {
+	select {
+	case err := <-e.exit(container):
+		return err
+	case <-ctx.Done():
+		return nil
+	}
+}
+
+// errExited is a container exit the tests inject.
+var errExited = errors.New("the container exited")
+
+// rolloutState reads the service's rollout operation: done, and its error code.
+func (h *harness) rolloutState(t *testing.T) (bool, float64) {
+	t.Helper()
+	recorder := h.invoke(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/operations/rel-svc", nil)
+	var operation struct {
+		Done  bool `json:"done"`
+		Error struct {
+			Code float64 `json:"code"`
+		} `json:"error"`
+	}
+	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &operation) != nil {
+		t.Fatalf("operation get = %d %s", recorder.Code, recorder.Body.String())
+	}
+	return operation.Done, operation.Error.Code
+}
+
+// hasReaper reports whether one service's idle reaper is registered.
+func (h *harness) hasReaper(scope state.Scope, id string) bool {
+	h.provider.reaperMu.Lock()
+	defer h.provider.reaperMu.Unlock()
+	return h.provider.reapers[reaperKey(scope, id)] != nil
+}
+
+// Service IDs repeat across locations; resetting one location must leave the
+// other location's reaper running.
+func TestResettingOneLocationKeepsAnotherLocationsReaper(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	europe := map[string]any{"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}}}
+	if recorder := h.invoke(http.MethodPost, "/v2/projects/demo-project/locations/europe-west1/services?serviceId=svc", europe); recorder.Code != http.StatusOK {
+		t.Fatalf("europe create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	central := state.Scope{Project: "demo-project", Location: "us-central1"}
+	if err := h.provider.Reset(context.Background(), central); err != nil {
+		t.Fatal(err)
+	}
+	if h.hasReaper(central, "svc") || !h.hasReaper(state.Scope{Project: "demo-project", Location: "europe-west1"}, "svc") {
+		t.Fatal("resetting us-central1 cancelled the europe-west1 reaper or kept its own")
+	}
+}
+
+// Deleting one service must leave its neighbors' reapers running.
+func TestDeletingOneServiceKeepsAnothersReaper(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	other := map[string]any{"template": map[string]any{"containers": []any{map[string]any{"image": "example.local/other:1"}}}}
+	if recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId=other", other); recorder.Code != http.StatusOK {
+		t.Fatalf("second create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := h.invoke(http.MethodDelete, "/v2/"+serviceReference, nil); recorder.Code != http.StatusOK {
+		t.Fatalf("delete = %d %s", recorder.Code, recorder.Body.String())
+	}
+	scope := state.Scope{Project: "demo-project", Location: "us-central1"}
+	if h.hasReaper(scope, "svc") || !h.hasReaper(scope, "other") {
+		t.Fatal("deleting svc cancelled the other service's reaper or kept its own")
+	}
+}
+
+// A finished operation is final: a container that exits after its rollout
+// succeeded must not turn the operation into an error.
+func TestFinishedRolloutNeverFlipsToError(t *testing.T) {
+	h := newHarness(t)
+	revision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer revision.Close()
+	h.runtime.address = revision.Listener.Addr().String()
+	runtime := &exitingRuntime{fakeRuntime: h.runtime, exits: map[string]chan error{}}
+	h.provider.runtime = runtime
+	h.create(t)
+	waitFor(t, func() bool { done, _ := h.rolloutState(t); return done })
+	if _, code := h.rolloutState(t); code != 0 {
+		t.Fatalf("rollout failed with %v", code)
+	}
+	runtime.exit(imageReference + "-container") <- errExited
+	time.Sleep(300 * time.Millisecond)
+	if done, code := h.rolloutState(t); !done || code != 0 {
+		t.Fatalf("succeeded rollout became done=%v code=%v", done, code)
+	}
+}
+
+// Rollouts share one operation name; the first rollout's container exiting
+// must not finish the second rollout's operation.
+func TestStaleWatcherCannotFinishTheNextRollout(t *testing.T) {
+	h := newHarness(t)
+	runtime := &exitingRuntime{fakeRuntime: h.runtime, exits: map[string]chan error{}}
+	h.provider.runtime = runtime
+	h.create(t)
+	update := map[string]any{"template": map[string]any{"containers": []any{map[string]any{"image": "example.local/svc:2"}}}}
+	if recorder := h.invoke(http.MethodPatch, "/v2/"+serviceReference, update); recorder.Code != http.StatusOK {
+		t.Fatalf("update = %d %s", recorder.Code, recorder.Body.String())
+	}
+	runtime.exit(imageReference + "-container") <- errExited
+	time.Sleep(300 * time.Millisecond)
+	if done, code := h.rolloutState(t); done {
+		t.Fatalf("the first rollout's exit finished the second rollout with code %v", code)
+	}
+}
+
+// waitFor polls a condition for up to ten seconds.
+func waitFor(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatal("the condition did not hold in time")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// An invocation of a reaped revision cold-starts its container and rearms
+// the idle reaper.
+func TestInvocationColdStartsAReapedRevision(t *testing.T) {
+	h := newHarness(t)
+	h.create(t)
+	if recorder := h.invoke(http.MethodPost, "/v2/"+serviceReference+":setIamPolicy", map[string]any{"policy": map[string]any{
+		"bindings": []any{map[string]any{"role": "roles/run.invoker", "members": []any{"allUsers"}}},
+	}}); recorder.Code != http.StatusOK {
+		t.Fatalf("setIamPolicy = %d %s", recorder.Code, recorder.Body.String())
+	}
+	scope := state.Scope{Project: "demo-project", Location: "us-central1"}
+	h.provider.clock = func() time.Time { return time.Now().Add(2 * idleTimeout) }
+	if !h.provider.reap(context.Background(), scope, "svc") {
+		t.Fatal("the idle revision was not reaped")
+	}
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/_run/svc-demo-project.us-central1.run.app/", nil)
+	h.provider.Invocation().ServeHTTP(httptest.NewRecorder(), request)
+	h.runtime.mu.Lock()
+	launches := len(h.runtime.started)
+	h.runtime.mu.Unlock()
+	if launches != 2 || !h.hasReaper(scope, "svc") {
+		t.Fatalf("after the invocation: %d launches, reaper armed %v", launches, h.hasReaper(scope, "svc"))
+	}
+}
+
+// deafRuntime is a runtime whose revision never holds its own address and
+// exits shortly after start, like a revision that lost its port.
+type deafRuntime struct{ *fakeRuntime }
+
+func (deafRuntime) Listening(string) bool { return false }
+
+func (deafRuntime) Ready(context.Context, string) error {
+	time.Sleep(time.Second)
+	return errRevisionExited
+}
+
+// errRevisionExited is the exit deafRuntime reports.
+var errRevisionExited = errors.New("the revision process exited")
+
+// Another process can bind the port between reserve and the revision's own
+// bind. Its answers must not make the revision ready: the rollout fails when
+// the revision exits, and never reports success first.
+func TestRolloutIgnoresAForeignListenerOnTheRevisionPort(t *testing.T) {
+	foreign := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer foreign.Close()
+	h := newHarness(t)
+	h.runtime.address = foreign.Listener.Addr().String()
+	h.provider.runtime = deafRuntime{h.runtime}
+	if recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId=svc", map[string]any{
+		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
+	}); recorder.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	var code float64
+	waitFor(t, func() bool { done, observed := h.rolloutState(t); code = observed; return done })
+	if code == 0 {
+		t.Fatal("the rollout succeeded on a foreign listener's answers")
+	}
+}
+
+// helperImage maps to this test binary re-run as a revision process; the
+// service's MODE env selects what it does.
+const helperImage = "example.local/helper:1"
+
+// TestRunHelperProcess is the revision process, not a test: in serve mode it
+// serves PORT, exiting 1 when the port is taken.
+func TestRunHelperProcess(*testing.T) {
+	if os.Getenv("MODE") != "serve" {
+		return
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("PORT")) //nolint:noctx // the helper process has no context
+	if err != nil {
+		os.Exit(1)
+	}
+	_ = http.Serve(listener, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })) //nolint:gosec // a loopback test helper
+	os.Exit(0)
+}
+
+// A revision that binds its own port becomes ready, and the runtime sees
+// its listener.
+func TestRolloutSucceedsWhenTheRevisionListens(t *testing.T) {
+	h := newHarness(t)
+	h.provider.runtime = container.NewProcessRuntime(map[string][]string{helperImage: {os.Args[0], "-test.run=^TestRunHelperProcess$"}})
+	body := map[string]any{"template": map[string]any{"containers": []any{map[string]any{
+		"image": helperImage, "env": []any{map[string]any{"name": "MODE", "value": "serve"}},
+	}}}}
+	if recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId=svc", body); recorder.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	t.Cleanup(func() { _ = h.invoke(http.MethodDelete, "/v2/"+serviceReference, nil) })
+	waitFor(t, func() bool { done, _ := h.rolloutState(t); return done })
+	if _, code := h.rolloutState(t); code != 0 {
+		t.Fatalf("rollout failed with code %v", code)
+	}
 }

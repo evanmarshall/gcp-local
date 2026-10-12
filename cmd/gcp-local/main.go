@@ -25,21 +25,21 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/localtls"
 	artifactregistryprovider "github.com/evanmarshall/gcp-local/internal/providers/artifactregistry"
-	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
-	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
-	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
-	cloudschedulerprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudscheduler"
-	cloudsqlprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudsql"
-	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
-	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
-	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/iam"
+	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/bigquery"
+	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/bigtable"
+	cloudsqlprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql"
+	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/firestore"
+	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/memorystore"
+	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/databases/spanner"
 	loggingprovider "github.com/evanmarshall/gcp-local/internal/providers/logging"
-	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
-	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
-	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
-	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
-	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
+	cloudschedulerprovider "github.com/evanmarshall/gcp-local/internal/providers/messaging/cloudscheduler"
+	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/messaging/cloudtasks"
+	"github.com/evanmarshall/gcp-local/internal/providers/messaging/pubsub"
+	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/security/cloudkms"
+	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/security/iam"
+	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/resourcemanager"
+	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	vertexaiprovider "github.com/evanmarshall/gcp-local/internal/providers/vertexai"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
@@ -151,7 +151,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.firestoreJAR, "firestore-jar", "", "absolute checksum-pinned Firestore emulator JAR")
 	flags.StringVar(&options.spannerEmulator, "spanner-emulator", "", "absolute checksum-pinned Spanner emulator_main binary (Linux only)")
 	flags.StringVar(&options.spannerLibraries, "spanner-libraries", "", "absolute directory holding the emulator's pinned libstdc++.so.6")
-	flags.StringVar(&options.redisServer, "redis-server", "", "absolute redis-server built by scripts/install_redis.py (Memorystore)")
+	flags.StringVar(&options.redisServer, "redis-server", "", "absolute redis-server built by scripts/install/redis.py (Memorystore)")
 	flags.StringVar(&options.cloudsql.postgres, "cloudsql-postgres", "", "absolute root of the checksum-pinned PostgreSQL installs (Linux only)")
 	flags.StringVar(&options.cloudsql.mysql, "cloudsql-mysql", "", "absolute root of the checksum-pinned MySQL installs (Linux only)")
 	flags.StringVar(&options.cloudsql.runAs, "cloudsql-run-as", "", "uid:gid the PostgreSQL and MySQL servers run as; required when gcp-local runs as root")

@@ -1,0 +1,8 @@
+# Local authenticated Pub/Sub SDK runner; no live-cloud execution by default.
+-r sdk.txt
+google-cloud-pubsub==2.42.0
+grpcio==1.84.0
+grpcio-status==1.84.0
+grpc-google-iam-v1==0.14.5
+opentelemetry-sdk==1.45.0
+opentelemetry-semantic-conventions==0.66b0

@@ -52,9 +52,9 @@
   },
   "quality": {
     "tools": "toolchains/quality.json",
-    "python_tools": "requirements-tools.txt",
-    "go_config": ".golangci.yml",
-    "python_config": "ruff.toml",
+    "python_tools": "requirements/tools.txt",
+    "go_config": "quality/golangci.yml",
+    "python_config": "pyproject.toml [tool.ruff]",
     "baselines": "quality/",
     "dead_code_allowlists": [
       "quality/dead-code-go.txt",
@@ -71,7 +71,7 @@
     "purpose": "Interpreter for the image launcher and the bundled Cloud Run workflow worker; links against the runtime base's glibc and OpenSSL"
   },
   "distribution": {
-    "python": "pyproject.toml (hatchling 1.27.0); the wheel carries compose.yaml and packaging/haproxy.cfg as gcp_local/data",
+    "python": "pyproject.toml (hatchling 1.27.0); the wheel carries packaging/compose.yaml, packaging/compose.run.yaml, and packaging/haproxy.cfg as gcp_local/data",
     "image": "ghcr.io/evanmarshall/gcp-local:VERSION, linux/amd64 and linux/arm64",
     "release": ".github/workflows/release.yml"
   }

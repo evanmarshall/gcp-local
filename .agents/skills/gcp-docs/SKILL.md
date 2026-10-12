@@ -14,12 +14,12 @@ description: Use when a gcp-local change adds or removes a service, provider met
 | Any change below | `docs/coverage.md` summary row: methods served, data plane, recordings, Terraform |
 | Method or capability | The service doc (`docs/<service>.md`): served methods and explicit gaps. Also the README "Application use" column if what an application can do changed |
 | Conformance recording | The service doc's recording list (ID, date, what it observes). `docs/coverage.md` recordings column |
-| Permission probe | The `docs/coverage.md` cross-service table and `docs/permission-discovery.md` |
-| Terraform case | `docs/coverage.md` Terraform column and `docs/terraform-compatibility.md` |
+| Permission probe | The `docs/coverage.md` cross-service table and `docs/contributing/permission-discovery.md` |
+| Terraform case | `docs/coverage.md` Terraform column and `docs/contributing/terraform-compatibility.md` |
 | Evidence level changes (first recording, or modeled to recorded) | `LOCAL_SUPPORT` in `skills/gcp-local-setup/scripts/inspect_repo.py` |
-| A real client is tested (or found broken) | `tests/clients/matrix.json` and the client compatibility tables in `docs/coverage.md`; `check_repo.py` requires them to agree |
-| Developer role | `gcp_local/bootstrap.py` `DEVELOPER_ROLES` and the `docs/quickstart.md` roles table |
-| New service | All of the above, plus the README table, `docs/quickstart.md`, a row in the `CONTRIBUTING.md` checks table, and the `SERVICES` list |
+| A real client is tested (or found broken) | `tests/clients/matrix.json` and the client compatibility tables in `docs/coverage.md`; `scripts/check/repo.py` requires them to agree |
+| Developer role | `gcp_local/bootstrap.py` `DEVELOPER_ROLES` and the `docs/guides/quickstart.md` roles table |
+| New service | All of the above, plus the README table, `docs/guides/quickstart.md`, a row in the `CONTRIBUTING.md` checks table, and the `SERVICES` list |
 
 Then find stale copies:
 
@@ -38,7 +38,7 @@ Replace any list of services or recording counts outside `docs/coverage.md` with
 ## Verify
 
 ```sh
-uv run --with 'PyYAML==6.0.3' python scripts/check_repo.py
+uv run --with 'PyYAML==6.0.3' python scripts/check/repo.py
 ```
 
 This fails when a packaged service, recording, or Terraform case is missing from `docs/coverage.md`, when the README doesn't link to it, or when any relative link is broken. It doesn't check the method counts.

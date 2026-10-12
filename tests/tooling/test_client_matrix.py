@@ -3,10 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts/run"))
 
 import client_matrix
-import run_clients
+import clients as run_clients
 
 
 def combo(expect, match="known gap"):

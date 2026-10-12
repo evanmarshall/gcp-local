@@ -1,6 +1,6 @@
 # Design
 
-gcp-local is one Go process that serves GCP REST and gRPC APIs locally, authenticates every caller, checks IAM before any side effect, and hands the work to a service provider. Providers keep their own scoped state and reuse existing emulators or real servers as backends. Real-GCP recordings are the test oracle. The structure follows LocalStack; [the comparison](localstack-comparison.md) maps each part to its source. [Service coverage](coverage.md) says what each provider serves.
+gcp-local is one Go process that serves GCP REST and gRPC APIs locally, authenticates every caller, checks IAM before any side effect, and hands the work to a service provider. Providers keep their own scoped state and reuse existing emulators or real servers as backends. Real-GCP recordings are the test oracle. The structure follows LocalStack; [the comparison](architecture/localstack-comparison.md) maps each part to its source. [Service coverage](coverage.md) says what each provider serves.
 
 ```mermaid
 flowchart TD
@@ -56,11 +56,11 @@ Rules:
 - Clients never reach an API backend directly. Backend ports stay private. Cloud SQL and Redis expose their wire protocols on an explicit `-data-ports` range; those listeners forward bytes and the server enforces its own auth.
 - Providers own background work: Pub/Sub push, Cloud Tasks dispatch, Cloud Scheduler jobs, operation completion, Cloud Run revisions. A worker calls other services as its service agent, through the same IAM checks. It never gets an implicit administrator identity.
 - Shared helpers go in `internal/providers/provider` only when every caller renders byte-identical output.
-- `internal/providers/compute` answers reachability analytically from the configured network graph ([networking](networking.md)). A local socket connection is not evidence of GCP reachability.
+- `internal/providers/compute` answers reachability analytically from the configured network graph ([networking](services/networking.md)). A local socket connection is not evidence of GCP reachability.
 
 ## IAM engine
 
-`internal/iam` answers one question: may this principal perform these permission checks on this target? Details are in [the IAM guide](iam.md).
+`internal/iam` answers one question: may this principal perform these permission checks on this target? Details are in [the IAM guide](architecture/iam.md).
 
 - Each provider registers a permission plan per method: baseline permissions plus permissions added by named request or state features. A plan cannot drop baseline checks. An unresolved feature is an error, not an assumption.
 - Evaluation walks the target's ancestry in the resource index (resource, project, folder, organization) and unions allow bindings. It also evaluates IAM conditions (CEL), deny rules, and principal access boundary policies.
@@ -70,15 +70,15 @@ Rules:
 
 ## Scoped state and backends
 
-`internal/state` stores provider state per project and location; `internal/backend` starts, probes, resets, and stops one backend instance per service, project, and location. Each field has exactly one owner: provider store, backend, or the shared resource index. The index holds names, kinds, scopes, and parents for IAM ancestry, not copies of backend data. Details are in [state and backends](state-and-backends.md).
+`internal/state` stores provider state per project and location; `internal/backend` starts, probes, resets, and stops one backend instance per service, project, and location. Each field has exactly one owner: provider store, backend, or the shared resource index. The index holds names, kinds, scopes, and parents for IAM ancestry, not copies of backend data. Details are in [state and backends](architecture/state-and-backends.md).
 
 ## Local identity
 
-The core runs a local STS (`/v1/token`) and an optional per-workload metadata server. Callers use standard `external_account` ADC or `GCE_METADATA_HOST`; tokens are opaque process-local handles. The runtime never reads the real-cloud `.env`, gcloud config, or ambient ADC. Details are in [local identity](local-identity.md).
+The core runs a local STS (`/v1/token`) and an optional per-workload metadata server. Callers use standard `external_account` ADC or `GCE_METADATA_HOST`; tokens are opaque process-local handles. The runtime never reads the real-cloud `.env`, gcloud config, or ambient ADC. Details are in [local identity](guides/local-identity.md).
 
 ## Conformance recordings
 
-Behavior is "recorded" only when a scenario ran against a real GCP sandbox, the reviewed result is committed under `tests/conformance/recordings/`, and the local provider matches it. Normal development and CI compare locally against those recordings without network access. Recording and revalidation are separate, explicitly authorized live runs. [Validation](validation.md) covers the runner; [permission discovery](permission-discovery.md) covers permission minimization; [Terraform compatibility](terraform-compatibility.md) covers the pinned provider cases.
+Behavior is "recorded" only when a scenario ran against a real GCP sandbox, the reviewed result is committed under `tests/conformance/recordings/`, and the local provider matches it. Normal development and CI compare locally against those recordings without network access. Recording and revalidation are separate, explicitly authorized live runs. [Validation](contributing/validation.md) covers the runner; [permission discovery](contributing/permission-discovery.md) covers permission minimization; [Terraform compatibility](contributing/terraform-compatibility.md) covers the pinned provider cases.
 
 ## Non-goals
 

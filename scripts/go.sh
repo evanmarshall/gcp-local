@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 if [ ! -x .tools/go/bin/go ]; then
-    echo 'Install the pinned toolchain with python3 scripts/install_go.py' >&2
+    echo 'Install the pinned toolchain with python3 scripts/install/go.py' >&2
     exit 1
 fi
 export GOTOOLCHAIN=local

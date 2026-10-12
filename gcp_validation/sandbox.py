@@ -1,11 +1,11 @@
 """Explicit sandbox profiles and offline/live credential diagnostics."""
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import re
 import shlex
+from dataclasses import dataclass
+from pathlib import Path
 
 
 class SandboxError(ValueError):
@@ -126,7 +126,7 @@ def inspect_credentials(identity, project):
         if not isinstance(data, dict):
             raise SandboxError
         if data.get("type") == "external_account":
-            from .federation import validate_github_credentials
+            from gcp_validation.federation import validate_github_credentials
             return validate_github_credentials(data, identity, project)
         expected = ("https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
                     + identity.email + ":generateAccessToken")

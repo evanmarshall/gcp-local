@@ -1,4 +1,7 @@
-"""Run after local_env.py up; publishes and pulls one message through the local gRPC gateway."""
+"""Publish and pull one message through the local gRPC gateway.
+
+Run after scripts/dev/local_env.py up.
+"""
 
 import argparse
 import contextlib

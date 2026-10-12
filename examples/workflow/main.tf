@@ -2,7 +2,7 @@
 # Cloud Run worker -> Storage chain against a local gcp-local endpoint:
 # the worker and push service accounts, the bucket and the worker's object
 # grant, the topic, the Cloud Run v2 worker, its invoker grant, and the push
-# subscription. scripts/smoke_workflow.py drives it end to end.
+# subscription. scripts/smoke/workflow.py drives it end to end.
 #
 # This configuration can only reach a loopback endpoint: var.endpoint must be
 # a numeric loopback HTTP URL, every used API has an explicit endpoint

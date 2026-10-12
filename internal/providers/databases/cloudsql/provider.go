@@ -1,0 +1,447 @@
+package cloudsql
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"maps"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/dataplane"
+	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/mysqlwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/pgwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// Provider is the authorization gate in front of the PostgreSQL and MySQL fleet. It
+// owns instance metadata, operations, and index references; the servers own
+// databases, roles, and data.
+type Provider struct {
+	manager  *backend.Manager
+	index    *state.Index
+	engine   *iam.Engine
+	catalog  *state.Store[catalog]
+	releases map[string]string
+	pool     *dataplane.Pool
+	publicMu sync.Mutex
+	public   map[string]*dataplane.Listener
+	clock    func() time.Time
+}
+
+// handler serves one authorized method for one project.
+type handler func(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error)
+
+// New registers the Cloud SQL provider backed by the pinned PostgreSQL and MySQL binaries.
+func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, config Config) (*Provider, error) {
+	versions, err := config.validate()
+	if err != nil {
+		return nil, err
+	}
+	releases := map[string]string{}
+	for version, dist := range versions {
+		releases[version] = dist.release
+	}
+	provider, err := newProvider(registry, manager, index, engine, releases, func(state.Scope) (backend.Backend, error) {
+		return newFleet(versions, config.RunAs), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	provider.pool = config.Publish
+	return provider, nil
+}
+
+// newProvider wires the provider with an arbitrary backend factory (tests use a fake fleet).
+func newProvider(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, releases map[string]string, factory func(state.Scope) (backend.Backend, error)) (*Provider, error) {
+	if registry == nil || manager == nil || index == nil || engine == nil {
+		return nil, errProviderShape
+	}
+	if err := registerPlans(engine); err != nil {
+		return nil, err
+	}
+	p := &Provider{manager: manager, index: index, engine: engine, releases: releases, clock: time.Now,
+		catalog: state.NewStore(newCatalog, state.GlobalScope), public: map[string]*dataplane.Listener{}}
+	if err := manager.Register(serviceName, backend.Definition{
+		Validate: state.GlobalScope,
+		New:      factory,
+		// The manager stops every server of the project (discarding its data
+		// directories) before this hook closes its published ports and clears
+		// metadata and references.
+		AfterReset: func(scope state.Scope) error {
+			p.closeProjectPublic(scope.Project)
+			if err := p.catalog.Reset(scope); err != nil {
+				return fmt.Errorf("clear the Cloud SQL scope: %w", err)
+			}
+			index.RemoveScope(serviceName, scope)
+			return nil
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("register the Cloud SQL backend: %w", err)
+	}
+	return p, p.registerRoutes(registry)
+}
+
+// registerPlans registers every permission plan after confirming on a
+// scratch engine that the pinned roles grant them all.
+func registerPlans(engine *iam.Engine) error {
+	if err := rolesRecorded(); err != nil {
+		return err
+	}
+	for method, permission := range permissions {
+		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
+			return fmt.Errorf("register %s: %w", method, err)
+		}
+	}
+	return nil
+}
+
+// registerRoutes binds every served method to the provider.
+func (p *Provider) registerRoutes(registry *gateway.Registry) error {
+	for method := range p.handlers() {
+		if err := registry.Register(method, p.handle); err != nil {
+			return fmt.Errorf("register %s: %w", method, err)
+		}
+	}
+	return nil
+}
+
+// rolesRecorded checks on a scratch engine that the pinned predefined roles
+// grant every planned permission, so a missing snapshot refuses registration
+// before any plan reaches the shared engine.
+func rolesRecorded() error {
+	scratch, err := iam.New(state.NewIndex())
+	if err != nil {
+		return fmt.Errorf("load the pinned roles: %w", err)
+	}
+	for method, permission := range permissions {
+		if scratch.Register(method, iam.Rule{Baseline: []string{permission}}) != nil {
+			return fmt.Errorf("%w: no pinned role grants %s", ErrRolesUnrecorded, permission)
+		}
+	}
+	return nil
+}
+
+// handlers maps each served method to its implementation.
+func (p *Provider) handlers() map[string]handler {
+	return map[string]handler{
+		methodInstancesInsert: p.insertInstance, methodInstancesGet: p.getInstance, methodInstancesList: p.listInstances,
+		methodInstancesPatch: p.patchInstance, methodInstancesDelete: p.deleteInstance,
+		methodDatabasesInsert: p.insertDatabase, methodDatabasesGet: p.getDatabase, methodDatabasesList: p.listDatabases,
+		methodDatabasesDelete: p.deleteDatabase,
+		methodUsersInsert:     p.insertUser, methodUsersList: p.listUsers, methodUsersDelete: p.deleteUser,
+		methodOperationsGet: p.getOperation, methodOperationsList: p.listOperations,
+	}
+}
+
+// handle is the gateway entry point. Authorization completes before any
+// backend is started or called.
+func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
+	request, ok := raw.(*gateway.RESTRequest)
+	if !ok {
+		return nil, status.Error(codes.Internal, "Invalid Cloud SQL request")
+	}
+	project := request.Path[pathProject]
+	if provider.ProjectScope(project).Validate() != nil {
+		return nil, provider.Invalid("Invalid project.")
+	}
+	target := p.target(project, p.addressed(call.Method, request, project))
+	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	if provider.Unverified(authorizeErr) {
+		// A concurrent delete can unindex the instance after target chose it.
+		target = p.target(project, p.addressed(call.Method, request, project))
+		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+	}
+	if authorizeErr != nil {
+		return refusal(call.Method, authorizeErr)
+	}
+	call.Resource = target.Name
+	response, err := p.handlers()[call.Method](call, request, project)
+	if err != nil {
+		return nil, err
+	}
+	if response.Headers == nil {
+		response.Headers = http.Header{}
+	}
+	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
+	return response, nil
+}
+
+// refusal renders a denied decision in the Cloud SQL shape; coverage gaps
+// and other failures stay errors.
+func refusal(method string, err error) (any, error) {
+	switch status.Code(err) {
+	case codes.PermissionDenied:
+		return apiError(http.StatusForbidden, "PERMISSION_DENIED", "notAuthorized", "The client is not authorized to make this request."), nil
+	case codes.Unauthenticated:
+		return apiError(http.StatusUnauthorized, "UNAUTHENTICATED", "required", "Login Required."), nil
+	default:
+		return nil, fmt.Errorf("authorize %s: %w", method, err)
+	}
+}
+
+// addressed names the instance a request acts on, or "" for project-level calls.
+func (p *Provider) addressed(method string, request *gateway.RESTRequest, project string) string {
+	switch method {
+	case methodInstancesInsert, methodInstancesList:
+		return ""
+	case methodOperationsList:
+		return request.Query.Get("instance")
+	case methodOperationsGet:
+		var instance string
+		_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
+			for _, operation := range c.operations {
+				if operation.Name == request.Path[pathOperation] {
+					instance = operation.Instance
+				}
+			}
+			return nil
+		})
+		return instance
+	default:
+		return request.Path[pathInstance]
+	}
+}
+
+// target selects the IAM resource: the instance when indexed, else its
+// project, so a missing instance is authorized at the project and then
+// reported as missing. Cloud SQL has no instance-level IAM policies; the
+// instance node only carries its project ancestry and condition attributes.
+func (p *Provider) target(project, instance string) iam.Target {
+	if instance != "" {
+		name := instanceResource(project, instance)
+		if resource, ok := p.index.Get(name); ok && resource.Service == serviceName && resource.Scope == provider.ProjectScope(project) {
+			return iam.Target{Name: name, Attributes: iam.ResourceAttributes{
+				Name: "projects/" + project + "/instances/" + instance, Type: "sqladmin.googleapis.com/Instance", Service: "sqladmin.googleapis.com"}}
+		}
+	}
+	return iam.Target{Name: provider.ProjectResource(project)}
+}
+
+// use runs one backend operation for a project after authorization.
+func (p *Provider) use(ctx context.Context, project string, operation func(context.Context, driver) error) error {
+	err := p.manager.Use(ctx, backend.Key{Service: serviceName, Scope: provider.ProjectScope(project)}, func(ctx context.Context, active backend.Backend) error {
+		fleet, err := driverOf(active)
+		if err != nil {
+			return err
+		}
+		return operation(ctx, fleet)
+	})
+	if err != nil {
+		return fmt.Errorf("cloud SQL backend: %w", err)
+	}
+	return nil
+}
+
+// lookup returns a copy of one instance's metadata.
+func (p *Provider) lookup(project, instance string) (instanceRecord, bool) {
+	var record instanceRecord
+	var found bool
+	_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
+		var stored instanceRecord
+		stored, found = c.instances[instance]
+		record = stored.clone()
+		return nil
+	})
+	return record, found
+}
+
+// complete records a finished operation and returns its wire form.
+func (p *Provider) complete(call gateway.Call, project, kind, instance string, started time.Time) (*gateway.RESTResponse, error) {
+	operation := newOperation(kind, instance, subject(call.Principal), started, p.clock())
+	if err := p.catalog.With(provider.ProjectScope(project), func(c *catalog) error { c.record(operation); return nil }); err != nil {
+		return nil, fmt.Errorf("record the operation: %w", err)
+	}
+	return &gateway.RESTResponse{JSON: operation.wire(project)}, nil
+}
+
+// subject renders the operation user as GCP does: the caller's email.
+func subject(principal gateway.Principal) string {
+	if principal.State != gateway.Authenticated {
+		return ""
+	}
+	for _, prefix := range []string{"serviceAccount:", "user:"} {
+		if len(principal.Subject) > len(prefix) && principal.Subject[:len(prefix)] == prefix {
+			return principal.Subject[len(prefix):]
+		}
+	}
+	return principal.Subject
+}
+
+// backendFailure maps PostgreSQL and MySQL errors onto API errors; other
+// failures stay internal.
+func backendFailure(err error) (*gateway.RESTResponse, error) {
+	if my, ok := errors.AsType[*mysqlwire.Error](err); ok {
+		return mysqlFailure(my), nil
+	}
+	var pg *pgwire.Error
+	if !errors.As(err, &pg) {
+		return nil, err
+	}
+	switch pg.Code {
+	case "42P04", "42710": // duplicate_database, duplicate_object
+		return apiError(http.StatusConflict, "ALREADY_EXISTS", "", pg.Message), nil
+	case "3D000", "42704": // invalid_catalog_name, undefined_object
+		return apiError(http.StatusNotFound, "NOT_FOUND", "", pg.Message), nil
+	default:
+		return apiError(http.StatusBadRequest, "FAILED_PRECONDITION", "", pg.Message), nil
+	}
+}
+
+// mysqlFailure maps a MySQL server error onto an API error. Recorded
+// (cloudsql-mysql-instance-admin): a duplicate database (1007) is a 400, not
+// a 409, so it takes the default branch.
+func mysqlFailure(my *mysqlwire.Error) *gateway.RESTResponse {
+	switch {
+	case my.Code == 1396 && strings.Contains(my.Message, "CREATE USER"): // account exists
+		return apiError(http.StatusConflict, "ALREADY_EXISTS", "", my.Message)
+	case my.Code == 1008, my.Code == 1049, my.Code == 1396: // database or account missing
+		return apiError(http.StatusNotFound, "NOT_FOUND", "", my.Message)
+	default:
+		return apiError(http.StatusBadRequest, "FAILED_PRECONDITION", "", my.Message)
+	}
+}
+
+// maxOperations bounds the retained operation history per project.
+const maxOperations = 1000
+
+// instanceRecord is the provider-owned instance metadata. The server itself,
+// its databases, and its users are owned by the backend.
+type instanceRecord struct {
+	Name, Region, Version, Tier, Edition, PrivateNetwork string
+	Labels                                               map[string]string
+	DeletionProtection, IPv4                             bool
+	SettingsVersion                                      int64
+	Created                                              time.Time
+	// Port is the published data-plane port of a public-IP instance, or 0.
+	Port int
+}
+
+// operationRecord is one completed sql#operation.
+type operationRecord struct {
+	Name, Type, Instance, User string
+	Inserted, Ended            time.Time
+}
+
+// catalog is one project's provider state.
+type catalog struct {
+	instances  map[string]instanceRecord
+	operations []operationRecord
+}
+
+func newCatalog() catalog { return catalog{instances: map[string]instanceRecord{}} }
+
+// clone copies a record so callers never share the stored label map.
+func (r instanceRecord) clone() instanceRecord {
+	r.Labels = maps.Clone(r.Labels)
+	return r
+}
+
+// record appends a completed operation, dropping the oldest beyond the bound.
+func (c *catalog) record(operation operationRecord) {
+	c.operations = append(c.operations, operation)
+	if len(c.operations) > maxOperations {
+		c.operations = append([]operationRecord(nil), c.operations[len(c.operations)-maxOperations:]...)
+	}
+}
+
+// newOperation builds a completed operation. Every supported mutation runs to
+// completion before its response, so operations are returned DONE.
+func newOperation(kind, instance, user string, started, ended time.Time) operationRecord {
+	return operationRecord{Name: operationID(), Type: kind, Instance: instance, User: user, Inserted: started, Ended: ended}
+}
+
+// wire renders the sql#operation resource.
+func (o operationRecord) wire(project string) map[string]any {
+	inserted, ended := o.Inserted.UTC().Format(time.RFC3339Nano), o.Ended.UTC().Format(time.RFC3339Nano)
+	value := map[string]any{
+		keyKind: "sql#operation", keyName: o.Name, "operationType": o.Type, "status": statusDone,
+		"insertTime": inserted, "startTime": inserted, "endTime": ended,
+		"targetId": o.Instance, "targetProject": project, "targetLink": instanceLink(project, o.Instance),
+		keySelfLink: apiBase + "projects/" + project + "/operations/" + o.Name,
+	}
+	if o.User != "" {
+		value["user"] = o.User
+	}
+	return value
+}
+
+// wire renders the sql#instance resource from provider metadata.
+func (r instanceRecord) wire(project string, release string) map[string]any {
+	ipType := "PRIMARY"
+	if !r.IPv4 {
+		ipType = "PRIVATE"
+	}
+	ipConfiguration := map[string]any{"ipv4Enabled": r.IPv4}
+	if r.PrivateNetwork != "" {
+		ipConfiguration["privateNetwork"] = r.PrivateNetwork
+	}
+	settings := map[string]any{
+		keyKind: "sql#settings", "tier": r.Tier, keySettingsVersion: strconv.FormatInt(r.SettingsVersion, 10),
+		keyDeletionProtection: r.DeletionProtection, "activationPolicy": "ALWAYS", "availabilityType": "ZONAL",
+		"pricingPlan": "PER_USE", "ipConfiguration": ipConfiguration,
+	}
+	if len(r.Labels) > 0 {
+		settings["userLabels"] = maps.Clone(r.Labels)
+	}
+	if r.Edition != "" {
+		settings["edition"] = r.Edition
+	}
+	address := map[string]any{"type": ipType, "ipAddress": loopbackIPv4}
+	if r.Port > 0 {
+		// gcp-local extension: GCP serves PostgreSQL on 5432 and MySQL on 3306
+		// and has no port field; locally each instance has its own published port.
+		address["port"] = r.Port
+	}
+	addresses := []any{address}
+	if !isMySQL(r.Version) {
+		// Recorded: PostgreSQL instances list an OUTGOING address; MySQL instances do not.
+		addresses = append(addresses, map[string]any{"type": "OUTGOING", "ipAddress": loopbackIPv4})
+	}
+	value := map[string]any{
+		keyKind: "sql#instance", keyName: r.Name, pathProject: project, "region": r.Region, "databaseVersion": r.Version,
+		"state": statusRunnable, "backendType": "SECOND_GEN", "instanceType": "CLOUD_SQL_INSTANCE",
+		"connectionName": project + ":" + r.Region + ":" + r.Name, keySelfLink: instanceLink(project, r.Name),
+		"createTime": r.Created.UTC().Format(time.RFC3339Nano), "etag": r.etag(),
+		"ipAddresses": addresses, keySettings: settings,
+		// Recorded (cloudsql-postgres-instance-admin): GCP always returns these
+		// service-managed fields; the values are local stand-ins, only presence is compared.
+		"gceZone": r.Region + "-a", "geminiConfig": map[string]any{"entitled": false},
+		"includeReplicasForMajorVersionUpgrade": false, "maintenanceVersion": r.Version + "_LOCAL",
+		"satisfiesPzi": false, "serverCaCert": map[string]any{"kind": "sql#sslCert", pathInstance: r.Name},
+		"serviceAccountEmailAddress": "p-local@gcp-sa-cloud-sql.iam.gserviceaccount.com",
+		"sqlNetworkArchitecture":     "NEW_NETWORK_ARCHITECTURE", "upgradableDatabaseVersions": []any{},
+	}
+	if release != "" {
+		engine, _, _ := strings.Cut(r.Version, "_")
+		value["databaseInstalledVersion"] = engine + "_" + release
+	}
+	return value
+}
+
+// etag changes whenever the settings version changes.
+func (r instanceRecord) etag() string {
+	sum := sha256.Sum256([]byte(r.Name + "/" + strconv.FormatInt(r.SettingsVersion, 10) + "/" + r.Created.String()))
+	return hex.EncodeToString(sum[:16])
+}
+
+// operationID renders a random RFC 4122 version-4 identifier, the shape of
+// Cloud SQL operation names.
+func operationID() string {
+	raw := randomBytes(16)
+	raw[6] = raw[6]&0x0f | 0x40
+	raw[8] = raw[8]&0x3f | 0x80
+	text := hex.EncodeToString(raw)
+	return text[:8] + "-" + text[8:12] + "-" + text[12:16] + "-" + text[16:20] + "-" + text[20:]
+}

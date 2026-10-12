@@ -12,7 +12,7 @@ import (
 )
 
 // The provider forwards Avro schemas to the emulator and serves Protocol
-// Buffer schemas itself (docs/pubsub.md). These are the emulator behaviors
+// Buffer schemas itself (docs/services/messaging/pubsub.md). These are the emulator behaviors
 // that split relies on.
 const (
 	probeSchema     = "projects/backend-probe/schemas/avro-probe"

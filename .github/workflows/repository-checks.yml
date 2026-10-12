@@ -15,88 +15,84 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: python3 scripts/install_go.py
-      - run: python3 scripts/install_emulator_jar.py pubsub
-      - run: python3 scripts/install_emulator_jar.py firestore
-      - run: python3 scripts/install_spanner.py
-      - run: python3 scripts/install_redis.py
-      - run: python3 scripts/install_postgres.py
-      - run: python3 scripts/install_mysql.py
+      - run: python3 scripts/install/go.py
+      - run: python3 scripts/install/emulator_jar.py pubsub
+      - run: python3 scripts/install/emulator_jar.py firestore
+      - run: python3 scripts/install/spanner.py
+      - run: python3 scripts/install/redis.py
+      - run: python3 scripts/install/postgres.py
+      - run: python3 scripts/install/mysql.py
       - name: Install the libraries mysqld links from the host
         # Ubuntu 24.04 renamed libaio.so.1; mysqld still asks for the old name.
         run: |
           sudo apt-get update && sudo apt-get install -y libaio1t64 libnuma1
           sudo ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
       - run: python3 -m venv .venv-tools
-      - run: .venv-tools/bin/python -m pip install -r requirements-services.txt
+      - run: .venv-tools/bin/python -m pip install -r requirements/services.txt
       - run: .venv-tools/bin/python -m pip check
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - run: sh scripts/go.sh build -tags=backendprobe -o bin/pubsub-probe ./tools/pubsub-probe
       - name: Check official emulator protocols and lifecycle without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_pubsub_backend.sh
-      - run: sh scripts/go.sh test -c -tags=pubsubintegration -race -o bin/pubsub-integration ./internal/providers/pubsub
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check/backend/pubsub_backend.sh
+      - run: sh scripts/go.sh test -c -tags=pubsubintegration -race -o bin/pubsub-integration ./internal/providers/messaging/pubsub
       - name: Verify provider IAM, streams, lifecycle, and real Python SDK with local ADC
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_pubsub.sh
-      - run: sh scripts/go.sh test -c -tags=firestoreintegration -race -o bin/firestore-integration ./internal/providers/firestore
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check/backend/pubsub.sh
+      - run: sh scripts/go.sh test -c -tags=firestoreintegration -race -o bin/firestore-integration ./internal/providers/databases/firestore
       - name: Verify Firestore authorization, queries, transactions, and the real Python SDK against the official emulator
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_firestore.sh
-      - run: sh scripts/go.sh test -c -tags=spannerintegration -race -o bin/spanner-integration ./internal/providers/spanner
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check/backend/firestore.sh
+      - run: sh scripts/go.sh test -c -tags=spannerintegration -race -o bin/spanner-integration ./internal/providers/databases/spanner
       - name: Verify the Spanner provider against the official emulator without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_spanner.sh
-      - run: sh scripts/go.sh test -c -tags=redisintegration -race -o bin/redis-integration ./internal/providers/memorystore
+            sh scripts/check/backend/spanner.sh
+      - run: sh scripts/go.sh test -c -tags=redisintegration -race -o bin/redis-integration ./internal/providers/databases/memorystore
       - name: Verify Memorystore against a real Redis without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_redis.sh
-      - run: sh scripts/go.sh test -c -tags=cloudsqlintegration -race -o bin/cloudsql-integration ./internal/providers/cloudsql
+            sh scripts/check/backend/redis.sh
+      - run: sh scripts/go.sh test -c -tags=cloudsqlintegration -race -o bin/cloudsql-integration ./internal/providers/databases/cloudsql
       - name: Verify Cloud SQL against real PostgreSQL and MySQL behind the connector
         # The servers run as nobody, which must traverse the runner's home.
         run: |
           chmod o+x "$HOME"
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_cloudsql.sh
+            sh scripts/check/backend/cloudsql.sh
       - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/vertexai-sdk ./internal/providers/vertexai
       - name: Verify Vertex AI with the google-genai SDK and local ADC without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_vertexai.sh
+            sh scripts/check/sdk/vertexai.sh
       - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/logging-sdk ./internal/providers/logging
       - name: Verify Cloud Logging with the Python SDK over REST and gRPC without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_logging.sh
-      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/cloudkms-sdk ./internal/providers/cloudkms
+            sh scripts/check/sdk/logging.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/cloudkms-sdk ./internal/providers/security/cloudkms
       - name: Verify Cloud KMS asymmetric and MAC keys with the Python SDK and local ADC without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_cloudkms.sh
-      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/secretmanager-sdk ./internal/providers/secretmanager
+            sh scripts/check/sdk/cloudkms.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/secretmanager-sdk ./internal/providers/security/secretmanager
       - name: Verify Secret Manager with the Python SDK over gRPC without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_secretmanager.sh
-      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/cloudtasks-sdk ./internal/providers/cloudtasks
+            sh scripts/check/sdk/secretmanager.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/cloudtasks-sdk ./internal/providers/messaging/cloudtasks
       - name: Verify Cloud Tasks with the Python SDK over gRPC without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_cloudtasks.sh
+            sh scripts/check/sdk/cloudtasks.sh
       - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/cloudrun-sdk ./internal/providers/run
       - name: Verify Cloud Run with the Python SDK over gRPC without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            sh scripts/check_cloudrun_sdk.sh
-      - name: Compare local REST providers against their recorded contracts
-        run: |
-          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_rest_recordings.sh
+            sh scripts/check/sdk/cloudrun.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -105,9 +101,50 @@ jobs:
           path: |
             .artifacts/pubsub-backend/results.json
             .artifacts/pubsub-provider/results.json
-            .artifacts/pubsub-conformance/coverage.json
-            .artifacts/pubsub-conformance/junit.xml
-            .artifacts/rest-provider/coverage.json
+
+  # Every committed GCP recording is an integration test: this job replays all
+  # of them and fails unless each one is verified (scripts/run/recordings.py).
+  recordings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 scripts/install/go.py
+      - run: python3 scripts/install/emulator_jar.py pubsub
+      - run: python3 scripts/install/emulator_jar.py firestore
+      - run: python3 scripts/install/spanner.py
+      - run: python3 scripts/install/redis.py
+      - run: python3 scripts/install/postgres.py
+      - run: python3 scripts/install/mysql.py
+      - name: Install Java and the libraries mysqld links from the host
+        # Ubuntu 24.04 renamed libaio.so.1; mysqld still asks for the old name.
+        run: |
+          sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless libaio1t64 libnuma1
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
+      - run: python3 -m venv .venv-tools
+      - run: .venv-tools/bin/python -m pip install -r requirements/services.txt
+      - run: .venv-tools/bin/python -m pip check
+      - name: Warm the conformance builds before blocking network egress
+        run: |
+          sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance
+          sh scripts/go.sh test -c -tags=pubsubintegration -race -o bin/pubsub-integration ./internal/providers/messaging/pubsub
+      - name: Replay every recording and require each one verified
+        # The servers run as nobody, which must traverse the runner's home.
+        run: |
+          chmod o+x "$HOME"
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            GITHUB_SHA="$GITHUB_SHA" GCP_LOCAL_TEST_PYTHON="$PWD/.venv-tools/bin/python" \
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check/recordings.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: recordings
+          include-hidden-files: true
+          path: |
+            .artifacts/recordings/*/coverage.json
+            .artifacts/recordings/*/junit.xml
 
   packaged-environment:
     runs-on: ubuntu-latest
@@ -119,14 +156,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-sdk.txt -r requirements-pubsub.txt
+      - run: python -m pip install -r requirements/sdk.txt -r requirements/pubsub.txt
       - run: docker compose version
       - name: Verify startup, every packaged service under IAM, isolated reset, docker run, failure, and teardown
-        run: python scripts/smoke_environment.py
+        run: python scripts/smoke/environment.py
       - name: Run the Terraform workflow against the packaged environment, then reset and verify it is empty
-        run: python scripts/smoke_workflow.py --packaged
+        run: python scripts/smoke/workflow.py --packaged
       - name: Install the built wheel in a fresh venv and drive its gcp-local CLI
-        run: python scripts/smoke_package.py
+        run: python scripts/smoke/package.py
 
   packaged-cloudrun-docker:
     runs-on: ubuntu-latest
@@ -139,10 +176,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m venv .venv-tools
-      - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt
+      - run: .venv-tools/bin/python -m pip install -r requirements/pubsub.txt
       - run: docker compose version
       - name: Run a user-built image on packaged Cloud Run in Docker mode, then check per-environment cleanup
-        run: .venv-tools/bin/python scripts/smoke_workflow.py --packaged --cloud-run-docker
+        run: .venv-tools/bin/python scripts/smoke/workflow.py --packaged --cloud-run-docker
 
   workflow-acceptance:
     runs-on: ubuntu-latest
@@ -154,14 +191,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-pubsub.txt
+      - run: python -m pip install -r requirements/pubsub.txt
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
-      - run: python scripts/install_go.py
-      - run: python scripts/install_emulator_jar.py pubsub
-      - run: python scripts/install_terraform.py
+      - run: python scripts/install/go.py
+      - run: python scripts/install/emulator_jar.py pubsub
+      - run: python scripts/install/terraform.py
       - name: Provision and run the Pub/Sub push to Cloud Run worker to Storage workflow with Terraform
         run: |
-          GCP_LOCAL_JAVA=$(readlink -f "$(command -v java)") python scripts/smoke_workflow.py
+          GCP_LOCAL_JAVA=$(readlink -f "$(command -v java)") python scripts/smoke/workflow.py
       - name: Show the core log, including revision output
         if: failure()
         run: tail -n 200 /tmp/gcp-local-core-*.log
@@ -177,7 +214,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Deploy a real container through the local Cloud Run control plane
-        run: python scripts/smoke_cloudrun.py
+        run: python scripts/smoke/cloudrun.py
 
   terraform-acceptance:
     runs-on: ubuntu-latest
@@ -189,13 +226,13 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python scripts/install_go.py
-      - run: python scripts/install_terraform.py
-      - run: python scripts/install_emulator_jar.py pubsub
-      - run: python scripts/install_emulator_jar.py firestore
-      - run: python scripts/install_spanner.py
-      - run: python scripts/install_redis.py
-      - run: python scripts/install_postgres.py
+      - run: python scripts/install/go.py
+      - run: python scripts/install/terraform.py
+      - run: python scripts/install/emulator_jar.py pubsub
+      - run: python scripts/install/emulator_jar.py firestore
+      - run: python scripts/install/spanner.py
+      - run: python scripts/install/redis.py
+      - run: python scripts/install/postgres.py
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - name: Warm pinned module and build dependencies before isolation
         run: |
@@ -204,7 +241,7 @@ jobs:
       - name: Run upstream acceptance cases and the metadata negative control without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_terraform.sh
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check/terraform.sh
       - name: Hand private reports back to the artifact uploader
         if: always()
         run: |
@@ -232,11 +269,11 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python scripts/install_go.py
-      - run: python scripts/install_emulator_jar.py pubsub
-      - run: python scripts/install_emulator_jar.py firestore
-      - run: python scripts/install_spanner.py
-      - run: python scripts/install_client_tools.py
+      - run: python scripts/install/go.py
+      - run: python scripts/install/emulator_jar.py pubsub
+      - run: python scripts/install/emulator_jar.py firestore
+      - run: python scripts/install/spanner.py
+      - run: python scripts/install/client_tools.py
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - run: python -m venv .venv-tools
       - run: .venv-tools/bin/python -m pip install -r tests/clients/python/requirements.txt
@@ -249,7 +286,7 @@ jobs:
       - name: Drive every client in tests/clients/matrix.json with local ADC and only loopback
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_clients.sh
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check/clients.sh
       - name: Hand the results back to the artifact uploader
         if: always()
         run: |
@@ -275,12 +312,12 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python scripts/install_go.py
-      - run: sh scripts/check_go.sh
+      - run: python scripts/install/go.py
+      - run: sh scripts/check/go.sh
       - name: Exercise runtime and child backends without cloud egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            "$(command -v python)" scripts/run_isolated.py -- \
+            "$(command -v python)" scripts/run/isolated.py -- \
             sh scripts/go.sh test -race -count=1 -timeout 60s ./internal/...
 
   repository-checks:
@@ -294,14 +331,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-tools.txt
-      - run: python scripts/install_go.py
-      - run: python scripts/install_quality_tools.py
+      - run: python -m pip install -r requirements/tools.txt
+      - run: python scripts/install/go.py
+      - run: python scripts/install/quality_tools.py
       - name: Lint Go and Python and reject unbudgeted dead code
-        run: python scripts/check_quality.py
-      - run: python scripts/check_repo.py
+        run: python scripts/check/quality.py
+      - run: python scripts/check/repo.py
       - run: python -m unittest discover -s tests/tooling -v
-      - run: python scripts/check_history.py HEAD
+      - run: python scripts/check/history.py HEAD
 
   validation-harness:
     runs-on: ubuntu-latest
@@ -315,7 +352,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -r requirements-sdk.txt -r requirements-tools.txt
+      - run: python -m pip install -r requirements/sdk.txt -r requirements/tools.txt
       - run: python -m pip check
       - run: python -m pytest -q
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -337,37 +374,27 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m venv .venv-tools
-      - run: .venv-tools/bin/python -m pip install -r requirements-sdk.txt -r requirements-tools.txt
-      - run: sudo .venv-tools/bin/python scripts/smoke_isolation.py
-      - run: sudo .venv-tools/bin/python scripts/run_isolated.py -- .venv-tools/bin/python -m pytest tests/validation/test_sdk_runner.py -q
-      - run: python scripts/install_go.py
+      - run: .venv-tools/bin/python -m pip install -r requirements/sdk.txt -r requirements/tools.txt
+      - run: sudo .venv-tools/bin/python scripts/smoke/isolation.py
+      - run: sudo .venv-tools/bin/python scripts/run/isolated.py -- .venv-tools/bin/python -m pytest tests/validation/runners/test_sdk_runner.py -q
+      - run: python scripts/install/go.py
       - run: sh scripts/go.sh test -tags=sdkintegration -run '^$' ./internal/identity
       - name: Verify standard ADC and metadata refresh without cloud egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             GCP_LOCAL_TEST_PYTHON="$PWD/.venv-tools/bin/python" \
-            .venv-tools/bin/python scripts/run_isolated.py -- \
+            .venv-tools/bin/python scripts/run/isolated.py -- \
             sh scripts/go.sh test -tags=sdkintegration -race -count=1 -timeout 60s ./internal/identity
-      - run: python scripts/install_spanner.py
-      - run: python scripts/install_redis.py
-      - run: python scripts/install_postgres.py
-      - run: python scripts/install_emulator_jar.py firestore
-      - run: python scripts/install_emulator_jar.py pubsub
+      - run: python scripts/install/spanner.py
+      - run: python scripts/install/redis.py
+      - run: python scripts/install/postgres.py
+      - run: python scripts/install/emulator_jar.py firestore
+      - run: python scripts/install/emulator_jar.py pubsub
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
-      - name: Warm the Storage builds before blocking network egress
-        run: |
-          sh scripts/go.sh build -o bin/gcp-local ./cmd/gcp-local
-          sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance
-      - name: Compare real Storage backend and local ADC against recorded contracts
+      - name: Warm the Storage build before blocking network egress
+        run: sh scripts/go.sh build -o bin/gcp-local ./cmd/gcp-local
+      - name: Drive the production binary and local ADC through the Storage SDK smoke
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
-            GITHUB_SHA="$GITHUB_SHA" GCP_LOCAL_TEST_PYTHON="$PWD/.venv-tools/bin/python" \
-            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_storage.sh
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: storage-conformance
-          include-hidden-files: true
-          path: |
-            .artifacts/storage-provider/coverage.json
-            .artifacts/storage-provider/junit.xml
+            GCP_LOCAL_TEST_PYTHON="$PWD/.venv-tools/bin/python" \
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check/storage.sh

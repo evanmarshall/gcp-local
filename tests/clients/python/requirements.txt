@@ -1,5 +1,5 @@
-# Python clients for the client matrix (scripts/check_clients.sh); no live-cloud execution.
--r ../../../requirements-services.txt
+# Python clients for the client matrix (scripts/check/clients.sh); no live-cloud execution.
+-r ../../../requirements/services.txt
 google-cloud-bigquery==3.46.1
 google-cloud-bigtable==2.50.0
 google-cloud-iam==2.26.0

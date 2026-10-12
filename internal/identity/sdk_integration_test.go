@@ -26,7 +26,7 @@ import (
 func TestPythonSDKADCAndMetadataRefresh(t *testing.T) {
 	python := os.Getenv("GCP_LOCAL_TEST_PYTHON")
 	if python == "" || os.Getenv("GCP_LOCAL_ISOLATED") != "1" {
-		t.Fatal("Run sdkintegration with an explicit Python environment inside scripts/run_isolated.py")
+		t.Fatal("Run sdkintegration with an explicit Python environment inside scripts/run/isolated.py")
 	}
 	for _, mode := range []string{"external", "metadata"} {
 		t.Run(mode, func(t *testing.T) {

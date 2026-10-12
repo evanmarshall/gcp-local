@@ -20,4 +20,4 @@ Measured 2026-10-12 with Go 1.26.8:
 - Each project gets a private in-memory engine through the backend manager. Reset discards it. The provider owns datasets and table metadata; the engine owns columns and rows.
 - The authorization parse rewrites every table path to its canonical `` `project`.`dataset`.`table` ``. The engine resolves names loosely (a bare `t` can match any dataset's `t`) and folds case. Names the engine can't keep apart are refused: case-only differences, and paths that share a storage name (`ds.t_x` and `ds_t.x`).
 - The process runs in UTC (`RequireUTC`). googlesqlite decodes DATE values through `time.Local`.
-- Building the core needs about 6 GiB of memory; moo machines get 8 GiB ([moo](../moo.md)).
+- Building the core needs about 6 GiB of memory; moo machines get 8 GiB ([moo](../contributing/moo.md)).

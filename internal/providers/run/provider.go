@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/evanmarshall/gcp-local/internal/providers/run/container"
 	"net/http"
 	"net/url"
 	"strings"
@@ -36,7 +37,7 @@ type Provider struct {
 	hosts    map[string]hostEntry
 	hostMu   sync.RWMutex
 	engine   *iam.Engine
-	runtime  Runtime
+	runtime  container.Runtime
 	scopes   *state.Store[scopeState]
 	clock    func() time.Time
 }
@@ -48,7 +49,7 @@ var errProviderShape = errors.New("run requires registry, manager, index, iam, a
 // container readiness, evaluated by the per-service worker in methods.go. Reset
 // cleanup runs under an uncancellable child of the provider context so it can
 // outlive a shutdown that cancels the serving context.
-func New(ctx context.Context, config Config, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, runtime Runtime) (*Provider, error) {
+func New(ctx context.Context, config Config, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, runtime container.Runtime) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil || runtime == nil {
 		return nil, errProviderShape
 	}

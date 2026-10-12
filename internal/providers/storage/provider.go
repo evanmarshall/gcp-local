@@ -15,11 +15,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/evanmarshall/gcp-local/api/generated"
+	storageapi "github.com/evanmarshall/gcp-local/api/generated/storage"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"github.com/evanmarshall/gcp-local/internal/providers/storage/xmlapi"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -76,7 +77,7 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 // Storage method to an explicit 4xx gap.
 func (p *Provider) registerRoutes(registry *gateway.Registry) error {
 	handlers := map[string]gateway.Handler{}
-	for _, route := range generated.StorageRoutes {
+	for _, route := range storageapi.StorageRoutes {
 		handlers[route.Method] = unsupported
 	}
 	for _, method := range registeredMethods {
@@ -237,7 +238,7 @@ func (p *Provider) handleRequest(call gateway.Call, r *gateway.RESTRequest, newR
 	}
 	response, err := p.run(req)
 	if req.xml && response != nil {
-		response = xmlResult(response)
+		response = xmlapi.Result(response)
 	}
 	return response, err
 }

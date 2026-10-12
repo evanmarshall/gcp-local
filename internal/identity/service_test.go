@@ -153,7 +153,7 @@ func TestExchangeRefusesUnknownAndUnenrolledScopes(t *testing.T) {
 	values := form()
 	values.Set("scope", CloudPlatform+" https://www.googleapis.com/auth/unsupported")
 	code, body := exchange(t, s, values)
-	requireOAuthError(t, code, body, 400, "invalid_scope", `unsupported requested scope "https://www.googleapis.com/auth/unsupported": gcp-local issues only the Google OAuth scopes listed in docs/local-identity.md`)
+	requireOAuthError(t, code, body, 400, "invalid_scope", `unsupported requested scope "https://www.googleapis.com/auth/unsupported": gcp-local issues only the Google OAuth scopes listed in docs/guides/local-identity.md`)
 
 	readOnly := "https://www.googleapis.com/auth/devstorage.read_only"
 	restricted, err := New(Config{Principals: []Enrollment{{Subject: appSubject, Project: testProjectName, SubjectToken: subjectSecret, Scopes: []string{readOnly}}}}, nil)

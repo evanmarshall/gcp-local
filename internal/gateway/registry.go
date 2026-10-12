@@ -8,7 +8,27 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/evanmarshall/gcp-local/api/generated"
+	"github.com/evanmarshall/gcp-local/api/generated/artifactregistry"
+	"github.com/evanmarshall/gcp-local/api/generated/compute"
+	"github.com/evanmarshall/gcp-local/api/generated/contract"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/bigquery"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/bigtable"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/cloudsql"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/firestore"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/memorystore"
+	"github.com/evanmarshall/gcp-local/api/generated/databases/spanner"
+	"github.com/evanmarshall/gcp-local/api/generated/logging"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/cloudscheduler"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/cloudtasks"
+	"github.com/evanmarshall/gcp-local/api/generated/messaging/pubsub"
+	"github.com/evanmarshall/gcp-local/api/generated/mixin"
+	"github.com/evanmarshall/gcp-local/api/generated/run"
+	"github.com/evanmarshall/gcp-local/api/generated/security/cloudkms"
+	"github.com/evanmarshall/gcp-local/api/generated/security/iam"
+	"github.com/evanmarshall/gcp-local/api/generated/security/resourcemanager"
+	"github.com/evanmarshall/gcp-local/api/generated/security/secretmanager"
+	"github.com/evanmarshall/gcp-local/api/generated/storage"
+	"github.com/evanmarshall/gcp-local/api/generated/vertexai"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -70,51 +90,51 @@ func NewRegistry() *Registry {
 	r := &Registry{contracts: map[string]methodInfo{}, unary: map[string]Handler{}, stream: map[string]StreamHandler{}}
 	r.registerRoutes()
 	r.registerPubSub()
-	r.registerData("spanner", generated.SpannerMethods)
-	r.registerData("bigtable", generated.BigtableMethods)
+	r.registerData("spanner", spanner.SpannerMethods)
+	r.registerData("bigtable", bigtable.BigtableMethods)
 	// Transcoded methods dispatch to their REST route's handler; the gRPC
 	// contracts name the service for its untranscoded methods' gaps.
-	r.registerData("secretmanager", generated.SecretManagerMethods)
-	r.registerData("cloudtasks", generated.CloudTasksMethods)
-	r.registerData("cloudscheduler", generated.CloudSchedulerMethods)
-	r.registerData("cloudkms", generated.CloudKMSMethods)
-	r.registerData("run", generated.RunServicesMethods)
-	r.registerData("run", generated.RunRevisionsMethods)
-	r.registerData("spanner", generated.SpannerInstanceAdminMethods)
-	r.registerData("spanner", generated.SpannerDatabaseAdminMethods)
-	r.registerData("bigtable", generated.BigtableInstanceAdminMethods)
-	r.registerData("bigtable", generated.BigtableTableAdminMethods)
-	r.registerData("iam", generated.IAMAdminMethods)
+	r.registerData("secretmanager", secretmanager.SecretManagerMethods)
+	r.registerData("cloudtasks", cloudtasks.CloudTasksMethods)
+	r.registerData("cloudscheduler", cloudscheduler.CloudSchedulerMethods)
+	r.registerData("cloudkms", cloudkms.CloudKMSMethods)
+	r.registerData("run", run.RunServicesMethods)
+	r.registerData("run", run.RunRevisionsMethods)
+	r.registerData("spanner", spanner.SpannerInstanceAdminMethods)
+	r.registerData("spanner", spanner.SpannerDatabaseAdminMethods)
+	r.registerData("bigtable", bigtable.BigtableInstanceAdminMethods)
+	r.registerData("bigtable", bigtable.BigtableTableAdminMethods)
+	r.registerData("iam", iam.IAMAdminMethods)
 	return r
 }
 
 // registerRoutes binds every generated REST route table to its service.
 func (r *Registry) registerRoutes() {
 	tables := []struct {
-		routes  []generated.Route
+		routes  []contract.Route
 		service string
 	}{
-		{generated.StorageRoutes, "storage"},
-		{generated.StorageXMLRoutes, "storage"},
-		{generated.RunRoutes, "run"},
-		{generated.ComputeRoutes, "compute"},
-		{generated.SecretManagerRoutes, "secretmanager"},
-		{generated.CloudKMSRoutes, "cloudkms"},
-		{generated.FirestoreRoutes, "firestore"},
-		{generated.BigQueryRoutes, "bigquery"},
-		{generated.SpannerRoutes, "spanner"},
-		{generated.BigtableRoutes, "bigtable"},
-		{generated.ArtifactRegistryRoutes, "artifactregistry"},
-		{generated.ResourceManagerRoutes, "resourcemanager"},
-		{generated.IAMRoutes, "iam"},
-		{generated.CloudTasksRoutes, "cloudtasks"},
-		{generated.CloudSchedulerRoutes, "cloudscheduler"},
-		{generated.CloudSQLRoutes, "cloudsql"},
-		{generated.PubSubRestRoutes, servicePubsub},
-		{generated.PubSubSchemaRestRoutes, servicePubsub},
-		{generated.RedisRoutes, "redis"},
-		{generated.VertexAIRoutes, "vertexai"},
-		{generated.LoggingRoutes, "logging"},
+		{storage.StorageRoutes, "storage"},
+		{storage.StorageXMLRoutes, "storage"},
+		{run.RunRoutes, "run"},
+		{compute.ComputeRoutes, "compute"},
+		{secretmanager.SecretManagerRoutes, "secretmanager"},
+		{cloudkms.CloudKMSRoutes, "cloudkms"},
+		{firestore.FirestoreRoutes, "firestore"},
+		{bigquery.BigQueryRoutes, "bigquery"},
+		{spanner.SpannerRoutes, "spanner"},
+		{bigtable.BigtableRoutes, "bigtable"},
+		{artifactregistry.ArtifactRegistryRoutes, "artifactregistry"},
+		{resourcemanager.ResourceManagerRoutes, "resourcemanager"},
+		{iam.IAMRoutes, "iam"},
+		{cloudtasks.CloudTasksRoutes, "cloudtasks"},
+		{cloudscheduler.CloudSchedulerRoutes, "cloudscheduler"},
+		{cloudsql.CloudSQLRoutes, "cloudsql"},
+		{pubsub.PubSubRestRoutes, servicePubsub},
+		{pubsub.PubSubSchemaRestRoutes, servicePubsub},
+		{memorystore.RedisRoutes, "redis"},
+		{vertexai.VertexAIRoutes, "vertexai"},
+		{logging.LoggingRoutes, "logging"},
 	}
 	for _, table := range tables {
 		for _, route := range table.routes {
@@ -127,24 +147,24 @@ func (r *Registry) registerRoutes() {
 // implementation owner for IAMPolicy gRPC; its handler rejects other service
 // resource names instead of forwarding them.
 func (r *Registry) registerPubSub() {
-	for _, rpc := range generated.PubSubMethods {
+	for _, rpc := range pubsub.PubSubMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "pubsub", streaming: rpc.Streaming}
 	}
-	for _, rpc := range generated.IAMMethods {
+	for _, rpc := range mixin.IAMMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "pubsub"}
 	}
 	// Firestore server-streaming RPCs register as streams like bidirectional
 	// ones; the gateway hands them the decoded request.
-	for _, rpc := range generated.FirestoreMethods {
+	for _, rpc := range firestore.FirestoreMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "firestore", streaming: rpc.Streaming}
 	}
-	for _, rpc := range generated.LoggingMethods {
+	for _, rpc := range logging.LoggingMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "logging", streaming: rpc.Streaming}
 	}
 }
 
 // registerData binds one service's gRPC data-plane contracts.
-func (r *Registry) registerData(service string, rpcs []generated.RPC) {
+func (r *Registry) registerData(service string, rpcs []contract.RPC) {
 	for _, rpc := range rpcs {
 		r.contracts[rpc.Method] = methodInfo{service: service, streaming: rpc.Streaming}
 	}

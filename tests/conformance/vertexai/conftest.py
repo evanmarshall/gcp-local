@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from gcp_validation.live_rest import RestClient
-from gcp_validation.vertexai import LIVE_ENDPOINT, SERVICE, InferenceRun, load_scope
+from gcp_validation.services.vertexai import LIVE_ENDPOINT, SERVICE, InferenceRun, load_scope
 
 
 @pytest.fixture

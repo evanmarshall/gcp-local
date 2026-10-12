@@ -12,8 +12,8 @@ import pluggy
 import pytest
 import pytest_socket
 
-from .config import Target
-from .evidence import (
+from gcp_validation.config import Target
+from gcp_validation.evidence import (
     Divergence,
     Inconclusive,
     Scenario,
@@ -23,7 +23,7 @@ from .evidence import (
     now,
     sha256,
 )
-from .sandbox import Sandbox
+from gcp_validation.sandbox import Sandbox
 
 STATUS = {
     Divergence: "divergence",

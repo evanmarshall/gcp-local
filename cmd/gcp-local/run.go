@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/evanmarshall/gcp-local/internal/providers/run/container"
 	"net"
 	"net/http"
 	"strings"
@@ -56,7 +57,7 @@ func assembleRun(ctx context.Context, options serveOptions, selected map[string]
 // runSetup is the revision runtime and the address its revisions dial for
 // their metadata servers.
 type runSetup struct {
-	runtime      runprovider.Runtime
+	runtime      container.Runtime
 	metadataHost string
 }
 
@@ -67,13 +68,13 @@ func runRuntime(ctx context.Context, options serveOptions, server *core.Server) 
 		return runSetup{}, err
 	}
 	if options.runSocket == "" && len(options.runProcess) == 0 {
-		return runSetup{runprovider.NoopRuntime{}, loopbackHost}, nil
+		return runSetup{container.NoopRuntime{}, loopbackHost}, nil
 	}
 	if options.runSocket == "" {
 		// Revision processes share the core's loopback.
 		return runSetup{processRuntime(options.runProcess), loopbackHost}, nil
 	}
-	docker, err := runprovider.NewDockerRuntime(runprovider.DockerConfig{Socket: options.runSocket, Network: options.runNetwork, Environment: options.runEnv})
+	docker, err := container.NewDockerRuntime(container.DockerConfig{Socket: options.runSocket, Network: options.runNetwork, Environment: options.runEnv})
 	if err != nil {
 		return runSetup{}, fmt.Errorf("configure the Cloud Run Docker runtime: %w", err)
 	}
@@ -103,18 +104,18 @@ func checkRunFlags(options serveOptions) error {
 }
 
 // processRuntime maps images to local commands.
-func processRuntime(mapped map[string]string) *runprovider.ProcessRuntime {
+func processRuntime(mapped map[string]string) *container.ProcessRuntime {
 	commands := map[string][]string{}
 	for image, command := range mapped {
 		commands[image] = strings.Fields(command)
 	}
-	return runprovider.NewProcessRuntime(commands)
+	return container.NewProcessRuntime(commands)
 }
 
 // dockerMetadataHost picks the core address revision containers can dial: its
 // own address on the configured network, or the default bridge gateway when
 // the core runs on the engine host.
-func dockerMetadataHost(ctx context.Context, docker *runprovider.DockerRuntime, network string) (string, error) {
+func dockerMetadataHost(ctx context.Context, docker *container.DockerRuntime, network string) (string, error) {
 	if network != "" {
 		host, err := docker.LocalAddress(ctx)
 		if err != nil {

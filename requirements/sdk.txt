@@ -1,0 +1,12 @@
+-r cloud.txt
+# Selected Python Storage system tests at fce6a6bf4561eabc939c972bb92282be86fb6aec.
+google-cloud-storage==3.10.1
+google-api-core==2.40.0
+google-cloud-core==2.8.0
+google-resumable-media==2.11.0
+google-crc32c==1.9.0
+googleapis-common-protos==1.75.5
+protobuf==7.36.2
+proto-plus==1.29.0
+opentelemetry-api==1.45.0
+typing-extensions==4.16.0

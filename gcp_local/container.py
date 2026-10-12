@@ -123,7 +123,7 @@ def run_arguments() -> list[str]:
         raise SystemExit(
             "GCP_LOCAL_RUN_DOCKER_SOCKET needs GCP_LOCAL_RUN_ENVIRONMENT (a label value) "
             "and GCP_LOCAL_RUN_DOCKER_NETWORK (the network this container shares with "
-            "its revisions); see docs/cloudrun.md"
+            "its revisions); see docs/services/cloudrun.md"
         )
     return [
         "-run-docker-socket=" + socket,
@@ -146,7 +146,7 @@ def standalone() -> list[str]:
     ):
         raise SystemExit(
             "Mount a private (mode 0700) directory owned by --user at /state; "
-            "see docs/quickstart.md"
+            "see docs/guides/quickstart.md"
         )
     recorded = Path(host)
     if (STATE / "environment.json").exists():
