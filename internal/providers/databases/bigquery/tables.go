@@ -105,20 +105,16 @@ func (p *Provider) tablesCreate(call gateway.Call, request *gateway.RESTRequest,
 		if _, err := engine.query(ctx, "CREATE TABLE "+canonicalPath(scope.Project, dataset, table)+" ("+definitions+")", nil); err != nil {
 			return err
 		}
-		return p.scopes.With(scope, func(s *scopeState) error {
-			owner := s.datasets[dataset]
-			if owner == nil {
-				return provider.NotFound(kindDataset, dataset)
-			}
-			if err := p.indexTable(scope, dataset, table); err != nil {
-				return err
-			}
-			created = &tableRecord{Dataset: dataset, ID: table, Type: typeTable, Schema: body.Schema, Labels: maps.Clone(body.Labels),
-				FriendlyName: body.FriendlyName, Location: owner.Location, CreatedAt: p.clock()}
-			s.tables[tableKey(dataset, table)] = created
-			created = created.clone()
+		var err error
+		if created, err = p.storeTable(scope, dataset, table, body); err == nil {
 			return nil
-		})
+		}
+		// No metadata names the new engine table; drop it so a later create
+		// of the same name does not collide with it.
+		if dropErr := dropEngineTable(ctx, engine, dataset, table, false); dropErr != nil {
+			return errors.Join(err, dropErr)
+		}
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -126,11 +122,36 @@ func (p *Provider) tablesCreate(call gateway.Call, request *gateway.RESTRequest,
 	return &gateway.RESTResponse{JSON: p.tableWire(scope, dataset, table, created)}, nil
 }
 
-// admitTable refuses a table that already exists, or that the engine could
-// not keep apart from another: the engine folds case and joins path parts
-// with underscores.
+// storeTable indexes a table the engine created and stores its metadata,
+// returning a copy.
+func (p *Provider) storeTable(scope state.Scope, dataset, table string, body tableBody) (*tableRecord, error) {
+	var created *tableRecord
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		owner := s.datasets[dataset]
+		if owner == nil {
+			return provider.NotFound(kindDataset, dataset)
+		}
+		if err := p.indexTable(scope, dataset, table); err != nil {
+			return err
+		}
+		record := &tableRecord{Dataset: dataset, ID: table, Type: typeTable, Schema: body.Schema, Labels: maps.Clone(body.Labels),
+			FriendlyName: body.FriendlyName, Location: owner.Location, CreatedAt: p.clock()}
+		s.tables[tableKey(dataset, table)] = record
+		created = record.clone()
+		return nil
+	})
+	return created, err //nolint:wrapcheck // the callback returns wire statuses and wrapped index errors
+}
+
+// admitTable refuses a table whose dataset is gone, one that already exists,
+// or one the engine could not keep apart from another: the engine folds case
+// and joins path parts with underscores. The caller holds the engine gate,
+// which a dataset delete also holds, so an admitted dataset stays.
 func (p *Provider) admitTable(scope state.Scope, dataset, table string) error {
 	return p.scopes.With(scope, func(s *scopeState) error { //nolint:wrapcheck // the callback returns wire statuses
+		if s.datasets[dataset] == nil {
+			return provider.NotFound(kindDataset, dataset)
+		}
 		if s.tables[tableKey(dataset, table)] != nil {
 			return status.Errorf(codes.AlreadyExists, "Already Exists: Table %s:%s.%s", scope.Project, dataset, table)
 		}
@@ -251,14 +272,20 @@ func (p *Provider) tablesDelete(call gateway.Call, request *gateway.RESTRequest,
 	return &gateway.RESTResponse{Status: 204}, nil
 }
 
+// dropEngineTable drops one table or view from the engine, if it exists.
+func dropEngineTable(ctx context.Context, engine *engineBackend, dataset, table string, view bool) error {
+	kind := "TABLE"
+	if view {
+		kind = "VIEW"
+	}
+	_, err := engine.query(ctx, "DROP "+kind+" IF EXISTS "+canonicalPath(engine.project, dataset, table), nil)
+	return err
+}
+
 // dropTables drops tables from the engine and then removes their metadata.
 func (p *Provider) dropTables(ctx context.Context, engine *engineBackend, scope state.Scope, records []*tableRecord) error {
 	for _, record := range records {
-		kind := "TABLE"
-		if record.Type == typeView {
-			kind = "VIEW"
-		}
-		if _, err := engine.query(ctx, "DROP "+kind+" IF EXISTS "+canonicalPath(scope.Project, record.Dataset, record.ID), nil); err != nil {
+		if err := dropEngineTable(ctx, engine, record.Dataset, record.ID, record.Type == typeView); err != nil {
 			return err
 		}
 		if err := p.scopes.With(scope, func(s *scopeState) error {

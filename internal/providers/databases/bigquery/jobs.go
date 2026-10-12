@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -411,6 +412,9 @@ func datasetOfResource(resource string) string {
 // later statement fails, since earlier statements already ran.
 func (p *Provider) runPlan(ctx context.Context, scope state.Scope, plan *queryPlan, job *jobRecord) error {
 	return p.useEngine(ctx, scope, func(ctx context.Context, engine *engineBackend) error {
+		if err := p.requireDatasets(scope, plan); err != nil {
+			return err
+		}
 		result, runErr := runStatements(ctx, engine, plan)
 		reconcileErr := p.reconcile(ctx, engine, scope, plan.ddl)
 		if runErr != nil {
@@ -423,6 +427,28 @@ func (p *Provider) runPlan(ctx context.Context, scope state.Scope, plan *queryPl
 		if target := plan.target; target != nil {
 			if record := p.tableCopy(scope, target.dataset, target.table); record != nil {
 				job.TargetSchema = record.Schema
+			}
+		}
+		return nil
+	})
+}
+
+// requireDatasets refuses a plan naming a dataset deleted since it was
+// planned; the engine has no datasets and would create a table in one
+// anyway. The caller holds the engine gate, which a dataset delete also
+// holds, so the datasets stay while the plan runs.
+func (p *Provider) requireDatasets(scope state.Scope, plan *queryPlan) error {
+	datasets := make([]string, 0, len(plan.checks)+len(plan.ddl))
+	for _, check := range plan.checks {
+		datasets = append(datasets, datasetOfResource(check.resource))
+	}
+	for _, target := range plan.ddl {
+		datasets = append(datasets, target.name.dataset)
+	}
+	return p.scopes.With(scope, func(s *scopeState) error { //nolint:wrapcheck // the callback returns a wire status
+		for _, dataset := range datasets {
+			if s.datasets[dataset] == nil {
+				return status.Errorf(codes.NotFound, "Not found: Dataset %s:%s", scope.Project, dataset)
 			}
 		}
 		return nil
@@ -449,18 +475,29 @@ func runStatements(ctx context.Context, engine *engineBackend, plan *queryPlan) 
 
 // reconcile reads each CREATE or DROP target back from the engine and makes
 // the table metadata agree: a new table gets its engine schema, a replaced
-// one its new schema, and a dropped one loses its metadata. The caller holds
-// the engine gate, so no dataset changes meanwhile.
+// one its new schema, and a dropped one loses its metadata. An engine table
+// left without metadata (its dataset gone, or its index entry refused) is
+// dropped. The caller holds the engine gate, so no dataset changes meanwhile.
 func (p *Provider) reconcile(ctx context.Context, engine *engineBackend, scope state.Scope, targets []ddlTarget) error {
 	for _, target := range targets {
-		columns, exists, err := engine.columnsOf(ctx, target.name.dataset, target.name.table)
+		name := target.name
+		columns, exists, err := engine.columnsOf(ctx, name.dataset, name.table)
 		if err != nil {
 			return err
 		}
-		if err := p.scopes.With(scope, func(s *scopeState) error {
-			return p.applyTarget(s, scope, target, exists, columns)
-		}); err != nil {
-			return fmt.Errorf("reconcile %s.%s: %w", target.name.dataset, target.name.table, err)
+		tracked := false
+		applyErr := p.scopes.With(scope, func(s *scopeState) error {
+			err := p.applyTarget(s, scope, target, exists, columns)
+			tracked = s.tables[tableKey(name.dataset, name.table)] != nil
+			return err
+		})
+		if exists && !tracked {
+			if dropErr := dropEngineTable(ctx, engine, name.dataset, name.table, target.view); dropErr != nil {
+				applyErr = errors.Join(applyErr, dropErr)
+			}
+		}
+		if applyErr != nil {
+			return fmt.Errorf("reconcile %s.%s: %w", name.dataset, name.table, applyErr)
 		}
 	}
 	return nil

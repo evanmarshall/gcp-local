@@ -68,6 +68,7 @@ var parserOptions = sync.OnceValues(func() (*googlesql.ParserOptions, error) {
 // carriage return, which GoogleSQL also treats as a line end (comments end
 // at either), keeping byte offsets and tokens identical.
 func parseTree(sql string) (*astNode, error) {
+	defer collectModuleGarbage()
 	options, err := parserOptions()
 	if err != nil {
 		return nil, err

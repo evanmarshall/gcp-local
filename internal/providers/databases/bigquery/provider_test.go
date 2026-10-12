@@ -37,6 +37,8 @@ type harness struct {
 	gate    *gateway.Gateway
 	engine  *iam.Engine
 	manager *backend.Manager
+	index   *state.Index
+	bq      *Provider
 }
 
 func newHarness(t *testing.T) *harness {
@@ -68,14 +70,14 @@ func newHarness(t *testing.T) *harness {
 	}
 	manager := backend.NewManager(10*time.Second, 10*time.Second)
 	t.Cleanup(func() { _ = manager.Shutdown(context.Background()) })
-	_, err = New(context.Background(), registry, manager, index, engine)
+	bq, err := New(context.Background(), registry, manager, index, engine)
 	if err != nil {
 		t.Fatalf("build the bigquery provider: %v", err)
 	}
 	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, engine: engine, manager: manager}
+	return &harness{t: t, gate: g, engine: engine, manager: manager, index: index, bq: bq}
 }
 
 // expect issues one REST request and fails the test unless it returns want.
@@ -305,6 +307,16 @@ func TestUnsupportedPolicyFailsClosed(t *testing.T) {
 	}
 	want(t, "unsupported dataset read", h.invokeAs(testToken, http.MethodGet, testDatasets+"/"+testDataset, nil), 501, "Unsupported policy configuration")
 	want(t, "deleted dataset reads through the project", h.invokeAs(testToken, http.MethodGet, testDatasets+"/absent", nil), 404, "absent")
+}
+
+// A scope the state store refuses fails closed instead of skipping the check.
+func TestRefusedScopeFailsClosed(t *testing.T) {
+	h := newHarness(t)
+	call := gateway.Call{Context: context.Background(), Method: methodDatasetsGet,
+		Principal: gateway.Principal{State: gateway.Authenticated, Subject: testActor}}
+	if _, _, err := h.bq.authorizeAt(call, datasetResource("", testDataset), ""); err == nil || !strings.Contains(err.Error(), `authorize in project ""`) {
+		t.Fatalf("authorize in a refused scope = %v, want a refusal", err)
+	}
 }
 
 // A table policy is the table's own: it leaves the dataset's grants alone and

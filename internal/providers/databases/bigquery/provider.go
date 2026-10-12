@@ -93,7 +93,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid BigQuery request")
 	}
-	scope, target, err := p.resolve(call, request)
+	scope, target, err := resolveTarget(call, request)
 	if err != nil {
 		return nil, err
 	}
@@ -116,39 +116,32 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
-// authorizeAt authorizes one call against a resource. A resource missing
-// from the index (absent, or deleted while the request ran) authorizes at its
-// parent instead, table then dataset then project, so absence reads 404
-// through the policies that govern it. An indexed resource never falls back:
-// an engine refusal such as an unsupported policy stays closed. A resource
-// deleted and recreated during the check is checked again, a bounded number
-// of times.
+// authorizeAt authorizes one call against a resource, or, when the index
+// lacks it, against its nearest indexed ancestor (table, then dataset, then
+// project), so absence reads 404 through the policies that govern it. The
+// target is chosen and authorized under the scope lock, which every index
+// change for this provider's datasets and tables also holds, so a concurrent
+// create or delete cannot unindex the target mid-check. An indexed resource
+// never falls back: an engine refusal such as an unsupported policy stays
+// closed, and so does a scope the store refuses.
 func (p *Provider) authorizeAt(call gateway.Call, resource, project string) (iam.Decision, string, error) {
-	_, wasIndexed := p.index.Get(resource)
-	for attempt := 0; ; attempt++ {
-		decision, err := p.engine.Authorize(call, iam.Target{Name: resource}, nil)
-		_, indexed := p.index.Get(resource)
-		parent := parentResource(resource, project)
-		switch {
-		case !provider.Unverified(err) || attempt >= maxAuthorizeAttempts:
-			return decision, resource, err //nolint:wrapcheck // callers wrap or render the refusal
-		case indexed && wasIndexed:
-			// Indexed throughout: the engine's own refusal.
-			return decision, resource, err //nolint:wrapcheck // callers wrap or render the refusal
-		case indexed:
-			// Recreated during the check: check it again.
-			wasIndexed = true
-		case parent != resource:
+	var decision iam.Decision
+	var authorizeErr error
+	if err := p.scopes.With(provider.ProjectScope(project), func(*scopeState) error {
+		for {
+			parent := parentResource(resource, project)
+			if _, indexed := p.index.Get(resource); indexed || parent == resource {
+				break
+			}
 			resource = parent
-			_, wasIndexed = p.index.Get(resource)
-		default:
-			return decision, resource, err //nolint:wrapcheck // callers wrap or render the refusal
 		}
+		decision, authorizeErr = p.engine.Authorize(call, iam.Target{Name: resource}, nil)
+		return nil
+	}); err != nil {
+		return decision, resource, fmt.Errorf("authorize in project %q: %w", project, err)
 	}
+	return decision, resource, authorizeErr //nolint:wrapcheck // callers wrap or render the refusal
 }
-
-// maxAuthorizeAttempts bounds re-checks of a resource racing a delete.
-const maxAuthorizeAttempts = 4
 
 // parentResource names a table's dataset, or a dataset's project.
 func parentResource(resource, project string) string {
@@ -172,12 +165,12 @@ func stampDecision(response *gateway.RESTResponse, id string) {
 // headerDecision names the IAM decision that answered the request.
 const headerDecision = "X-Gcp-Local-Decision-Id"
 
-// resolve derives the scope and IAM target for one request. Dataset methods
+// resolveTarget derives the scope and IAM target for one request. Dataset methods
 // authorize against the dataset resource. Table, row, and table IAM methods
 // authorize against the table, whose policy inherits the dataset's; a table
-// that does not exist authorizes against its dataset, so only callers with
-// dataset access learn it is absent.
-func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
+// that does not exist authorizes against its dataset (authorizeAt), so only
+// callers with dataset access learn it is absent.
+func resolveTarget(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
 	project := request.Path["project"]
 	scope := provider.ProjectScope(project)
 	target := iam.Target{Name: provider.ProjectResource(project)}
@@ -201,9 +194,6 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
 		}
 		target.Name = tableResource(project, dataset, table)
-		if _, ok := p.index.Get(target.Name); !ok {
-			target.Name = datasetResource(project, dataset)
-		}
 		return scope, target, nil
 	}
 }

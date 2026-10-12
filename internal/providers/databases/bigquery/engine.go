@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -31,6 +33,27 @@ type engineBackend struct {
 // time.Local, which shifts them a day on hosts west of UTC; GCP reports UTC.
 // Each binary that serves BigQuery calls it before it starts.
 func RequireUTC() { time.Local = time.UTC } //nolint:gosmopolitan // the engine reads time.Local; see above
+
+// moduleCalls counts calls into the GoogleSQL module since the last
+// collection.
+var moduleCalls atomic.Int64
+
+// moduleCallsPerCollection bounds the module calls between collections.
+const moduleCallsPerCollection = 32
+
+// collectModuleGarbage runs the Go collector every moduleCallsPerCollection
+// calls into the GoogleSQL module. The engine and the authorization parse
+// share one module (go-googlesql v0.3.0), whose wasm memory holds catalogs
+// and parser and analyzer outputs and is freed only by Go finalizers. The Go
+// collector cannot see that memory fill, so under load it runs too rarely:
+// the module passes 2 GiB and every later call panics on a negative int32
+// pointer (measured: about 250 CREATE and DROP TABLE cycles; each new table
+// builds a catalog of every BigQuery function).
+func collectModuleGarbage() {
+	if moduleCalls.Add(1)%moduleCallsPerCollection == 0 {
+		runtime.GC()
+	}
+}
 
 // errEngineStopped reports use of a stopped engine.
 var errEngineStopped = errors.New("bigquery engine is stopped")
@@ -116,6 +139,7 @@ type engineResult struct {
 
 // query runs one script and reads the rows of its last statement.
 func (e *engineBackend) query(ctx context.Context, script string, args []any) (*engineResult, error) {
+	defer collectModuleGarbage()
 	rows, err := e.conn.QueryContext(ctx, script, args...)
 	if err != nil {
 		return nil, engineError(err)
@@ -152,6 +176,7 @@ func (e *engineBackend) query(ctx context.Context, script string, args []any) (*
 
 // exec runs one DML statement and reports the rows it changed.
 func (e *engineBackend) exec(ctx context.Context, statement string, args []any) (*engineResult, error) {
+	defer collectModuleGarbage()
 	result, err := e.conn.ExecContext(ctx, statement, args...)
 	if err != nil {
 		return nil, engineError(err)
@@ -179,6 +204,7 @@ func (e *engineBackend) columnsOf(ctx context.Context, dataset, table string) ([
 // insertRows adds rows in one transaction: either every row lands, or none
 // does and the failing row's index is reported.
 func (e *engineBackend) insertRows(ctx context.Context, dataset, table string, fields []map[string]any, rows []map[string]any) (int, error) {
+	defer collectModuleGarbage()
 	names := make([]string, 0, len(fields))
 	placeholders := make([]string, 0, len(fields))
 	for _, field := range fields {
