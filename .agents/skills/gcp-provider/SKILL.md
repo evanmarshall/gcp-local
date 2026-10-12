@@ -21,6 +21,7 @@ Read the issue and [the design](../../../docs/design.md). Find the existing patt
 - A refusal must not make a client hang. Clients retry 5xx; where the main client libraries retry a service's 5xx without a limit (Storage), refuse with a non-retryable 4xx.
 - Never drop or rewrite a GCP response field (`mediaLink`, `selfLink`, operation names) on the assumption that clients derive it. Rewrite it to the emulator's public origin, and test with a client that reads it.
 - Claim a client works only with a row in the [client compatibility table](../../../docs/coverage.md#client-compatibility) backed by a test that drives that client.
+- When a change makes a [client matrix](../../../docs/clients.md) pair pass, `sh scripts/check_clients.sh` fails until you set it to `pass` in `tests/clients/matrix.json` and move its line in `docs/coverage.md`.
 
 ## Finish
 

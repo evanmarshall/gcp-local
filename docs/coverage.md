@@ -45,7 +45,7 @@ Notes on counts:
 
 ## Client compatibility
 
-A recording proves only the requests it sends. This table lists the real clients a test drives against the emulator; a client not listed is untested, even for a recorded service.
+A recording proves only the requests it sends. This table lists the real clients a test drives against the emulator; a client not listed is untested, even for a recorded service. Rows testing `tests/clients/*` come from the [client matrix](clients.md): one workflow per service at the client's default transport, with a denied call by an ungranted identity.
 
 | Service | Client | Transport | Test |
 | --- | --- | --- | --- |
@@ -65,8 +65,53 @@ A recording proves only the requests it sends. This table lists the real clients
 | vertexai | Python `google-genai` 2.29.0 | REST | `internal/providers/vertexai/testdata/sdk.py` |
 | identity | Python `google-auth` 2.56.2 (ADC, metadata) | HTTP | `internal/identity/testdata/sdk.py` |
 | Terraform cases above | `hashicorp/google` 8.5.0 | REST | `tests/terraform/runner` |
+| storage | Go `cloud.google.com/go/storage` 1.65.0 | JSON REST | `tests/clients/go` |
+| storage | Node `@google-cloud/storage` 8.4.0 | JSON REST | `tests/clients/node` |
+| storage | Python `google-cloud-storage` 3.10.1 | JSON REST | `tests/clients/python` |
+| pubsub | Python `google-cloud-pubsub` 2.42.0 | gRPC | `tests/clients/python` |
+| firestore | Go `cloud.google.com/go/firestore` 1.22.0 | gRPC | `tests/clients/go` |
+| firestore | Python `google-cloud-firestore` 2.34.1 | gRPC | `tests/clients/python` |
+| secretmanager | Go `cloud.google.com/go/secretmanager` 1.22.0 | gRPC | `tests/clients/go` |
+| secretmanager | Python `google-cloud-secret-manager` 2.31.0 | gRPC | `tests/clients/python` |
+| cloudtasks | Go `cloud.google.com/go/cloudtasks` 1.20.0 | gRPC | `tests/clients/go` |
+| cloudtasks | Python `google-cloud-tasks` 2.26.0 | gRPC | `tests/clients/python` |
+| bigquery | Go `cloud.google.com/go/bigquery` 1.85.0 | REST | `tests/clients/go` |
+| bigquery | Node `@google-cloud/bigquery` 9.2.0 | REST | `tests/clients/node` |
+| logging | Go `cloud.google.com/go/logging` 1.18.0 | gRPC | `tests/clients/go` |
+| iam | Node `@googleapis/iam` 42.1.0 | REST | `tests/clients/node` |
 
-Untested: the Go, Node, and Java client libraries for every service not listed above, `gcloud`, `gsutil`, and `rclone` (its Storage requests, `mediaLink` download and a null-body rewrite, are tested in Go). Cloud KMS, BigQuery, Artifact Registry, IAM, Cloud SQL, Memorystore, and Cloud Run are exercised only through raw REST, Terraform, or their wire protocols.
+### Known client failures
+
+These matrix pairs fail today. `sh scripts/check_clients.sh` fails if one starts passing or fails differently, so this table stays current.
+
+| Service | Client | Transport | Fails because | Issue |
+| --- | --- | --- | --- | --- |
+| storage | `gcloud` 588.0.0 | JSON REST | STS refuses gcloud's client authentication | [#53](https://github.com/evanmarshall/gcp-local/issues/53) |
+| storage | `rclone` 1.75.2 | JSON REST | bucket create with bucketPolicyOnly is refused | [#51](https://github.com/evanmarshall/gcp-local/issues/51) |
+| pubsub | Go `cloud.google.com/go/pubsub/v2` 2.7.0 | gRPC | StreamingPull refuses protocol_version | [#55](https://github.com/evanmarshall/gcp-local/issues/55) |
+| pubsub | Node `@google-cloud/pubsub` 6.2.0 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| pubsub | `gcloud` 588.0.0 | REST | STS refuses gcloud's client authentication; REST publish and pull are not served | [#53](https://github.com/evanmarshall/gcp-local/issues/53) |
+| firestore | Node `@google-cloud/firestore` 9.3.1 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| secretmanager | Node `@google-cloud/secret-manager` 7.1.1 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| secretmanager | `gcloud` 588.0.0 | REST | STS refuses gcloud's client authentication | [#53](https://github.com/evanmarshall/gcp-local/issues/53) |
+| cloudkms | Go `cloud.google.com/go/kms` 1.35.0 | gRPC | no gRPC listener | [#59](https://github.com/evanmarshall/gcp-local/issues/59) |
+| cloudkms | Node `@google-cloud/kms` 6.2.1 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| cloudkms | Python `google-cloud-kms` 3.18.0 | gRPC | no gRPC listener | [#59](https://github.com/evanmarshall/gcp-local/issues/59) |
+| cloudkms | `gcloud` 588.0.0 | REST | STS refuses gcloud's client authentication | [#53](https://github.com/evanmarshall/gcp-local/issues/53) |
+| cloudtasks | Node `@google-cloud/tasks` 7.2.1 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| bigquery | Python `google-cloud-bigquery` 3.46.1 | REST | jobs.insert is not served | [#57](https://github.com/evanmarshall/gcp-local/issues/57) |
+| spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |
+| spanner | Node `@google-cloud/spanner` 9.0.0 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| spanner | Python `google-cloud-spanner` 3.71.0 | gRPC | the handwritten client only dials TLS; the gateway is plaintext | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 | gRPC | no admin gRPC listener | [#62](https://github.com/evanmarshall/gcp-local/issues/62) |
+| bigtable | Node `@google-cloud/bigtable` 7.4.0 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| bigtable | Python `google-cloud-bigtable` 2.50.0 | gRPC | the handwritten client only dials TLS; the gateway is plaintext | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| logging | Node `@google-cloud/logging` 12.2.0 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| logging | Python `google-cloud-logging` 3.17.0 | gRPC | the handwritten client only dials TLS; the gateway is plaintext | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
+| iam | Go `cloud.google.com/go/iam` 1.11.0 | gRPC | no gRPC listener | [#63](https://github.com/evanmarshall/gcp-local/issues/63) |
+| iam | Python `google-cloud-iam` 2.26.0 | gRPC | no gRPC listener | [#63](https://github.com/evanmarshall/gcp-local/issues/63) |
+
+Untested: Java clients, `gsutil`, and every client of Artifact Registry, Cloud SQL, Memorystore, Cloud Run, and Compute.
 
 ## Cross-service behavior
 

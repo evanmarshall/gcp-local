@@ -66,7 +66,7 @@ The Python auth library needs both metadata variables. The server returns the pr
 | google-cloud-storage 3.10.1, either flow | Authenticated calls before and after refresh |
 | Terraform google provider 8.5.0 | Only through the [workflow](workflow.md#terraform-authentication), with `terraform-adc.json` and the `cloud-platform` scope |
 
-Go, Java, and Node SDKs are not verified.
+Go and Node.js clients are verified per service in the [client matrix](clients.md). Java is not verified.
 
 ## Limits
 

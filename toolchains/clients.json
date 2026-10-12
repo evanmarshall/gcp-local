@@ -1,0 +1,62 @@
+{
+  "name": "Client-matrix tools: Node.js, the gcloud CLI, and rclone",
+  "retrieved_at": "2026-10-12",
+  "distribution": "Downloaded development tools; binaries are not vendored",
+  "node": {
+    "version": "24.21.0",
+    "source": "https://nodejs.org/dist/v24.21.0/SHASUMS256.txt",
+    "archives": {
+      "linux_amd64": {
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz",
+        "sha256": "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
+      },
+      "linux_arm64": {
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-arm64.tar.xz",
+        "sha256": "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2"
+      },
+      "darwin_arm64": {
+        "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-darwin-arm64.tar.xz",
+        "sha256": "6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe"
+      }
+    }
+  },
+  "rclone": {
+    "version": "1.75.2",
+    "source": "https://downloads.rclone.org/v1.75.2/SHA256SUMS",
+    "archives": {
+      "linux_amd64": {
+        "url": "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-linux-amd64.zip",
+        "sha256": "349ac8fba6ff65d6247043f1750cdcb518ec5d500ef91463a10d37c0ccdf3702"
+      },
+      "linux_arm64": {
+        "url": "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-linux-arm64.zip",
+        "sha256": "7e1e8d69654941b7b7df84ee74c5f7fb09cce7d5496947fb7bf16b55ff427d10"
+      },
+      "darwin_arm64": {
+        "url": "https://github.com/rclone/rclone/releases/download/v1.75.2/rclone-v1.75.2-osx-arm64.zip",
+        "sha256": "610ab7d48615135dfc60b763858b11a426a0d3d1160c1bb76fb0ae6011b02edd"
+      }
+    }
+  },
+  "gcloud": {
+    "version": "588.0.0",
+    "source": "https://dl.google.com/dl/cloudsdk/channels/rapid/components-v588.0.0.json",
+    "python": "Runs on the caller's Python 3.10 or newer; the bundled-python component is not installed",
+    "components": [
+      {
+        "id": "core",
+        "version": "2026.10.02",
+        "url": "https://dl.google.com/dl/cloudsdk/channels/rapid/components/google-cloud-sdk-core-20261002073740.tar.gz",
+        "size": 29641870,
+        "sha256": "6f5ed0f5bede78214b77968556113bae907fbee418ec4750a1727a69290e2c87"
+      },
+      {
+        "id": "gcloud-deps",
+        "version": "2026.09.25",
+        "url": "https://dl.google.com/dl/cloudsdk/channels/rapid/components/google-cloud-sdk-gcloud-deps-20260925073854.tar.gz",
+        "size": 7388174,
+        "sha256": "d3f5bebdd2d2df59cd4052acdf0feab5ea1a3d7f3b1309159f3082bfd768ce75"
+      }
+    ]
+  }
+}

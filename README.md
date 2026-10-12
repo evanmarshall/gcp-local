@@ -43,7 +43,7 @@ client.create_bucket(bucket, location="us-central1")
 bucket.blob("hello.txt").upload_from_string("Hello from local GCP.")
 ```
 
-More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terraform-provisioned Pub/Sub → Cloud Run → Cloud Storage [workflow](docs/workflow.md). The [quickstart](docs/quickstart.md) covers Terraform credentials, multiple environments, and configuration.
+More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terraform-provisioned Pub/Sub → Cloud Run → Cloud Storage [workflow](docs/workflow.md). The [quickstart](docs/quickstart.md) covers Terraform credentials, multiple environments, and configuration. [Client setup](docs/clients.md) has the endpoint and transport settings for Go, Python, Node.js, gcloud, and rclone.
 
 ## Supported services
 

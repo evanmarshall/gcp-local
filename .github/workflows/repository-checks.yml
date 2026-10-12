@@ -195,6 +195,50 @@ jobs:
             .artifacts/terraform/*.json
             .artifacts/terraform-fault/*.json
 
+  client-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python scripts/install_go.py
+      - run: python scripts/install_emulator_jar.py pubsub
+      - run: python scripts/install_emulator_jar.py firestore
+      - run: python scripts/install_spanner.py
+      - run: python scripts/install_client_tools.py
+      - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
+      - run: python -m venv .venv-tools
+      - run: .venv-tools/bin/python -m pip install -r tests/clients/python/requirements.txt
+      - run: .venv-tools/bin/python -m pip check
+      - run: PATH="$PWD/.tools/clients/node/bin:$PATH" npm ci --prefix tests/clients/node --no-audit --no-fund
+      - name: Warm the core and Go client builds before blocking network egress
+        run: |
+          sh scripts/go.sh build -o bin/gcp-local ./cmd/gcp-local
+          sh scripts/go.sh -C tests/clients/go build -o "$PWD/bin/client-matrix-go" .
+      - name: Drive every client in tests/clients/matrix.json with local ADC and only loopback
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check_clients.sh
+      - name: Hand the results back to the artifact uploader
+        if: always()
+        run: |
+          if [ -d .artifacts/client-matrix ]; then
+            sudo chown -R "$(id -u):$(id -g)" .artifacts/client-matrix
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: client-matrix
+          include-hidden-files: true
+          path: |
+            .artifacts/client-matrix/results.json
+            .artifacts/client-matrix/logs/
+            .artifacts/client-matrix/gcp-local.log
+
   runtime:
     runs-on: ubuntu-latest
     steps:

@@ -8,10 +8,13 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+import client_matrix
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gcp_local.bootstrap import SERVICES
+
+ISSUE_LINK = "](" + client_matrix.ISSUES
 
 GIT = shutil.which("git") or "git"
 
@@ -99,8 +102,29 @@ def check_coverage(errors: list[str]) -> None:
         for path in re.findall(r"^\|[^\n]*\| `([^`]+)` \|$", clients, re.MULTILINE)
         if not (ROOT / path).exists()
     )
+    check_client_matrix(errors, clients)
     if "docs/coverage.md" not in (ROOT / "README.md").read_text():
         errors.append("README.md: must link docs/coverage.md")
+
+
+def check_client_matrix(errors: list[str], section: str) -> None:
+    """Require the client compatibility tables to list exactly the matrix's combinations."""
+    rows, failures = client_matrix.coverage_lines(client_matrix.load())
+    lines = set(section.splitlines())
+    documented = {
+        "row": {line for line in lines if "| `tests/clients/" in line},
+        "known failure": {line for line in lines if line.startswith("|") and ISSUE_LINK in line},
+    }
+    label = "docs/coverage.md"
+    for kind, expected in (("row", set(rows)), ("known failure", set(failures))):
+        errors.extend(
+            f"{label}: missing client {kind}: {line}"
+            for line in sorted(expected - documented[kind])
+        )
+        errors.extend(
+            f"{label}: client {kind} not in tests/clients/matrix.json: {line}"
+            for line in sorted(documented[kind] - expected)
+        )
 
 
 def check_tooling_index(errors: list[str]) -> None:

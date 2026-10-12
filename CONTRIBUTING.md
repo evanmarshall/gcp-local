@@ -46,6 +46,7 @@ Run the checks for every area you change; CI runs all of them. "Linux" means CI 
 | `sh scripts/check_cloudkms.sh` | Cloud KMS asymmetric and MAC keys with the Python SDK | Linux | `requirements-services.txt` |
 | `sh scripts/check_secretmanager.sh` | Secret Manager with the Python SDK over gRPC | Linux | `requirements-services.txt` |
 | `sh scripts/check_cloudtasks.sh` | Cloud Tasks with the Python SDK over gRPC, including dispatch | Linux | `requirements-services.txt` |
+| `sh scripts/check_clients.sh` | Go, Node.js, Python, gcloud, and rclone clients per service against `tests/clients/matrix.json` ([client matrix](docs/clients.md)) | Linux | Java 17, `install_emulator_jar.py pubsub` and `firestore`, `install_spanner.py`, `install_client_tools.py`, `npm ci` in `tests/clients/node`, `tests/clients/python/requirements.txt` |
 | `sh scripts/check_terraform.sh` | Pinned upstream Terraform cases and an RPO negative control; never calls GCP | Linux | Java 17, every backend, `install_terraform.py` |
 | `scripts/smoke_isolation.py` | `run_isolated.py` blocks egress and kills hung descendants | Linux, root | None |
 | `scripts/smoke_environment.py` | Packaged environment: every service under IAM, reset, teardown | Docker | `requirements-pubsub.txt` |
@@ -62,11 +63,12 @@ Every other file in `scripts/` supports a check or a documented workflow:
 | Script | Purpose |
 | --- | --- |
 | `go.sh` | Run the pinned Go toolchain in `.tools/go` |
-| `install_go.py`, `install_quality_tools.py`, `install_terraform.py` | Install pinned tools under `.tools/` |
+| `install_go.py`, `install_quality_tools.py`, `install_terraform.py`, `install_client_tools.py` | Install pinned tools under `.tools/` (`install_client_tools.py`: Node.js, gcloud, rclone for the client matrix) |
 | `install_emulator_jar.py`, `install_spanner.py`, `install_redis.py`, `install_postgres.py` | Install pinned backends under `.tools/`; the Dockerfile runs them too |
 | `backend_env.sh` | Sourced by check scripts to export the `.tools/` backend paths |
 | `run_isolated.py` | Run a server and a test command in a loopback-only Linux namespace |
-| `run_pubsub.py`, `run_terraform.py`, `probe_pubsub_backend.py`, `smoke_storage.py`, `smoke_runtime.py` | Called by the check scripts |
+| `run_pubsub.py`, `run_terraform.py`, `run_clients.py`, `probe_pubsub_backend.py`, `smoke_storage.py`, `smoke_runtime.py` | Called by the check scripts |
+| `client_matrix.py` | Loads `tests/clients/matrix.json` and resolves client versions for `run_clients.py` and `check_repo.py` |
 | `smoke_support.py` | Helpers shared by the smoke scripts |
 | `generate_terraform_tests.py` | Regenerate, or `--check`, the adapted Terraform cases ([audit](tests/terraform/audit.md)) |
 | `local_env.py`, `create_local_identity.py` | Run a packaged environment; write a local ADC bundle ([quickstart](docs/quickstart.md), [local identity](docs/local-identity.md)) |
@@ -86,6 +88,8 @@ Python dependencies are fully pinned, transitives included:
 | `requirements-sdk.txt` | Storage SDK, plus `requirements-cloud.txt` | `pytest`, Storage checks, smoke scripts |
 | `requirements-pubsub.txt` | Pub/Sub SDK, plus `requirements-sdk.txt` | Pub/Sub, workflow, packaged, and release smoke |
 | `requirements-services.txt` | Firestore, Logging, KMS, Secret Manager, Cloud Tasks, and google-genai SDKs, plus `requirements-pubsub.txt` | `check_pubsub.sh`, `check_firestore.sh`, `check_logging.sh`, `check_vertexai.sh`, `check_cloudkms.sh`, `check_secretmanager.sh`, `check_cloudtasks.sh` |
+| `requirements-services.txt` | Firestore, Logging, and google-genai SDKs, plus `requirements-pubsub.txt` | `check_pubsub.sh`, `check_firestore.sh`, `check_logging.sh`, `check_vertexai.sh` |
+| `tests/clients/python/requirements.txt` | Every Python client in the client matrix, plus `requirements-services.txt` | `check_clients.sh` |
 
 - `requirements-sdk.txt` is a recording contract file. Changing it invalidates the Storage SDK recording.
 - `requirements-pubsub.txt` stays separate because the release workflow and application docs install only the Pub/Sub SDK.

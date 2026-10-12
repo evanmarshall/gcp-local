@@ -18,10 +18,11 @@ Point each client at the emulator and keep its normal credential loading:
 | --- | --- | --- |
 | Python `google-cloud-storage` | `Client(client_options={"api_endpoint": "http://127.0.0.1:4566"})` | Yes ([`smoke_storage.py`](../scripts/smoke_storage.py)) |
 | Go `cloud.google.com/go/storage` | `storage.NewClient(ctx, option.WithEndpoint("http://127.0.0.1:4566/storage/v1/"))` | Yes ([`sdk_test.go`](../internal/providers/storage/sdk_test.go)) |
-| Node `@google-cloud/storage` | `new Storage({apiEndpoint: "http://127.0.0.1:4566"})` | No |
+| Node `@google-cloud/storage` | `new Storage({apiEndpoint: "http://127.0.0.1:4566", useAuthWithCustomEndpoint: true})`; upload with `save(data, {resumable: false})` | Yes ([client matrix](clients.md)) |
 | rclone | `endpoint = http://127.0.0.1:4566/storage/v1/` in the `google cloud storage` remote | No; its requests are tested in Go |
 | Terraform `hashicorp/google` | `storage_custom_endpoint = "http://127.0.0.1:4566/storage/v1/"` | Yes ([Terraform](terraform-compatibility.md)) |
 
+- Without `useAuthWithCustomEndpoint`, the Node client sends no credentials. Its resumable uploads (the `save()` default) never send them to a custom endpoint: 8.4.0 omits the option in `File.startResumableUpload_`.
 - Go and rclone need the `/storage/v1/` suffix; without it they request `/storage/b/...`. The Go client reads objects over the XML API at the endpoint's host.
 - Signed URLs use the client's endpoint as their host: Python takes `client.api_endpoint`, Go takes `SignedURLOptions{Hostname: "127.0.0.1:4566", Insecure: true}`.
 

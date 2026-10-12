@@ -1,0 +1,13 @@
+# Python clients for the client matrix (scripts/check_clients.sh); no live-cloud execution.
+-r ../../../requirements-services.txt
+google-cloud-bigquery==3.46.1
+google-cloud-bigtable==2.50.0
+google-cloud-iam==2.26.0
+google-cloud-monitoring==2.32.0
+google-cloud-spanner==3.71.0
+grpc-interceptor==0.15.4
+mmh3==5.3.1
+opentelemetry-resourcedetector-gcp==1.14.0
+python-dateutil==2.9.0.post0
+six==1.17.0
+sqlparse==0.6.0

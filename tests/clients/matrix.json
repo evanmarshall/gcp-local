@@ -1,0 +1,388 @@
+{
+  "clients": {
+    "go": {
+      "language": "Go",
+      "pins": "go",
+      "test": "tests/clients/go",
+      "command": [
+        "bin/client-matrix-go"
+      ]
+    },
+    "node": {
+      "language": "Node",
+      "pins": "node",
+      "test": "tests/clients/node",
+      "command": [
+        "{node}",
+        "tests/clients/node/run.mjs"
+      ]
+    },
+    "python": {
+      "language": "Python",
+      "pins": "python",
+      "test": "tests/clients/python",
+      "command": [
+        "{python}",
+        "tests/clients/python/run.py"
+      ]
+    },
+    "gcloud": {
+      "language": "",
+      "pins": "cli",
+      "test": "tests/clients/cli",
+      "command": [
+        "{python}",
+        "tests/clients/cli/gcloud.py"
+      ]
+    },
+    "rclone": {
+      "language": "",
+      "pins": "cli",
+      "test": "tests/clients/cli",
+      "command": [
+        "{python}",
+        "tests/clients/cli/rclone.py"
+      ]
+    }
+  },
+  "combos": [
+    {
+      "service": "storage",
+      "client": "go",
+      "package": "cloud.google.com/go/storage",
+      "transport": "JSON REST",
+      "expect": "pass"
+    },
+    {
+      "service": "storage",
+      "client": "node",
+      "package": "@google-cloud/storage",
+      "transport": "JSON REST",
+      "expect": "pass"
+    },
+    {
+      "service": "storage",
+      "client": "python",
+      "package": "google-cloud-storage",
+      "transport": "JSON REST",
+      "expect": "pass"
+    },
+    {
+      "service": "storage",
+      "client": "gcloud",
+      "package": "gcloud",
+      "transport": "JSON REST",
+      "expect": "xfail",
+      "issue": 53,
+      "gap": "STS refuses gcloud's client authentication",
+      "match": "Use a form-encoded local subject-token exchange"
+    },
+    {
+      "service": "storage",
+      "client": "rclone",
+      "package": "rclone",
+      "transport": "JSON REST",
+      "expect": "xfail",
+      "issue": 51,
+      "gap": "bucket create with bucketPolicyOnly is refused",
+      "match": "bucketPolicyOnly"
+    },
+    {
+      "service": "pubsub",
+      "client": "go",
+      "package": "cloud.google.com/go/pubsub/v2",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 55,
+      "gap": "StreamingPull refuses protocol_version",
+      "match": "field protocol_version"
+    },
+    {
+      "service": "pubsub",
+      "client": "node",
+      "package": "@google-cloud/pubsub",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "grpc-js sends no call credentials over plaintext gRPC",
+      "match": "Cannot compose insecure credentials"
+    },
+    {
+      "service": "pubsub",
+      "client": "python",
+      "package": "google-cloud-pubsub",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "pubsub",
+      "client": "gcloud",
+      "package": "gcloud",
+      "transport": "REST",
+      "expect": "xfail",
+      "issue": 53,
+      "gap": "STS refuses gcloud's client authentication; REST publish and pull are not served",
+      "match": "Use a form-encoded local subject-token exchange"
+    },
+    {
+      "service": "firestore",
+      "client": "go",
+      "package": "cloud.google.com/go/firestore",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "firestore",
+      "client": "node",
+      "package": "@google-cloud/firestore",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "grpc-js sends no call credentials over plaintext gRPC",
+      "match": "Cannot compose insecure credentials"
+    },
+    {
+      "service": "firestore",
+      "client": "python",
+      "package": "google-cloud-firestore",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "secretmanager",
+      "client": "go",
+      "package": "cloud.google.com/go/secretmanager",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "secretmanager",
+      "client": "node",
+      "package": "@google-cloud/secret-manager",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "grpc-js sends no call credentials over plaintext gRPC",
+      "match": "Cannot compose insecure credentials"
+    },
+    {
+      "service": "secretmanager",
+      "client": "python",
+      "package": "google-cloud-secret-manager",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "secretmanager",
+      "client": "gcloud",
+      "package": "gcloud",
+      "transport": "REST",
+      "expect": "xfail",
+      "issue": 53,
+      "gap": "STS refuses gcloud's client authentication",
+      "match": "Use a form-encoded local subject-token exchange"
+    },
+    {
+      "service": "cloudkms",
+      "client": "go",
+      "package": "cloud.google.com/go/kms",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 59,
+      "gap": "no gRPC listener",
+      "match": "unknown service google.cloud.kms.v1.KeyManagementService"
+    },
+    {
+      "service": "cloudkms",
+      "client": "node",
+      "package": "@google-cloud/kms",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "grpc-js sends no call credentials over plaintext gRPC",
+      "match": "Cannot compose insecure credentials"
+    },
+    {
+      "service": "cloudkms",
+      "client": "python",
+      "package": "google-cloud-kms",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 59,
+      "gap": "no gRPC listener",
+      "match": "unknown service google.cloud.kms.v1.KeyManagementService"
+    },
+    {
+      "service": "cloudkms",
+      "client": "gcloud",
+      "package": "gcloud",
+      "transport": "REST",
+      "expect": "xfail",
+      "issue": 53,
+      "gap": "STS refuses gcloud's client authentication",
+      "match": "Use a form-encoded local subject-token exchange"
+    },
+    {
+      "service": "cloudtasks",
+      "client": "go",
+      "package": "cloud.google.com/go/cloudtasks",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "cloudtasks",
+      "client": "node",
+      "package": "@google-cloud/tasks",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "grpc-js sends no call credentials over plaintext gRPC",
+      "match": "Cannot compose insecure credentials"
+    },
+    {
+      "service": "cloudtasks",
+      "client": "python",
+      "package": "google-cloud-tasks",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "bigquery",
+      "client": "go",
+      "package": "cloud.google.com/go/bigquery",
+      "transport": "REST",
+      "expect": "pass"
+    },
+    {
+      "service": "bigquery",
+      "client": "node",
+      "package": "@google-cloud/bigquery",
+      "transport": "REST",
+      "expect": "pass"
+    },
+    {
+      "service": "bigquery",
+      "client": "python",
+      "package": "google-cloud-bigquery",
+      "transport": "REST",
+      "expect": "xfail",
+      "issue": 57,
+      "gap": "jobs.insert is not served",
+      "match": "No provider implements this REST API method"
+    },
+    {
+      "service": "spanner",
+      "client": "go",
+      "package": "cloud.google.com/go/spanner",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 61,
+      "gap": "no admin gRPC listener",
+      "match": "unknown service google.spanner.admin.instance.v1.InstanceAdmin"
+    },
+    {
+      "service": "spanner",
+      "client": "node",
+      "package": "@google-cloud/spanner",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "grpc-js sends no call credentials over plaintext gRPC",
+      "match": "Cannot compose insecure credentials"
+    },
+    {
+      "service": "spanner",
+      "client": "python",
+      "package": "google-cloud-spanner",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "the handwritten client only dials TLS; the gateway is plaintext",
+      "match": "Ssl handshake failed"
+    },
+    {
+      "service": "bigtable",
+      "client": "go",
+      "package": "cloud.google.com/go/bigtable",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 62,
+      "gap": "no admin gRPC listener",
+      "match": "unknown service google.bigtable.admin.v2.BigtableInstanceAdmin"
+    },
+    {
+      "service": "bigtable",
+      "client": "node",
+      "package": "@google-cloud/bigtable",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "grpc-js sends no call credentials over plaintext gRPC",
+      "match": "Cannot compose insecure credentials"
+    },
+    {
+      "service": "bigtable",
+      "client": "python",
+      "package": "google-cloud-bigtable",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "the handwritten client only dials TLS; the gateway is plaintext",
+      "match": "Ssl handshake failed"
+    },
+    {
+      "service": "logging",
+      "client": "go",
+      "package": "cloud.google.com/go/logging",
+      "transport": "gRPC",
+      "expect": "pass"
+    },
+    {
+      "service": "logging",
+      "client": "node",
+      "package": "@google-cloud/logging",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "grpc-js sends no call credentials over plaintext gRPC",
+      "match": "Cannot compose insecure credentials"
+    },
+    {
+      "service": "logging",
+      "client": "python",
+      "package": "google-cloud-logging",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 54,
+      "gap": "the handwritten client only dials TLS; the gateway is plaintext",
+      "match": "Ssl handshake failed"
+    },
+    {
+      "service": "iam",
+      "client": "go",
+      "package": "cloud.google.com/go/iam",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 63,
+      "gap": "no gRPC listener",
+      "match": "unknown service google.iam.admin.v1.IAM"
+    },
+    {
+      "service": "iam",
+      "client": "node",
+      "package": "@googleapis/iam",
+      "transport": "REST",
+      "expect": "pass"
+    },
+    {
+      "service": "iam",
+      "client": "python",
+      "package": "google-cloud-iam",
+      "transport": "gRPC",
+      "expect": "xfail",
+      "issue": 63,
+      "gap": "no gRPC listener",
+      "match": "unknown service google.iam.admin.v1.IAM"
+    }
+  ]
+}
