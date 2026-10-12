@@ -44,6 +44,8 @@ Seven scenarios were recorded and revalidated against real GCP on **2026-10-05 U
 | `storage-multipart-query-name` | Multipart name in query, matching bucket metadata, explicit STANDARD replacement, generation changes and content preservation |
 | `storage-python-sdk` | Three pinned upstream Python Storage tests plus pagination and generation-guarded cleanup |
 
+`storage-iam-conditions` was recorded on **2026-10-11 UTC** and is matched the same way: a version-3 conditional `objectViewer` binding scoped by `resource.name`, and the rejection of a conditional binding in a version-1 policy ([IAM](iam.md)).
+
 The cloud runs used one owned us-central1 bucket at a time, at most ten objects of at most 1 MiB, with successful cleanup. See [recordings](../tests/conformance/recordings/) for immutable observations, contract hashes, source versions, and dates. Ordinary local comparison uses a build-tagged **credential fixture** that resolves the runner's synthetic tokens; the gateway, IAM, provider, and backend are production code. Those fixed tokens are rejected by the production binary, which is separately exercised with real local STS/ADC credentials. Neither credential mode contacts real GCP during local tests.
 
 Run in moo or Linux CI with namespace permission and the pinned SDK environment:

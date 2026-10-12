@@ -1,6 +1,6 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRPC dispatch, scoped state/lifecycle, local identity, basic IAM, authenticated Storage, and an initial Pub/Sub provider backed by Google's official emulator. Storage has seven cloud-recorded scenarios and Pub/Sub one; Secret Manager, IAM service accounts, project IAM, Artifact Registry, Firestore, BigQuery, Cloud Tasks, Cloud KMS, Spanner, and Bigtable have one recorded REST scenario each that the local providers match. Cloud Run and Compute are locally modeled without recordings. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRPC dispatch, scoped state/lifecycle, local identity, and an IAM engine in front of 16 service providers. [Service coverage](docs/coverage.md) is the source of truth for what each provider serves, what applications can use, and which recordings verify it. Do not describe planned services as working features.
 
 ## Start here
 
@@ -12,6 +12,7 @@ gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRP
 
 - Use [gcp-provider](.agents/skills/gcp-provider/SKILL.md) for API providers, emulator integration, state ownership, or service execution.
 - Use [gcp-conformance](.agents/skills/gcp-conformance/SKILL.md) for recorded GCP behavior, permission probes, Terraform compatibility, or fidelity claims.
+- Use [gcp-docs](.agents/skills/gcp-docs/SKILL.md) when a change affects what a service supports or how it is verified, and [concise-and-blunt](.agents/skills/concise-and-blunt/SKILL.md) for all documentation writing.
 - Use [moo-code](.agents/skills/moo-code/SKILL.md) for development in isolated machines and [moo-golden-image](.agents/skills/moo-golden-image/SKILL.md) for baseline setup. Give concurrent tasks separate worktrees and machines; follow [the moo guide](docs/moo.md).
 - Skills live in `.agents/skills/`; keep descriptions specific and instructions concise. Do not copy this entire file into each skill.
 - The portable application-onboarding bundle lives in `skills/gcp-local-setup/`. See [its installer guide](docs/agent-setup.md); do not copy emulator-contributor instructions into application repositories.

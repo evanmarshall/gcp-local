@@ -55,24 +55,26 @@ The command creates `.gcp-local/environment/` with mode 0700 and owner-only iden
 
 Every implemented provider is selected. The generated developer identity receives explicit project-level grants, evaluated per request by the [IAM engine](iam.md) like any other binding; an enrolled identity without grants is refused, and missing credentials never become an administrator.
 
-| Service | Developer roles | Evidence |
-| --- | --- | --- |
-| Cloud Storage | Storage Admin | Several cloud-recorded scenarios ([storage.md](storage.md)) |
-| Pub/Sub | Pub/Sub Admin | One recorded pull/authorization scenario; push and streaming are locally modeled ([pubsub.md](pubsub.md)) |
-| Secret Manager | Secret Manager Admin | One recorded scenario ([secretmanager.md](secretmanager.md)) |
-| IAM service accounts | Service Account Admin, Service Account User | One recorded scenario ([serviceaccounts.md](serviceaccounts.md)) |
-| Project IAM (Resource Manager) | Project IAM Admin | One recorded scenario ([project-iam.md](project-iam.md)) |
-| Artifact Registry | Artifact Registry Admin | One recorded scenario ([artifactregistry.md](artifactregistry.md)) |
-| Firestore | Datastore User, Datastore Index Admin | One recorded scenario ([firestore.md](firestore.md)) |
-| BigQuery | BigQuery Data Owner, BigQuery Job User | One recorded scenario ([bigquery.md](bigquery.md)) |
-| Cloud Tasks | Cloud Tasks Admin | One recorded scenario ([cloudtasks.md](cloudtasks.md)) |
-| Cloud KMS | Cloud KMS Admin, CryptoKey Encrypter/Decrypter | One recorded scenario ([cloudkms.md](cloudkms.md)) |
-| Spanner | Spanner Admin | One recorded scenario ([spanner.md](spanner.md)) |
-| Bigtable | Bigtable Admin | One recorded scenario ([bigtable.md](bigtable.md)) |
-| Compute networking, Connectivity Tests | Compute Admin, Network Management Admin | One recorded scenario ([networking.md](networking.md)) |
-| Cloud Run | Cloud Run Admin | Locally modeled; no recording ([cloudrun.md](cloudrun.md)) |
+| Service | Developer roles |
+| --- | --- |
+| Cloud Storage | Storage Admin |
+| Pub/Sub | Pub/Sub Admin |
+| Secret Manager | Secret Manager Admin |
+| IAM service accounts | Service Account Admin, Service Account User |
+| Project IAM (Resource Manager) | Project IAM Admin |
+| Artifact Registry | Artifact Registry Admin |
+| Firestore | Datastore User, Datastore Index Admin |
+| BigQuery | BigQuery Data Owner, BigQuery Job User |
+| Cloud Tasks | Cloud Tasks Admin |
+| Cloud KMS | Cloud KMS Admin, CryptoKey Encrypter/Decrypter |
+| Spanner | Spanner Admin |
+| Bigtable | Bigtable Admin |
+| Cloud SQL for PostgreSQL | Cloud SQL Admin |
+| Memorystore for Redis | Redis Admin |
+| Compute networking, Connectivity Tests | Compute Admin, Network Management Admin |
+| Cloud Run | Cloud Run Admin |
 
-A recording covers the operations in that scenario only; each service doc lists what else is implemented and what is not.
+What each service supports and how it is verified is in [service coverage](coverage.md).
 
 ### Cloud Run in the packaged environment
 

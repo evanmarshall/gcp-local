@@ -10,6 +10,9 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from gcp_local.bootstrap import SERVICES
+
 GIT = shutil.which("git") or "git"
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +64,40 @@ def check_yaml_and_links(errors: list[str], path: Path, content: str, label: str
             errors.append(f"{label}: broken relative link: {target}")
 
 
+def check_coverage(errors: list[str]) -> None:
+    """Require docs/coverage.md to list every service, recording, and Terraform case."""
+    coverage = (ROOT / "docs/coverage.md").read_text()
+    rows = {
+        match.group(1): match.group(0)
+        for match in re.finditer(r"^\| `([a-z]+)` \|.*$", coverage, re.MULTILINE)
+    }
+    label = "docs/coverage.md"
+    errors.extend(f"{label}: no row for service {name}" for name in SERVICES if name not in rows)
+    errors.extend(f"{label}: unknown service {name}" for name in rows if name not in SERVICES)
+    listed = "\n".join(rows.values())
+
+    def names(directory: str) -> list[str]:
+        return sorted(path.name for path in (ROOT / directory).iterdir() if path.is_dir())
+
+    selection = yaml.safe_load((ROOT / "tests/terraform/selection.json").read_text())
+    for kind, required in (
+        ("recording", names("tests/conformance/recordings")),
+        ("Terraform case", selection["test_ids"]),
+    ):
+        errors.extend(
+            f"{label}: {kind} {name} missing from the summary table"
+            for name in required
+            if not re.search(rf"[ ,]{re.escape(name)}[ ,|]", listed)
+        )
+    errors.extend(
+        f"{label}: permission probe {name} not listed"
+        for name in names("tests/permission/recordings")
+        if name not in coverage
+    )
+    if "docs/coverage.md" not in (ROOT / "README.md").read_text():
+        errors.append("README.md: must link docs/coverage.md")
+
+
 def skill_error(path: Path, content: str) -> str | None:
     """Return the first skill-metadata defect, or None when the skill is sound."""
     match = re.match(r"\A---\n(.*?)\n---\n", content, re.DOTALL)
@@ -104,6 +141,7 @@ def main() -> int:
     )
     paths = [ROOT / name for name in sorted(set(files)) if name]
     check_documents(errors, paths)
+    check_coverage(errors)
     skills = sorted(
         [*(ROOT / ".agents/skills").glob("*/SKILL.md"), *(ROOT / "skills").glob("*/SKILL.md")]
     )

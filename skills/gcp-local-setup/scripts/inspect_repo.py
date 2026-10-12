@@ -73,7 +73,7 @@ PATTERNS = {
 }
 # Detected service names that differ from the runtime's health provider names.
 PROVIDERS = {"cloud-run": "run", "secret-manager": "secretmanager"}
-# Evidence level per detected service; see the checkout's docs/quickstart.md.
+# Evidence level per detected service; see the checkout's docs/coverage.md.
 LOCAL_SUPPORT = {
     "storage": "partial-recorded-slice",
     "pubsub": "partial-recorded-slice",

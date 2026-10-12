@@ -1,0 +1,4 @@
+interface:
+  display_name: "GCP Docs"
+  short_description: "Keep coverage, README, and service docs in sync"
+  default_prompt: "Use $gcp-docs to update the docs for this change."

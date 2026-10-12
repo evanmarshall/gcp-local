@@ -1,0 +1,4 @@
+interface:
+  display_name: "Concise and Blunt"
+  short_description: "Write docs that lead with the answer and stop"
+  default_prompt: "Use $concise-and-blunt to write or tighten this documentation."

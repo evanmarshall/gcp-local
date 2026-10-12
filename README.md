@@ -47,27 +47,27 @@ Full, runnable examples are in [`examples/`](examples/), including Pub/Sub over 
 
 ## Supported services
 
-"Recorded" means the emulator's responses are compared against a scenario captured from real Google Cloud; each linked page lists exactly which operations are covered and which are not.
+[Service coverage](docs/coverage.md) is the full matrix: methods served versus the whole API, what an application can actually do with each resource, and which recordings and Terraform tests verify it.
 
-| Service | Backend | Verification |
+| Service | Backend | Application use |
 | --- | --- | --- |
-| [Cloud Storage](docs/storage.md) | fake-gcs-server, in-process | Recorded, including IAM conditions; Terraform tests |
-| [Pub/Sub](docs/pubsub.md) | Official Google emulator | Recorded (pull and IAM); push is modeled locally; Terraform tests |
-| [Firestore](docs/firestore.md) | Official Google emulator | Recorded; Terraform tests |
-| [Spanner](docs/spanner.md) | Official Google emulator | Recorded; Terraform tests |
-| [Bigtable](docs/bigtable.md) | Official Google emulator code | Recorded |
-| [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL per instance | Recorded |
-| [Memorystore for Redis](docs/memorystore.md) | Real Redis per instance | Recorded |
-| [BigQuery](docs/bigquery.md) | gcp-local | Recorded (datasets, tables, rows, simple queries); Terraform tests |
-| [Secret Manager](docs/secretmanager.md) | gcp-local | Recorded; Terraform tests |
-| [Cloud KMS](docs/cloudkms.md) | gcp-local | Recorded; Terraform tests |
-| [Cloud Tasks](docs/cloudtasks.md) | gcp-local | Recorded, including dispatch and retry; Terraform tests |
-| [Artifact Registry](docs/artifactregistry.md) | gcp-local | Recorded (repositories only); Terraform tests |
-| [IAM service accounts](docs/serviceaccounts.md) and [project IAM](docs/project-iam.md) | gcp-local | Recorded; Terraform tests |
-| [VPC networking and Connectivity Tests](docs/networking.md) | gcp-local | Recorded, including firewall, peering, and Cloud NAT verdicts; Terraform tests |
-| [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Modeled locally, not yet recorded; Terraform tests |
+| [Cloud Storage](docs/storage.md) | fake-gcs-server | Objects: read, write, list, delete |
+| [Pub/Sub](docs/pubsub.md) | Official Google emulator | Publish, pull, streaming pull, push |
+| [Secret Manager](docs/secretmanager.md) | gcp-local | Secret versions and access |
+| [Cloud KMS](docs/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt |
+| [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries |
+| [Firestore](docs/firestore.md) | Official Google emulator | Single documents; no queries or transactions |
+| [BigQuery](docs/bigquery.md) | gcp-local | Streaming inserts, simple SELECT |
+| [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | Admin API; connections need manual setup |
+| [Memorystore for Redis](docs/memorystore.md) | Real Redis | Admin API; Redis reachable inside the container |
+| [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Invocation; packaged environment runs the bundled worker only |
+| [Spanner](docs/spanner.md) | Official Google emulator | Admin and schema only |
+| [Bigtable](docs/bigtable.md) | Official Google emulator code | Admin only |
+| [Artifact Registry](docs/artifactregistry.md) | gcp-local | Repositories only; no push or pull |
+| [IAM](docs/serviceaccounts.md) and [project IAM](docs/project-iam.md) | gcp-local | Service accounts and policies |
+| [VPC networking](docs/networking.md) | gcp-local | Connectivity verdicts, no real traffic |
 
-Every service evaluates IAM on each request through one shared policy engine with predefined role definitions recorded from Google Cloud. IAM conditions are supported; deny policies, principal access boundaries, organization policy, and VPC Service Controls are not yet ([IAM details](docs/iam.md)).
+Every service evaluates IAM on each request with predefined roles recorded from Google Cloud. IAM conditions work; deny policies, principal access boundaries, organization policy, and VPC Service Controls do not yet ([IAM details](docs/iam.md)).
 
 ## How it works
 
