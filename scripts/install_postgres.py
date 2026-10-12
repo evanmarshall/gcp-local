@@ -15,6 +15,8 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -43,6 +45,22 @@ def _download(pin: dict, target: Path) -> None:
     """Download one artifact over https with no ambient proxy and verify size and digest."""
     if urlparse(pin["url"]).scheme != "https":
         raise SystemExit("Refusing a non-https PostgreSQL download")
+    # Maven Central's CDN has returned transient 404s for pinned artifacts;
+    # retry the fetch a few times before failing the install.
+    for attempt in range(4):
+        try:
+            digest, total = _fetch(pin, target)
+            break
+        except urllib.error.URLError:
+            if attempt == 3:
+                raise
+            time.sleep(5 * (attempt + 1))
+    if total != pin["size"] or digest != pin["sha256"]:
+        raise SystemExit("PostgreSQL artifact failed size/digest verification")
+
+
+def _fetch(pin: dict, target: Path) -> tuple[str, int]:
+    """Stream one artifact to target, refusing more than its pinned size."""
     digest, total = hashlib.sha256(), 0
     with _OPENER.open(pin["url"], timeout=120) as response, target.open("wb") as handle:
         while chunk := response.read(CHUNK):
@@ -51,8 +69,7 @@ def _download(pin: dict, target: Path) -> None:
                 raise SystemExit("PostgreSQL artifact exceeds its pinned size")
             digest.update(chunk)
             handle.write(chunk)
-    if total != pin["size"] or digest.hexdigest() != pin["sha256"]:
-        raise SystemExit("PostgreSQL artifact failed size/digest verification")
+    return digest.hexdigest(), total
 
 
 def _archive(jar: Path, pin: dict) -> bytes:
