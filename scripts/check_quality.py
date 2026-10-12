@@ -13,6 +13,7 @@ definition must be deleted or named in quality/vulture-whitelist.py.
 import argparse
 import collections
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -29,9 +30,11 @@ GO_PROGRAMS = ["./cmd/gcp-local", "./tools/..."]
 PYTHON_SOURCES = ("gcp_validation", "scripts", "skills", "tests", "examples", "conftest.py")
 
 
-def run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+def run(
+    command: Sequence[str], env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run a command in the repository root and capture its output."""
-    return subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+    return subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False, env=env)
 
 
 def relative(name: str) -> str:
@@ -41,27 +44,38 @@ def relative(name: str) -> str:
 
 
 def go_lint() -> collections.Counter[tuple[str, str]]:
-    """Collect Go lint findings grouped by rule and file."""
-    report = ROOT / ".artifacts/quality/go-lint.json"
-    report.parent.mkdir(parents=True, exist_ok=True)
-    result = run(
-        [
-            str(TOOLS / "golangci-lint"),
-            "run",
-            "-c",
-            ".golangci.yml",
-            "--output.json.path",
-            str(report),
-            "--output.text.path=",
-        ]
-    )
-    if not report.is_file():
-        raise SystemExit(f"golangci-lint produced no report:\n{result.stdout}{result.stderr}")
-    findings = collections.Counter()
-    for issue in json.loads(report.read_text())["Issues"]:
-        findings[
-            (issue.get("FromLinter") or issue["Linter"], relative(issue["Pos"]["Filename"]))
-        ] += 1
+    """Collect Go lint findings grouped by rule and file, for the host and Linux.
+
+    Linting only the host's GOOS hides Linux-only files (`*_linux.go`) from a
+    macOS run, so CI finds them later. Each finding counts once even when both
+    targets report it.
+    """
+    findings: collections.Counter[tuple[str, str]] = collections.Counter()
+    host = "darwin" if sys.platform == "darwin" else "linux"
+    for target in sorted({host, "linux"}):
+        report = ROOT / f".artifacts/quality/go-lint-{target}.json"
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.unlink(missing_ok=True)
+        result = run(
+            [
+                str(TOOLS / "golangci-lint"),
+                "run",
+                "-c",
+                ".golangci.yml",
+                "--output.json.path",
+                str(report),
+                "--output.text.path=",
+            ],
+            env={**os.environ, "GOOS": target},
+        )
+        if not report.is_file():
+            raise SystemExit(f"golangci-lint produced no report:\n{result.stdout}{result.stderr}")
+        target_findings: collections.Counter[tuple[str, str]] = collections.Counter()
+        for issue in json.loads(report.read_text())["Issues"] or []:
+            target_findings[
+                (issue.get("FromLinter") or issue["Linter"], relative(issue["Pos"]["Filename"]))
+            ] += 1
+        findings |= target_findings
     return findings
 
 

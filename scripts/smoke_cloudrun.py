@@ -107,8 +107,11 @@ def write_configs() -> Path:
         # The smoke drives the control plane without a local identity mount,
         # so its fixture principal is allUsers; the invoker contract under test
         # is enforced per service, not here.
+        # Deploying as the default compute account needs actAs on it, which
+        # resolves against this project policy when the account isn't declared.
         "policies": {resource: {"bindings": [
             {"role": "roles/run.admin", "members": ["allUsers"]},
+            {"role": "roles/iam.serviceAccountUser", "members": ["allUsers"]},
         ]}},
     }
     path = directory / "iam.json"

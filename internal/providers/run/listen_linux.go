@@ -1,6 +1,7 @@
 package run
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,7 +37,7 @@ func listeningInodes(port int) map[string]bool {
 	inodes := map[string]bool{}
 	suffix := ":" + strings.ToUpper(strconv.FormatInt(int64(port), 16))
 	for _, table := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
-		data, err := os.ReadFile(table)
+		data, err := os.ReadFile(table) //nolint:gosec // fixed /proc/net socket tables, not caller input
 		if err != nil {
 			continue
 		}
@@ -59,11 +60,11 @@ func processGroup(pid int) int {
 	}
 	// The command name is parenthesized and may hold spaces; the fields after
 	// it are state, ppid, then pgrp.
-	end := strings.LastIndexByte(string(data), ')')
+	end := bytes.LastIndexByte(data, ')')
 	if end < 0 {
 		return -1
 	}
-	fields := strings.Fields(string(data)[end+1:])
+	fields := strings.Fields(string(data[end+1:]))
 	if len(fields) < 3 {
 		return -1
 	}
