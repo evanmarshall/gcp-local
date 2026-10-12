@@ -2,17 +2,60 @@
 
 Cloud Run v2 services, revisions, and operations over REST, with containers run by Docker or as local processes and invocation gated by ID token and `run.invoker`. Modeled locally; nothing is recorded against GCP.
 
-## Use
+## Run your own image
+
+Start the packaged environment in Docker mode, then deploy any image your Docker engine has or can pull anonymously:
+
+```sh
+docker build -t my-app:dev .
+gcp-local --cloud-run-docker up      # or: python3 scripts/local_env.py --cloud-run-docker up
+gcp-local env                        # GCP_LOCAL_RUN_ENDPOINT is http://gcp-local:<port>
+```
+
+**`--cloud-run-docker` mounts the host's Docker socket into the core container. Anything with that socket controls the host's Docker, which is root-equivalent on the host.** It is off by default. Without it, the packaged environment runs only the bundled `gcp-local/workflow:latest` worker as a process and refuses other images.
+
+Deploy with Terraform or the API as usual (`image = "my-app:dev"`). Each revision is a container that:
+
+- receives only `K_SERVICE`, `K_REVISION`, `K_CONFIGURATION`, `PORT`, `GCE_METADATA_HOST`, and the service's plain-text `env` (plus the image's own `ENV`). No host credentials, files, or Docker socket are mounted.
+- runs as `template.serviceAccount` through its own metadata server at `GCE_METADATA_HOST`, which answers only that container ([local identity](local-identity.md)). A revision without a service account gets no metadata server.
+- joins the environment's internal network. It reaches gcp-local at `GCP_LOCAL_RUN_ENDPOINT` (REST, e.g. `http://gcp-local:4566/storage/v1`) and `GCP_LOCAL_RUN_GRPC_ENDPOINT` (`gcp-local:4567`); pass these through `env`. It has no internet access, so it cannot reach real Google APIs or your cloud credentials.
+- is labeled `gcp-local.environment=<compose project>`. `reset` and `down` remove every container with this environment's label and no others; the core also removes them when it starts and stops.
+
+Images:
+
+- A local image (built or tagged with `docker`) runs as is, whatever its name.
+- A missing image is pulled anonymously by the engine during `create`. Neither the host's nor the container's registry credentials are sent. For a private image, `docker pull` it yourself first.
+- Missing `gcr.io`, `*.gcr.io`, and `*.pkg.dev` images are refused: Artifact Registry here stores [repository metadata only](artifactregistry.md), and gcp-local never pulls from Google. `docker tag my-app:dev us-docker.pkg.dev/p/r/app:1` makes such a name local.
+- Missing `gcp-local/...` images are refused; build the bundled worker with `docker build -t gcp-local/workflow:latest examples/workflow`.
+
+Without the CLI, add Docker mode to the [`docker run` command](quickstart.md#run-with-docker-run):
+
+```sh
+docker network create --internal gcp-local-run
+# Replace `docker run --detach` with `docker create` and add:
+#   --volume /var/run/docker.sock:/var/run/docker.sock --group-add SOCKET_GID
+#   --env GCP_LOCAL_RUN_DOCKER_SOCKET=/var/run/docker.sock
+#   --env GCP_LOCAL_RUN_DOCKER_NETWORK=gcp-local-run --env GCP_LOCAL_RUN_ENVIRONMENT=standalone
+docker network connect gcp-local-run gcp-local   # before the first start
+docker start gcp-local
+```
+
+`SOCKET_GID` is the socket's group inside the engine (`0` on Docker Desktop). Revisions reach the core at `http://gcp-local:<GCP_LOCAL_PORT>`. `docker stop gcp-local` removes the revisions; after `docker rm --force`, run `docker rm -f $(docker ps -aq --filter label=gcp-local.environment=standalone)`.
+
+## Invoke
+
+Call `http://127.0.0.1:4566/_run/{service}-{project}.{location}.run.app/...` with a local ID token whose audience is `https://{service}-{project}.{location}.run.app`. Pub/Sub push and Cloud Tasks mint these tokens; there is no public ID-token endpoint. The gateway checks the audience and `run.routes.invoke` before forwarding, and the container never sees the caller's `Authorization` header.
+
+## Core flags
 
 ```sh
 bin/gcp-local -services run -identity-config ... -iam-config ... \
   -run-docker-socket /var/run/docker.sock
 ```
 
-- `-run-docker-socket` runs one container per revision. Without a socket, every launch is refused.
-- `-run-process IMAGE=COMMAND` runs a mapped image as a local process. The [packaged environment](quickstart.md#cloud-run-in-the-packaged-environment) uses it only for the bundled `gcp-local/workflow:latest` worker and refuses other images.
-
-Invoke a service at `http://127.0.0.1:4566/_run/{service}-{project}.{location}.run.app/...` with a local ID token whose audience is the service URI. The container receives `K_SERVICE`, `K_REVISION`, `K_CONFIGURATION`, `PORT`, and the service's plain-text `env`; it never sees the caller's `Authorization` header. Workload metadata is bound to `template.serviceAccount` ([local identity](local-identity.md)).
+- `-run-docker-socket` runs one container per revision and publishes its port on the default bridge, for a core on the Docker host. Without a socket or a process mapping, every launch is refused.
+- `-run-docker-network NAME` and `-run-docker-environment LABEL` attach revisions to a network the core shares and label them; the packaged Docker mode sets both. Either without a socket is refused, and a network needs a label.
+- `-run-process IMAGE=COMMAND` runs a mapped image as a local process. It can't be combined with `-run-docker-socket`.
 
 ## Methods
 
@@ -27,20 +70,23 @@ Routes are `/v2/projects/{project}/locations/{location}/...`.
 
 ## IAM
 
-Permissions are `run.services.*`, `run.revisions.*`, `run.operations.*`, and `run.routes.invoke`. Pinned roles: `roles/run.admin`, `.developer`, `.invoker`, `.viewer`. Invocation checks the token audience and `run.routes.invoke` before forwarding.
+Permissions are `run.services.*`, `run.revisions.*`, `run.operations.*`, and `run.routes.invoke`. Pinned roles: `roles/run.admin`, `.developer`, `.invoker`, `.viewer`.
 
 ## Verification
 
 ```sh
-sh scripts/go.sh test -race ./internal/providers/run
-.venv-tools/bin/python scripts/smoke_cloudrun.py   # Linux with Docker
+sh scripts/go.sh test -race ./internal/providers/run ./cmd/gcp-local
+.venv-tools/bin/python scripts/smoke_workflow.py --packaged --cloud-run-docker   # Docker
+.venv-tools/bin/python scripts/smoke_cloudrun.py                                 # Linux with Docker
 ```
 
-`TestAccCloudRunV2Service` passes ([Terraform](terraform-compatibility.md)). The [workflow example](workflow.md) deploys a service with an invoker grant.
+The Docker-mode smoke builds `examples/workflow` as a user image, deploys it with Terraform, delivers Pub/Sub pushes with ID tokens, checks that the worker writes to Storage as its own service account, and checks that one environment's `reset` and `down` leave another environment's revision running. `TestAccCloudRunV2Service` passes ([Terraform](terraform-compatibility.md)).
 
 ## Gaps
 
 - No recordings.
+- Revision containers have no internet egress.
 - `ingress` is stored but not enforced; token and `run.invoker` are the only boundary. VPC egress and Direct VPC are not modeled, and the [networking analyzer](networking.md) has no Cloud Run endpoints.
 - No jobs, volumes (including `/cloudsql`), or `valueSource` environment variables.
+- A pull happens inside `create` and can take up to 5 minutes.
 - State is in memory.

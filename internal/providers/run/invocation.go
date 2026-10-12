@@ -120,8 +120,8 @@ func (p *Provider) lookupServing(host string) (servingRef, error) {
 // path, and headers the application needs are forwarded; the local
 // authorization header never reaches the container.
 func (p *Provider) forward(w http.ResponseWriter, r *http.Request, serving servingRef, path string) {
-	if !loopback(serving.address) {
-		writeInvocationError(w, status.Error(codes.Internal, "The revision address is not a loopback endpoint"))
+	if !revisionAddress(serving.address) {
+		writeInvocationError(w, status.Error(codes.Internal, "The revision address is not a loopback or private-network endpoint"))
 		return
 	}
 	// The incoming body may be chunked (an unknown-length reader makes
@@ -137,7 +137,7 @@ func (p *Provider) forward(w http.ResponseWriter, r *http.Request, serving servi
 		writeInvocationError(w, status.Error(codes.InvalidArgument, "The invocation body exceeds the supported size"))
 		return
 	}
-	target, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+serving.address+path, bytes.NewReader(body)) //nolint:gosec // the address is the provider-owned loopback container port and the path is a single local URL path
+	target, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+serving.address+path, bytes.NewReader(body)) //nolint:gosec // the address is the provider-owned revision port and the path is a single local URL path
 
 	if err != nil {
 		writeInvocationError(w, status.Error(codes.Internal, "Build the container request"))
@@ -148,7 +148,7 @@ func (p *Provider) forward(w http.ResponseWriter, r *http.Request, serving servi
 			target.Header.Set(key, value)
 		}
 	}
-	response, err := http.DefaultClient.Do(target) //nolint:gosec // the target URL is validated above as a loopback revision port
+	response, err := http.DefaultClient.Do(target) //nolint:gosec // the target URL is validated above as a local revision port
 	if err != nil {
 		writeInvocationError(w, status.Error(codes.Unavailable, "The revision container is unreachable"))
 		return
@@ -308,13 +308,16 @@ func (p *Provider) audienceOf(serving servingRef) string {
 	return "https://" + hostOf(state.Scope{Project: serving.project, Location: serving.location}, serving.id)
 }
 
-// loopback reports whether the address dials a loopback host.
-func loopback(address string) bool {
+// revisionAddress reports whether the address dials a loopback host (a
+// process or published port) or a private address (a container on the
+// environment's Docker network). Runtimes produce every revision address.
+func revisionAddress(address string) bool {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return false
 	}
-	return net.ParseIP(host).IsLoopback()
+	ip := net.ParseIP(host)
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 // touchActivity records one invocation against the revision's idle clock.

@@ -16,11 +16,18 @@ started with the documented ``scripts/local_env.py up`` (host Docker; the
 revision runs as a process inside the core container). Instead of destroy,
 ``reset`` must leave every workflow resource kind empty and no worker running,
 and ``down`` must remove the environment's containers.
+
+With --packaged --cloud-run-docker, the worker is a user-built image
+(examples/workflow/Dockerfile under a fresh tag) run as a revision container
+on the environment's network. A second Docker-mode environment runs its own
+revision; the first environment's reset and down must remove only the first
+environment's containers.
 """
 
 import argparse
 import json
 import os
+import secrets
 import shutil
 import stat
 import subprocess
@@ -350,63 +357,161 @@ def packaged_credentials(adc: str) -> google.auth.credentials.Credentials:
     return credentials
 
 
-def packaged_run(directory: Path, workdir: Path) -> None:
-    """Start the packaged environment, run the workflow, reset, and verify it is empty."""
-    port = free_ports(2)  # HTTP and its gRPC gateway
-    print(environment(directory, "up", "--port", str(port), "--project", PROJECT,
+def compose_project(directory: Path) -> str:
+    """Return the environment's Compose project, which also labels its revisions."""
+    return json.loads((directory / "environment.json").read_text())["compose_project"]
+
+
+def revision_containers(directory: Path) -> list[str]:
+    """List the environment's Cloud Run revision containers, running or not."""
+    label = "label=gcp-local.environment=" + compose_project(directory)
+    return subprocess.check_output([DOCKER, "ps", "-aq", "--filter", label], text=True).split()
+
+
+def build_worker_image() -> str:
+    """Build the example worker as a user image under a fresh local tag."""
+    tag = "gcp-local-smoke/worker:" + secrets.token_hex(4)
+    subprocess.run([DOCKER, "build", "--quiet", "-t", tag, str(REPO / "examples/workflow")],
+                   check=True, capture_output=True, text=True, timeout=600)
+    return tag
+
+
+def assert_revision_container(directory: Path, image: str) -> None:
+    """Require one revision container on the environment network with no host access."""
+    containers = revision_containers(directory)
+    assert len(containers) == 1, "expected one revision container, found " + str(containers)
+    state = json.loads(subprocess.check_output([DOCKER, "inspect", containers[0]], text=True))[0]
+    assert state["Config"]["Image"] == image
+    assert list(state["NetworkSettings"]["Networks"]) == [compose_project(directory) + "_backend"]
+    assert not state["HostConfig"].get("Binds"), state["HostConfig"]["Binds"]
+    assert not state["Mounts"], state["Mounts"]
+    assert not state["HostConfig"]["Privileged"]
+    assert not state["HostConfig"].get("PortBindings"), "a revision published a host port"
+    names = {entry.split("=", 1)[0] for entry in state["Config"]["Env"]}
+    # Declared env, the Cloud Run variables, the metadata host, and the image's own.
+    assert names <= {"K_SERVICE", "K_REVISION", "K_CONFIGURATION", "PORT", "GCE_METADATA_HOST",
+                     "GCP_LOCAL_STORAGE_ENDPOINT", "PATH", "LANG", "GPG_KEY",
+                     "PYTHON_VERSION", "PYTHON_SHA256"}, names
+    print("the worker revision runs as a labeled container on the environment network")
+
+
+def deploy_neighbor(directory: Path, image: str) -> None:
+    """Deploy one revision in a second Docker-mode environment through the REST API."""
+    env = json.loads(environment(directory, "env"))
+    credentials = packaged_credentials(env["GOOGLE_APPLICATION_CREDENTIALS"])
+    local = Local(env["GCP_LOCAL_ENDPOINT"], credentials.token)
+    scope = "/v2/projects/" + env["GOOGLE_CLOUD_PROJECT"] + "/locations/" + REGION
+    body = {"template": {"containers": [{"image": image}]}}
+    request = urllib.request.Request(  # noqa: S310 -- the environment's loopback endpoint
+        local.base + scope + "/services?serviceId=neighbor", method="POST",
+        data=json.dumps(body).encode(),
+        headers={"Authorization": "Bearer " + local.token, "Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310 -- loopback
+        operation = json.loads(response.read())
+    end = time.time() + 60
+    while not operation.get("done"):
+        assert time.time() < end, "the neighbor rollout did not finish"
+        time.sleep(0.5)
+        _, payload = api(local, "GET", "/v2/" + operation["name"])
+        operation = json.loads(payload)
+    assert "error" not in operation, operation
+    assert len(revision_containers(directory)) == 1
+
+
+def packaged_run(directory: Path, workdir: Path, image: str = WORKER_IMAGE,
+                 neighbor: Path | None = None) -> None:
+    """Start the packaged environment, run the workflow, reset, and verify it is empty.
+
+    With a neighbor, the environment runs in Cloud Run Docker mode and the
+    neighbor's revision container must survive this environment's reset.
+    """
+    port = free_ports(18)  # HTTP, gRPC, and the data ports
+    mode = ("--cloud-run-docker",) if neighbor else ()
+    print(environment(directory, "up", *mode, "--port", str(port), "--project", PROJECT,
                       "--workload", WORKER_EMAIL.split("@")[0]).strip().splitlines()[-1])
     env = json.loads(environment(directory, "env"))
     base = env["GCP_LOCAL_ENDPOINT"]
-    container = json.loads((directory / "environment.json").read_text())["compose_project"]
-    container += "-gcp-local-1"
+    container = compose_project(directory) + "-gcp-local-1"
     credentials = packaged_credentials(env["GOOGLE_APPLICATION_CREDENTIALS"])
     terraform = Terraform(workdir, {
         "endpoint": base, "credentials_file": env["GCP_LOCAL_TERRAFORM_CREDENTIALS"],
         "project": PROJECT, "project_number": env["GCP_LOCAL_PROJECT_NUMBER"],
-        "region": REGION, "bucket": BUCKET, "worker_image": WORKER_IMAGE,
-        # The revision runs inside the core container, where the core listens
-        # on the same port the host sees.
-        "worker_storage_endpoint": base + "/storage/v1",
+        "region": REGION, "bucket": BUCKET, "worker_image": image,
+        # A process revision runs inside the core container, where the core
+        # listens on the same port the host sees; a revision container dials
+        # the core by its name on the environment network.
+        "worker_storage_endpoint": env.get("GCP_LOCAL_RUN_ENDPOINT", base) + "/storage/v1",
     })
     provision(terraform, Path(env["GOOGLE_APPLICATION_CREDENTIALS"]))
     exercise(terraform, credentials, Local(base, credentials.token),
              env["GCP_LOCAL_GRPC_ENDPOINT"])
-    assert packaged_workers(container), "the worker revision is not running in the core container"
-    print("the worker revision runs as a process inside the packaged core container")
+    if neighbor:
+        assert_revision_container(directory, image)
+        assert not packaged_workers(container), "a revision ran as a process in Docker mode"
+    else:
+        assert packaged_workers(container), "the worker revision is not running in the core"
+        print("the worker revision runs as a process inside the packaged core container")
     # No destroy: reset alone must discard everything the workflow created.
     environment(directory, "reset")
     credentials = packaged_credentials(env["GOOGLE_APPLICATION_CREDENTIALS"])
     assert_empty(Local(base, credentials.token), after="reset")
     assert not packaged_workers(container), "a worker revision survived reset"
-    print("after reset: no revision process remains")
+    assert not revision_containers(directory), "a revision container survived reset"
+    print("after reset: no revision process or container remains")
+    if neighbor:
+        assert len(revision_containers(neighbor)) == 1, (
+            "reset removed another environment's revision")
+        print("after reset: the other environment's revision container still runs")
 
 
-def packaged() -> int:
+def down(directory: Path) -> str | None:
+    """Stop one environment and return its Compose project, if it was created."""
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts/local_env.py"), "--directory",
+         str(directory), "down"], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return compose_project(directory) if (directory / "environment.json").exists() else None
+
+
+def assert_removed(project: str) -> None:
+    """Require no Compose container and no revision container of one environment."""
+    for label in ("com.docker.compose.project=", "gcp-local.environment="):
+        remaining = subprocess.check_output(
+            [DOCKER, "ps", "-aq", "--filter", "label=" + label + project], text=True)
+        assert not remaining.strip(), "down left a container labeled " + label + project
+
+
+def packaged(*, cloud_run_docker: bool) -> int:
     """Run the workflow against the packaged environment, then reset and tear it down."""
     subprocess.run([sys.executable, str(REPO / "scripts/install_terraform.py")],
                    check=True, capture_output=True, text=True)
     assert TERRAFORM.is_file(), "The pinned Terraform is missing"
+    image = build_worker_image() if cloud_run_docker else WORKER_IMAGE
     with tempfile.TemporaryDirectory(prefix="gcp-local-packaged-") as temporary:
         root = Path(temporary).resolve()
         root.chmod(stat.S_IRWXU)
         directory = root / "environment"
+        neighbor = root / "neighbor" if cloud_run_docker else None
         workdir = root / "terraform"
         workdir.mkdir()
+        projects = []
         try:
-            packaged_run(directory, workdir)
+            if neighbor:
+                environment(neighbor, "up", "--cloud-run-docker", "--port",
+                            str(free_ports(18)))
+                deploy_neighbor(neighbor, image)
+            packaged_run(directory, workdir, image, neighbor)
         finally:
-            down = subprocess.run(
-                [sys.executable, str(REPO / "scripts/local_env.py"), "--directory",
-                 str(directory), "down"], capture_output=True, text=True, check=False)
-            project = (json.loads((directory / "environment.json").read_text())["compose_project"]
-                       if (directory / "environment.json").exists() else None)
-        assert down.returncode == 0, down.stdout + down.stderr
-        if project:
-            remaining = subprocess.check_output(
-                [DOCKER, "ps", "-aq", "--filter", "label=com.docker.compose.project=" + project],
-                text=True)
-            assert not remaining.strip(), "down left a packaged container"
-    print("after down: no packaged container remains")
+            projects.append(down(directory))
+            if neighbor:
+                assert len(revision_containers(neighbor)) == 1, (
+                    "down removed another environment's revision")
+                projects.append(down(neighbor))
+            if cloud_run_docker:
+                subprocess.run([DOCKER, "rmi", image], capture_output=True, check=False)
+        for project in filter(None, projects):
+            assert_removed(project)
+    print("after down: no packaged or revision container remains")
     print("packaged workflow acceptance passed")
     return 0
 
@@ -416,8 +521,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packaged", action="store_true",
                         help="run against the packaged Docker environment (scripts/local_env.py)")
-    if parser.parse_args().packaged:
-        return packaged()
+    parser.add_argument("--cloud-run-docker", action="store_true",
+                        help="with --packaged: run a user-built worker image as a container")
+    args = parser.parse_args()
+    if args.cloud_run_docker and not args.packaged:
+        parser.error("--cloud-run-docker needs --packaged")
+    if args.packaged:
+        return packaged(cloud_run_docker=args.cloud_run_docker)
     binary, java = install_tools()
     secrets_dir = Path(tempfile.mkdtemp(prefix="gcp-local-workflow-"))
     identity_path, adc, terraform_adc = write_identity(secrets_dir)

@@ -62,7 +62,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [BigQuery](docs/bigquery.md) | gcp-local | Streaming inserts, simple SELECT |
 | [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | PostgreSQL clients on `127.0.0.1` with a user password |
 | [Memorystore for Redis](docs/memorystore.md) | Real Redis | Redis clients on the reported port, with AUTH |
-| [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Invocation; the packaged environment runs only the bundled worker |
+| [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Your own images with `--cloud-run-docker`; ID-token invocation |
 | [Spanner](docs/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions |
 | [Bigtable](docs/bigtable.md) | Official Google emulator code | Row reads, scans, mutations over gRPC; not recorded |
 | [Artifact Registry](docs/artifactregistry.md) | gcp-local | Repositories only; no push or pull |
@@ -82,7 +82,7 @@ Scenarios are recorded once against a sandbox Google Cloud project and replayed 
 - Unsupported methods and options return `UNIMPLEMENTED`.
 - State is in memory; `reset` and `down` discard it.
 - Storage buckets need uniform bucket-level access, enforced public access prevention, and no soft-delete retention.
-- Packaged Cloud Run runs only the bundled example worker; your own images need the Docker runtime ([Cloud Run](docs/cloudrun.md)).
+- Packaged Cloud Run runs your own images only with `gcp-local --cloud-run-docker up`, which mounts the Docker socket (root-equivalent on the host). Revisions have no internet access ([Cloud Run](docs/cloudrun.md)).
 - Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379 or 5432; read the port from the API. Neither accepts TLS.
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.
 - Networking verdicts are analytical, not packet routing.

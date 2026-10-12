@@ -42,6 +42,7 @@ SOURCE_FILES = (
     ".dockerignore",
     "compose.yaml",
     "compose.build.yaml",
+    "compose.run.yaml",
     "packaging/haproxy.cfg",
     "go.mod",
     "go.sum",
@@ -60,6 +61,9 @@ SOURCE_FILES = (
 )
 SOURCE_DIRECTORIES = ("api", "cmd", "internal", "gcp_local")
 ENVIRONMENT_VARIABLE = "GCP_LOCAL_IMAGE"
+# The label the core's Cloud Run Docker runtime puts on every revision
+# container; its value is the environment's Compose project.
+REVISION_LABEL = "gcp-local.environment"
 
 
 def checkout() -> Path | None:
@@ -119,14 +123,9 @@ def image_of(value: dict[str, object]) -> str:
     return "gcp-local:" + str(value["version"])
 
 
-def compose(
-    value: dict[str, object],
-    *arguments: str,
-    check: bool = True,
-    capture: bool = False,
-) -> subprocess.CompletedProcess[str]:
-    """Run docker compose against the packaged runtime with a minimal environment."""
-    env = {
+def docker_env() -> dict[str, str]:
+    """Return the host variables Docker itself needs, and nothing else."""
+    return {
         key: item
         for key, item in os.environ.items()
         if key
@@ -141,6 +140,16 @@ def compose(
             "SSH_AUTH_SOCK",
         }
     }
+
+
+def compose(
+    value: dict[str, object],
+    *arguments: str,
+    check: bool = True,
+    capture: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Run docker compose against the packaged runtime with a minimal environment."""
+    env = docker_env()
     env.update(
         {
             "GCP_LOCAL_DIRECTORY": str(value["directory"]),
@@ -157,6 +166,10 @@ def compose(
     files = ["--file", str(directory / "compose.yaml")]
     if value.get("version"):
         files += ["--file", str(directory / "compose.build.yaml")]
+    if value.get("cloud_run_docker"):
+        files += ["--file", str(directory / "compose.run.yaml")]
+        env["GCP_LOCAL_RUN_ENVIRONMENT"] = str(value["compose_project"])
+        env["GCP_LOCAL_DOCKER_GID"] = str(value["docker_socket_gid"])
     return subprocess.run(  # noqa: S603 -- fixed docker binary and validated arguments
         [
             DOCKER,
@@ -178,9 +191,55 @@ def compose(
     )
 
 
+def docker(*arguments: str) -> subprocess.CompletedProcess[str]:
+    """Run one docker command with the minimal environment and capture its output."""
+    return subprocess.run(  # noqa: S603 -- fixed docker binary and validated arguments
+        [DOCKER, *arguments], env=docker_env(), check=True, capture_output=True, text=True
+    )
+
+
+def socket_gid(value: dict[str, object]) -> int:
+    """Read the engine socket's group as the core container sees it.
+
+    The core runs as the host user without capabilities, so it needs the
+    socket's group. On Docker Desktop the socket lives in the engine VM, where
+    its group differs from the host's, so the image itself reports it.
+    """
+    probe = docker(
+        "run", "--rm", "--pull", "never", "--network", "none",
+        "--user", f"{value['uid']}:{value['gid']}",
+        "--volume", "/var/run/docker.sock:/run/engine.sock:ro",
+        "--entrypoint", "/usr/local/bin/python3", image_of(value),
+        "-I", "-c", "import os; print(os.stat('/run/engine.sock').st_gid)",
+    ).stdout.strip()  # fmt: skip
+    if not probe.isdigit():
+        raise ValueError("Could not read the Docker socket group for Cloud Run Docker mode")
+    return int(probe)
+
+
+def revision_containers(value: dict[str, object]) -> list[str]:
+    """List this environment's Cloud Run revision containers, running or not."""
+    label = REVISION_LABEL + "=" + str(value["compose_project"])
+    return docker("ps", "--all", "--quiet", "--filter", "label=" + label).stdout.split()
+
+
+def remove_revisions(value: dict[str, object]) -> None:
+    """Force-remove this environment's revision containers and no others."""
+    containers = revision_containers(value)
+    if containers:
+        docker("rm", "--force", *containers)
+
+
 def application_env(value: dict[str, object]) -> dict[str, str]:
     """Return the environment variables application processes inherit."""
     identity = Path(str(value["directory"])) / "identity"
+    run = {}
+    if value.get("cloud_run_docker"):
+        # Revision containers reach the core by its Compose service name.
+        run = {
+            "GCP_LOCAL_RUN_ENDPOINT": f"http://gcp-local:{value['port']}",
+            "GCP_LOCAL_RUN_GRPC_ENDPOINT": "gcp-local:4567",
+        }
     return {
         "GOOGLE_APPLICATION_CREDENTIALS": str(identity / "adc.json"),
         "GOOGLE_CLOUD_PROJECT": str(value["project"]),
@@ -190,6 +249,7 @@ def application_env(value: dict[str, object]) -> dict[str, str]:
         "GCP_LOCAL_DATA_PORTS": data_port_range(value),
         "GCP_LOCAL_PROJECT_NUMBER": str(value["project_number"]),
         "GCP_LOCAL_TERRAFORM_CREDENTIALS": str(identity / "terraform-adc.json"),
+        **run,
     }
 
 
@@ -307,14 +367,20 @@ def start(args: argparse.Namespace, value: dict[str, object], directory: Path) -
     """Build or pull the runtime image, then start or recreate the environment."""
     if args.action == "up":
         value["image"], value["version"] = select_image(args.image)
+        value["cloud_run_docker"], value["docker_socket_gid"] = False, None
         private_json(directory / "environment.json", value)
         if value["version"]:
             compose(value, "build")
             compose(value, "pull", "--policy", "missing", "entrypoint")
         else:
             compose(value, "pull", "--policy", "missing")
-    elif args.image is not None:
-        raise ValueError("Select an image with up; reset reuses the running selection")
+        if args.cloud_run_docker:
+            value["cloud_run_docker"], value["docker_socket_gid"] = True, socket_gid(value)
+            private_json(directory / "environment.json", value)
+    elif args.image is not None or args.cloud_run_docker:
+        raise ValueError(
+            "Select an image and Cloud Run Docker mode with up; reset reuses the running selection"
+        )
     flags = ["--force-recreate"] if args.action == "reset" else []
     compose(
         value,
@@ -328,6 +394,10 @@ def start(args: argparse.Namespace, value: dict[str, object], directory: Path) -
         "never",
         *flags,
     )
+    if not value.get("cloud_run_docker"):
+        # A core without Docker mode cannot see containers an earlier
+        # Docker-mode core left behind. A Docker-mode core sweeps at startup.
+        remove_revisions(value)
     await_ready(value)
     print(
         json.dumps(
@@ -351,7 +421,11 @@ def run(args: argparse.Namespace, value: dict[str, object], directory: Path) -> 
     elif args.action in {"up", "reset"}:
         start(args, value, directory)
     elif args.action == "down":
+        # Revision containers hold endpoints on the backend network, so they
+        # go before Compose removes it, and again after the core has stopped.
+        remove_revisions(value)
         compose(value, "down", "--timeout", "15")
+        remove_revisions(value)
         print(
             "Environment stopped; in-memory service state is discarded. "
             "Local credentials are retained."
@@ -389,6 +463,12 @@ def parser() -> argparse.ArgumentParser:
         + ":VERSION; default: GCP_LOCAL_IMAGE, a checkout build, or the published "
         + __version__
         + " image",
+    )
+    result.add_argument(
+        "--cloud-run-docker",
+        action="store_true",
+        help="With up: run Cloud Run revisions as Docker containers. Mounts the Docker "
+        "socket, which gives the core root-equivalent access to the host's Docker",
     )
     result.add_argument("action", choices=("up", "down", "reset", "status", "env", "logs"))
     return result

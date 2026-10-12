@@ -39,12 +39,14 @@ packages = ["gcp_local"]
 # checkout uses; the wheel carries it as package data.
 [tool.hatch.build.targets.wheel.force-include]
 "compose.yaml" = "gcp_local/data/compose.yaml"
+"compose.run.yaml" = "gcp_local/data/compose.run.yaml"
 "packaging/haproxy.cfg" = "gcp_local/data/packaging/haproxy.cfg"
 
 [tool.hatch.build.targets.sdist]
 include = [
   "/gcp_local",
   "/compose.yaml",
+  "/compose.run.yaml",
   "/packaging/haproxy.cfg",
   "/README.md",
   "/LICENSE",

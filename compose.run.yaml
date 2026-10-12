@@ -1,16 +1,21 @@
-# Optional override for Cloud Run container execution: mounts the local Docker
-# engine socket so the run provider can start revision containers. Container
-# execution is opt-in because it grants the core access to the host engine.
-# The CLI does not apply it; the packaged default runs the bundled workflow
-# worker image as a process inside the core container.
+# Cloud Run Docker mode, applied by `gcp-local --cloud-run-docker up`. It
+# mounts the engine socket, which gives the core root-equivalent control of
+# the host's Docker. Revision containers join this environment's internal
+# backend network and carry its label; reset and down remove them.
 services:
   gcp-local:
     environment:
       GCP_LOCAL_RUN_DOCKER_SOCKET: /var/run/docker.sock
+      GCP_LOCAL_RUN_ENVIRONMENT: ${GCP_LOCAL_RUN_ENVIRONMENT:?Use the gcp-local CLI}
+      # Compose names the network <project>_backend; the CLI uses the project
+      # name as the environment label.
+      GCP_LOCAL_RUN_DOCKER_NETWORK: ${GCP_LOCAL_RUN_ENVIRONMENT:?Use the gcp-local CLI}_backend
+    # The socket's group inside the engine host; the CLI reads it.
+    group_add:
+      - "${GCP_LOCAL_DOCKER_GID:?Use the gcp-local CLI}"
     volumes:
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
-        read_only: true
         bind:
           create_host_path: false

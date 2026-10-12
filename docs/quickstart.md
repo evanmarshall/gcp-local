@@ -27,11 +27,11 @@ The packaged CLI pulls `ghcr.io/evanmarshall/gcp-local:<its version>`. `--image`
 | `up` | Creates the environment directory if needed, starts the container, waits for health |
 | `status` | Prints JSON: version, providers, backend state |
 | `env` | Prints JSON with the variables below |
-| `reset` | Deletes all resources, policies, Cloud Run processes, and issued tokens |
-| `down` | Removes the containers and networks; keeps credentials |
+| `reset` | Deletes all resources, policies, Cloud Run revisions, and issued tokens |
+| `down` | Removes the containers (Cloud Run revisions included) and networks; keeps credentials |
 | `logs` | Prints the last 100 log lines |
 
-Options go before the command: `--directory`, `--port`, `--data-ports FIRST-LAST`, `--project`, `--workload ACCOUNT_ID` (repeatable), `--image`. The directory fixes its ports, project, and workloads on first `up`; use a new directory to change them.
+Options go before the command: `--directory`, `--port`, `--data-ports FIRST-LAST`, `--project`, `--workload ACCOUNT_ID` (repeatable), `--image`, `--cloud-run-docker`. `up` sets `--image` and `--cloud-run-docker` each time; `reset` keeps them. The directory fixes its ports, project, and workloads on first `up`; use a new directory to change them.
 
 ## Endpoints and variables
 
@@ -91,7 +91,11 @@ The generated developer identity gets these project-level grants. An identity wi
 
 ## Cloud Run in the packaged environment
 
-Revisions run as processes inside the container. Only the image `gcp-local/workflow:latest` runs; it maps to the bundled [workflow worker](../examples/workflow/worker.py), and other images are refused. To run your own images, use the [container runtime](cloudrun.md) through the manual `compose.run.yaml` override, which mounts the host Docker socket. Enroll workload identities on first `up` (`--workload worker`); grant them roles through IAM.
+By default, revisions run as processes inside the container. Only the image `gcp-local/workflow:latest` runs; it maps to the bundled [workflow worker](../examples/workflow/worker.py), and other images are refused.
+
+To run your own images, start with `gcp-local --cloud-run-docker up`. Each revision then runs as a Docker container on the environment's network. This mounts the host's Docker socket, which is root-equivalent access to the host; it is off by default. See [run your own image](cloudrun.md#run-your-own-image) for what the container gets and which images are pulled.
+
+Enroll workload identities on first `up` (`--workload worker`); grant them roles through IAM.
 
 ## Multiple environments
 
@@ -126,6 +130,7 @@ docker run --detach --name gcp-local \
 - Wait for `docker inspect --format '{{.State.Health.Status}}' gcp-local` to print `healthy`.
 - `gcp-local --directory .gcp-local/docker status|env` and the examples work. `reset`, `down`, and `logs` don't; use `docker restart` (clears state) and `docker rm --force`.
 - The container is on Docker's default bridge network, not an internal backend network.
+- Cloud Run runs only the bundled worker unless you set up [Docker mode](cloudrun.md#run-your-own-image) by hand.
 
 ## Limits
 

@@ -365,6 +365,8 @@ def load(
         or not (
             version is None or (isinstance(version, str) and re.fullmatch(VERSION_PATTERN, version))
         )
+        or type(value.get("cloud_run_docker", False)) is not bool
+        or (value.get("cloud_run_docker") and type(value.get("docker_socket_gid")) is not int)
     ):
         raise ValueError("Invalid environment port, project, image, or source version")
     # Manifests written before the data-plane range existed use the default.

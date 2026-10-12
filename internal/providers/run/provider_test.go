@@ -48,7 +48,7 @@ func (f *fakeRuntime) Start(_ context.Context, spec StartSpec) (Started, error) 
 	f.started = append(f.started, spec)
 	id := spec.Image + "-container"
 	f.running[id] = nil
-	return Started{Address: "127.0.0.1:19000", Container: id}, nil
+	return Started{Address: "127.0.0.1:19000", Container: id, Peer: "127.0.0.1"}, nil
 }
 
 func (f *fakeRuntime) Ready(_ context.Context, container string) error {

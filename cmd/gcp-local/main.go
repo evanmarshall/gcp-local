@@ -34,7 +34,6 @@ import (
 	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
-	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -109,7 +108,7 @@ type serveOptions struct {
 	listen, grpcListen, metadataListen string
 	shutdown                           time.Duration
 	iamPath, identityPath              string
-	runSocket                          string
+	runSocket, runNetwork, runEnv      string
 	runProcess                         map[string]string
 	services, pubsubJava, pubsubJAR    string
 	firestoreJava, firestoreJAR        string
@@ -150,6 +149,8 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.dataListen, "data-listen", "127.0.0.1", "IP address the data-plane ports bind")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
 	flags.StringVar(&options.runSocket, "run-docker-socket", "", "Docker engine socket for Cloud Run containers; empty refuses launch")
+	flags.StringVar(&options.runNetwork, "run-docker-network", "", "Docker network revision containers join; empty publishes their ports on the default bridge")
+	flags.StringVar(&options.runEnv, "run-docker-environment", "", "label value that marks this core's revision containers; swept at startup and shutdown")
 	flags.Var(processMap{&options.runProcess}, "run-process", "dockerless revision launch: image=command; repeatable; commands run as local processes")
 	flags.StringVar(&options.metadataListen, "metadata-listen", "", "optional per-workload loopback metadata listener")
 	flags.StringVar(&options.metadataPrincipal, "metadata-principal", "", "enrolled service account bound to the metadata listener")
@@ -165,46 +166,6 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	}
 	options.dataPlane = pool
 	return options, true
-}
-
-// workloadMetadataBind binds one per-workload metadata handler on the Docker
-// bridge gateway address so containers can reach it, and returns the dialable
-// host:port.
-func workloadMetadataBind(handler http.Handler) (string, func(), error) {
-	// Container revisions reach the handler through the Docker bridge. The
-	// dockerless process runtime reaches loopback directly, so without a
-	// bridge the handler binds loopback; the exposure is the local user
-	// session, which is the restricted-guest trust boundary anyway.
-	bind := "172.17.0.1"
-	if !bridgeExists(bind) {
-		bind = "127.0.0.1"
-	}
-	var listen net.ListenConfig
-	listener, err := listen.Listen(context.Background(), "tcp", net.JoinHostPort(bind, "0"))
-	if err != nil {
-		return "", nil, fmt.Errorf("bind the workload metadata listener: %w", err)
-	}
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = server.Serve(listener)
-	}()
-	return listener.Addr().String(), func() { _ = server.Close(); <-done }, nil
-}
-
-// bridgeExists reports whether the interface owns the given address.
-func bridgeExists(address string) bool {
-	interfaces, err := net.InterfaceAddrs()
-	if err != nil {
-		return false
-	}
-	for _, candidate := range interfaces {
-		if ip, ok := candidate.(*net.IPNet); ok && ip.IP.String() == address {
-			return true
-		}
-	}
-	return false
 }
 
 // assemble wires identity, IAM, providers, and listeners from one options set.
@@ -456,41 +417,6 @@ func assembleFirestore(ctx context.Context, options serveOptions, selected map[s
 	return nil
 }
 
-// assembleRun registers the Cloud Run provider and its invocation surface.
-func assembleRun(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service) error {
-	if !selected["run"] {
-		return nil
-	}
-	// The container runtime is provider-owned. Without an explicit Docker
-	// socket the provider refuses every container launch.
-	var runtime runprovider.Runtime = runprovider.NoopRuntime{}
-	if options.runSocket != "" {
-		runtime = runprovider.NewDockerRuntime(options.runSocket)
-	} else if len(options.runProcess) > 0 {
-		commands := map[string][]string{}
-		for image, command := range options.runProcess {
-			commands[image] = strings.Fields(command)
-		}
-		runtime = runprovider.NewProcessRuntime(commands)
-	}
-	config := runprovider.Config{BaseURL: runBaseURL(options.listen)}
-	if identities != nil {
-		// Workload identity: each revision's configured service account gets
-		// its own metadata handler bound on the container-reachable bridge
-		// address. Without an identity config the feature stays off. The same
-		// key set verifies the invocation audience tokens.
-		config.Metadata = identities.Metadata
-		config.MetadataBind = workloadMetadataBind
-		config.Tokens = identities.IDTokens
-	}
-	provider, err := runprovider.New(ctx, config, registry, server.Backends, index, engine, runtime)
-	if err != nil {
-		return fmt.Errorf("register the Cloud Run provider: %w", err)
-	}
-	server.Run = provider.Invocation()
-	return nil
-}
-
 // runBaseURL returns the base of local service URIs for the HTTP listener.
 // A wildcard listener (the packaged container binds 0.0.0.0) is named by its
 // loopback address: the push agent and revision processes dial service URIs
@@ -502,7 +428,7 @@ func runBaseURL(listen string) string {
 		return "http://" + listen
 	}
 	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
-		host = "127.0.0.1"
+		host = loopbackHost
 	}
 	return "http://" + net.JoinHostPort(host, port)
 }

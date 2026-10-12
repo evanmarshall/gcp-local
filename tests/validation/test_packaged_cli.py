@@ -167,3 +167,102 @@ def test_launcher_adds_the_running_uid_to_passwd(tmp_path):
     assert lines[1].split(":")[2:4] == [str(os.getuid()), str(os.getgid())]
     container.write_passwd(image, target)
     assert len(target.read_text().splitlines()) == 2
+
+
+def test_launcher_docker_mode_requires_its_label_and_network(monkeypatch, tmp_path):
+    monkeypatch.setenv("GCP_LOCAL_PORT", "15566")
+    monkeypatch.setenv("GCP_LOCAL_RUN_DOCKER_SOCKET", "/var/run/docker.sock")
+    monkeypatch.delenv("GCP_LOCAL_RUN_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("GCP_LOCAL_RUN_DOCKER_NETWORK", raising=False)
+    with pytest.raises(SystemExit, match="GCP_LOCAL_RUN_ENVIRONMENT"):
+        container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+    monkeypatch.setenv("GCP_LOCAL_RUN_ENVIRONMENT", "gcp-local-0123456789abcdef")
+    monkeypatch.setenv("GCP_LOCAL_RUN_DOCKER_NETWORK", "bad network")
+    with pytest.raises(SystemExit, match="GCP_LOCAL_RUN_DOCKER_NETWORK"):
+        container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+    monkeypatch.setenv("GCP_LOCAL_RUN_DOCKER_NETWORK", "gcp-local-0123456789abcdef_backend")
+    arguments = container.core_arguments(tmp_path / "identity.json", tmp_path / "iam.json")
+    assert arguments[-3:] == [
+        "-run-docker-socket=/var/run/docker.sock",
+        "-run-docker-network=gcp-local-0123456789abcdef_backend",
+        "-run-docker-environment=gcp-local-0123456789abcdef",
+    ]
+    # Every image runs as a container: no process mapping that could shadow one.
+    assert not any(argument.startswith("-run-process") for argument in arguments)
+
+
+class Recorder:
+    """Capture the docker commands the CLI runs."""
+
+    def __init__(self, listed: str = "") -> None:
+        self.calls: list[tuple[list[str], dict[str, str]]] = []
+        self.listed = listed
+
+    def __call__(self, command, **kwargs):
+        self.calls.append((list(command), kwargs.get("env") or {}))
+        stdout = self.listed if "ps" in command else ""
+        return environment.subprocess.CompletedProcess(command, 0, stdout, "")
+
+
+def docker_mode(value):
+    return {**value, "cloud_run_docker": True, "docker_socket_gid": 991}
+
+
+def test_compose_applies_the_docker_override_only_when_enabled(monkeypatch, initialized):
+    _, value = initialized
+    recorder = Recorder()
+    monkeypatch.setattr(environment.subprocess, "run", recorder)
+    environment.compose({**value, "image": "gcp-local:test"}, "config")
+    environment.compose(docker_mode({**value, "image": "gcp-local:test"}), "config")
+    (plain, plain_env), (enabled, enabled_env) = recorder.calls
+    assert not any(part.endswith("compose.run.yaml") for part in plain)
+    assert "GCP_LOCAL_RUN_ENVIRONMENT" not in plain_env
+    assert any(part.endswith("compose.run.yaml") for part in enabled)
+    assert enabled_env["GCP_LOCAL_RUN_ENVIRONMENT"] == value["compose_project"]
+    assert enabled_env["GCP_LOCAL_DOCKER_GID"] == "991"
+
+
+def test_down_removes_only_this_environments_revisions(monkeypatch, initialized):
+    directory, value = initialized
+    recorder = Recorder(listed="abc123\ndef456\n")
+    monkeypatch.setattr(environment.subprocess, "run", recorder)
+    args = environment.parser().parse_args(["down"])
+    environment.run(args, {**value, "image": "gcp-local:test"}, directory)
+    commands = [command[1:] for command, _ in recorder.calls]
+    label = "label=gcp-local.environment=" + value["compose_project"]
+    listings = [command for command in commands if command[0] == "ps"]
+    assert listings
+    assert all(command[-1] == label for command in listings)
+    removals = [index for index, command in enumerate(commands) if command[0] == "rm"]
+    down = next(index for index, command in enumerate(commands) if "down" in command)
+    # Removed before Compose deletes the network and again after the core stops.
+    assert removals[0] < down < removals[-1]
+    assert commands[removals[0]] == ["rm", "--force", "abc123", "def456"]
+
+
+def test_reset_refuses_to_change_cloud_run_docker_mode(initialized):
+    directory, value = initialized
+    args = environment.parser().parse_args(["--cloud-run-docker", "reset"])
+    with pytest.raises(ValueError, match="Cloud Run Docker mode with up"):
+        environment.start(args, value, directory)
+
+
+def test_manifests_with_an_invalid_docker_mode_are_refused(initialized):
+    directory, value = initialized
+    for mode in (
+        {"cloud_run_docker": "yes"},
+        {"cloud_run_docker": True, "docker_socket_gid": None},
+    ):
+        bootstrap.private_json(directory / "environment.json", {**value, **mode})
+        with pytest.raises(ValueError, match="Invalid environment"):
+            bootstrap.load(directory)
+    bootstrap.private_json(directory / "environment.json", docker_mode(value))
+    assert bootstrap.load(directory)["docker_socket_gid"] == 991
+
+
+def test_env_names_the_in_network_endpoint_in_docker_mode(initialized):
+    _, value = initialized
+    assert "GCP_LOCAL_RUN_ENDPOINT" not in environment.application_env(value)
+    env = environment.application_env(docker_mode(value))
+    assert env["GCP_LOCAL_RUN_ENDPOINT"] == "http://gcp-local:14566"
+    assert env["GCP_LOCAL_RUN_GRPC_ENDPOINT"] == "gcp-local:4567"

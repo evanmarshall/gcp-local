@@ -24,10 +24,14 @@ type Runtime interface {
 	Stop(ctx context.Context, container string) error
 }
 
-// Started is the handle of one launched container.
+// Started is the handle of one launched container: the address the
+// invocation proxy dials, the engine identifier, and Peer, the IP address the
+// workload's own connections come from. Only Peer may use the revision's
+// metadata server.
 type Started struct {
 	Address   string
 	Container string
+	Peer      string
 }
 
 // StartSpec is the provider-owned container contract: only the image, port,

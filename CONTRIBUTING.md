@@ -46,7 +46,7 @@ Run the checks for every area you change; CI runs all of them. "Linux" means CI 
 | `sh scripts/check_terraform.sh` | Pinned upstream Terraform cases and an RPO negative control; never calls GCP | Linux | Java 17, every backend, `install_terraform.py` |
 | `scripts/smoke_isolation.py` | `run_isolated.py` blocks egress and kills hung descendants | Linux, root | None |
 | `scripts/smoke_environment.py` | Packaged environment: every service under IAM, reset, teardown | Docker | `requirements-pubsub.txt` |
-| `scripts/smoke_workflow.py [--packaged]` | Terraform Pub/Sub push to Cloud Run to Storage workflow | Linux with Java 17, or Docker with `--packaged` | `requirements-pubsub.txt` |
+| `scripts/smoke_workflow.py [--packaged [--cloud-run-docker]]` | Terraform Pub/Sub push to Cloud Run to Storage workflow; `--cloud-run-docker` runs a user-built image and checks per-environment container cleanup | Linux with Java 17, or Docker with `--packaged` | `requirements-pubsub.txt` |
 | `scripts/smoke_package.py` | The built wheel's `gcp-local` CLI against an image | Docker | `requirements-pubsub.txt` |
 | `scripts/smoke_cloudrun.py` | Cloud Run deploying a real container | Linux with Docker | None |
 

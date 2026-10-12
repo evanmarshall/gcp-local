@@ -30,9 +30,9 @@ STATE = Path("/state")
 CONFIG = Path("/config")
 PASSWD_IMAGE = Path("/etc/passwd.image")
 PASSWD = Path("/tmp/passwd")  # noqa: S108 -- the container's private tmpfs
-# The packaged Cloud Run runtime: revisions run as processes inside the core's
-# container. Only the bundled workflow worker image is mapped; other images
-# are refused (container-in-container is not supported).
+# The default packaged Cloud Run runtime: revisions run as processes inside
+# the core's container. Only the bundled workflow worker image is mapped;
+# other images are refused unless Docker mode is enabled (run_arguments).
 WORKFLOW_IMAGE = "gcp-local/workflow:latest"
 WORKFLOW_WORKER = "/opt/gcp-local/workflow/worker.py"
 
@@ -80,14 +80,35 @@ def core_arguments(identity: Path, iam: Path) -> list[str]:
         "-spanner-libraries=/opt/spanner/lib",
         "-redis-server=/opt/redis/redis-server",
         "-cloudsql-postgres=/opt/postgres",
-        f"-run-process={WORKFLOW_IMAGE}={PYTHON} -I {WORKFLOW_WORKER}",
     ]
+    return arguments + run_arguments()
+
+
+def run_arguments() -> list[str]:
+    """Select the Cloud Run runtime: the bundled worker process, or opt-in Docker.
+
+    Docker mode (``gcp-local --cloud-run-docker up``, compose.run.yaml) runs
+    every image as a container on the environment's network and labels it with
+    the environment so reset and down remove only its own containers.
+    """
     socket = os.environ.get("GCP_LOCAL_RUN_DOCKER_SOCKET")
-    if socket:
-        # Opt-in container execution (compose.run.yaml); the socket runtime
-        # takes precedence over the process mapping.
-        arguments.append("-run-docker-socket=" + socket)
-    return arguments
+    if not socket:
+        return [f"-run-process={WORKFLOW_IMAGE}={PYTHON} -I {WORKFLOW_WORKER}"]
+    environment = os.environ.get("GCP_LOCAL_RUN_ENVIRONMENT", "")
+    network = os.environ.get("GCP_LOCAL_RUN_DOCKER_NETWORK", "")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,62}", environment) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", network
+    ):
+        raise SystemExit(
+            "GCP_LOCAL_RUN_DOCKER_SOCKET needs GCP_LOCAL_RUN_ENVIRONMENT (a label value) "
+            "and GCP_LOCAL_RUN_DOCKER_NETWORK (the network this container shares with "
+            "its revisions); see docs/cloudrun.md"
+        )
+    return [
+        "-run-docker-socket=" + socket,
+        "-run-docker-network=" + network,
+        "-run-docker-environment=" + environment,
+    ]
 
 
 def standalone() -> list[str]:

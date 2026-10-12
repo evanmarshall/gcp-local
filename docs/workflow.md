@@ -12,6 +12,8 @@ On Linux or macOS with Docker, after installing `requirements-pubsub.txt` and `p
 
 It runs `scripts/local_env.py up --project demo-run --workload worker`, reads `env`, applies the Terraform, checks delivery and both denial boundaries, then runs `reset` and `down` and requires no resources, worker processes, or containers to remain.
 
+Add `--cloud-run-docker` to build `examples/workflow` as a user image and run it as a revision container ([Cloud Run](cloudrun.md#run-your-own-image)). Terraform sets `worker_storage_endpoint` from `GCP_LOCAL_RUN_ENDPOINT`. A second Docker-mode environment runs its own revision, and the first environment's `reset` and `down` must leave it running.
+
 ## Run it without Docker
 
 On Linux with Java 17 and `requirements-pubsub.txt`:

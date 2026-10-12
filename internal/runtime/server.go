@@ -19,14 +19,17 @@ import (
 )
 
 type Server struct {
-	HTTP            *http.Server
-	GRPC            *grpc.Server
-	Backends        *backend.Manager
-	Identity        http.Handler
-	IAM             http.Handler
-	Run             http.Handler
-	Analyzer        http.Handler
-	Metadata        *http.Server
+	HTTP     *http.Server
+	GRPC     *grpc.Server
+	Backends *backend.Manager
+	Identity http.Handler
+	IAM      http.Handler
+	Run      http.Handler
+	Analyzer http.Handler
+	Metadata *http.Server
+	// AfterShutdown runs once the backends have stopped, within the drain
+	// budget (the Cloud Run Docker runtime removes its containers here).
+	AfterShutdown   func(context.Context) error
 	ShutdownTimeout time.Duration
 	ready           atomic.Bool
 }
@@ -152,6 +155,11 @@ func (s *Server) Serve(ctx context.Context, listeners Listeners) error {
 	serveErr = awaitServers(served, remaining, serveErr)
 	if err := s.Backends.Shutdown(deadline); err != nil { //nolint:contextcheck // draining must outlive the cancelled request
 		shutdownErr = errors.Join(shutdownErr, err)
+	}
+	if s.AfterShutdown != nil {
+		if err := s.AfterShutdown(deadline); err != nil { //nolint:contextcheck // draining must outlive the cancelled request
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("after shutdown: %w", err))
+		}
 	}
 	if shutdownErr != nil {
 		return shutdownErr

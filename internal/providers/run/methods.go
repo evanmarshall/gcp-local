@@ -261,13 +261,15 @@ func (p *Provider) startRevision(record *serviceRecord, revision *revisionRecord
 		Port:  revision.Template.Container.Port,
 		Env:   workloadEnv(record, revision),
 	}
+	var gate *peerGate
 	if revision.Template.ServiceAccount != "" && p.metadata != nil {
 		subject := "serviceAccount:" + revision.Template.ServiceAccount
 		handler, metadataErr := p.metadata(subject)
 		if metadataErr != nil {
 			return fmt.Errorf("enroll the workload identity %s: %w", subject, metadataErr)
 		}
-		hostPort, release, bindErr := p.metabind(handler)
+		gate = newPeerGate(handler)
+		hostPort, release, bindErr := p.metabind(gate)
 		if bindErr != nil {
 			return fmt.Errorf("bind the workload metadata listener: %w", bindErr)
 		}
@@ -276,7 +278,11 @@ func (p *Provider) startRevision(record *serviceRecord, revision *revisionRecord
 	}
 	started, err := p.runtime.Start(context.WithoutCancel(context.Background()), spec)
 	if err != nil {
+		releaseMetadata(revision)
 		return fmt.Errorf("start the revision container: %w", err)
+	}
+	if gate != nil {
+		gate.allow(started.Peer)
 	}
 	revision.Container = started.Container
 	revision.Address = started.Address

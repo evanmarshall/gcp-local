@@ -79,7 +79,7 @@ func (p *ProcessRuntime) Start(ctx context.Context, spec StartSpec) (Started, er
 	p.mu.Lock()
 	p.running[handle] = run
 	p.mu.Unlock()
-	return Started{Address: "127.0.0.1:" + strconv.Itoa(port), Container: handle}, nil
+	return Started{Address: "127.0.0.1:" + strconv.Itoa(port), Container: handle, Peer: "127.0.0.1"}, nil
 }
 
 // Ready reports whether the revision process has exited, with its status.
