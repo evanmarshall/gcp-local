@@ -196,7 +196,8 @@ def dead_lettering(s, project_number):
         return check
 
     assert s.stream(subscription, reject, seen(7), 20), f"ungranted attempts {attempts}"
-    assert set(attempts) == {None}, f"attempts counted without grants: {attempts}"
+    # GCP counts attempts without the grants and redelivers past the limit.
+    assert attempts[:7] == list(range(1, 8)), f"ungranted attempts {attempts}"
     assert not s.pull(collected, wait=0.5), "dead-lettered without the service agent's grants"
 
     for kind, resource, role in (
@@ -275,7 +276,8 @@ def exactly_once(s):
             return bool(results)
 
     assert s.stream(exact, receive, done, 20), "exactly-once message not delivered"
-    assert results == [("SUCCESS", "INVALID_ACK_ID")], results
+    # GCP acknowledges a repeated ack of the same ack ID.
+    assert results == [("SUCCESS", "SUCCESS")], results
     assert not s.pull(exact, wait=1), "exactly-once message was redelivered after a successful ack"
     return {"exactly_once": results[0]}
 

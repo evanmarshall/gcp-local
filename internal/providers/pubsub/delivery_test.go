@@ -73,8 +73,8 @@ func expectForwarded(t *testing.T, b *memoryPubSub, forwarded bool, updates int,
 }
 
 // TestDeadLetterPolicyFollowsServiceAgentGrants models GCP's rule that
-// delivery attempts are counted and forwarded only while the Pub/Sub service
-// agent can publish to the dead-letter topic and acknowledge on the source.
+// messages are forwarded only while the Pub/Sub service agent can publish to
+// the dead-letter topic and acknowledge on the source.
 func TestDeadLetterPolicyFollowsServiceAgentGrants(t *testing.T) {
 	p, b, as, _ := deliveryFixture(t)
 	request := &pb.Subscription{Name: testSub, Topic: testTopic, DeadLetterPolicy: &pb.DeadLetterPolicy{DeadLetterTopic: deadLetterTopic}}
@@ -108,6 +108,81 @@ func TestDeadLetterPolicyFollowsServiceAgentGrants(t *testing.T) {
 	must(t, err)
 	if typed[*pb.Subscription](t, got).GetDeadLetterPolicy().GetDeadLetterTopic() != deadLetterTopic {
 		t.Fatal("get dropped the requested dead-letter policy while it was inactive")
+	}
+}
+
+// pullOne pulls exactly one message through the provider.
+func pullOne(t *testing.T, as func(string, string, proto.Message) (any, error), subscription string) *pb.ReceivedMessage {
+	t.Helper()
+	pulled, err := as(subscriber+"Pull", subscription, &pb.PullRequest{Subscription: subscription, MaxMessages: 1})
+	must(t, err)
+	received := typed[*pb.PullResponse](t, pulled).GetReceivedMessages()
+	if len(received) != 1 {
+		t.Fatalf("%s: pulled %d messages", subscription, len(received))
+	}
+	return received[0]
+}
+
+// TestUngrantedDeadLetterStillCountsAttempts follows the
+// pubsub-delivery-features recording: without the service agent's grants GCP
+// reports delivery attempts 1 through 7 past max_delivery_attempts 5 and
+// never forwards. The provider counts while the emulator lacks the policy.
+func TestUngrantedDeadLetterStillCountsAttempts(t *testing.T) {
+	p, b, as, _ := deliveryFixture(t)
+	_, err := as(subscriber+"CreateSubscription", testSub, &pb.Subscription{Name: testSub, Topic: testTopic,
+		DeadLetterPolicy: &pb.DeadLetterPolicy{DeadLetterTopic: deadLetterTopic, MaxDeliveryAttempts: 5}})
+	must(t, err)
+	publish := func(value string) {
+		t.Helper()
+		_, err := as(publisher+"Publish", testTopic, &pb.PublishRequest{Topic: testTopic, Messages: []*pb.PubsubMessage{{Data: []byte(value)}}})
+		must(t, err)
+	}
+	publish("poison")
+	for want := int32(1); want <= 7; want++ {
+		received := pullOne(t, as, testSub)
+		if received.GetDeliveryAttempt() != want {
+			t.Fatalf("ungranted delivery attempt = %d, want %d", received.GetDeliveryAttempt(), want)
+		}
+		_, err := as(subscriber+"ModifyAckDeadline", testSub, &pb.ModifyAckDeadlineRequest{Subscription: testSub, AckIds: []string{received.GetAckId()}})
+		must(t, err)
+	}
+	expectForwarded(t, b, false, 0, "attempts past the limit without grants")
+	_, err = as(subscriber+"Acknowledge", testSub, &pb.AcknowledgeRequest{Subscription: testSub, AckIds: []string{pullOne(t, as, testSub).GetAckId()}})
+	must(t, err)
+	publish("next")
+	if got := pullOne(t, as, testSub).GetDeliveryAttempt(); got != 1 {
+		t.Fatalf("a new message started at attempt %d, want 1", got)
+	}
+	// A count the emulator stamped while it held the policy is kept.
+	received := []*pb.ReceivedMessage{{AckId: "counted", DeliveryAttempt: 3, Message: &pb.PubsubMessage{MessageId: "emulator"}}}
+	p.track(testSub, received)
+	if received[0].GetDeliveryAttempt() != 3 {
+		t.Fatalf("emulator attempt count rewritten to %d", received[0].GetDeliveryAttempt())
+	}
+}
+
+// TestExactlyOnceRepeatedAckSucceeds follows the pubsub-delivery-features
+// recording: GCP answers OK to a unary Acknowledge of an already acknowledged
+// ack ID. Other ack IDs still reach the emulator, which fails unknown ones.
+func TestExactlyOnceRepeatedAckSucceeds(t *testing.T) {
+	_, b, as, _ := deliveryFixture(t)
+	_, err := as(subscriber+"CreateSubscription", testSub, &pb.Subscription{Name: testSub, Topic: testTopic, EnableExactlyOnceDelivery: true})
+	must(t, err)
+	_, err = as(publisher+"Publish", testTopic, &pb.PublishRequest{Topic: testTopic, Messages: []*pb.PubsubMessage{{Data: []byte("once")}}})
+	must(t, err)
+	ackID := pullOne(t, as, testSub).GetAckId()
+	ack := func(ids ...string) {
+		t.Helper()
+		_, err := as(subscriber+"Acknowledge", testSub, &pb.AcknowledgeRequest{Subscription: testSub, AckIds: ids})
+		must(t, err)
+	}
+	ack(ackID)
+	ack(ackID)
+	ack(ackID, "unknown")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if strings.Join(b.acked, ",") != ackID+",unknown" {
+		t.Fatalf("backend acknowledgements = %v, want the first ack and the unknown ID once each", b.acked)
 	}
 }
 
@@ -182,13 +257,8 @@ func TestNackDeadlines(t *testing.T) {
 	must(t, err)
 	nack := func(subscription string) int32 {
 		t.Helper()
-		pulled, err := as(subscriber+"Pull", subscription, &pb.PullRequest{Subscription: subscription, MaxMessages: 1})
-		must(t, err)
-		received := typed[*pb.PullResponse](t, pulled).GetReceivedMessages()
-		if len(received) != 1 {
-			t.Fatalf("%s: pulled %d messages", subscription, len(received))
-		}
-		_, err = as(subscriber+"ModifyAckDeadline", subscription, &pb.ModifyAckDeadlineRequest{Subscription: subscription, AckIds: []string{received[0].GetAckId()}})
+		received := pullOne(t, as, subscription)
+		_, err := as(subscriber+"ModifyAckDeadline", subscription, &pb.ModifyAckDeadlineRequest{Subscription: subscription, AckIds: []string{received.GetAckId()}})
 		must(t, err)
 		return b.modacks[len(b.modacks)-1].GetAckDeadlineSeconds()
 	}

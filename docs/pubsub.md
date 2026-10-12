@@ -1,6 +1,6 @@
 # Pub/Sub
 
-Topics, subscriptions, publish, pull, StreamingPull, authenticated local push, ordering, filters, dead-letter topics, retry backoff, exactly-once delivery, snapshots, and seek, with IAM enforced before the call reaches Google's official emulator. One scenario, `pubsub-pull-authorization`, is recorded against GCP; everything else is tested locally. Each project gets its own emulator JVM, started on first use.
+Topics, subscriptions, publish, pull, StreamingPull, authenticated local push, ordering, filters, dead-letter topics, retry backoff, exactly-once delivery, snapshots, and seek, with IAM enforced before the call reaches Google's official emulator. Two scenarios are recorded against GCP ([verification](#verification)); everything else is tested locally. Each project gets its own emulator JVM, started on first use.
 
 ## Use
 
@@ -50,15 +50,15 @@ Use `SubscriberGrpcTransport(channel=channel)` for subscribers. `local_channel_c
 
 ## Delivery features
 
-All modeled locally, not recorded. Field rules follow the [`Subscription` reference](https://cloud.google.com/pubsub/docs/reference/rpc/google.pubsub.v1#subscription). "Emulator" is what Google's emulator 0.8.36 does on its own; `check_pubsub_backend.sh` fails if that changes.
+Ordering, filters, a repeated exactly-once ack, and dead-lettering with and without the service agent's grants are recorded (`pubsub-delivery-features`, 2026-10-12). Retry backoff timing, snapshots and seek, and push are modeled locally, not recorded. Field rules follow the [`Subscription` reference](https://cloud.google.com/pubsub/docs/reference/rpc/google.pubsub.v1#subscription). "Emulator" is what Google's emulator 0.8.36 does on its own; `check_pubsub_backend.sh` fails if that changes.
 
 | Feature | Emulator | gcp-local |
 | --- | --- | --- |
-| Dead-letter topic (`dead_letter_policy`) | Counts `delivery_attempt` and forwards after `max_delivery_attempts` (5 to 100; 0 means 5), adding the `CloudPubSubDeadLetter*` attributes. No IAM | Forwards the policy to the emulator only while the service agent holds both grants (below). Without them, attempts are not counted (`delivery_attempt` 0) and nothing is forwarded, per Google's dead-letter guide. Push bodies carry `deliveryAttempt` |
+| Dead-letter topic (`dead_letter_policy`) | Counts `delivery_attempt` and forwards after `max_delivery_attempts` (5 to 100; 0 means 5), adding the `CloudPubSubDeadLetter*` attributes. No IAM | Forwards to the dead-letter topic only while the service agent holds both grants (below). Without them, as in GCP, `delivery_attempt` still counts 1, 2, 3, and so on, the message is redelivered past `max_delivery_attempts`, and nothing is forwarded; the provider counts these attempts itself. Push bodies carry `deliveryAttempt` |
 | Retry policy (`retry_policy`) | Stored, but redelivers a nack immediately | A nack waits `minimum_backoff`, doubling per consecutive nack of the message up to `maximum_backoff` (defaults 10 s and 600 s). Ack-deadline expiry redelivers with no extra backoff |
 | Ordering (`enable_message_ordering`, `ordering_key`) | Delivers in key order, one batch per key, but re-queues a nacked message behind later ones | A nack on an ordered subscription becomes a 1-second deadline; the emulator's expiry path redelivers that message and every later one for the key, in order |
 | Filter (`filter`) | Filters on attributes; an unparsable filter fails `UNKNOWN` | Returns `INVALID_ARGUMENT` for an unparsable filter; refuses filters over 256 bytes |
-| Exactly-once (`enable_exactly_once_delivery`) | Unary `Acknowledge` and `ModifyAckDeadline` fail with `ErrorInfo` `EXACTLY_ONCE_ACKID_FAILURE` for an acked or unknown ack ID; streams report `exactly_once_delivery_enabled` | Passed through. Refused on push subscriptions |
+| Exactly-once (`enable_exactly_once_delivery`) | Unary `Acknowledge` and `ModifyAckDeadline` fail with `ErrorInfo` `EXACTLY_ONCE_ACKID_FAILURE` for an acked or unknown ack ID; streams report `exactly_once_delivery_enabled` | A repeated unary `Acknowledge` of an ack ID already acknowledged returns OK, as in GCP. Unknown ack IDs and `ModifyAckDeadline` keep the emulator's failure. Refused on push subscriptions |
 | Retention, snapshots, seek (`retain_acked_messages`, `message_retention_duration`) | Seek to a time or snapshot; snapshot create, get, list, delete | Authorizes each call and keeps snapshot labels, which the emulator drops |
 
 ### Dead-letter grants
@@ -99,8 +99,9 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
 | `pubsub-pull-authorization` | 2026-10-09 | Topic-scoped Publisher and subscription-scoped Subscriber grants, denied publish and pull, message identity, ack, cleanup |
+| `pubsub-delivery-features` | 2026-10-12 | Delivery settings echoed at create, denied pull, key order before and after a nack, filtered delivery, an invalid filter, a repeated exactly-once ack, dead-letter attempts and forwarding with and without the service agent's grants, cleanup |
 
-`pubsub-delivery-features` (`tests/conformance/pubsub_delivery`) observes ordering, filters, exactly-once ack results, and dead-lettering with and without the service agent's grants. It is not recorded: `check_pubsub.sh` runs it locally without comparing to GCP. Recording it needs its own approved scope (`python3 scripts/plan_pubsub.py --scenario delivery ...`).
+`check_pubsub.sh` compares both locally. Re-recording `pubsub-delivery-features` (`tests/conformance/pubsub_delivery`) needs its own approved scope (`python3 scripts/plan_pubsub.py --scenario delivery ...`).
 
 Run in Linux or moo after installing Java 17, the emulator JAR, and `requirements-services.txt`:
 
@@ -124,7 +125,8 @@ A run creates one topic and one subscription and makes at most ten publish attem
 
 ## Gaps
 
-- Not recorded: StreamingPull, push, nack redelivery, IAM policy calls, and every delivery feature above.
+- Not recorded: StreamingPull, push, IAM policy calls, retry backoff, snapshots, and seek.
+- Dead-letter attempts counted before the service agent's grants exist restart at 1 once both grants are held.
 - No schemas (`SchemaService`, topic `schema_settings`), KMS, topic retention, subscription expiration TTL, BigQuery or Cloud Storage export subscriptions, `UpdateTopic`, `UpdateSubscription`, `UpdateSnapshot`, `ModifyPushConfig`, `DetachSubscription`, or `ListTopicSnapshots`/`ListTopicSubscriptions`. Subscriptions never expire.
 - Exactly-once: an ack after the deadline expires still succeeds (GCP rejects it), and acks sent on a stream get no `acknowledge_confirmation`. The Python client acks over unary calls and is unaffected.
 - Retry backoff applies to nacks only; ordered redelivery after a nack waits at least 1 second.

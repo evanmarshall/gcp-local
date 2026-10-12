@@ -96,8 +96,8 @@ func data(received []*pb.ReceivedMessage) []string {
 }
 
 // TestDeadLetterThroughEmulatorRequiresServiceAgent shows that without the
-// service agent's grants a message is redelivered past the limit with no
-// attempt count, and that granting both roles lets the emulator dead-letter it.
+// service agent's grants a message is redelivered past the limit with counted
+// attempts, and that granting both roles lets the emulator dead-letter it.
 func TestDeadLetterThroughEmulatorRequiresServiceAgent(t *testing.T) {
 	x := newFeatures(t)
 	source, deadLetters := x.topic("source"), x.topic("dead-letters")
@@ -107,7 +107,7 @@ func TestDeadLetterThroughEmulatorRequiresServiceAgent(t *testing.T) {
 	x.publish(source, &pb.PubsubMessage{Data: []byte("poison")})
 	for attempt := 1; attempt <= 7; attempt++ {
 		received := x.pull(subscription, 1, 5*time.Second)
-		if len(received) != 1 || received[0].GetDeliveryAttempt() != 0 {
+		if len(received) != 1 || received[0].GetDeliveryAttempt() != int32(attempt) {
 			t.Fatalf("ungranted attempt %d: %v", attempt, received)
 		}
 		x.nack(subscription, received...)
@@ -183,8 +183,9 @@ func TestOrderingRetryFilterAndExactlyOnceThroughEmulator(t *testing.T) {
 
 	x.publish(retries, &pb.PubsubMessage{Data: []byte("retry")})
 	retry := x.pull(retried, 1, 5*time.Second)
-	x.nack(retried, retry...)
+	// The emulator starts the backoff when it handles the nack, before the RPC returns.
 	nacked := time.Now()
+	x.nack(retried, retry...)
 	if early := x.pull(retried, 1, time.Second); len(early) != 0 {
 		t.Fatalf("redelivered %v before the two-second minimum backoff", data(early))
 	}
@@ -195,18 +196,23 @@ func TestOrderingRetryFilterAndExactlyOnceThroughEmulator(t *testing.T) {
 
 	once := x.pull(exact, 1, 5*time.Second)
 	must(t, x.ack(exact, once...))
-	err = x.ack(exact, once...)
+	// GCP answers OK to a repeated ack (pubsub-delivery-features); an unknown
+	// ack ID still fails with the emulator's exactly-once details.
+	must(t, x.ack(exact, once...))
+	// The emulator's ack IDs are "<subscription>:<sequence>"; this one was never issued.
+	unknown := &pb.ReceivedMessage{AckId: exact + ":999999"}
+	err = x.ack(exact, unknown)
 	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("second exactly-once ack: %v", err)
+		t.Fatalf("exactly-once ack of an unknown ID: %v", err)
 	}
 	reasons := []string{}
 	for _, detail := range status.Convert(err).Details() {
 		if info, ok := detail.(*errdetails.ErrorInfo); ok {
-			reasons = append(reasons, info.GetReason()+":"+info.GetMetadata()[once[0].GetAckId()])
+			reasons = append(reasons, info.GetReason()+":"+info.GetMetadata()[unknown.GetAckId()])
 		}
 	}
 	if len(reasons) != 1 || reasons[0] != "EXACTLY_ONCE_ACKID_FAILURE:PERMANENT_FAILURE_INVALID_ACK_ID" {
-		t.Fatalf("exactly-once ack failure details = %v", reasons)
+		t.Fatalf("exactly-once ack failure details = %v (%v)", reasons, err)
 	}
 }
 

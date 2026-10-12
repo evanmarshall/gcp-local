@@ -30,38 +30,52 @@ const (
 	deadLetterAcknowledge = "pubsub.deadLetter.acknowledge"
 )
 
-// maxTrackedDeliveries bounds the per-subscription ack-ID map that counts
-// consecutive nacks for retry backoff. Untracked nacks use the minimum backoff.
+// maxTrackedDeliveries bounds each per-subscription tracking map. Past the
+// bound, an untracked nack uses the minimum backoff, an untracked message
+// reports delivery attempt 1, and a repeated exactly-once ack reaches the
+// emulator.
 const maxTrackedDeliveries = 10000
 
 // delivery is the provider-owned delivery configuration of one subscription.
 //
 // The emulator implements dead-lettering but not IAM, so the provider owns the
 // requested dead-letter policy and forwards it to the emulator only while the
-// service agent holds both grants ("Pub/Sub only counts delivery attempts when
-// a dead-letter topic is configured correctly", dead-letter topics guide). The
-// emulator ignores retry backoff and re-queues a nacked ordered message behind
-// later ones, so the provider rewrites nacks: an ordered nack becomes a
+// service agent holds both grants. Without them GCP still counts and reports
+// delivery attempts and redelivers past max_delivery_attempts, but never
+// forwards (recording pubsub-delivery-features). The emulator counts attempts
+// only while it holds the policy, so the provider counts deliveries itself
+// while the policy is withheld.
+//
+// The emulator ignores retry backoff and re-queues a nacked ordered message
+// behind later ones, so the provider rewrites nacks: an ordered nack becomes a
 // one-second deadline (the emulator's expiry path redelivers in key order), and
 // a retry policy turns it into the backoff delay.
+//
+// On an exactly-once subscription GCP answers OK to a unary Acknowledge of an
+// ack ID it already acknowledged, where the emulator fails it, so the provider
+// remembers successful acknowledgements and does not forward them again.
 type delivery struct {
-	ordered    bool
-	retry      *pb.RetryPolicy
-	deadLetter *pb.DeadLetterPolicy
+	ordered     bool
+	exactlyOnce bool
+	retry       *pb.RetryPolicy
+	deadLetter  *pb.DeadLetterPolicy
 
 	mu       sync.Mutex
-	active   bool              // dead-letter policy currently forwarded to the emulator
-	messages map[string]string // ack ID -> message ID, retry policies only
-	failures map[string]int    // message ID -> consecutive nacks
+	active   bool                // dead-letter policy currently forwarded to the emulator
+	messages map[string]string   // ack ID -> message ID, retry and dead-letter policies
+	failures map[string]int      // message ID -> consecutive nacks
+	attempts map[string]int32    // message ID -> deliveries counted while the policy is withheld
+	acked    map[string]struct{} // ack IDs acknowledged on an exactly-once subscription
 }
 
 // newDelivery captures the delivery settings a create request carries, or nil
 // when the subscription needs no provider delivery state.
 func newDelivery(subscription *pb.Subscription) *delivery {
-	if !subscription.GetEnableMessageOrdering() && subscription.GetRetryPolicy() == nil && subscription.GetDeadLetterPolicy() == nil {
+	if !subscription.GetEnableMessageOrdering() && !subscription.GetEnableExactlyOnceDelivery() && subscription.GetRetryPolicy() == nil && subscription.GetDeadLetterPolicy() == nil {
 		return nil
 	}
-	d := &delivery{ordered: subscription.GetEnableMessageOrdering(), messages: map[string]string{}, failures: map[string]int{}}
+	d := &delivery{ordered: subscription.GetEnableMessageOrdering(), exactlyOnce: subscription.GetEnableExactlyOnceDelivery(),
+		messages: map[string]string{}, failures: map[string]int{}, attempts: map[string]int32{}, acked: map[string]struct{}{}}
 	if retry := subscription.GetRetryPolicy(); retry != nil {
 		d.retry = proto.CloneOf(retry)
 	}
@@ -81,6 +95,12 @@ func (p *Provider) deliveryOf(subscription string) *delivery {
 	}
 	d, _ := value.(*delivery)
 	return d
+}
+
+// tracks reports whether a subscription follows individual messages, for
+// retry backoff or dead-letter attempt counts.
+func (d *delivery) tracks() bool {
+	return d != nil && (d.retry != nil || d.deadLetter != nil)
 }
 
 // serviceAgent is the per-project Pub/Sub service agent principal.
@@ -142,26 +162,43 @@ func (p *Provider) syncDeadLetter(ctx context.Context, b driver, call gateway.Ca
 	return nil
 }
 
-// track remembers which message each ack ID delivered, for retry backoff.
+// track remembers which message each ack ID delivered and, on a dead-letter
+// subscription, stamps the provider's attempt count on deliveries the emulator
+// did not count. A nonzero emulator count means the emulator held the policy
+// for that delivery, so it is kept.
 func (p *Provider) track(subscription string, received []*pb.ReceivedMessage) {
 	d := p.deliveryOf(subscription)
-	if d == nil || d.retry == nil {
+	if !d.tracks() {
 		return
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for _, message := range received {
-		if len(d.messages) >= maxTrackedDeliveries {
-			return
+		id := message.GetMessage().GetMessageId()
+		if d.deadLetter != nil && message.GetDeliveryAttempt() == 0 {
+			message.DeliveryAttempt = d.count(id)
 		}
-		d.messages[message.GetAckId()] = message.GetMessage().GetMessageId()
+		if len(d.messages) < maxTrackedDeliveries {
+			d.messages[message.GetAckId()] = id
+		}
 	}
 }
 
-// acknowledged forgets acknowledged deliveries and their failure counts.
+// count records one more delivery of a message and returns its attempt number.
+func (d *delivery) count(id string) int32 {
+	attempts, found := d.attempts[id]
+	if !found && len(d.attempts) >= maxTrackedDeliveries {
+		return 1
+	}
+	d.attempts[id] = attempts + 1
+	return attempts + 1
+}
+
+// acknowledged forgets acknowledged deliveries with their failure and attempt
+// counts.
 func (p *Provider) acknowledged(subscription string, ackIDs []string) {
 	d := p.deliveryOf(subscription)
-	if d == nil || d.retry == nil {
+	if !d.tracks() {
 		return
 	}
 	d.mu.Lock()
@@ -169,7 +206,60 @@ func (p *Provider) acknowledged(subscription string, ackIDs []string) {
 	for _, id := range ackIDs {
 		if message, ok := d.messages[id]; ok {
 			delete(d.failures, message)
+			delete(d.attempts, message)
 			delete(d.messages, id)
+		}
+	}
+}
+
+// forwardAcknowledge forwards a unary Acknowledge. On an exactly-once
+// subscription, ack IDs the provider already acknowledged succeed without
+// reaching the emulator, as GCP answers OK for them. Unknown and expired ack
+// IDs still fail with the emulator's EXACTLY_ONCE_ACKID_FAILURE details, as
+// the exactly-once guide describes for invalid ack IDs. A successful ack
+// forgets the messages' tracking state.
+func (p *Provider) forwardAcknowledge(ctx context.Context, b driver, request *pb.AcknowledgeRequest) (proto.Message, error) {
+	d := p.deliveryOf(request.GetSubscription())
+	once := d != nil && d.exactlyOnce
+	forwarded := request
+	if once {
+		forwarded = &pb.AcknowledgeRequest{Subscription: request.GetSubscription(), AckIds: d.unacknowledged(request.GetAckIds())}
+		if len(forwarded.GetAckIds()) == 0 {
+			return &emptypb.Empty{}, nil
+		}
+	}
+	response, err := invoke(ctx, b, subscriber+"Acknowledge", forwarded)
+	if err != nil {
+		return response, err
+	}
+	if once {
+		d.remember(forwarded.GetAckIds())
+	}
+	p.acknowledged(request.GetSubscription(), request.GetAckIds())
+	return response, nil
+}
+
+// unacknowledged returns the ack IDs this exactly-once subscription has not
+// yet acknowledged.
+func (d *delivery) unacknowledged(ackIDs []string) []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	pending := []string{}
+	for _, id := range ackIDs {
+		if _, done := d.acked[id]; !done {
+			pending = append(pending, id)
+		}
+	}
+	return pending
+}
+
+// remember records successfully acknowledged ack IDs, up to the tracking bound.
+func (d *delivery) remember(ackIDs []string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, id := range ackIDs {
+		if len(d.acked) < maxTrackedDeliveries {
+			d.acked[id] = struct{}{}
 		}
 	}
 }
@@ -183,12 +273,13 @@ func (p *Provider) nackDeadline(subscription, ackID string) int32 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var seconds int32
+	message, tracked := d.messages[ackID]
+	delete(d.messages, ackID)
 	if d.retry != nil {
 		failures := 1
-		if message, ok := d.messages[ackID]; ok {
+		if tracked {
 			d.failures[message]++
 			failures = d.failures[message]
-			delete(d.messages, ackID)
 		}
 		seconds = backoff(d.retry, failures)
 	}

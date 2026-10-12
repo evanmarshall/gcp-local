@@ -1,4 +1,4 @@
-"""Run the prepared delivery scenario locally; never create a fake cloud baseline."""
+"""Run the delivery scenario locally, then compare it with its GCP recording."""
 
 import json
 import os
@@ -36,39 +36,40 @@ try:
 finally:
     client.close()
 root = Path(__file__).resolve().parents[4]
-# Comparison needs a reviewed GCP baseline; until one exists this run only
-# prepares the scenario and claims no cloud fidelity.
-baseline = root / "tests/conformance/recordings/pubsub-delivery-features/provenance.json"
-if baseline.exists():
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "tests/conformance/pubsub_delivery",
-            "-q",
-            "--gcp-mode",
-            "local",
-            "--gcp-project",
-            target.project,
-            "--gcp-endpoint",
-            target.endpoint,
-            "--gcp-pubsub-identities",
-            identities,
-            "--gcp-artifacts",
-            str(root / ".artifacts/pubsub-delivery-conformance"),
-        ],
-        cwd=root,
-        env={**os.environ, "GCP_LOCAL_PUBSUB_PROJECT_NUMBER": number},
-        check=True,
-        timeout=120,
-    )
+artifacts = root / ".artifacts/pubsub-delivery-conformance"
+# Compare against the reviewed GCP recording. A missing or stale baseline
+# skips in pytest, so the coverage report must show the scenario verified.
+subprocess.run(
+    [
+        sys.executable,
+        "-m",
+        "pytest",
+        "tests/conformance/pubsub_delivery",
+        "-q",
+        "--gcp-mode",
+        "local",
+        "--gcp-project",
+        target.project,
+        "--gcp-endpoint",
+        target.endpoint,
+        "--gcp-pubsub-identities",
+        identities,
+        "--gcp-artifacts",
+        str(artifacts),
+    ],
+    cwd=root,
+    env={**os.environ, "GCP_LOCAL_PUBSUB_PROJECT_NUMBER": number},
+    check=True,
+    timeout=120,
+)
+coverage = json.loads((artifacts / "coverage.json").read_text())["conformance"]
+assert coverage["total"] == coverage["verified"] == 1, coverage
 print(
     json.dumps(
         {
-            "kind": "local-scenario-preparation",
+            "kind": "local-scenario-comparison",
             "gcp_execution": False,
-            "cloud_fidelity": "unverified" if not baseline.exists() else "see-conformance-report",
+            "cloud_fidelity": "verified-against-recording",
             "observations": observations.values,
         }
     )

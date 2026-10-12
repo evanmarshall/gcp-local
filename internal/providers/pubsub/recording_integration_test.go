@@ -66,8 +66,9 @@ func TestBoundedRecorderThroughProductionLocalADC(t *testing.T) {
 	runScenarioScript(t, f, "testdata/recording.py", identities, filepath.Join(directory, "state"))
 }
 
-// TestDeliveryScenarioThroughProductionLocalADC prepares the unrecorded
-// pubsub-delivery-features scenario locally; it makes no cloud claim.
+// TestDeliveryScenarioThroughProductionLocalADC runs the
+// pubsub-delivery-features scenario locally and compares it with its GCP
+// recording.
 func TestDeliveryScenarioThroughProductionLocalADC(t *testing.T) {
 	f, identities, directory := recorderRun(t)
 	runScenarioScript(t, f, "testdata/delivery_recording.py", identities, filepath.Join(directory, "state"), "123456")

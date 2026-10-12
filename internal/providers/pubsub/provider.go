@@ -331,9 +331,10 @@ func (p *Provider) execute(call gateway.Call, request proto.Message, active back
 }
 
 // forward invokes the backend. Delivery calls first synchronize the
-// dead-letter policy; nacks take the provider's delivery deadline. A pull
-// re-authorizes afterwards so a grant revoked while the pull blocked does not
-// release messages.
+// dead-letter policy; nacks take the provider's delivery deadline, and
+// exactly-once acks skip IDs already acknowledged. A pull re-authorizes
+// afterwards so a grant revoked while the pull blocked does not release
+// messages.
 func (p *Provider) forward(call gateway.Call, b driver, request, forwarded proto.Message) (proto.Message, error) {
 	switch r := forwarded.(type) {
 	case *pb.PullRequest:
@@ -345,6 +346,8 @@ func (p *Provider) forward(call gateway.Call, b driver, request, forwarded proto
 			return nil, err
 		}
 		return p.forwardModifyAckDeadline(call.Context, b, r)
+	case *pb.AcknowledgeRequest:
+		return p.forwardAcknowledge(call.Context, b, r)
 	}
 	response, err := invoke(call.Context, b, call.Method, forwarded)
 	if subscription, ok := request.(*pb.Subscription); ok && subscription.GetFilter() != "" && status.Code(err) == codes.Unknown {
@@ -357,19 +360,19 @@ func (p *Provider) forward(call gateway.Call, b driver, request, forwarded proto
 	return response, p.afterDelivery(call, request, response)
 }
 
-// afterDelivery records acknowledged and delivered messages for retry backoff
-// and re-authorizes a pull that may have blocked while a grant was revoked.
+// afterDelivery re-authorizes a pull that may have blocked while a grant was
+// revoked, then tracks the delivered messages for retry backoff and
+// dead-letter attempt counts.
 func (p *Provider) afterDelivery(call gateway.Call, request, response proto.Message) error {
-	switch r := request.(type) {
-	case *pb.AcknowledgeRequest:
-		p.acknowledged(r.GetSubscription(), r.GetAckIds())
-	case *pb.PullRequest:
-		if err := p.authorize(call, request); err != nil {
-			return err
-		}
-		if pulled, ok := response.(*pb.PullResponse); ok {
-			p.track(r.GetSubscription(), pulled.GetReceivedMessages())
-		}
+	r, ok := request.(*pb.PullRequest)
+	if !ok {
+		return nil
+	}
+	if err := p.authorize(call, request); err != nil {
+		return err
+	}
+	if pulled, ok := response.(*pb.PullResponse); ok {
+		p.track(r.GetSubscription(), pulled.GetReceivedMessages())
 	}
 	return nil
 }
