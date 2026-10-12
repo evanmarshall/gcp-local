@@ -26,8 +26,9 @@ const (
 
 // harness drives the provider through the gateway.
 type harness struct {
-	t    *testing.T
-	gate *gateway.Gateway
+	t        *testing.T
+	gate     *gateway.Gateway
+	provider *Provider
 }
 
 func newHarness(t *testing.T) *harness {
@@ -53,11 +54,10 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("build the secretmanager provider: %v", err)
 	}
-	_ = provider
 	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g}
+	return &harness{t: t, gate: g, provider: provider}
 }
 
 // invoke issues one REST request as the named fixture principal.
@@ -71,7 +71,9 @@ func (h *harness) invoke(verb, path string, body any, actor string) *httptest.Re
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Authorization", "Bearer "+actor)
+	if actor != "" {
+		request.Header.Set("Authorization", "Bearer "+actor)
+	}
 	recorder := httptest.NewRecorder()
 	h.gate.ServeHTTP(recorder, request)
 	return recorder

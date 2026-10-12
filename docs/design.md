@@ -32,6 +32,7 @@ flowchart TD
 - Providers register methods explicitly. A duplicate, misspelled, or wrong-streaming registration fails at startup. Unregistered methods return `UNIMPLEMENTED` (HTTP 501).
 - REST matching unescapes each path variable once, so object names keep slashes, `%`, and `?`. JSON bodies are capped at 2 MiB and must be objects; uploads stay streams. The `Authorization` header is removed before the provider sees the request.
 - gRPC uses Google's generated messages. Streaming calls read the first request to find the resource, then pass it to the provider once; deadlines and cancellation stay on the original stream.
+- A REST-only provider can serve gRPC by transcoding: the gateway turns the call into the REST request its `google.api.http` binding describes and returns the REST result as the gRPC response (Secret Manager, Cloud Tasks). The provider and its permission plans see one request shape.
 - A valid W3C `traceparent` propagates; otherwise the gateway generates one and returns it as `x-gcp-local-trace-id`.
 - `/_local/health` and `/_local/diagnostics` bypass provider dispatch and never call a backend. Shutdown drains both listeners under one deadline, then cancels what remains.
 

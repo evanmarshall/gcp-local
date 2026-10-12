@@ -77,6 +77,8 @@ func main() {
 	write("spanner_dispatch.go", dataDispatch(spannerData), *check)
 	write("bigtable_dispatch.go", dataDispatch(bigtableData), *check)
 	write("firestore_dispatch.go", firestoreDispatch(), *check)
+	write("secretmanager_dispatch.go", transcodedDispatch(secretManagerRPC, true), *check)
+	write("cloudtasks_dispatch.go", transcodedDispatch(cloudTasksRPC, false), *check)
 }
 
 // storageRoutes generates the Storage REST route table from the pinned
@@ -808,8 +810,13 @@ func firestoreRoutes() []byte {
 
 // secretManagerRoutes generates the Secret Manager v1 route table slice.
 func secretManagerRoutes() []byte {
+	return routeTable("SecretManagerRoutes", "is the Secret Manager v1 route table slice.", secretManagerRows())
+}
+
+// secretManagerRows lists the Secret Manager v1 REST routes.
+func secretManagerRows() []route {
 	const base = "/v1/projects/{project}"
-	rows := []route{
+	return []route{
 		{"secretmanager.secrets.create", http.MethodPost, base + "/secrets", true, false},
 		{"secretmanager.secrets.list", http.MethodGet, base + "/secrets", false, false},
 		{"secretmanager.secrets.get", http.MethodGet, base + "/secrets/{secret}", false, false},
@@ -827,7 +834,6 @@ func secretManagerRoutes() []byte {
 		{"secretmanager.versions.enable", http.MethodPost, base + "/secrets/{secret}/versions/{version}:enable", false, false},
 		{"secretmanager.locations.list", http.MethodGet, base + "/locations", false, false},
 	}
-	return routeTable("SecretManagerRoutes", "is the Secret Manager v1 route table slice.", rows)
 }
 
 // cloudKMSRoutes generates the Cloud KMS v1 route table slice.
@@ -868,8 +874,16 @@ func cloudKMSRoutes() []byte {
 
 // cloudTasksRoutes generates the Cloud Tasks v2beta3 route table slice.
 func cloudTasksRoutes() []byte {
+	return routeTable("CloudTasksRoutes", "is the Cloud Tasks v2beta3 route table slice.", cloudTasksRows())
+}
+
+// cloudTasksGetIamPolicy is served on GET and POST; gRPC pairs with the POST row.
+const cloudTasksGetIamPolicy = "cloudtasks.queues.getIamPolicy"
+
+// cloudTasksRows lists the Cloud Tasks v2beta3 REST routes.
+func cloudTasksRows() []route {
 	const base = "/v2beta3/projects/{project}/locations/{location}"
-	rows := []route{
+	return []route{
 		{"cloudtasks.queues.create", http.MethodPost, base + "/queues", true, false},
 		{"cloudtasks.queues.list", http.MethodGet, base + "/queues", false, false},
 		{"cloudtasks.queues.get", http.MethodGet, base + "/queues/{queue}", false, false},
@@ -883,12 +897,11 @@ func cloudTasksRoutes() []byte {
 		{"cloudtasks.tasks.get", http.MethodGet, base + "/queues/{queue}/tasks/{task}", false, false},
 		{"cloudtasks.tasks.delete", http.MethodDelete, base + "/queues/{queue}/tasks/{task}", false, false},
 		{"cloudtasks.tasks.run", http.MethodPost, base + "/queues/{queue}/tasks/{task}:run", false, false},
-		{"cloudtasks.queues.getIamPolicy", http.MethodGet, base + "/queues/{queue}:getIamPolicy", false, false},
-		{"cloudtasks.queues.getIamPolicy", http.MethodPost, base + "/queues/{queue}:getIamPolicy", false, false},
+		{cloudTasksGetIamPolicy, http.MethodGet, base + "/queues/{queue}:getIamPolicy", false, false},
+		{cloudTasksGetIamPolicy, http.MethodPost, base + "/queues/{queue}:getIamPolicy", false, false},
 		{"cloudtasks.queues.setIamPolicy", http.MethodPost, base + "/queues/{queue}:setIamPolicy", true, false},
 		{"cloudtasks.locations.list", http.MethodGet, "/v2beta3/projects/{project}/locations", false, false},
 	}
-	return routeTable("CloudTasksRoutes", "is the Cloud Tasks v2beta3 route table slice.", rows)
 }
 
 // redisMethods is the Memorystore for Redis v1 slice selected from the pinned

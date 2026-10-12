@@ -5,12 +5,15 @@ go 1.26.0
 toolchain go1.26.8
 
 require (
+	cloud.google.com/go/auth v0.23.0
 	cloud.google.com/go/bigtable v1.58.0
+	cloud.google.com/go/cloudtasks v1.20.0
 	cloud.google.com/go/firestore v1.22.0
 	cloud.google.com/go/iam v1.11.0
 	cloud.google.com/go/logging v1.18.0
 	cloud.google.com/go/longrunning v1.2.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
+	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/spanner v1.95.1
 	cloud.google.com/go/storage v1.65.0
 	github.com/fsouza/fake-gcs-server v1.56.1
@@ -26,7 +29,6 @@ require (
 require (
 	cel.dev/expr v0.25.2 // indirect
 	cloud.google.com/go v0.123.0 // indirect
-	cloud.google.com/go/auth v0.23.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/monitoring v1.29.0 // indirect

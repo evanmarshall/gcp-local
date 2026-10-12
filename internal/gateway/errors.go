@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -63,11 +62,7 @@ func writeError(w http.ResponseWriter, err error) {
 	if mapped, ok := statusHTTP[s.Code()]; ok {
 		code = mapped
 	}
-	name := statusNames[s.Code()]
-	if name == "" {
-		name = strings.ToUpper(s.Code().String())
-	}
-	body := map[string]any{"code": code, "status": name, "message": s.Message()}
+	body := map[string]any{"code": code, "status": statusName(s.Code()), "message": s.Message()}
 	if len(s.Proto().GetDetails()) > 0 {
 		var details []json.RawMessage
 		for _, detail := range s.Proto().GetDetails() {

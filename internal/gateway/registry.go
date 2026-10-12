@@ -72,6 +72,10 @@ func NewRegistry() *Registry {
 	r.registerPubSub()
 	r.registerData("spanner", generated.SpannerMethods)
 	r.registerData("bigtable", generated.BigtableMethods)
+	// Transcoded methods dispatch to their REST route's handler; the gRPC
+	// contracts name the service for its untranscoded methods' gaps.
+	r.registerData("secretmanager", generated.SecretManagerMethods)
+	r.registerData("cloudtasks", generated.CloudTasksMethods)
 	return r
 }
 

@@ -611,11 +611,12 @@ def grpc_status(
 
 
 def verify_dataplane(directory: Path) -> None:
-    """Write and read Spanner and Bigtable rows through the packaged gateway, IAM enforced."""
+    """Call Spanner, Bigtable, Secret Manager, and Cloud Tasks over gRPC, IAM enforced."""
     env, tokens = environment_tokens(directory)
     developer, ungranted = tokens["developer"], tokens[UNGRANTED]
     session = spanner_rows(env, developer, ungranted)
     table = bigtable_table(env, developer).encode()
+    project = env["GOOGLE_CLOUD_PROJECT"].encode()
     set_cell = field(1, b"cf") + field(2, b"c") + field(3, 1000) + field(4, b"v")
     checks = [
         (
@@ -628,6 +629,16 @@ def verify_dataplane(directory: Path) -> None:
             "/google.spanner.v1.Spanner/ExecuteStreamingSql",
             field(1, session.encode()) + field(3, b"SELECT Id FROM Items"),
             True,
+        ),
+        (
+            "/google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
+            field(1, b"projects/" + project),
+            False,
+        ),
+        (
+            "/google.cloud.tasks.v2.CloudTasks/ListQueues",
+            field(1, b"projects/" + project + b"/locations/us-central1"),
+            False,
         ),
     ]
     with grpc.insecure_channel(env["GCP_LOCAL_GRPC_ENDPOINT"]) as channel:

@@ -47,23 +47,28 @@ type Gateway struct {
 	resolve  Resolver
 	routes   []compiledRoute
 	rpcs     map[string]generated.RPC
+	// transcoded gRPC methods run through a REST route's provider method.
+	transcoded map[string]generated.Transcoding
 }
 
 func New(registry *Registry, resolve Resolver) *Gateway {
 	if registry == nil {
 		registry = NewRegistry()
 	}
-	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]generated.RPC{}}
+	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]generated.RPC{}, transcoded: map[string]generated.Transcoding{}}
 	for _, contract := range contracts() {
 		g.routes = append(g.routes, compileRoute(contract))
 	}
 	for _, rpc := range generated.PubSubMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
-	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods} {
+	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods} {
 		for _, rpc := range table {
 			g.rpcs[rpc.Method] = rpc
 		}
+	}
+	for _, binding := range append(append([]generated.Transcoding(nil), generated.SecretManagerTranscoding...), generated.CloudTasksTranscoding...) {
+		g.transcoded[binding.RPC] = binding
 	}
 	for _, rpc := range generated.FirestoreMethods {
 		g.rpcs[rpc.Method] = rpc

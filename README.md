@@ -53,9 +53,9 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | --- | --- | --- |
 | [Cloud Storage](docs/storage.md) | fake-gcs-server | Objects: read, write, list, delete, copy; resumable uploads; V4 signed URLs |
 | [Pub/Sub](docs/pubsub.md) | Official Google emulator | Publish, pull, streaming pull, push |
-| [Secret Manager](docs/secretmanager.md) | gcp-local | Secret versions and access |
+| [Secret Manager](docs/secretmanager.md) | gcp-local | Secret versions and access over REST and gRPC |
 | [Cloud KMS](docs/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt, asymmetric sign and decrypt, HMAC |
-| [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries |
+| [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries over REST and gRPC |
 | [Cloud Logging](docs/logging.md) | gcp-local | Write, filter, and delete log entries over REST and gRPC |
 | [Vertex AI](docs/vertexai.md) | Deterministic stub or Ollama | Generate, stream, count tokens, embed; answers are not from Gemini |
 | [Firestore](docs/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners |

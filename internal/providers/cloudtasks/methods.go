@@ -38,6 +38,9 @@ func (p *Provider) executeQueue(call gateway.Call, request *gateway.RESTRequest,
 	case methodQueuesGet:
 		return p.getQueue(request, scope)
 	case methodQueuesList:
+		if request.Query.Get("filter") != "" {
+			return nil, gap("queue list filters are not implemented")
+		}
 		return p.listQueues(scope)
 	case methodQueuesDelete:
 		return p.deleteQueue(request, scope)

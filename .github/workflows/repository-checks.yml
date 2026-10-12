@@ -72,6 +72,16 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             sh scripts/check_cloudkms.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/secretmanager-sdk ./internal/providers/secretmanager
+      - name: Verify Secret Manager with the Python SDK over gRPC without egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            sh scripts/check_secretmanager.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/cloudtasks-sdk ./internal/providers/cloudtasks
+      - name: Verify Cloud Tasks with the Python SDK over gRPC without egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            sh scripts/check_cloudtasks.sh
       - name: Compare local REST providers against their recorded contracts
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \

@@ -1,8 +1,11 @@
 # SDKs for the local service checks (check_pubsub.sh, check_firestore.sh,
-# check_logging.sh, check_vertexai.sh, check_cloudkms.sh); no live-cloud execution.
+# check_logging.sh, check_vertexai.sh, check_cloudkms.sh, check_secretmanager.sh,
+# check_cloudtasks.sh); no live-cloud execution.
 -r requirements-pubsub.txt
 google-cloud-firestore==2.34.1
 google-cloud-kms==3.18.0
+google-cloud-secret-manager==2.31.0
+google-cloud-tasks==2.26.0
 google-cloud-logging==3.17.0
 google-cloud-appengine-logging==1.11.0
 google-cloud-audit-log==0.6.2

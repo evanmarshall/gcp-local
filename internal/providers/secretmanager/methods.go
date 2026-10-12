@@ -68,6 +68,9 @@ func (p *Provider) executeSecret(call gateway.Call, request *gateway.RESTRequest
 	case methodSecretsGet:
 		return p.get(scope, record)
 	case methodSecretsList:
+		if request.Query.Get("filter") != "" {
+			return nil, gap("list filters are not implemented")
+		}
 		return p.list(scope)
 	case methodSecretsUpdate:
 		return p.update(request, scope, record)
@@ -88,6 +91,9 @@ func (p *Provider) executeVersion(call gateway.Call, request *gateway.RESTReques
 	case methodVersionsAdd:
 		return p.addVersion(request, scope, record)
 	case methodVersionsList:
+		if request.Query.Get("filter") != "" {
+			return nil, gap("list filters are not implemented")
+		}
 		return p.versionsList(scope, record)
 	case methodVersionsGet:
 		return p.versionGet(request, scope, record)
