@@ -7,8 +7,26 @@ import platform
 import shutil
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 from urllib.request import urlopen
+
+ATTEMPTS = 4
+
+
+def download(url: str, archive: Path) -> None:
+    """Fetch the archive, retrying transient network failures with backoff."""
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with urlopen(url, timeout=60) as source, archive.open("wb") as output:  # noqa: S310 -- fixed https URL
+                shutil.copyfileobj(source, output)
+        except OSError as error:  # timeouts, resets, and URLError are all OSError
+            if attempt == ATTEMPTS:
+                raise SystemExit(f"Go download failed after {ATTEMPTS} attempts: {error}") from None
+            print(f"Go download attempt {attempt} failed ({error}); retrying", flush=True)
+            time.sleep(5 * attempt)
+        else:
+            return
 
 
 def main() -> None:
@@ -43,11 +61,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="go-install-", dir=tools) as raw:
         temporary = Path(raw)
         archive = temporary / "archive.tar.gz"
-        with (
-            urlopen("https://go.dev/dl/" + entry["filename"], timeout=60) as source,
-            archive.open("wb") as output,
-        ):
-            shutil.copyfileobj(source, output)
+        download("https://go.dev/dl/" + entry["filename"], archive)
         if hashlib.sha256(archive.read_bytes()).hexdigest() != entry["sha256"]:
             raise SystemExit("Go archive checksum mismatch")
         with tarfile.open(archive) as source:
