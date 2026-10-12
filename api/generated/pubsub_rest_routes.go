@@ -15,4 +15,8 @@ var PubSubRestRoutes = []Route{
 	{"pubsub.http.topics.setIamPolicy", "POST", "/v1/projects/{project}/topics/{topic}:setIamPolicy", true, false},
 	{"pubsub.http.subscriptions.getIamPolicy", "GET", "/v1/projects/{project}/subscriptions/{subscription}:getIamPolicy", false, false},
 	{"pubsub.http.subscriptions.setIamPolicy", "POST", "/v1/projects/{project}/subscriptions/{subscription}:setIamPolicy", true, false},
+	{"pubsub.http.topics.publish", "POST", "/v1/projects/{project}/topics/{topic}:publish", true, false},
+	{"pubsub.http.subscriptions.pull", "POST", "/v1/projects/{project}/subscriptions/{subscription}:pull", true, false},
+	{"pubsub.http.subscriptions.acknowledge", "POST", "/v1/projects/{project}/subscriptions/{subscription}:acknowledge", true, false},
+	{"pubsub.http.subscriptions.modifyAckDeadline", "POST", "/v1/projects/{project}/subscriptions/{subscription}:modifyAckDeadline", true, false},
 }

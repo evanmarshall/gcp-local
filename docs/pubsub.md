@@ -1,6 +1,6 @@
 # Pub/Sub
 
-Topics, subscriptions, publish, pull, StreamingPull, authenticated local push, ordering, filters, dead-letter topics, retry backoff, exactly-once delivery, snapshots, and seek, with IAM enforced before the call reaches Google's official emulator. Two scenarios are recorded against GCP ([verification](#verification)); everything else is tested locally. Each project gets its own emulator JVM, started on first use.
+Topics, subscriptions, publish, pull, StreamingPull, authenticated local push, ordering, filters, dead-letter topics, retry backoff, exactly-once delivery, snapshots, and seek, with IAM enforced before the call reaches Google's official emulator. Three scenarios are recorded against GCP ([verification](#verification)); everything else is tested locally. Each project gets its own emulator JVM, started on first use.
 
 ## Use
 
@@ -45,7 +45,7 @@ Use `SubscriberGrpcTransport(channel=channel)` for subscribers. `local_channel_c
 | Publisher (gRPC) | `CreateTopic`, `GetTopic`, `ListTopics`, `DeleteTopic`, `Publish` | Labels at create; 1 MiB per publish request |
 | Subscriber (gRPC) | `CreateSubscription`, `GetSubscription`, `ListSubscriptions`, `DeleteSubscription`, `Pull`, `Acknowledge`, `ModifyAckDeadline`, `StreamingPull`, `Seek`, `CreateSnapshot`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot` | Same-project only; delivery settings below are fixed at create; `ModifyAckDeadline=0` redelivers. StreamingPull `protocol_version` 0 or 1 (the Go client sends 1) on the first request only; with 1 the emulator answers keepalive requests. Other versions return `UNIMPLEMENTED` |
 | IAMPolicy (gRPC) | `GetIamPolicy`, `SetIamPolicy` | Topics and subscriptions; version-1 policies with etag checks |
-| REST | Topic and subscription `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy` | No REST publish, pull, snapshots, or seek. Unknown body fields return 400; known unsupported fields return 501 |
+| REST | Topic and subscription `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy`; `topics.publish`, `subscriptions.pull`, `subscriptions.acknowledge`, `subscriptions.modifyAckDeadline` | The data-plane methods run the gRPC twins' validation, permissions, and delivery features, and answer in the REST reference's JSON (base64 `data`, `messageIds`, `receivedMessages` with `ackId`, `message`, and `deliveryAttempt`). A body may repeat the path's topic or subscription; a different one returns 400. No REST StreamingPull, snapshots, or seek. Unknown body fields return 400; known unsupported fields return 501 |
 | Push | Authenticated HTTP push to a numeric loopback URL | Modeled locally, not recorded |
 
 ## Delivery features
@@ -100,8 +100,9 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 | --- | --- | --- |
 | `pubsub-pull-authorization` | 2026-10-09 | Topic-scoped Publisher and subscription-scoped Subscriber grants, denied publish and pull, message identity, ack, cleanup |
 | `pubsub-delivery-features` | 2026-10-12 | Delivery settings echoed at create, denied pull, key order before and after a nack, filtered delivery, an invalid filter, a repeated exactly-once ack, dead-letter attempts and forwarding with and without the service agent's grants, cleanup |
+| `pubsub-rest-data-plane` | 2026-10-12 | REST publish, pull, nack (`modifyAckDeadline` 0), redelivery, and acknowledge in the shapes gcloud 588.0.0 sends; denied publish, pull, and acknowledge; a topic-scoped publisher that cannot pull; an out-of-range deadline; an empty pull; a pull without `maxMessages`; a publish body that repeats the topic; cleanup |
 
-`check_pubsub.sh` compares both locally. Re-recording `pubsub-delivery-features` (`tests/conformance/pubsub_delivery`) needs its own approved scope (`python3 scripts/plan_pubsub.py --scenario delivery ...`).
+`check_pubsub.sh` compares the first two locally; `check_rest_recordings.sh` compares `pubsub-rest-data-plane` (`tests/conformance/pubsubrest`, live scope service `pubsub-rest`). Re-recording `pubsub-delivery-features` (`tests/conformance/pubsub_delivery`) needs its own approved scope (`python3 scripts/plan_pubsub.py --scenario delivery ...`).
 
 Run in Linux or moo after installing Java 17, the emulator JAR, and `requirements-services.txt`:
 
@@ -125,7 +126,8 @@ A run creates one topic and one subscription and makes at most ten publish attem
 
 ## Gaps
 
-- Not recorded: StreamingPull, push, IAM policy calls, retry backoff, snapshots, and seek.
+- Not recorded: StreamingPull, push, retry backoff, snapshots, and seek. IAM policy calls are recorded only as the REST grants in `pubsub-rest-data-plane`.
+- GCP accepted a publish sent right after its topic was deleted (2026-10-12); locally it returns 404.
 - Dead-letter attempts counted before the service agent's grants exist restart at 1 once both grants are held.
 - No schemas (`SchemaService`, topic `schema_settings`), KMS, topic retention, subscription expiration TTL, BigQuery or Cloud Storage export subscriptions, `UpdateTopic`, `UpdateSubscription`, `UpdateSnapshot`, `ModifyPushConfig`, `DetachSubscription`, or `ListTopicSnapshots`/`ListTopicSubscriptions`. Subscriptions never expire.
 - Exactly-once: an ack after the deadline expires still succeeds (GCP rejects it), and acks sent on a stream get no `acknowledge_confirmation`. The Python client acks over unary calls and is unaffected.

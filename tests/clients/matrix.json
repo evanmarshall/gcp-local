@@ -113,10 +113,7 @@
       "client": "gcloud",
       "package": "gcloud",
       "transport": "REST",
-      "expect": "xfail",
-      "issue": 66,
-      "gap": "REST publish and pull are not served",
-      "match": "No provider implements this REST API method"
+      "expect": "pass"
     },
     {
       "service": "firestore",

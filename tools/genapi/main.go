@@ -848,6 +848,12 @@ func pubsubRestRoutes() []byte {
 		{"pubsub.http.topics.setIamPolicy", http.MethodPost, topics + "/{topic}:setIamPolicy", true, false},
 		{"pubsub.http.subscriptions.getIamPolicy", http.MethodGet, subs + "/{subscription}:getIamPolicy", false, false},
 		{"pubsub.http.subscriptions.setIamPolicy", http.MethodPost, subs + "/{subscription}:setIamPolicy", true, false},
+		// Data plane: the REST reference's custom methods, which gcloud
+		// pubsub topics publish and subscriptions pull drive.
+		{"pubsub.http.topics.publish", http.MethodPost, topics + "/{topic}:publish", true, false},
+		{"pubsub.http.subscriptions.pull", http.MethodPost, subs + "/{subscription}:pull", true, false},
+		{"pubsub.http.subscriptions.acknowledge", http.MethodPost, subs + "/{subscription}:acknowledge", true, false},
+		{"pubsub.http.subscriptions.modifyAckDeadline", http.MethodPost, subs + "/{subscription}:modifyAckDeadline", true, false},
 	}
 	return routeTable("PubSubRestRoutes", "is the Pub/Sub JSON REST route table slice.", rows)
 }

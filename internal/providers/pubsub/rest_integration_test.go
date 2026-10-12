@@ -162,3 +162,67 @@ func TestRestSurfaceDeniedIsDenied(t *testing.T) {
 		t.Fatalf("denied create status = %d", code)
 	}
 }
+
+// restPulled is the REST pull response shape.
+type restPulled struct {
+	ReceivedMessages []struct {
+		AckID   string `json:"ackId"`
+		Message struct {
+			Data        string            `json:"data"`
+			MessageID   string            `json:"messageId"`
+			PublishTime string            `json:"publishTime"`
+			Attributes  map[string]string `json:"attributes"`
+		} `json:"message"`
+	} `json:"receivedMessages"`
+}
+
+// TestRestSurfaceDataPlane publishes, pulls, nacks, and acknowledges over REST
+// against the official emulator, and checks the gRPC surface sees the same
+// subscription state.
+func TestRestSurfaceDataPlane(t *testing.T) {
+	f := running(t)
+	const sub = "/v1/projects/project-a/subscriptions/rest-data"
+	if code, _ := restCall(f, t, "PUT", restTestTopic, subjectSecret, map[string]any{}); code != 200 {
+		t.Fatalf("topic create status = %d", code)
+	}
+	if code, payload := restCall(f, t, "PUT", sub, subjectSecret, map[string]any{"topic": "rest-topic"}); code != 200 {
+		t.Fatalf("subscription create status = %d body %s", code, payload)
+	}
+	if code, _ := restCall(f, t, "POST", restTestTopic+":publish", subjectSecret+"-peer", map[string]any{"messages": []any{map[string]any{"data": "bm8="}}}); code != 403 {
+		t.Fatalf("denied publish status = %d", code)
+	}
+	code, payload := restCall(f, t, "POST", restTestTopic+":publish", subjectSecret, map[string]any{"messages": []any{map[string]any{"data": "aGVsbG8=", "attributes": map[string]any{"k": "v"}}}})
+	var published struct {
+		MessageIDs []string `json:"messageIds"`
+	}
+	if code != 200 || json.Unmarshal(payload, &published) != nil || len(published.MessageIDs) != 1 {
+		t.Fatalf("publish status = %d body %s", code, payload)
+	}
+	pull := func() restPulled {
+		t.Helper()
+		code, payload := restCall(f, t, "POST", sub+":pull", subjectSecret, map[string]any{"maxMessages": 1})
+		var out restPulled
+		if code != 200 || json.Unmarshal(payload, &out) != nil || len(out.ReceivedMessages) != 1 {
+			t.Fatalf("pull status = %d body %s", code, payload)
+		}
+		return out
+	}
+	first := pull().ReceivedMessages[0]
+	if first.Message.Data != "aGVsbG8=" || first.Message.MessageID != published.MessageIDs[0] || first.Message.PublishTime == "" || first.Message.Attributes["k"] != "v" {
+		t.Fatalf("received = %+v", first)
+	}
+	if code, payload := restCall(f, t, "POST", sub+":modifyAckDeadline", subjectSecret, map[string]any{"ackIds": []string{first.AckID}, "ackDeadlineSeconds": 0}); code != 200 || string(bytes.TrimSpace(payload)) != "{}" {
+		t.Fatalf("nack status = %d body %s", code, payload)
+	}
+	second := pull().ReceivedMessages[0]
+	if second.Message.MessageID != first.Message.MessageID {
+		t.Fatalf("nacked message was not redelivered: %+v", second)
+	}
+	if code, payload := restCall(f, t, "POST", sub+":acknowledge", subjectSecret, map[string]any{"ackIds": []string{second.AckID}}); code != 200 {
+		t.Fatalf("ack status = %d body %s", code, payload)
+	}
+	response, err := pb.NewSubscriberClient(f.connection).Pull(f.owner, &pb.PullRequest{Subscription: "projects/project-a/subscriptions/rest-data", MaxMessages: 1, ReturnImmediately: true})
+	if err != nil || len(response.GetReceivedMessages()) != 0 {
+		t.Fatalf("grpc pull after the REST ack = %v, %v", response, err)
+	}
+}

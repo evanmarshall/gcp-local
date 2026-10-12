@@ -1,0 +1,151 @@
+{
+  "pubsub-rest-data-plane": {
+    "recorded-date": "12-10-2026, 07:24:55",
+    "recorded-content": {
+      "topic-created": {
+        "http_status": 200,
+        "name": "projects/<project>/topics/<name>"
+      },
+      "subscription-created": {
+        "ackDeadlineSeconds": 10,
+        "http_status": 200,
+        "name": "projects/<project>/subscriptions/<name>",
+        "topic": "projects/<project>/topics/<name>"
+      },
+      "denied-publish": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "publisher-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/pubsub.publisher"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "published": {
+        "fields": [
+          "messageIds"
+        ],
+        "http_status": 200,
+        "message_ids": 1
+      },
+      "publisher-cannot-pull": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "subscriber-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/pubsub.subscriber"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "pulled": {
+        "attributes": null,
+        "count": 1,
+        "data": "gcp-local rest data plane",
+        "fields": [
+          "receivedMessages"
+        ],
+        "http_status": 200,
+        "message_fields": [
+          "data",
+          "messageId",
+          "publishTime"
+        ],
+        "received_fields": [
+          "ackId",
+          "message"
+        ],
+        "same_message_id": true
+      },
+      "denied-pull": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-acknowledge": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "nacked": {
+        "body": {},
+        "http_status": 200
+      },
+      "redelivered": {
+        "attributes": null,
+        "count": 1,
+        "data": "gcp-local rest data plane",
+        "fields": [
+          "receivedMessages"
+        ],
+        "http_status": 200,
+        "message_fields": [
+          "data",
+          "messageId",
+          "publishTime"
+        ],
+        "received_fields": [
+          "ackId",
+          "message"
+        ],
+        "same_message_id": true
+      },
+      "deadline-out-of-range": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "acknowledged": {
+        "body": {},
+        "http_status": 200
+      },
+      "empty-pull": {
+        "body": {},
+        "http_status": 200
+      },
+      "pull-without-max-messages": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "publish-body-names-topic": {
+        "fields": [
+          "messageIds"
+        ],
+        "http_status": 200
+      },
+      "subscription-deleted": {
+        "http_status": 200
+      },
+      "topic-deleted": {
+        "http_status": 200
+      },
+      "cleanup": {
+        "topic_and_subscription_absent": true
+      }
+    }
+  }
+}

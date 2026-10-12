@@ -281,6 +281,12 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err := p.preflight(call, request); err != nil {
 		return nil, err
 	}
+	return p.run(call, request)
+}
+
+// run opens the backend session and runs the authorize, invoke, and settle
+// flow that the gRPC and REST surfaces share.
+func (p *Provider) run(call gateway.Call, request proto.Message) (proto.Message, error) {
 	// Pull blocks, so it runs as a session beside other operations.
 	use := p.manager.Use
 	if call.Method == subscriber+"Pull" {

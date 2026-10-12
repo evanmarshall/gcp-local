@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -24,10 +25,12 @@ const (
 
 // buildRestProto converts one REST request into the gRPC twin's proto.
 func (p *Provider) buildRestProto(twin, project string, request *gateway.RESTRequest) (proto.Message, error) {
-	if strings.Contains(twin, "Subscription") {
+	if strings.HasPrefix(twin, subscriber) {
 		return p.buildSubscriptionProto(twin, project, request)
 	}
 	switch twin {
+	case publisher + "Publish":
+		return restPathBound(request, &pb.PublishRequest{}, "topic", restTopicName(project, request.Path["topic"]))
 	case publisher + "CreateTopic":
 		// The v2 CreateTopic call takes the Topic message directly.
 		topic := &pb.Topic{}
@@ -49,7 +52,16 @@ func (p *Provider) buildRestProto(twin, project string, request *gateway.RESTReq
 
 // buildSubscriptionProto converts one REST subscription request.
 func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway.RESTRequest) (proto.Message, error) {
+	name := restSubscriptionName(project, request.Path["subscription"])
 	switch twin {
+	case subscriber + "Pull":
+		return restPathBound(request, &pb.PullRequest{}, "subscription", name)
+	case subscriber + "Acknowledge":
+		return restPathBound(request, &pb.AcknowledgeRequest{}, "subscription", name)
+	case subscriber + "ModifyAckDeadline":
+		return restPathBound(request, &pb.ModifyAckDeadlineRequest{}, "subscription", name)
+	case subscriber + "ListSubscriptions":
+		return &pb.ListSubscriptionsRequest{Project: "projects/" + project}, nil
 	case subscriber + "CreateSubscription":
 		subscription, err := subscriptionFromREST(project, request)
 		if err != nil {
@@ -61,8 +73,51 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	case subscriber + "DeleteSubscription":
 		return &pb.DeleteSubscriptionRequest{Subscription: restSubscriptionName(project, request.Path["subscription"])}, nil
 	default:
-		return &pb.ListSubscriptionsRequest{Project: "projects/" + project}, nil
+		return nil, fmt.Errorf("%w: %s", errRestNoProtoMapping, twin)
 	}
+}
+
+// restPathBound decodes a data-plane body (publish, pull, acknowledge,
+// modifyAckDeadline) and binds the resource from the path. The REST
+// reference's request bodies omit the topic or subscription, which the path
+// names. GCP accepts a publish body that repeats the path's topic (recording
+// pubsub-rest-data-plane); a body naming a different resource is unrecorded,
+// so it is refused rather than silently resolved either way.
+func restPathBound(request *gateway.RESTRequest, message proto.Message, field protoreflect.Name, name string) (proto.Message, error) {
+	if err := restBody(request, message); err != nil {
+		return nil, err
+	}
+	reflected := message.ProtoReflect()
+	descriptor := reflected.Descriptor().Fields().ByName(field)
+	if reflected.Has(descriptor) && reflected.Get(descriptor).String() != name {
+		return nil, status.Error(codes.InvalidArgument, "Invalid request body: the "+string(field)+" differs from the request path")
+	}
+	reflected.Set(descriptor, protoreflect.ValueOfString(name))
+	return message, nil
+}
+
+// dataPlane reports whether a twin is a message operation, whose REST
+// response is the proto's own JSON mapping.
+func dataPlane(twin string) bool {
+	switch twin {
+	case publisher + "Publish", subscriber + "Pull", subscriber + "Acknowledge", subscriber + "ModifyAckDeadline":
+		return true
+	}
+	return false
+}
+
+// restDataWire renders a message operation's response with Google's JSON
+// mapping of the proto, as the REST reference documents: PublishResponse
+// carries messageIds; PullResponse carries receivedMessages with ackId,
+// message (base64 data, messageId, publishTime, attributes, orderingKey), and
+// deliveryAttempt when a dead-letter policy counts it; acknowledge and
+// modifyAckDeadline answer an empty object.
+func restDataWire(response proto.Message) (*gateway.RESTResponse, error) {
+	encoded, err := protojson.Marshal(response)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Unable to encode the Pub/Sub response")
+	}
+	return &gateway.RESTResponse{JSON: json.RawMessage(encoded)}, nil
 }
 
 // restBody decodes a REST body with Google's JSON mapping of the proto.

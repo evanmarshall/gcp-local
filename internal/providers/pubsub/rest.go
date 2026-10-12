@@ -1,15 +1,12 @@
 package pubsub
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
-	"errors"
-
 	"cloud.google.com/go/iam/apiv1/iampb"
-	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
@@ -37,6 +34,10 @@ const (
 	restSubscriptionsGet    = "pubsub.http.subscriptions.get"
 	restSubscriptionsDelete = "pubsub.http.subscriptions.delete"
 	restSubscriptionsList   = "pubsub.http.subscriptions.list"
+	restTopicsPublish       = "pubsub.http.topics.publish"
+	restSubscriptionsPull   = "pubsub.http.subscriptions.pull"
+	restSubscriptionsAck    = "pubsub.http.subscriptions.acknowledge"
+	restSubscriptionsModAck = "pubsub.http.subscriptions.modifyAckDeadline"
 )
 
 // restTwins maps each REST method to its gRPC twin: the emulator call and the
@@ -50,6 +51,10 @@ var restTwins = map[string]string{
 	restSubscriptionsGet:    subscriber + "GetSubscription",
 	restSubscriptionsDelete: subscriber + "DeleteSubscription",
 	restSubscriptionsList:   subscriber + "ListSubscriptions",
+	restTopicsPublish:       publisher + "Publish",
+	restSubscriptionsPull:   subscriber + "Pull",
+	restSubscriptionsAck:    subscriber + "Acknowledge",
+	restSubscriptionsModAck: subscriber + "ModifyAckDeadline",
 	restTopicsGetIam:        policyRPC + "GetIamPolicy",
 	restTopicsSetIam:        policyRPC + "SetIamPolicy",
 	restSubsGetIam:          policyRPC + "GetIamPolicy",
@@ -92,7 +97,7 @@ func restResourceFor(method, project string, request *gateway.RESTRequest) strin
 	switch method {
 	case restTopicsList:
 		return provider.ProjectResource(project)
-	case restTopicsCreate, restTopicsGet, restTopicsDelete, restTopicsGetIam, restTopicsSetIam:
+	case restTopicsCreate, restTopicsGet, restTopicsDelete, restTopicsGetIam, restTopicsSetIam, restTopicsPublish:
 		return restTopicName(project, request.Path["topic"])
 	case restSubscriptionsList:
 		return provider.ProjectResource(project)
@@ -140,9 +145,12 @@ func (p *Provider) handleRest(call gateway.Call, raw any) (any, error) {
 	if err := p.preflight(call, protoRequest); err != nil {
 		return nil, err
 	}
-	response, err := p.restSession(call, protoRequest)
+	response, err := p.run(call, protoRequest)
 	if err != nil {
 		return nil, err
+	}
+	if dataPlane(call.Method) {
+		return restDataWire(response)
 	}
 	return &gateway.RESTResponse{JSON: restWire(call.Method, response)}, nil
 }
@@ -176,20 +184,4 @@ func (p *Provider) handleRestPolicy(call gateway.Call, request *gateway.RESTRequ
 		return nil, status.Error(codes.Internal, "Unable to encode the IAM policy")
 	}
 	return &gateway.RESTResponse{JSON: json.RawMessage(encoded)}, nil
-}
-
-// restSession opens the backend session and runs the same authorize, invoke,
-// and settle flow the gRPC dispatch uses.
-func (p *Provider) restSession(call gateway.Call, protoRequest proto.Message) (proto.Message, error) {
-	var response proto.Message
-	err := p.manager.Use(call.Context, keyOf(call), func(session context.Context, active backend.Backend) error {
-		call.Context = session //nolint:fatcontext // one request-scoped handoff of the manager session
-		var err error
-		response, err = p.execute(call, protoRequest, active)
-		return err
-	})
-	if err != nil {
-		return nil, fmt.Errorf("run the pub/sub session: %w", err)
-	}
-	return response, nil
 }
