@@ -1,0 +1,164 @@
+# Tagged release: the multi-architecture runtime image on GHCR and the Python
+# CLI on PyPI. It runs only for a pushed version tag (vMAJOR.MINOR.PATCH) that
+# matches gcp_local/__init__.py, and is inert until the repository owner
+# completes the one-time setup in docs/quickstart.md#releases: GHCR package
+# permissions for this repository, a PyPI trusted publisher for this workflow
+# and the "pypi" environment, and that environment's protection rules.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/evanmarshall/gcp-local
+
+jobs:
+  distributions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Require the tag to match the package version and image repository
+        id: version
+        run: |
+          version=$(python -c 'import gcp_local; print(gcp_local.__version__)')
+          repository=$(python -c 'import gcp_local; print(gcp_local.IMAGE_REPOSITORY)')
+          test "v$version" = "$GITHUB_REF_NAME"
+          test "$repository" = "$IMAGE"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: python -m pip install build==1.2.2.post1
+      - name: Build the sdist and wheel reproducibly from the tag
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m build --outdir dist
+          (cd dist && sha256sum -- * > SHA256SUMS)
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'dist/gcp_local-*'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: distributions
+          path: dist/
+
+  test:
+    needs: distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: distributions
+          path: dist/
+      - run: python -m pip install -r requirements-sdk.txt -r requirements-pubsub.txt
+      - name: Build the release image locally for the runner architecture
+        run: |
+          docker build --build-arg GCP_LOCAL_VERSION=${{ needs.distributions.outputs.version }} \
+            --tag gcp-local:release-test .
+      - name: Drive the released wheel's CLI against the release image
+        run: python scripts/smoke_package.py --wheel dist/gcp_local-*.whl --image gcp-local:release-test
+
+  image:
+    needs: [distributions, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: metadata
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: GCP_LOCAL_VERSION=${{ needs.distributions.outputs.version }}
+          provenance: mode=max
+          sbom: true
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  pypi:
+    needs: [distributions, test, image]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/gcp-local
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: distributions
+          path: dist/
+      - run: rm dist/SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  github-release:
+    needs: [distributions, image, pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: distributions
+          path: dist/
+      - name: Publish the release notes, distributions, checksums, and image digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+          VERSION: ${{ needs.distributions.outputs.version }}
+        run: |
+          printf 'Image: `%s:%s` (`%s@%s`)\n\nInstall: `pip install gcp-local==%s`\n' \
+            "$IMAGE" "$VERSION" "$IMAGE" "$DIGEST" "$VERSION" > notes.md
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --generate-notes --notes-file notes.md dist/*
