@@ -22,7 +22,7 @@ The index exists for IAM ancestry and cross-service references. It never copies 
 ## Backend lifecycle
 
 1. Register a definition with a scope validator, a driver factory, and an `AfterReset` hook.
-2. `Require` or `Preload` starts the instance and waits for readiness. Concurrent starts share one instance.
+2. The first `Use` starts the instance and waits for readiness. Concurrent starts share one instance.
 3. Mutations run in `Manager.Use` after authorization. It serializes against reset and shutdown for that instance and passes a context cancelled at shutdown. Don't re-enter the same instance from the callback.
 4. Long-lived reads (Pub/Sub pull and streaming pull) use `Manager.Session`, which releases the mutation gate after startup. Sessions can't publish metadata. Reset cancels and drains them first.
 
@@ -38,6 +38,6 @@ The process driver runs an absolute command with an explicit environment in its 
 
 ## Limits
 
-- All state is process-local. `Snapshot` and `Restore` return `ErrPersistenceUnsupported`.
+- All state is process-local and lost on restart.
 - Diagnostics reports the last observed status; it never starts a backend or probes the network.
 - Per-service backend details: [Pub/Sub](pubsub.md), [Firestore](firestore.md), [Memorystore](memorystore.md), [Cloud SQL](cloudsql.md), [Spanner](spanner.md).

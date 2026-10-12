@@ -84,6 +84,6 @@ Behavior is "recorded" only when a scenario ran against a real GCP sandbox, the 
 - Packet-level network simulation.
 - Performance, quota, and billing fidelity.
 - Full API surface. Coverage follows recorded workloads and Terraform cases.
-- Persistence. `Snapshot` and `Restore` return `ErrPersistenceUnsupported`.
+- Persistence. State is in memory only.
 
 Planned work is tracked in [issue #1](https://github.com/evanmarshall/gcp-local/issues/1).
