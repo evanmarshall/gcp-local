@@ -34,6 +34,7 @@ import (
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/iam"
+	loggingprovider "github.com/evanmarshall/gcp-local/internal/providers/logging"
 	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
 	pubsubprovider "github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
@@ -41,6 +42,7 @@ import (
 	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
+	vertexaiprovider "github.com/evanmarshall/gcp-local/internal/providers/vertexai"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
@@ -85,6 +87,8 @@ func main() {
 			{Role: "roles/resourcemanager.projectIamAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			{Role: "roles/iam.serviceAccountKeyAdmin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/aiplatform.user", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
+			{Role: "roles/logging.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
 	}
@@ -163,6 +167,11 @@ func main() {
 	_, err = iamadminprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
+	must(err)
+	_, err = loggingprovider.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
+	// Vertex AI answers from the deterministic stub; nothing calls Google.
+	_, err = vertexaiprovider.New(context.Background(), registry, index, engine, vertexaiprovider.Config{})
 	must(err)
 	if root := os.Getenv("GCP_LOCAL_POSTGRES_ROOT"); root != "" {
 		must(addCloudSQL(root, registry, server, index, engine))

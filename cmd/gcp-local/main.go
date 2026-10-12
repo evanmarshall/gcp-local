@@ -30,6 +30,7 @@ import (
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/iam"
+	loggingprovider "github.com/evanmarshall/gcp-local/internal/providers/logging"
 	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
 	"github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
@@ -37,6 +38,7 @@ import (
 	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/secretmanager"
 	spannerprovider "github.com/evanmarshall/gcp-local/internal/providers/spanner"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
+	vertexaiprovider "github.com/evanmarshall/gcp-local/internal/providers/vertexai"
 	core "github.com/evanmarshall/gcp-local/internal/runtime"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
@@ -116,6 +118,7 @@ type serveOptions struct {
 	cloudsql                           cloudSQLOptions
 	dataPorts, dataListen              string
 	dataPlane                          *dataplane.Pool
+	vertex                             vertexaiprovider.Config
 	metadataPrincipal                  string
 	showVersion                        bool
 }
@@ -129,7 +132,10 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcListen, "grpc-listen", "127.0.0.1:4567", "gRPC listen address")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager,iam")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager,iam,logging,vertexai")
+	flags.StringVar(&options.vertex.Backend, "vertex-backend", "stub", "Vertex AI model backend: stub (deterministic, default) or ollama")
+	flags.StringVar(&options.vertex.OllamaURL, "vertex-ollama-url", "", "Ollama server URL for -vertex-backend=ollama, e.g. http://127.0.0.1:11434")
+	flags.Var(modelMap{&options.vertex.Models}, "vertex-model", "Vertex AI model ID=Ollama model, e.g. gemini-2.5-flash=llama3.2; * matches any ID; repeatable")
 	flags.StringVar(&options.pubsubJava, "pubsub-java", "", "absolute Java executable for the official emulator")
 	flags.StringVar(&options.pubsubJAR, "pubsub-jar", "", "absolute checksum-pinned Pub/Sub emulator JAR")
 	flags.StringVar(&options.firestoreJava, "firestore-java", "", "absolute Java executable for the official Firestore emulator")
@@ -299,10 +305,11 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	if err := assembleCloudTasks(ctx, selected, registry, server, index, engine, tokens); err != nil {
 		return err
 	}
-	// Providers in front of an official or pinned backend binary take the
-	// backend paths from the serve options.
+	// Providers in front of an official or pinned backend binary, or a
+	// configured model backend, take their backend settings from the serve
+	// options.
 	for _, assemble := range []func(context.Context, serveOptions, map[string]bool, *gateway.Registry, *core.Server, *state.Index, *iam.Engine) error{
-		assembleFirestore, assembleSpanner, assembleMemorystore, assembleCloudSQLService,
+		assembleFirestore, assembleSpanner, assembleMemorystore, assembleCloudSQLService, assembleVertexAI,
 	} {
 		if err := assemble(ctx, options, selected, registry, server, index, engine); err != nil {
 			return err
@@ -314,6 +321,7 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	}{
 		{"compute", assembleCompute},
 		{"secretmanager", assembleSecretManager},
+		{"logging", assembleLogging},
 		{"cloudkms", assembleCloudKMS},
 		{"bigquery", assembleBigQuery},
 		{"bigtable", assembleBigtable},
@@ -582,6 +590,57 @@ func main() {
 
 // errRunProcessShape rejects a malformed run-process flag value.
 var errRunProcessShape = errors.New("run-process expects image=command")
+
+// Vertex AI flag sentinels.
+var (
+	errVertexModelShape = errors.New("vertex-model expects VERTEX_MODEL_ID=OLLAMA_MODEL")
+	errVertexUnselected = errors.New("vertex AI backend flags require vertexai in -services")
+)
+
+// modelMap collects repeatable Vertex AI model ID=Ollama model flags.
+type modelMap struct {
+	target *map[string]string
+}
+
+func (m modelMap) String() string { return "" }
+
+func (m modelMap) Set(value string) error {
+	model, alias, found := strings.Cut(value, "=")
+	if !found || model == "" || alias == "" {
+		return errVertexModelShape
+	}
+	if *m.target == nil {
+		*m.target = map[string]string{}
+	}
+	(*m.target)[model] = alias
+	return nil
+}
+
+// assembleVertexAI registers the Vertex AI provider with its explicitly
+// configured model backend.
+func assembleVertexAI(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, _ *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["vertexai"] {
+		if options.vertex.OllamaURL != "" || len(options.vertex.Models) > 0 || (options.vertex.Backend != "" && options.vertex.Backend != vertexaiprovider.BackendStub) {
+			return errVertexUnselected
+		}
+		return nil
+	}
+	if _, err := vertexaiprovider.New(ctx, registry, index, engine, options.vertex); err != nil {
+		return fmt.Errorf("register the Vertex AI provider: %w", err)
+	}
+	return nil
+}
+
+// assembleLogging registers the Cloud Logging provider.
+func assembleLogging(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["logging"] {
+		return nil
+	}
+	if _, err := loggingprovider.New(ctx, registry, server.Backends, index, engine); err != nil {
+		return fmt.Errorf("register the Logging provider: %w", err)
+	}
+	return nil
+}
 
 // processMap collects repeatable image=command flags.
 type processMap struct {

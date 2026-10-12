@@ -1,6 +1,6 @@
 # Agent instructions
 
-gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRPC dispatch, scoped state/lifecycle, local identity, and an IAM engine in front of 16 service providers. [Service coverage](docs/coverage.md) is the source of truth for what each provider serves, what applications can use, and which recordings verify it. Do not describe planned services as working features.
+gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRPC dispatch, scoped state/lifecycle, local identity, and an IAM engine in front of 18 service providers. [Service coverage](docs/coverage.md) is the source of truth for what each provider serves, what applications can use, and which recordings verify it. Do not describe planned services as working features.
 
 ## Start here
 
@@ -33,6 +33,7 @@ gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRP
 - For Spanner, run `python3 scripts/install_spanner.py` in the Linux task guest, then `sh scripts/check_spanner.sh`. The official emulator is Linux-only; see [Spanner](docs/spanner.md).
 - For Memorystore, run `python3 scripts/install_redis.py` in the Linux task guest, then `sh scripts/check_redis.sh`. See [Memorystore](docs/memorystore.md).
 - For Cloud SQL, run `python3 scripts/install_postgres.py` in the Linux task guest, then `sh scripts/check_cloudsql.sh`. Run it as an unprivileged user, or as root with the install root traversable by `nobody`; see [Cloud SQL](docs/cloudsql.md).
+- For Vertex AI and Cloud Logging, install `requirements-vertexai.txt` and `requirements-logging.txt` in the task guest, then run `sh scripts/check_vertexai.sh` and `sh scripts/check_logging.sh`. They drive the google-genai and google-cloud-logging SDKs with local ADC in isolation. Vertex AI answers come from a stub or Ollama, never Gemini; see [Vertex AI](docs/vertexai.md) and [Cloud Logging](docs/logging.md).
 - Run `sh scripts/check_terraform.sh` inside moo/Linux for the pinned acceptance slice after installing `scripts/install_terraform.py`. It includes a negative control and never executes Terraform against GCP.
 - For packaged setup changes, run `.venv-tools/bin/python scripts/smoke_environment.py` with Docker and pinned SDK dependencies. Read [the quickstart](docs/quickstart.md); reset/down apply only to the selected private environment directory.
 - Update the relevant coverage notes when adding behavior. Run the checks appropriate to the change and report what was actually verified.

@@ -56,10 +56,18 @@ SERVICE_PROBES = [
     ("resourcemanager", "POST", "/v1/projects/{project}:getIamPolicy"),
     ("redis", "GET", "/v1/projects/{project}/locations/us-central1/instances"),
     ("cloudsql", "GET", "/sql/v1beta4/projects/{project}/instances"),
+    ("logging", "GET", "/v2/projects/{project}/logs"),
+    (
+        "vertexai",
+        "POST",
+        "/v1/projects/{project}/locations/us-central1/publishers/google/models/gemini-2.5-flash:countTokens",
+    ),
     ("compute", "GET", "/compute/v1/projects/{project}/global/networks"),
     ("compute", "GET", "/v1/projects/{project}/locations/global/connectivityTests"),
 ]
 UNGRANTED = "ungranted"
+# Request bodies for probes whose POST needs more than an empty object.
+PROBE_BODIES = {"vertexai": b'{"contents":[{"role":"user","parts":[{"text":"probe"}]}]}'}
 
 
 def cli(
@@ -254,9 +262,12 @@ def verify_doctor(directory: Path, temporary: Path) -> None:
     assert json.loads(result.stdout)["profiles"]["local"]["missing_services"] == []
 
 
-def local_call(endpoint: str, method: str, path: str, **headers: str) -> tuple[int, bytes]:
+def local_call(
+    endpoint: str, method: str, path: str, body: bytes | None = None, **headers: str
+) -> tuple[int, bytes]:
     """Issue one loopback request without proxies or redirects."""
-    body = b"{}" if method == "POST" else None
+    if body is None and method == "POST":
+        body = b"{}"
     # The endpoint is the environment's own numeric loopback base from env.
     request = HTTPRequest(endpoint + path, data=body, method=method, headers=headers)  # noqa: S310
     try:
@@ -302,15 +313,16 @@ def verify_services(directory: Path) -> None:
     covered = set()
     for service, method, template in SERVICE_PROBES:
         path = template.format(project=project)
+        request = PROBE_BODIES.get(service)
         allowed, body = local_call(
-            endpoint, method, path, Authorization="Bearer " + tokens["developer"]
+            endpoint, method, path, request, Authorization="Bearer " + tokens["developer"]
         )
         assert allowed == 200, f"{service} refused the developer: {allowed} {body[:200]!r}"
         denied, body = local_call(
-            endpoint, method, path, Authorization="Bearer " + tokens[UNGRANTED]
+            endpoint, method, path, request, Authorization="Bearer " + tokens[UNGRANTED]
         )
         assert denied == 403, f"{service} did not refuse an ungranted caller: {denied}"
-        anonymous, _ = local_call(endpoint, method, path)
+        anonymous, _ = local_call(endpoint, method, path, request)
         assert anonymous in {401, 403}, f"{service} accepted an anonymous caller: {anonymous}"
         covered.add(service)
     assert covered == set(SERVICES), sorted(set(SERVICES) - covered)

@@ -25,20 +25,22 @@ What each service supports and how it is verified. Every service authenticates c
 | `secretmanager` | [Secret Manager](secretmanager.md) | gcp-local | 15 | 36 | Yes: secret versions and payload access | secretmanager-access-lifecycle | TestAccSecretManagerSecretAndVersion |
 | `cloudkms` | [Cloud KMS](cloudkms.md) | gcp-local | 20 | 87 | Yes: symmetric encrypt and decrypt | cloudkms-symmetric-key-lifecycle | TestAccKMSKeyRingCryptoKey |
 | `cloudtasks` | [Cloud Tasks](cloudtasks.md) | gcp-local | 16 | 24 | Yes: HTTP-target dispatch with OIDC and retries | cloudtasks-dispatch-retry | TestAccCloudTasksQueueLifecycle |
+| `logging` | [Cloud Logging](logging.md) | gcp-local | 4 | 254 | Yes: write, filter, page, and delete log entries | none | none |
 | `artifactregistry` | [Artifact Registry](artifactregistry.md) | gcp-local | 7 | 69 | No: repositories only; no image push or pull | artifactregistry-repository-lifecycle | TestAccArtifactRegistryRepository |
 | `iam` | [IAM service accounts](serviceaccounts.md) | gcp-local | 11 | 137 | Partial: accounts and policies; keys are synthesized and sign nothing | serviceaccount-lifecycle-authorization | TestAccServiceAccount |
 | `resourcemanager` | [Project IAM](project-iam.md) | gcp-local | 2 | 38 | Yes: project IAM policy | project-iam-policy-binding | TestAccProjectIamPolicy |
 | `compute` | [VPC networking and Connectivity Tests](networking.md) | gcp-local | 38 | 1066 | Analysis only: verdicts, no real traffic | vpc-firewall-connectivity, vm-connectivity-nat-peering | TestAccComputeNetworkAndSubnetwork |
 | `run` | [Cloud Run](cloudrun.md) | Local processes or Docker | 13 | 59 | Partial: invocation works; the packaged environment runs only the bundled worker | none | TestAccCloudRunV2Service |
+| `vertexai` | [Vertex AI](vertexai.md) | Deterministic stub or Ollama | 5 | 1128 | Partial: generate, stream, count tokens, embed; answers come from the stub or Ollama, not Gemini | none | none |
 
 API totals come from these discovery documents: storage v1, pubsub v1, firestore v1, spanner v1,
 bigtableadmin v2 plus bigtable v2, sqladmin v1beta4, redis v1, bigquery v2, secretmanager v1, cloudkms v1, cloudtasks
 v2beta3, artifactregistry v1, iam v1, cloudresourcemanager v1, compute v1 plus networkmanagement v1,
-and run v2. Pub/Sub counts the gRPC methods with permission plans; the same operations are also
-served over 12 REST routes. Spanner counts 21 admin and 15 data-plane session methods. Bigtable
-counts 17 admin methods (bigtableadmin v2) and 7 gRPC methods of the separate Bigtable v2 data API.
-Firestore counts 14 document methods (all on gRPC; all but Listen on REST) plus 2 Admin field
-methods on REST.
+run v2, logging v2, and aiplatform v1. Pub/Sub counts the gRPC methods with permission plans; the same
+operations are also served over 12 REST routes. Spanner counts 21 admin and 15 data-plane session
+methods. Bigtable counts 17 admin methods (bigtableadmin v2) and 7 gRPC methods of the separate
+Bigtable v2 data API. Firestore counts 14 document methods (all on gRPC; all but Listen on REST)
+plus 2 Admin field methods on REST. Logging serves its 4 methods over both REST and gRPC.
 
 ## Cross-service behavior
 
@@ -56,4 +58,4 @@ methods on REST.
 ## Not yet integrated
 
 Services with no provider include Cloud Functions, GKE, Dataflow, Workflows, Eventarc, Cloud
-Scheduler, Logging, Monitoring, and Datastore mode. Requests to them get no route.
+Scheduler, Monitoring, and Datastore mode. Requests to them get no route.

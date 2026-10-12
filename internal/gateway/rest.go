@@ -60,6 +60,9 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 	for _, rpc := range generated.FirestoreMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
+	for _, rpc := range generated.LoggingMethods {
+		g.rpcs[rpc.Method] = rpc
+	}
 	return g
 }
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +104,8 @@ func contracts() []generated.Route {
 	routes = append(routes, generated.CloudSQLRoutes...)
 	routes = append(routes, generated.PubSubRestRoutes...)
 	routes = append(routes, generated.RedisRoutes...)
+	routes = append(routes, generated.VertexAIRoutes...)
+	routes = append(routes, generated.LoggingRoutes...)
 	sort.SliceStable(routes, func(i, j int) bool {
 		left, right := strings.Contains(routes[i].Path, ":"), strings.Contains(routes[j].Path, ":")
 		return left && !right
@@ -231,10 +236,35 @@ func restBody(r *http.Request, route *compiledRoute, request *RESTRequest) error
 }
 
 // streamBody commits the status and copies a streaming body to the client.
-// A copy failure cannot retract the committed status.
+// A copy failure cannot retract the committed status. A closable body is a
+// live stream (server-sent events, a JSON array): every write is flushed so
+// it reaches the client as the provider produces it, and the body is closed
+// when the copy ends so a provider writing into a pipe stops when the client
+// goes away. A fixed payload is copied unflushed.
 func streamBody(w http.ResponseWriter, code int, body io.Reader) {
+	closer, live := body.(io.Closer)
+	if live {
+		defer closer.Close()
+	}
 	w.WriteHeader(code)
-	_, _ = io.Copy(w, body)
+	flusher, ok := w.(http.Flusher)
+	if !live || !ok {
+		_, _ = io.Copy(w, body)
+		return
+	}
+	_, _ = io.Copy(flushWriter{w, flusher}, body)
+}
+
+// flushWriter flushes the response after each write.
+type flushWriter struct {
+	w http.ResponseWriter
+	f http.Flusher
+}
+
+func (f flushWriter) Write(p []byte) (int, error) {
+	n, err := f.w.Write(p)
+	f.f.Flush()
+	return n, err //nolint:wrapcheck // the copy loop only needs the transport error
 }
 
 // dispatchREST invokes the provider and writes the response body it returns.

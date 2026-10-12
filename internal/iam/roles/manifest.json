@@ -1,8 +1,18 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
-  "recorded_at": "2026-10-12T01:48:30.501818+00:00",
-  "scope": "Read-only predefined artifactregistry, bigquery, bigtable, cloudsql, cloudtasks, compute, firestore, identity, kms, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
+  "recorded_at": "2026-10-12T03:06:50.587664+00:00",
+  "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudsql, cloudtasks, compute, firestore, identity, kms, logging, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
   "roles": [
+    {
+      "file": "aiplatform.user.json",
+      "name": "roles/aiplatform.user",
+      "sha256": "2477dea61551284205a03b0a06de7ad13e3f8af815ffb7206e1e92a05af8b2e4"
+    },
+    {
+      "file": "aiplatform.viewer.json",
+      "name": "roles/aiplatform.viewer",
+      "sha256": "3fec911d8798d36758120d9106cf8e8802476144c37fc0b5d73c153aba91f38f"
+    },
     {
       "file": "artifactregistry.admin.json",
       "name": "roles/artifactregistry.admin",
@@ -152,6 +162,21 @@
       "file": "cloudkms.viewer.json",
       "name": "roles/cloudkms.viewer",
       "sha256": "6255aeb7d81965ef82a5ccba31734938cf41e2f365d1b1a1441edcd9fa48ab92"
+    },
+    {
+      "file": "logging.admin.json",
+      "name": "roles/logging.admin",
+      "sha256": "47f3722e5335244a4c8f3e524f2f12d2c99c8e073fddd8da2c48468b43e1511e"
+    },
+    {
+      "file": "logging.logWriter.json",
+      "name": "roles/logging.logWriter",
+      "sha256": "b704bec2fccf6fd8a384d895a616cb9706cd11fcd90695f73857aa4a390bd652"
+    },
+    {
+      "file": "logging.viewer.json",
+      "name": "roles/logging.viewer",
+      "sha256": "e280d63339f4f16d6f26ef593136c091825cb0dd60de25b988cdca293caedcfe"
     },
     {
       "file": "networkmanagement.admin.json",

@@ -11,6 +11,10 @@ Spanner and Bigtable data-plane input: the protoc descriptors of `cloud.google.c
 
 Firestore gRPC input: the published `cloud.google.com/go/firestore/apiv1/firestorepb` bindings, pinned to v1.22.0 in `go.mod`. `firestore_dispatch.go` stubs every `google.firestore.v1.Firestore` method; resource selectors merge each method's root and nested HTTP bindings (`A` and `A/*/**`) into `A/**`, where a trailing `**` matches zero or more segments. Firestore REST routes use `{path=**}` variables that span segments; the gateway unescapes each segment separately and rejects escaped slashes and dot segments.
 
+Cloud Logging input: the `LoggingServiceV2` descriptors from `cloud.google.com/go/logging/apiv2/loggingpb`, pinned to v1.18.0 in `go.mod`. `logging_dispatch.go` forwards every RPC; resource selectors come from the HTTP annotations, and RPCs whose binding has no resource variable (entries write/list) get an empty selector, so the provider resolves and authorizes every project named in the body. `logging_routes.go` is a handwritten four-route REST allowlist using the logging v2 discovery method IDs.
+
+Vertex AI input: `vertexai_routes.go` is a handwritten allowlist of five publisher-model methods (`generateContent`, `streamGenerateContent`, `countTokens`, `predict`, `embedContent`) on the v1 and v1beta1 paths, named by their aiplatform v1 discovery method IDs. The aiplatform discovery document is not committed.
+
 Generate gcp-local's separate outputs with the pinned Go toolchain:
 
 ```sh

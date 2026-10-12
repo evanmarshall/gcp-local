@@ -35,6 +35,7 @@ SERVICES = [
     "compute",
     "firestore",
     "iam",
+    "logging",
     "pubsub",
     "redis",
     "resourcemanager",
@@ -42,6 +43,7 @@ SERVICES = [
     "secretmanager",
     "spanner",
     "storage",
+    "vertexai",
 ]
 SERVICE_FLAG = ",".join(sorted("kms" if name == "cloudkms" else name for name in SERVICES))
 
@@ -51,6 +53,7 @@ SERVICE_FLAG = ",".join(sorted("kms" if name == "cloudkms" else name for name in
 # encrypter/decrypter (Cloud KMS Admin cannot use keys) and Service Account
 # User (deploying a Cloud Run revision as another account needs actAs).
 DEVELOPER_ROLES = [
+    "roles/aiplatform.user",
     "roles/artifactregistry.admin",
     "roles/bigquery.dataOwner",
     "roles/bigquery.jobUser",
@@ -64,6 +67,7 @@ DEVELOPER_ROLES = [
     "roles/datastore.user",
     "roles/iam.serviceAccountAdmin",
     "roles/iam.serviceAccountUser",
+    "roles/logging.admin",
     "roles/networkmanagement.admin",
     "roles/pubsub.admin",
     "roles/redis.admin",

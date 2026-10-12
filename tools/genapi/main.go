@@ -65,7 +65,10 @@ func main() {
 	write("cloudtasks_routes.go", cloudTasksRoutes(*check), *check)
 	write("redis_routes.go", redisRoutes(), *check)
 	write("cloudsql_routes.go", cloudSQLRoutes(), *check)
+	write("vertexai_routes.go", vertexAIRoutes(), *check)
+	write("logging_routes.go", loggingRoutes(), *check)
 	write("pubsub_dispatch.go", pubsubDispatch(), *check)
+	write("logging_dispatch.go", loggingDispatch(), *check)
 	write("iam_dispatch.go", iamDispatch(), *check)
 	write("spanner_dispatch.go", dataDispatch(spannerData), *check)
 	write("bigtable_dispatch.go", dataDispatch(bigtableData), *check)
@@ -449,6 +452,9 @@ func goType(d protoreflect.MessageDescriptor) string {
 	}
 	if strings.HasPrefix(string(d.FullName()), "google.firestore.v1.") {
 		return "pb." + string(d.Name())
+	}
+	if strings.HasPrefix(string(d.FullName()), "google.logging.v2.") {
+		return "loggingpb." + string(d.Name())
 	}
 	panic("Unknown external message type: " + string(d.FullName()))
 }

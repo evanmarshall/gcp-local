@@ -22,7 +22,7 @@ jobs:
       - run: python3 scripts/install_redis.py
       - run: python3 scripts/install_postgres.py
       - run: python3 -m venv .venv-tools
-      - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt -r requirements-firestore.txt
+      - run: .venv-tools/bin/python -m pip install -r requirements-pubsub.txt -r requirements-firestore.txt -r requirements-vertexai.txt -r requirements-logging.txt
       - run: .venv-tools/bin/python -m pip check
       - run: sudo apt-get update && sudo apt-get install -y openjdk-17-jre-headless
       - run: sh scripts/go.sh build -tags=backendprobe -o bin/pubsub-probe ./tools/pubsub-probe
@@ -57,6 +57,16 @@ jobs:
           chmod o+x "$HOME"
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             sh scripts/check_cloudsql.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/vertexai-sdk ./internal/providers/vertexai
+      - name: Verify Vertex AI with the google-genai SDK and local ADC without egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            sh scripts/check_vertexai.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/logging-sdk ./internal/providers/logging
+      - name: Verify Cloud Logging with the Python SDK over REST and gRPC without egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            sh scripts/check_logging.sh
       - name: Compare local REST providers against their recorded contracts
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \

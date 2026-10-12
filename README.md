@@ -1,6 +1,6 @@
 # gcp-local
 
-**A local emulator for Google Cloud that enforces IAM.** Run Cloud Storage, Pub/Sub, Cloud Run, Firestore, Spanner, BigQuery, Cloud SQL, and more on your machine, with the real client libraries and Terraform, and get the same permission errors you would get in production.
+**A local emulator for Google Cloud that enforces IAM.** Run Cloud Storage, Pub/Sub, Cloud Run, Firestore, Spanner, BigQuery, Cloud SQL, Cloud Logging, Vertex AI, and more on your machine, with the real client libraries and Terraform, and get the same permission errors you would get in production.
 
 Most cloud emulators skip authentication entirely, so code that works locally can still fail in production on a missing grant. gcp-local issues local credentials, evaluates IAM policies on every request, and denies calls the way Google Cloud does. Each service's behavior is checked against recordings captured from real Google Cloud.
 
@@ -56,6 +56,8 @@ Full, runnable examples are in [`examples/`](examples/), including Pub/Sub over 
 | [Secret Manager](docs/secretmanager.md) | gcp-local | Secret versions and access |
 | [Cloud KMS](docs/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt |
 | [Cloud Tasks](docs/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries |
+| [Cloud Logging](docs/logging.md) | gcp-local | Write, filter, and delete log entries over REST and gRPC |
+| [Vertex AI](docs/vertexai.md) | Deterministic stub or Ollama | Generate, stream, count tokens, embed; answers are not from Gemini |
 | [Firestore](docs/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners (Python client over gRPC) |
 | [BigQuery](docs/bigquery.md) | gcp-local | Streaming inserts, simple SELECT |
 | [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | PostgreSQL clients on `127.0.0.1` with a user password |
@@ -84,6 +86,7 @@ Fidelity is tested, not assumed: scenarios are recorded once against a dedicated
 - Redis and Cloud SQL instances listen on `127.0.0.1` ports from a 16-port range (4568-4583 by default), not on 6379 or 5432; read the port from the API. Neither accepts TLS ([Cloud SQL](docs/cloudsql.md#connect-from-the-host), [Memorystore](docs/memorystore.md#endpoint-and-auth-semantics)).
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.
 - Networking verdicts are analytical (like Connectivity Tests), not real packet routing.
+- Vertex AI answers come from a deterministic stub or a local Ollama model, not Gemini.
 
 ## Contributing
 

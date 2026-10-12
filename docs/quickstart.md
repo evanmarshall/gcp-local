@@ -50,7 +50,7 @@ python3 scripts/local_env.py env
 
 ## What starts
 
-`up` waits for the container and the published endpoints to become healthy. The HTTP endpoint is `http://127.0.0.1:4566` and the gRPC gateway (Pub/Sub, Bigtable, Spanner, Firestore) is `127.0.0.1:4567`. Memorystore and Cloud SQL instances get ports from `127.0.0.1:4568-4583`, one per instance; connect to the port the API reports ([Memorystore](memorystore.md#endpoint-and-auth-semantics), [Cloud SQL](cloudsql.md#connect-from-the-host)). The range follows the HTTP port (`--port 14566` gives 14568-14583), so a second environment needs a base port at least 18 away; `up --data-ports FIRST-LAST` sets up to 64 ports. `status` returns JSON with the version, registered providers, and lazy backend state. If startup fails, the command exits nonzero; `logs` prints the last 100 lines and `down` removes the environment.
+`up` waits for the container and the published endpoints to become healthy. The HTTP endpoint is `http://127.0.0.1:4566` and the gRPC gateway (Pub/Sub, Bigtable, Spanner, Firestore, Cloud Logging) is `127.0.0.1:4567`. Memorystore and Cloud SQL instances get ports from `127.0.0.1:4568-4583`, one per instance; connect to the port the API reports ([Memorystore](memorystore.md#endpoint-and-auth-semantics), [Cloud SQL](cloudsql.md#connect-from-the-host)). The range follows the HTTP port (`--port 14566` gives 14568-14583), so a second environment needs a base port at least 18 away; `up --data-ports FIRST-LAST` sets up to 64 ports. `status` returns JSON with the version, registered providers, and lazy backend state. If startup fails, the command exits nonzero; `logs` prints the last 100 lines and `down` removes the environment.
 
 The command creates `.gcp-local/environment/` with mode 0700 and owner-only identity/IAM files. The synthetic project is `gcp-local-test`, and its project number is a stable 12-digit value derived from the project ID (the Pub/Sub push contract requires a real-shaped number). `env` prints JSON with the ADC path, project, project number, HTTP and gRPC endpoints, the data-port range (`GCP_LOCAL_DATA_PORTS`), and the Terraform credential file.
 
@@ -67,6 +67,8 @@ Every implemented provider is selected. The generated developer identity receive
 | Firestore | Datastore User, Datastore Index Admin |
 | BigQuery | BigQuery Data Owner, BigQuery Job User |
 | Cloud Tasks | Cloud Tasks Admin |
+| Cloud Logging | Logging Admin |
+| Vertex AI | Vertex AI User |
 | Cloud KMS | Cloud KMS Admin, CryptoKey Encrypter/Decrypter |
 | Spanner | Spanner Admin |
 | Bigtable | Bigtable Admin |

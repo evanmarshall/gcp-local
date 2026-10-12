@@ -9,6 +9,7 @@ import (
 	"cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
 	"cloud.google.com/go/iam/apiv1/iampb"
+	"cloud.google.com/go/logging/apiv2/loggingpb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
 	"github.com/evanmarshall/gcp-local/api/generated"
@@ -28,6 +29,7 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	spannerpb.RegisterSpannerServer(server, &generated.SpannerServer{Dispatch: g})
 	bigtablepb.RegisterBigtableServer(server, &generated.BigtableServer{Dispatch: g})
 	firestorepb.RegisterFirestoreServer(server, &generated.FirestoreServer{Dispatch: g})
+	loggingpb.RegisterLoggingServiceV2Server(server, &generated.LoggingServiceV2Server{Dispatch: g})
 	return server
 }
 func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Message) (Call, error) {
@@ -39,6 +41,11 @@ func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Mess
 	info, ok := g.rpcs[method]
 	if !ok {
 		return call, gap(method)
+	}
+	// A contract without a resource selector names its projects in the
+	// request body; the provider resolves and authorizes each one.
+	if info.ResourceField == "" {
+		return call, nil
 	}
 	resource, err := resourceField(request, info.ResourceField)
 	if err != nil {

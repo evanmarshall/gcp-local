@@ -97,6 +97,8 @@ func (r *Registry) registerRoutes() {
 		{generated.CloudSQLRoutes, "cloudsql"},
 		{generated.PubSubRestRoutes, servicePubsub},
 		{generated.RedisRoutes, "redis"},
+		{generated.VertexAIRoutes, "vertexai"},
+		{generated.LoggingRoutes, "logging"},
 	}
 	for _, table := range tables {
 		for _, route := range table.routes {
@@ -119,6 +121,9 @@ func (r *Registry) registerPubSub() {
 	// ones; the gateway hands them the decoded request.
 	for _, rpc := range generated.FirestoreMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "firestore", streaming: rpc.Streaming}
+	}
+	for _, rpc := range generated.LoggingMethods {
+		r.contracts[rpc.Method] = methodInfo{service: "logging", streaming: rpc.Streaming}
 	}
 }
 

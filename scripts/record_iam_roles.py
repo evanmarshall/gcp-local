@@ -56,6 +56,8 @@ ROLES = {
     "resourcemanager": ("resourcemanager.projectIamAdmin",),
     "redis": ("redis.admin", "redis.editor", "redis.viewer"),
     "cloudsql": ("cloudsql.admin", "cloudsql.editor", "cloudsql.viewer", "cloudsql.client"),
+    "aiplatform": ("aiplatform.user", "aiplatform.viewer"),
+    "logging": ("logging.admin", "logging.logWriter", "logging.viewer"),
 }
 
 
