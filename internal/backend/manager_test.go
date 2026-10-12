@@ -578,3 +578,44 @@ func TestSessionResetTimeoutRetainsMetadataAndAllowsRetry(t *testing.T) {
 	}
 	shutdown(t, manager)
 }
+
+var errNotReady = errors.New("not ready yet")
+
+// slowStart becomes ready a fixed delay after Start, like a cold JVM emulator.
+type slowStart struct {
+	delay   time.Duration
+	started atomic.Int64
+	at      atomic.Int64
+}
+
+func (s *slowStart) Start(context.Context) error {
+	s.started.Add(1)
+	s.at.Store(time.Now().UnixNano())
+	return nil
+}
+func (s *slowStart) Ready(context.Context) error {
+	if time.Since(time.Unix(0, s.at.Load())) < s.delay {
+		return errNotReady
+	}
+	return nil
+}
+func (*slowStart) Stop(context.Context) error  { return nil }
+func (*slowStart) Reset(context.Context) error { return nil }
+
+func TestCancelledCallerDoesNotFailStartingBackend(t *testing.T) {
+	manager := backend.NewManager(5*time.Second, time.Second)
+	slow := &slowStart{delay: 200 * time.Millisecond}
+	_ = manager.Register("storage", backend.Definition{New: func(state.Scope) (backend.Backend, error) { return slow, nil }, AfterReset: func(state.Scope) error { return nil }})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := start(ctx, manager, key("project-a")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if err := start(context.Background(), manager, key("project-a")); err != nil {
+		t.Fatalf("a cancelled first caller left the backend unusable: %v", err)
+	}
+	if slow.started.Load() != 1 {
+		t.Fatalf("backend started %d times", slow.started.Load())
+	}
+	shutdown(t, manager)
+}

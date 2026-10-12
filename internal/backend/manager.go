@@ -252,7 +252,11 @@ func (m *Manager) require(ctx context.Context, key Key, instance *instance) (Bac
 	case Ready:
 		return m.probe(ctx, instance)
 	default:
-		return m.start(ctx, key, instance)
+		active, err := m.start(key, instance) //nolint:contextcheck // startup outlives a cancelled caller
+		if err == nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return active, err
 	}
 }
 
@@ -279,18 +283,18 @@ func (m *Manager) probe(ctx context.Context, instance *instance) (Backend, error
 }
 
 // start constructs the backend if needed, starts it, and waits for readiness
-// within the start timeout.
-func (m *Manager) start(ctx context.Context, key Key, instance *instance) (Backend, error) {
+// within the start timeout. Startup runs under the manager lifetime, not the
+// caller's context: a client that gives up during a slow cold start must not
+// leave the backend failed for every later request.
+func (m *Manager) start(key Key, instance *instance) (Backend, error) {
 	instance.phase(Starting, "")
-	deadline, cancel := context.WithTimeout(ctx, m.startTimeout)
+	deadline, cancel := context.WithTimeout(m.lifetime, m.startTimeout)
 	defer cancel()
-	stopCancel := context.AfterFunc(m.lifetime, cancel) //nolint:contextcheck // the manager lifetime is rooted at process start by design
-	defer stopCancel()
 	if err := instance.construct(key.Scope); err != nil {
 		return nil, err
 	}
 	if err := instance.backend.Start(deadline); err != nil {
-		m.fail(instance, "start") //nolint:contextcheck // cleanup must outlive the cancelled request
+		m.fail(instance, "start")
 		return nil, fmt.Errorf("backend start: %w", err)
 	}
 	return m.awaitReady(deadline, instance)
