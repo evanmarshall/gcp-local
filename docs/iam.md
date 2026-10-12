@@ -28,7 +28,7 @@ Policies are stored once per owning service and scope, returned as copies, and r
 
 ## Role snapshots
 
-`internal/iam/roles/` holds 62 predefined roles read from GCP with `roles.get` (full view), last on 2026-10-12 UTC. `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. Builds and tests never fetch roles.
+`internal/iam/roles/` holds 66 predefined roles read from GCP with `roles.get` (full view), last on 2026-10-12 UTC. `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. Builds and tests never fetch roles.
 
 To propose a refresh (read-only; needs an authorized account and quota project):
 

@@ -1,6 +1,9 @@
 package cloudkms
 
 import (
+	"crypto/ecdsa"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -41,6 +44,12 @@ var handlers = map[string]handler{
 	methodVersionsGet:       (*Provider).versionsGet,
 	methodVersionsPatch:     (*Provider).versionsPatch,
 	methodVersionsDestroy:   (*Provider).versionsDestroy,
+	methodVersionsRestore:   (*Provider).versionsRestore,
+	methodAsymmetricSign:    (*Provider).asymmetricSign,
+	methodAsymmetricDecrypt: (*Provider).asymmetricDecrypt,
+	methodGetPublicKey:      (*Provider).getPublicKey,
+	methodMacSign:           (*Provider).macSign,
+	methodMacVerify:         (*Provider).macVerify,
 }
 
 // execute dispatches one authorized KMS request.
@@ -138,8 +147,8 @@ func sortedKeys[T any](entries map[string]T, prefix string) []string {
 	return names
 }
 
-// cryptoKeysCreate validates and stores one symmetric crypto key with version 1
-// unless skipInitialVersionCreation is set.
+// cryptoKeysCreate validates and stores one crypto key with version 1 unless
+// skipInitialVersionCreation is set.
 func (p *Provider) cryptoKeysCreate(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	resource.key = request.Query.Get("cryptoKeyId")
 	if !uid.MatchString(resource.key) {
@@ -172,6 +181,7 @@ func (p *Provider) cryptoKeysCreate(request *gateway.RESTRequest, scope state.Sc
 }
 
 // newCryptoKey builds one key record and its initial version from a request.
+// Only an ENCRYPT_DECRYPT key gets a primary version.
 func (p *Provider) newCryptoKey(request *gateway.RESTRequest, name string) (*cryptoKeyRecord, error) {
 	body, err := parseCryptoKeyBody(request.JSON)
 	if err != nil {
@@ -183,7 +193,7 @@ func (p *Provider) newCryptoKey(request *gateway.RESTRequest, name string) (*cry
 	}
 	now := p.clock()
 	record := &cryptoKeyRecord{
-		Name: name, Purpose: body.Purpose, Algorithm: body.Template.Algorithm,
+		Name: name, Purpose: string(body.Purpose), Algorithm: string(body.Template.Algorithm),
 		Labels: maps.Clone(body.Labels), Rotation: body.RotationPeriod, NextRotation: body.NextRotation,
 		DestroyDuration: destroy, DestroyText: body.DestroyDuration,
 		Versions: map[string]*versionRecord{}, CreatedAt: now,
@@ -191,21 +201,37 @@ func (p *Provider) newCryptoKey(request *gateway.RESTRequest, name string) (*cry
 	if request.Query.Get("skipInitialVersionCreation") == "true" {
 		return record, nil
 	}
-	version, err := newVersion("1", now)
+	version, err := newVersion("1", record.Algorithm, now)
 	if err != nil {
 		return nil, err
 	}
-	record.Versions["1"], record.Primary = version, "1"
+	record.Versions["1"] = version
+	if record.Purpose == purposeEncryptDecrypt {
+		record.Primary = "1"
+	}
 	return record, nil
 }
 
-// newVersion creates one enabled version with fresh material.
-func newVersion(number string, now time.Time) (*versionRecord, error) {
-	material := make([]byte, 32)
-	if err := readRandom(material); err != nil {
+// newVersion creates one enabled version with fresh material for its
+// algorithm, read from crypto/rand. GCP reports PENDING_GENERATION first for
+// asymmetric versions; generation here is synchronous.
+func newVersion(number, algorithm string, now time.Time) (*versionRecord, error) {
+	spec := algorithms[algorithm]
+	version := &versionRecord{Number: number, Algorithm: algorithm, State: stateEnabled, CreatedAt: now}
+	var err error
+	switch {
+	case spec.curve != nil:
+		version.Private, err = ecdsa.GenerateKey(spec.curve, rand.Reader)
+	case spec.bits > 0:
+		version.Private, err = rsa.GenerateKey(rand.Reader, spec.bits)
+	default:
+		version.Material = make([]byte, 32)
+		err = readRandom(version.Material)
+	}
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Key generation failed: %v", err)
 	}
-	return &versionRecord{Number: number, State: stateEnabled, Material: material, CreatedAt: now}, nil
+	return version, nil
 }
 
 // cryptoKeyDocument renders the crypto key wire shape; unset optional fields
@@ -310,12 +336,12 @@ func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Sc
 	if err := decodeBody(request.JSON, &body); err != nil {
 		return nil, err
 	}
-	for _, path := range paths {
-		if err := validateKeyPath(path, body); err != nil {
-			return nil, err
-		}
-	}
 	return p.keyResponse(scope, resource, func(record *cryptoKeyRecord) error {
+		for _, path := range paths {
+			if err := validateKeyPath(record, path, body); err != nil {
+				return err
+			}
+		}
 		for _, path := range paths {
 			applyKeyPath(record, path, body)
 		}
@@ -323,19 +349,43 @@ func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Sc
 	})
 }
 
-// validateKeyPath accepts the modeled crypto key update mask paths.
-func validateKeyPath(path string, body keyUpdateBody) error {
+// validateKeyPath accepts the modeled crypto key update mask paths for one key.
+func validateKeyPath(record *cryptoKeyRecord, path string, body keyUpdateBody) error {
 	switch path {
-	case "labels", "rotationPeriod", "nextRotationTime":
+	case "labels":
 		return nil
-	case "versionTemplate.algorithm":
-		if body.Template.Algorithm != algorithmSymmetric {
-			return gap("only " + algorithmSymmetric + " version templates")
+	case "rotationPeriod", "nextRotationTime":
+		if body.Rotation != "" || body.NextRotation != "" {
+			return rotationAllowed(record.Purpose)
 		}
 		return nil
+	case "versionTemplate.algorithm":
+		return algorithmAllowed(record.Purpose, string(body.Template.Algorithm))
 	default:
 		return status.Errorf(codes.InvalidArgument, "Unsupported update mask path %q", path)
 	}
+}
+
+// rotationAllowed refuses automatic rotation outside ENCRYPT_DECRYPT keys.
+func rotationAllowed(purpose string) error {
+	if purpose != purposeEncryptDecrypt {
+		return status.Errorf(codes.InvalidArgument, "Automatic rotation is not supported for purpose %s.", purpose)
+	}
+	return nil
+}
+
+// algorithmAllowed accepts an implemented algorithm of the key's purpose.
+func algorithmAllowed(purpose, algorithm string) error {
+	spec, ok := algorithms[algorithm]
+	switch {
+	case algorithm == "":
+		return status.Errorf(codes.InvalidArgument, "versionTemplate.algorithm is required for purpose %s.", purpose)
+	case !ok:
+		return gap("algorithm " + algorithm)
+	case spec.purpose != purpose:
+		return status.Errorf(codes.InvalidArgument, "Algorithm %s is not compatible with purpose %s.", algorithm, purpose)
+	}
+	return nil
 }
 
 // applyKeyPath writes one validated mask path.
@@ -348,7 +398,7 @@ func applyKeyPath(record *cryptoKeyRecord, path string, body keyUpdateBody) {
 	case "nextRotationTime":
 		record.NextRotation = body.NextRotation
 	default:
-		record.Algorithm = body.Template.Algorithm
+		record.Algorithm = string(body.Template.Algorithm)
 	}
 }
 
@@ -364,6 +414,9 @@ func (p *Provider) updatePrimaryVersion(request *gateway.RESTRequest, scope stat
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid cryptoKeyVersionId %q", body.Version)
 	}
 	return p.keyResponse(scope, resource, func(record *cryptoKeyRecord) error {
+		if record.Purpose != purposeEncryptDecrypt {
+			return wrongPurpose(resource.keyName(), record.Purpose)
+		}
 		version := record.Versions[body.Version]
 		if version == nil {
 			return notFound("CryptoKeyVersion", resource.versionName(body.Version))
@@ -452,23 +505,33 @@ func parseCryptoKeyBody(raw []byte) (cryptoKeyBody, error) {
 	if body.Purpose == "" {
 		body.Purpose = purposeEncryptDecrypt
 	}
-	if body.Template.Algorithm == "" {
+	if body.Template.Algorithm == "" && body.Purpose == purposeEncryptDecrypt {
 		body.Template.Algorithm = algorithmSymmetric
 	}
 	if body.DestroyDuration == "" {
 		body.DestroyDuration = defaultDestroyDuration
 	}
-	switch {
-	case body.Purpose != purposeEncryptDecrypt:
-		return body, gap("only symmetric ENCRYPT_DECRYPT keys")
-	case body.Template.Algorithm != algorithmSymmetric:
-		return body, gap("only " + algorithmSymmetric + " keys")
-	case body.Template.ProtectionLevel != "" && body.Template.ProtectionLevel != protectionSoftware:
-		return body, gap("only SOFTWARE protection")
-	case body.ImportOnly:
-		return body, gap("import-only keys")
+	return body, validateCryptoKeyBody(body)
+}
+
+// validateCryptoKeyBody refuses unimplemented and inconsistent key fields.
+func validateCryptoKeyBody(body cryptoKeyBody) error {
+	purpose := string(body.Purpose)
+	if !purposes[purpose] {
+		return gap("purpose " + purpose)
 	}
-	return body, nil
+	if err := algorithmAllowed(purpose, string(body.Template.Algorithm)); err != nil {
+		return err
+	}
+	switch {
+	case (body.RotationPeriod != "" || body.NextRotation != "") && purpose != purposeEncryptDecrypt:
+		return rotationAllowed(purpose)
+	case body.Template.ProtectionLevel != "" && body.Template.ProtectionLevel != protectionSoftware:
+		return gap("only SOFTWARE protection")
+	case body.ImportOnly:
+		return gap("import-only keys")
+	}
+	return nil
 }
 
 // parseDestroyDuration accepts the documented 1-to-120-day range.

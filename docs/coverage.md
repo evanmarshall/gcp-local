@@ -21,7 +21,7 @@ What each service supports and how it is verified. Every service authenticates c
 | `redis` | [Memorystore for Redis](memorystore.md) | Real Redis per instance | 8 | 47 | Yes: Redis on the reported `127.0.0.1` port, with AUTH; no TLS | memorystore-redis-instance-admin | none |
 | `bigquery` | [BigQuery](bigquery.md) | gcp-local | 18 | 47 | Partial: streaming inserts and single-table SELECT with an equality filter | bigquery-dataset-rows-query | TestAccBigQueryDatasetAndTable |
 | `secretmanager` | [Secret Manager](secretmanager.md) | gcp-local | 15 | 36 | Yes: secret versions and payload access | secretmanager-access-lifecycle | TestAccSecretManagerSecretAndVersion |
-| `cloudkms` | [Cloud KMS](cloudkms.md) | gcp-local | 20 | 87 | Yes: symmetric encrypt and decrypt | cloudkms-symmetric-key-lifecycle | TestAccKMSKeyRingCryptoKey |
+| `cloudkms` | [Cloud KMS](cloudkms.md) | gcp-local | 26 | 87 | Yes: symmetric encrypt and decrypt; asymmetric sign and decrypt and HMAC modeled locally, not recorded | cloudkms-symmetric-key-lifecycle | TestAccKMSKeyRingCryptoKey |
 | `cloudtasks` | [Cloud Tasks](cloudtasks.md) | gcp-local | 16 | 24 | Yes: HTTP-target dispatch with OIDC and retries | cloudtasks-dispatch-retry | TestAccCloudTasksQueueLifecycle |
 | `logging` | [Cloud Logging](logging.md) | gcp-local | 4 | 254 | Yes: write, filter, page, and delete log entries | logging-entries-lifecycle | none |
 | `artifactregistry` | [Artifact Registry](artifactregistry.md) | gcp-local | 7 | 69 | No: repositories only; no image push or pull | artifactregistry-repository-lifecycle | TestAccArtifactRegistryRepository |

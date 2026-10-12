@@ -43,6 +43,7 @@ Run the checks for every area you change; CI runs all of them. "Linux" means CI 
 | `sh scripts/check_cloudsql.sh` | Cloud SQL against real PostgreSQL | Linux; non-root, or root with `.tools/postgres` traversable by `nobody` | `install_postgres.py` |
 | `sh scripts/check_vertexai.sh` | Vertex AI with the google-genai SDK | Linux | `requirements-services.txt` |
 | `sh scripts/check_logging.sh` | Cloud Logging with the Python SDK | Linux | `requirements-services.txt` |
+| `sh scripts/check_cloudkms.sh` | Cloud KMS asymmetric and MAC keys with the Python SDK | Linux | `requirements-services.txt` |
 | `sh scripts/check_terraform.sh` | Pinned upstream Terraform cases and an RPO negative control; never calls GCP | Linux | Java 17, every backend, `install_terraform.py` |
 | `scripts/smoke_isolation.py` | `run_isolated.py` blocks egress and kills hung descendants | Linux, root | None |
 | `scripts/smoke_environment.py` | Packaged environment: every service under IAM, reset, teardown | Docker | `requirements-pubsub.txt` |
@@ -82,7 +83,7 @@ Python dependencies are fully pinned, transitives included:
 | `requirements-cloud.txt` | pytest harness and google-auth | Live-cloud workflow; included by `requirements-sdk.txt` |
 | `requirements-sdk.txt` | Storage SDK, plus `requirements-cloud.txt` | `pytest`, Storage checks, smoke scripts |
 | `requirements-pubsub.txt` | Pub/Sub SDK, plus `requirements-sdk.txt` | Pub/Sub, workflow, packaged, and release smoke |
-| `requirements-services.txt` | Firestore, Logging, and google-genai SDKs, plus `requirements-pubsub.txt` | `check_pubsub.sh`, `check_firestore.sh`, `check_logging.sh`, `check_vertexai.sh` |
+| `requirements-services.txt` | Firestore, Logging, KMS, and google-genai SDKs, plus `requirements-pubsub.txt` | `check_pubsub.sh`, `check_firestore.sh`, `check_logging.sh`, `check_vertexai.sh`, `check_cloudkms.sh` |
 
 - `requirements-sdk.txt` is a recording contract file. Changing it invalidates the Storage SDK recording.
 - `requirements-pubsub.txt` stays separate because the release workflow and application docs install only the Pub/Sub SDK.

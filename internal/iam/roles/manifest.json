@@ -1,6 +1,6 @@
 {
   "source": "https://iam.googleapis.com/v1/roles/{role}",
-  "recorded_at": "2026-10-12T03:06:50.587664+00:00",
+  "recorded_at": "2026-10-12T05:11:04.660039+00:00",
   "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudsql, cloudtasks, compute, firestore, identity, kms, logging, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions; no resource mutation or grant",
   "roles": [
     {
@@ -157,6 +157,26 @@
       "file": "cloudkms.cryptoKeyEncrypterDecrypter.json",
       "name": "roles/cloudkms.cryptoKeyEncrypterDecrypter",
       "sha256": "9751767e6c4581fce5ce4018f6b98e54d07e9482c08ee1bbfa25ea1509ed2d43"
+    },
+    {
+      "file": "cloudkms.cryptoKeyDecrypter.json",
+      "name": "roles/cloudkms.cryptoKeyDecrypter",
+      "sha256": "6f7dd737f52a8738bad27a7a023a82c1ac9bfbe337509e24df13b09ed120a96a"
+    },
+    {
+      "file": "cloudkms.signer.json",
+      "name": "roles/cloudkms.signer",
+      "sha256": "7a86ecfde595e0a9465d9ee02efd08375da25060bac3adead8e84b7b8ff2a5ed"
+    },
+    {
+      "file": "cloudkms.signerVerifier.json",
+      "name": "roles/cloudkms.signerVerifier",
+      "sha256": "29d3455cc34f886b6cd8e591bdb10b3285ee84d83aa8565e912f082fc93d5627"
+    },
+    {
+      "file": "cloudkms.publicKeyViewer.json",
+      "name": "roles/cloudkms.publicKeyViewer",
+      "sha256": "994a3c591865c54ab122a78b9456d361826685234fd294f4d96ad0155a31b636"
     },
     {
       "file": "cloudkms.viewer.json",

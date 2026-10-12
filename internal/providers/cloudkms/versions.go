@@ -27,7 +27,7 @@ func settle(record *cryptoKeyRecord, now time.Time) {
 	for _, version := range record.Versions {
 		if version.State == stateDestroyScheduled && !now.Before(version.DestroyAt) {
 			version.State = stateDestroyed
-			version.Material = nil
+			version.Material, version.Private = nil, nil
 		}
 	}
 }
@@ -37,7 +37,7 @@ func versionDocument(resource ref, record *versionRecord) map[string]any {
 	document := map[string]any{
 		keyName:            resource.versionName(record.Number),
 		keyState:           record.State,
-		keyAlgorithm:       algorithmSymmetric,
+		keyAlgorithm:       record.Algorithm,
 		keyProtectionLevel: protectionSoftware,
 		keyCreateTime:      stamp(record.CreatedAt),
 		"generateTime":     stamp(record.CreatedAt),
@@ -71,18 +71,19 @@ func (p *Provider) withVersion(scope state.Scope, resource ref, use func(*crypto
 	return respond(document)
 }
 
-// versionsCreate appends one enabled version with fresh material. It does
-// not move an existing primary; a key without one adopts the new version.
+// versionsCreate appends one enabled version with fresh material for the
+// key's template algorithm. It does not move an existing primary; an
+// ENCRYPT_DECRYPT key without one adopts the new version.
 func (p *Provider) versionsCreate(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	var document map[string]any
 	err := p.withKey(scope, resource, func(record *cryptoKeyRecord) error {
 		number := strconv.Itoa(len(record.Versions) + 1)
-		version, err := newVersion(number, p.clock())
+		version, err := newVersion(number, record.Algorithm, p.clock())
 		if err != nil {
 			return err
 		}
 		record.Versions[number] = version
-		if record.Primary == "" {
+		if record.Primary == "" && record.Purpose == purposeEncryptDecrypt {
 			record.Primary = number
 		}
 		document = versionDocument(resource, version)
@@ -130,7 +131,7 @@ func (p *Provider) versionsPatch(request *gateway.RESTRequest, scope state.Scope
 		return nil, status.Errorf(codes.InvalidArgument, "Unsupported update mask %q", strings.Join(paths, ","))
 	}
 	var body struct {
-		State string `json:"state"`
+		State stateEnum `json:"state"`
 	}
 	if err := decodeBody(request.JSON, &body); err != nil {
 		return nil, err
@@ -142,7 +143,7 @@ func (p *Provider) versionsPatch(request *gateway.RESTRequest, scope state.Scope
 		if version.State != stateEnabled && version.State != stateDisabled {
 			return status.Errorf(codes.FailedPrecondition, "%s is in state %s.", resource.versionName(version.Number), version.State)
 		}
-		version.State = body.State
+		version.State = string(body.State)
 		return nil
 	})
 }
@@ -155,6 +156,17 @@ func (p *Provider) versionsDestroy(_ *gateway.RESTRequest, scope state.Scope, re
 		}
 		version.State = stateDestroyScheduled
 		version.DestroyAt = p.clock().Add(record.DestroyDuration)
+		return nil
+	})
+}
+
+// versionsRestore returns a version scheduled for destruction to DISABLED.
+func (p *Provider) versionsRestore(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return p.withVersion(scope, resource, func(_ *cryptoKeyRecord, version *versionRecord) error {
+		if version.State != stateDestroyScheduled {
+			return status.Errorf(codes.FailedPrecondition, "%s is in state %s.", resource.versionName(version.Number), version.State)
+		}
+		version.State, version.DestroyAt = stateDisabled, time.Time{}
 		return nil
 	})
 }
@@ -205,6 +217,9 @@ func (p *Provider) primaryMaterial(scope state.Scope, resource ref) (string, []b
 	var number string
 	var material []byte
 	err := p.withKey(scope, resource, func(record *cryptoKeyRecord) error {
+		if record.Purpose != purposeEncryptDecrypt {
+			return wrongPurpose(resource.keyName(), record.Purpose)
+		}
 		version := record.Versions[record.Primary]
 		if version == nil || version.State != stateEnabled {
 			return status.Errorf(codes.FailedPrecondition, "%s has no enabled primary version.", resource.keyName())
@@ -244,11 +259,7 @@ func (p *Provider) decrypt(request *gateway.RESTRequest, scope state.Scope, reso
 	if err := verifyChecksums(map[string]any{}, crcCheck{sealed, body.CiphertextCRC, ""}, crcCheck{aad, body.AADCRC, ""}); err != nil {
 		return nil, err
 	}
-	number, err := envelopeVersion(sealed)
-	if err != nil {
-		return nil, err
-	}
-	material, primary, err := p.versionMaterial(scope, resource, number)
+	number, material, primary, err := p.sealingMaterial(scope, resource, sealed)
 	if err != nil {
 		return nil, err
 	}
@@ -267,12 +278,20 @@ func (p *Provider) decrypt(request *gateway.RESTRequest, scope state.Scope, reso
 	return respond(document)
 }
 
-// versionMaterial copies one enabled version's material and reports whether
-// it is the primary.
-func (p *Provider) versionMaterial(scope state.Scope, resource ref, number string) ([]byte, bool, error) {
+// sealingMaterial copies the material of the enabled version that sealed one
+// envelope and reports whether it is the primary.
+func (p *Provider) sealingMaterial(scope state.Scope, resource ref, sealed []byte) (string, []byte, bool, error) {
+	var number string
 	var material []byte
 	var primary bool
 	err := p.withKey(scope, resource, func(record *cryptoKeyRecord) error {
+		if record.Purpose != purposeEncryptDecrypt {
+			return wrongPurpose(resource.keyName(), record.Purpose)
+		}
+		var err error
+		if number, err = envelopeVersion(sealed); err != nil {
+			return err
+		}
 		version := record.Versions[number]
 		if version == nil {
 			return errInvalidCiphertext
@@ -284,9 +303,9 @@ func (p *Provider) versionMaterial(scope state.Scope, resource ref, number strin
 		return nil
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("decrypt: %w", err)
+		return "", nil, false, fmt.Errorf("decrypt: %w", err)
 	}
-	return material, primary, nil
+	return number, material, primary, nil
 }
 
 // decodePayload decodes one base64 payload field within the size bound.

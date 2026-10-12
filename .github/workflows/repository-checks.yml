@@ -67,6 +67,11 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             sh scripts/check_logging.sh
+      - run: sh scripts/go.sh test -c -tags=sdkintegration -race -o bin/cloudkms-sdk ./internal/providers/cloudkms
+      - name: Verify Cloud KMS asymmetric and MAC keys with the Python SDK and local ADC without egress
+        run: |
+          sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
+            sh scripts/check_cloudkms.sh
       - name: Compare local REST providers against their recorded contracts
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \

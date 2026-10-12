@@ -489,4 +489,9 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, testVersions+"/1", nil)
 	probe(http.MethodPost, testKeyPath+":updatePrimaryVersion", map[string]any{"cryptoKeyVersionId": "1"})
 	probe(http.MethodPatch, testVersions+"/1?updateMask=state", map[string]any{keyState: stateEnabled})
+	// The purpose-specific routes reach their handlers and refuse the symmetric key.
+	probe(http.MethodGet, testVersions+"/1/publicKey", nil)
+	for _, verb := range []string{":asymmetricSign", ":asymmetricDecrypt", ":macSign", ":macVerify", ":restore"} {
+		probe(http.MethodPost, testVersions+"/1"+verb, map[string]any{"data": b64("x"), "ciphertext": b64("x"), "mac": b64("x")})
+	}
 }

@@ -831,6 +831,12 @@ func cloudKMSRoutes() []byte {
 		// State changes use PATCH with updateMask=state; GCP has no enable/disable verbs.
 		{"cloudkms.cryptoKeyVersions.patch", http.MethodPatch, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}", true, false},
 		{"cloudkms.cryptoKeyVersions.destroy", http.MethodPost, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:destroy", true, false},
+		{"cloudkms.cryptoKeyVersions.restore", http.MethodPost, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:restore", true, false},
+		{"cloudkms.cryptoKeyVersions.asymmetricSign", http.MethodPost, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:asymmetricSign", true, false},
+		{"cloudkms.cryptoKeyVersions.asymmetricDecrypt", http.MethodPost, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:asymmetricDecrypt", true, false},
+		{"cloudkms.cryptoKeyVersions.getPublicKey", http.MethodGet, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}/publicKey", false, false},
+		{"cloudkms.cryptoKeyVersions.macSign", http.MethodPost, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:macSign", true, false},
+		{"cloudkms.cryptoKeyVersions.macVerify", http.MethodPost, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:macVerify", true, false},
 	}
 	return routeTable("CloudKMSRoutes", "is the Cloud KMS v1 route table slice.", rows)
 }

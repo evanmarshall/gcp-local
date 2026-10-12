@@ -23,4 +23,10 @@ var CloudKMSRoutes = []Route{
 	{"cloudkms.cryptoKeyVersions.get", "GET", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}", false, false},
 	{"cloudkms.cryptoKeyVersions.patch", "PATCH", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}", true, false},
 	{"cloudkms.cryptoKeyVersions.destroy", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:destroy", true, false},
+	{"cloudkms.cryptoKeyVersions.restore", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:restore", true, false},
+	{"cloudkms.cryptoKeyVersions.asymmetricSign", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:asymmetricSign", true, false},
+	{"cloudkms.cryptoKeyVersions.asymmetricDecrypt", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:asymmetricDecrypt", true, false},
+	{"cloudkms.cryptoKeyVersions.getPublicKey", "GET", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}/publicKey", false, false},
+	{"cloudkms.cryptoKeyVersions.macSign", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:macSign", true, false},
+	{"cloudkms.cryptoKeyVersions.macVerify", "POST", "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:macVerify", true, false},
 }
