@@ -60,7 +60,7 @@ Statistics such as `totalBytesProcessed` are stand-ins (`"0"`); only their prese
 sh scripts/check/recordings.sh
 ```
 
-`TestAccBigQueryDatasetAndTable` passes ([Terraform](../../contributing/terraform-compatibility.md)).
+`TestLocalBigQueryDatasetAndTable` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
 ## Gaps
 

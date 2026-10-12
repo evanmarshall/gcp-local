@@ -1,6 +1,6 @@
 # Terraform acceptance adapter audit
 
-The runner uses `terraform-plugin-testing v1.15.0` and the unmodified, checksum-pinned Google provider **8.5.0** executable. It extracts eight exact functions from source revision `70539b4b7bb9ea096987422d9596186417b73f51`; source hashes, the original function text, and MPL-2.0 attribution are committed in `third_party/terraform-provider-google`. `scripts/dev/generate_terraform_tests.py --check` checks the reproducible adaptation. Terraform CLI **1.16.5** and provider release archives are pinned for Linux arm64/amd64 and macOS arm64. The CLI is source-available under BUSL-1.1; the acceptance framework and Google provider are MPL-2.0. Executables are downloaded to ignored `.tools`, never vendored.
+The runner uses `terraform-plugin-testing v1.15.0` and the unmodified, checksum-pinned Google provider **8.5.0** executable. It extracts eight exact functions (three tests and five helpers) from source revision `70539b4b7bb9ea096987422d9596186417b73f51`; source hashes, the original function text, and MPL-2.0 attribution are committed in `third_party/terraform-provider-google`. `scripts/dev/generate_terraform_tests.py --check` checks the reproducible adaptation. Terraform CLI **1.16.5** and provider release archives are pinned for Linux arm64/amd64 and macOS arm64. The CLI is source-available under BUSL-1.1; the acceptance framework and Google provider are MPL-2.0. Executables are downloaded to ignored `.tools`, never vendored.
 
 ## Executed helpers and changes
 
@@ -16,13 +16,17 @@ The runner uses `terraform-plugin-testing v1.15.0` and the unmodified, checksum-
 | Temporary source file and CRC32C helper | Private test directory; original checksum algorithm and expected content assertions retained |
 | Destroy/check clients | Explicit loopback Storage client with no proxy/redirects, bounded response/time limits, and actual 404 verification |
 | Post-apply lifecycle | Additional refresh and unchanged plan checks after each configuration, including label removals and file replacement |
+| Basic test's bucket HCL | Adds a `google_storage_bucket_iam_member` and a `google_storage_folder` beside the upstream bucket |
 
-The original bucket/object attribute checks remain except for the documented regional RPO assertion.
-The locally adapted `TestAccSpannerInstanceAndDatabase` is not an extracted upstream function. Its assertions (names, processing units, post-destroy 404) and destroy probe follow the same owned-name and isolation rules.
+The original bucket/object attribute checks remain except for the documented regional RPO assertion. Provider `terraform_labels` is excluded from import comparison because the adapter adds an ownership default label; effective labels remain checked. Import tests cover qualified IDs only. These are adapted upstream cases, not an unmodified provider-wide certification.
 
-The locally adapted `TestAccPubSubTopicAndSubscription`, `TestAccComputeNetworkAndSubnetwork`, and `TestAccArtifactRegistryRepository` follow the same pattern: pinned provider through their custom endpoints, fixture credentials, owned names, post-destroy 404 probes, and unchanged-plan checks after refresh. `TestAccProjectIamPolicy` follows the same pattern through `resource_manager_custom_endpoint`; the upstream resource replaces the entire project policy (and destroy re-applies an empty one), so the case runs last and its policy data re-applies every seeded fixture grant. `TestAccServiceAccount` follows the same pattern through `iam_custom_endpoint` (with `iam_beta_custom_endpoint` pinned to the same value), and its create body uses the `{serviceAccount}` envelope.
-: it drives `google_spanner_instance` and `google_spanner_database` with the same pinned provider through `spanner_custom_endpoint`, fixture credentials, and the official Spanner emulator backend. Its assertions (names, processing units, post-destroy 404) and destroy probe follow the same owned-name and isolation rules.
- Provider `terraform_labels` is excluded from import comparison because the adapter adds an ownership default label; effective labels remain checked. Import tests cover qualified IDs only. These are adapted upstream cases, not an unmodified provider-wide certification.
+## Locally written cases
+
+The 13 `TestLocal*` cases in `selection.json` `local_test_ids` are not extracted from upstream; gcp-local wrote their configurations and assertions. They use the same pinned provider through their service's custom endpoint, fixture credentials, owned names, and an unchanged-plan check after each apply and refresh. All but `TestLocalServiceAccount` and `TestLocalProjectIamPolicy` probe for absence after destroy. Case-specific notes:
+
+- `TestLocalSpannerInstanceAndDatabase` drives `google_spanner_instance` and `google_spanner_database` through `spanner_custom_endpoint` and the official Spanner emulator backend.
+- `TestLocalProjectIamPolicy` uses `resource_manager_custom_endpoint`. The resource replaces the entire project policy (destroy re-applies an empty one), so the case runs last and its policy data re-applies every seeded fixture grant.
+- `TestLocalServiceAccount` uses `iam_custom_endpoint` (with `iam_beta_custom_endpoint` pinned to the same value); its create body uses the `{serviceAccount}` envelope.
 
 ## Endpoint audit
 

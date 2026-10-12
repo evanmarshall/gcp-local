@@ -13,7 +13,7 @@ Reference: [localstack/localstack](https://github.com/localstack/localstack) at 
 | Lifecycle | `ServiceLoader` loads services on demand; Kinesis stops its backend before reset and starts it lazily. [Loader][loader], [Kinesis][kinesis] | `internal/backend` manager: lazy start, readiness, reset, shutdown |
 | Async work | SNS delivery publishers and dispatcher; Lambda Docker executor. [SNS][sns], [Lambda][lambda] | Provider-owned workers: Pub/Sub push, Cloud Tasks dispatch, Cloud Run containers |
 | Recorded tests | Snapshot tests record AWS responses and compare local runs; transformers keep reference relationships; validation metadata tracks cloud runs. [Parity][parity], [Validation][validation] | `gcp_validation` pytest plugin and `tests/conformance/recordings/` |
-| Terraform | An allowlist of Terraform AWS provider acceptance tests. [Terraform][terraform] | Pinned google provider cases in `tests/terraform/` |
+| Terraform | An allowlist of Terraform AWS provider acceptance tests. [Terraform][terraform] | Pinned google provider cases in `tests/terraform/`: 3 extracted from upstream, the rest written locally |
 | Database ports | External service ports for databases such as PostgreSQL and Redis. [Ports][ports] | `-data-ports` listeners for Cloud SQL and Memorystore |
 
 ## Where gcp-local departs

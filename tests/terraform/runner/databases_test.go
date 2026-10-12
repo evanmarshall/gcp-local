@@ -40,8 +40,8 @@ func bqName() string {
 	return "gcp_local_tf_" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccBigQueryDatasetAndTable creates a dataset, a table, and destroys both.
-func TestAccBigQueryDatasetAndTable(t *testing.T) {
+// TestLocalBigQueryDatasetAndTable creates a dataset, a table, and destroys both.
+func TestLocalBigQueryDatasetAndTable(t *testing.T) {
 	name := bqName()
 
 	localBigQueryCase(t, resource.TestCase{
@@ -143,8 +143,8 @@ func firestoreName() string {
 	return "gcp-local-tf-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccFirestoreDocument creates one document, reads it back, and destroys it.
-func TestAccFirestoreDocument(t *testing.T) {
+// TestLocalFirestoreDocument creates one document, reads it back, and destroys it.
+func TestLocalFirestoreDocument(t *testing.T) {
 	docID := firestoreName()
 
 	localFirestoreCase(t, resource.TestCase{
@@ -241,8 +241,8 @@ func spannerName() string {
 	return "gcp-local-tf-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccSpannerInstanceAndDatabase creates an instance, a database, and destroys both.
-func TestAccSpannerInstanceAndDatabase(t *testing.T) {
+// TestLocalSpannerInstanceAndDatabase creates an instance, a database, and destroys both.
+func TestLocalSpannerInstanceAndDatabase(t *testing.T) {
 	name := spannerName()
 
 	localSpannerCase(t, resource.TestCase{

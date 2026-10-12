@@ -29,7 +29,7 @@ Binding contents are not compared; sandbox and local projects hold different gra
 sh scripts/check/recordings.sh
 ```
 
-`TestAccProjectIamPolicy` passes ([Terraform](../../contributing/terraform-compatibility.md)).
+`TestLocalProjectIamPolicy` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
 To re-record, get an approved `.gcp-local/projectiam-scope.json` (`LIMITS` in `gcp_validation/services/security/projectiam.py`) and a temporary `roles/resourcemanager.projectIamAdmin` on the fixture identity. That role can change any binding: back up the policy first and remove the grant afterwards.
 

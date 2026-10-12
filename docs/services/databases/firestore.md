@@ -85,7 +85,7 @@ sh scripts/check/recordings.sh   # both recordings
 sh scripts/check/backend/firestore.sh         # provider and Python SDK against the emulator
 ```
 
-`TestAccFirestoreDocument` passes ([Terraform](../../contributing/terraform-compatibility.md)).
+`TestLocalFirestoreDocument` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
 ## Gaps
 

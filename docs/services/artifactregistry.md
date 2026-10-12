@@ -34,7 +34,7 @@ Pinned roles: `roles/artifactregistry.admin`, `.repoAdmin`, `.reader`. A reposit
 sh scripts/check/recordings.sh
 ```
 
-`TestAccArtifactRegistryRepository` passes ([Terraform](../contributing/terraform-compatibility.md)).
+`TestLocalArtifactRegistryRepository` passes ([Terraform](../contributing/terraform-compatibility.md)).
 
 ## Gaps
 

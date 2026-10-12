@@ -1,25 +1,36 @@
 # Terraform compatibility
 
-16 upstream google provider acceptance cases, adapted to gcp-local, pass across 14 services. They use the released google provider 8.5.0, Terraform 1.16.5, and terraform-plugin-testing 1.15.0. The [selection manifest](../../tests/terraform/selection.json) pins the test IDs and source hashes; the [adapter audit](../../tests/terraform/audit.md) lists every change from upstream.
+16 Terraform acceptance cases pass against gcp-local across 14 services, with the released google provider 8.5.0, Terraform 1.16.5, and terraform-plugin-testing 1.15.0. Only 3 are extracted from the provider's upstream tests; the other 13 are written in gcp-local. The [selection manifest](../../tests/terraform/selection.json) lists both sets and pins the upstream source hashes; the [adapter audit](../../tests/terraform/audit.md) lists every change to the upstream cases.
 
-| Upstream test ID | What passes locally |
+## Extracted from upstream (3)
+
+Extracted by `scripts/dev/generate_terraform_tests.py` from `hashicorp/terraform-provider-google` at `70539b4b`, with the original text in [`third_party/terraform-provider-google`](../../third_party/terraform-provider-google/manifest.json).
+
+| Test ID | Upstream file | What passes locally |
+| --- | --- | --- |
+| `TestAccStorageBucket_basic` | `google/services/storage/resource_storage_bucket_test.go` | Create, read, project-number and timestamp fields, regional defaults, `project/bucket` import, refresh, empty second plan, destroy |
+| `TestAccStorageBucket_labels` | `google/services/storage/resource_storage_bucket_test.go` | Add, change, and remove labels with import checks and an empty plan after each step |
+| `TestAccStorageObject_recreate` | `google/services/storage/resource_storage_bucket_object_test.go` | Small multipart upload, CRC32C checks, replacement on content change |
+
+## Written locally (13)
+
+These have no upstream counterpart. Their configurations and assertions are gcp-local's own, in `tests/terraform/runner`.
+
+| Test ID | What passes locally |
 | --- | --- |
-| `TestAccStorageBucket_basic` | Create, read, project-number and timestamp fields, regional defaults, `project/bucket` import, refresh, empty second plan, destroy |
-| `TestAccStorageBucket_labels` | Add, change, and remove labels with import checks and an empty plan after each step |
-| `TestAccStorageObject_recreate` | Small multipart upload, CRC32C checks, replacement on content change |
-| `TestAccKMSKeyRingCryptoKey` | Key ring; crypto key with rotation period and primary version; versions destroyed with the key |
-| `TestAccSecretManagerSecretAndVersion` | Secret with replication policy, version with payload, enable/destroy, 404 after destroy |
-| `TestAccCloudTasksQueueLifecycle` | Queue with rate limits, PATCH update, delete, 404 after destroy |
-| `TestAccCloudSchedulerJob` | Pub/Sub target job with a time zone and retry config, PATCH of description and schedule, pause, empty plan, 404 after destroy |
-| `TestAccFirestoreDocument` | Document create, refresh, empty plan, 404 after destroy |
-| `TestAccBigQueryDatasetAndTable` | Dataset and table with a schema, destroy |
-| `TestAccSpannerInstanceAndDatabase` | Instance with processing units, database with DDL, empty plan, 404 after destroy |
-| `TestAccPubSubTopicAndSubscription` | Topic and pull subscription over REST with retention, empty plan, 404 after destroy |
-| `TestAccComputeNetworkAndSubnetwork` | Custom network and regional subnetwork, empty plan, 404 after destroy |
-| `TestAccArtifactRegistryRepository` | Docker repository through a long-running operation, empty plan, 404 after destroy |
-| `TestAccServiceAccount` | Service account create, read, empty plan, destroy |
-| `TestAccCloudRunV2Service` | Cloud Run v2 service create, read, 404 after destroy |
-| `TestAccProjectIamPolicy` | Project IAM policy replace; runs last because it replaces the whole policy |
+| `TestLocalKMSKeyRingCryptoKey` | Key ring; crypto key with rotation period and primary version; versions destroyed with the key |
+| `TestLocalSecretManagerSecretAndVersion` | Secret with replication policy, version with payload, enable/destroy, 404 after destroy |
+| `TestLocalCloudTasksQueueLifecycle` | Queue with rate limits, PATCH update, delete, 404 after destroy |
+| `TestLocalCloudSchedulerJob` | Pub/Sub target job with a time zone and retry config, PATCH of description and schedule, pause, empty plan, 404 after destroy |
+| `TestLocalFirestoreDocument` | Document create, refresh, empty plan, 404 after destroy |
+| `TestLocalBigQueryDatasetAndTable` | Dataset and table with a schema, destroy |
+| `TestLocalSpannerInstanceAndDatabase` | Instance with processing units, database with DDL, empty plan, 404 after destroy |
+| `TestLocalPubSubTopicAndSubscription` | Topic and pull subscription over REST with retention, empty plan, 404 after destroy |
+| `TestLocalComputeNetworkAndSubnetwork` | Custom network and regional subnetwork, empty plan, 404 after destroy |
+| `TestLocalArtifactRegistryRepository` | Docker repository through a long-running operation, empty plan, 404 after destroy |
+| `TestLocalServiceAccount` | Service account create, read, empty plan, destroy |
+| `TestLocalCloudRunV2Service` | Cloud Run v2 service create, read, 404 after destroy |
+| `TestLocalProjectIamPolicy` | Project IAM policy replace; runs last because it replaces the whole policy |
 
 These cases prove the released provider accepts gcp-local's responses. They are not recorded from real GCP and never run against it; the API outcomes they rely on are recorded separately ([coverage](../coverage.md)).
 
@@ -35,7 +46,7 @@ sh scripts/check/terraform.sh
 
 The installer verifies checksums and keeps Terraform and the provider in `.tools/terraform`, served from a filesystem-only mirror. Every case runs in a loopback-only namespace. Results go to `.artifacts/terraform/results.json`; a skipped or unrun case counts as a failure.
 
-The check also runs a negative control: a fixture with a wrong bucket RPO must fail the upstream assertion (results in `.artifacts/terraform-fault`).
+The check also runs a negative control: a fixture with a wrong bucket RPO must fail the upstream `TestAccStorageBucket_basic` assertion (results in `.artifacts/terraform-fault`).
 
 ## Provider configuration
 

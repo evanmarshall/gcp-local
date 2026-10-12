@@ -106,7 +106,7 @@ sh scripts/check/sdk/cloudrun.sh                                          # Linu
 .venv-tools/bin/python scripts/smoke/cloudrun.py                                 # Linux with Docker
 ```
 
-The Docker-mode smoke builds `examples/workflow` as a user image, deploys it with Terraform, delivers Pub/Sub pushes with ID tokens, checks that the worker writes to Storage as its own service account, and checks that one environment's `reset` and `down` leave another environment's revision running. `TestAccCloudRunV2Service` passes ([Terraform](../contributing/terraform-compatibility.md)).
+The Docker-mode smoke builds `examples/workflow` as a user image, deploys it with Terraform, delivers Pub/Sub pushes with ID tokens, checks that the worker writes to Storage as its own service account, and checks that one environment's `reset` and `down` leave another environment's revision running. `TestLocalCloudRunV2Service` passes ([Terraform](../contributing/terraform-compatibility.md)).
 
 ## Gaps
 

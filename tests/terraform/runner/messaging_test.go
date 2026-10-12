@@ -40,8 +40,8 @@ func pubsubName() string {
 	return "gcp-local-tf-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccPubSubTopicAndSubscription creates a topic, a subscription, and destroys both.
-func TestAccPubSubTopicAndSubscription(t *testing.T) {
+// TestLocalPubSubTopicAndSubscription creates a topic, a subscription, and destroys both.
+func TestLocalPubSubTopicAndSubscription(t *testing.T) {
 	name := pubsubName()
 
 	localPubSubCase(t, resource.TestCase{
@@ -153,9 +153,9 @@ func queueName() string {
 	return "gcp-local-tf-queue-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccCloudTasksQueueLifecycle creates a queue with rate limits, updates
+// TestLocalCloudTasksQueueLifecycle creates a queue with rate limits, updates
 // it, then destroys it.
-func TestAccCloudTasksQueueLifecycle(t *testing.T) {
+func TestLocalCloudTasksQueueLifecycle(t *testing.T) {
 	name := queueName()
 
 	localTasksCase(t, resource.TestCase{

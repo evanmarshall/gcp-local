@@ -48,7 +48,7 @@ Run the checks for every area you change; CI runs all of them. "Linux" means CI 
 | `sh scripts/check/sdk/cloudtasks.sh` | Cloud Tasks with the Python SDK over gRPC, including dispatch | Linux | `requirements/services.txt` |
 | `sh scripts/check/clients.sh` | Go, Node.js, Python, gcloud, and rclone clients per service against `tests/clients/matrix.json` ([client matrix](../docs/contributing/clients.md)) | Linux | Java 17, `install/emulator_jar.py pubsub` and `firestore`, `install/spanner.py`, `install/client_tools.py`, `npm ci` in `tests/clients/node`, `tests/clients/python/requirements.txt` |
 | `sh scripts/check/sdk/cloudrun.sh` | Cloud Run with the Python SDK over gRPC | Linux | `requirements/services.txt` |
-| `sh scripts/check/terraform.sh` | Pinned upstream Terraform cases and an RPO negative control; never calls GCP | Linux | Java 17, every backend, `install/terraform.py` |
+| `sh scripts/check/terraform.sh` | Pinned Terraform cases (3 extracted from upstream, the rest written locally) and an RPO negative control; never calls GCP | Linux | Java 17, every backend, `install/terraform.py` |
 | `scripts/smoke/isolation.py` | `run/isolated.py` blocks egress and kills hung descendants | Linux, root | None |
 | `scripts/smoke/environment.py` | Packaged environment: every service under IAM, reset, teardown | Docker | `requirements/pubsub.txt` |
 | `scripts/smoke/workflow.py [--packaged [--cloud-run-docker]]` | Terraform Pub/Sub push to Cloud Run to Storage workflow; `--cloud-run-docker` runs a user-built image and checks per-environment container cleanup | Linux with Java 17, or Docker with `--packaged` | `requirements/pubsub.txt` |

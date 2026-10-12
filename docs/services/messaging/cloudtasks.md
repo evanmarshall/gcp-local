@@ -53,7 +53,7 @@ Rate limits, TTLs, and queue type are compared by presence only.
 sh scripts/check/recordings.sh
 ```
 
-`TestAccCloudTasksQueueLifecycle` passes ([Terraform](../../contributing/terraform-compatibility.md)).
+`TestLocalCloudTasksQueueLifecycle` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
 ## Gaps
 

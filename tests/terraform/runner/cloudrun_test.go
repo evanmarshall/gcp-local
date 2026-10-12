@@ -34,8 +34,8 @@ func localCloudRunCase(t *testing.T, test resource.TestCase) {
 	resource.Test(t, test)
 }
 
-// TestAccCloudRunV2Service creates, reads, and destroys one Cloud Run v2 service.
-func TestAccCloudRunV2Service(t *testing.T) {
+// TestLocalCloudRunV2Service creates, reads, and destroys one Cloud Run v2 service.
+func TestLocalCloudRunV2Service(t *testing.T) {
 	name := pubsubName()
 	localCloudRunCase(t, resource.TestCase{
 		PreCheck:          func() { preCheck(t) },

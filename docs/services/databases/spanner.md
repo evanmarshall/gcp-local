@@ -70,7 +70,7 @@ sh scripts/check/backend/spanner.sh          # provider and Go client against th
 sh scripts/check/recordings.sh   # both recordings
 ```
 
-`TestAccSpannerInstanceAndDatabase` passes ([Terraform](../../contributing/terraform-compatibility.md)).
+`TestLocalSpannerInstanceAndDatabase` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
 ## Gaps
 

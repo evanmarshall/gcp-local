@@ -81,7 +81,7 @@ sh scripts/check/recordings.sh   # the symmetric recording
 sh scripts/check/sdk/cloudkms.sh         # google-cloud-kms over REST and gRPC, and the Go client over gRPC, with local ADC
 ```
 
-`cloudkms-asymmetric-mac-keys` was recorded and revalidated against GCP on 2026-10-12 and matches locally (`sh scripts/check/recordings.sh`): sign by digest and data, public key PEM and CRC32C, HMAC sign and verify, CRC32C and digest refusals, wrong-purpose and disabled-version `FAILED_PRECONDITION`, destroy and restore. `TestAccKMSKeyRingCryptoKey` passes ([Terraform](../../contributing/terraform-compatibility.md)).
+`cloudkms-asymmetric-mac-keys` was recorded and revalidated against GCP on 2026-10-12 and matches locally (`sh scripts/check/recordings.sh`): sign by digest and data, public key PEM and CRC32C, HMAC sign and verify, CRC32C and digest refusals, wrong-purpose and disabled-version `FAILED_PRECONDITION`, destroy and restore. `TestLocalKMSKeyRingCryptoKey` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
 ## Gaps
 

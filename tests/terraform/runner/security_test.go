@@ -40,9 +40,9 @@ func kmsName(prefix string) string {
 	return "gcp-local-tf-" + prefix + "-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccKMSKeyRingCryptoKey exercises the local Cloud KMS slice with the
+// TestLocalKMSKeyRingCryptoKey exercises the local Cloud KMS slice with the
 // pinned provider: a key ring, a symmetric crypto key, and its rotation.
-func TestAccKMSKeyRingCryptoKey(t *testing.T) {
+func TestLocalKMSKeyRingCryptoKey(t *testing.T) {
 	ringName := kmsName("ring")
 	keyName := kmsName("key")
 
@@ -158,9 +158,9 @@ func secretName() string {
 	return "gcp-local-tf-secret-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccSecretManagerSecretAndVersion creates a secret with a replication
+// TestLocalSecretManagerSecretAndVersion creates a secret with a replication
 // policy, adds a version, reads it back, and destroys both.
-func TestAccSecretManagerSecretAndVersion(t *testing.T) {
+func TestLocalSecretManagerSecretAndVersion(t *testing.T) {
 	name := secretName()
 
 	localSecretCase(t, resource.TestCase{
@@ -255,8 +255,8 @@ func saName() string {
 	return "gcp-local-tf-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccServiceAccount creates a service account and destroys it.
-func TestAccServiceAccount(t *testing.T) {
+// TestLocalServiceAccount creates a service account and destroys it.
+func TestLocalServiceAccount(t *testing.T) {
 	name := saName()
 	localIAMCase(t, resource.TestCase{
 		PreCheck:          func() { preCheck(t) },

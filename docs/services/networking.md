@@ -64,7 +64,7 @@ sh scripts/go.sh test -race ./internal/providers/compute
 sh scripts/check/recordings.sh   # both recordings
 ```
 
-`TestAccComputeNetworkAndSubnetwork` passes ([Terraform](../contributing/terraform-compatibility.md)).
+`TestLocalComputeNetworkAndSubnetwork` passes ([Terraform](../contributing/terraform-compatibility.md)).
 
 ## Gaps
 

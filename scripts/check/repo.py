@@ -85,9 +85,19 @@ def check_coverage(errors: list[str]) -> None:
         return sorted(path.name for path in (ROOT / directory).iterdir() if path.is_dir())
 
     selection = yaml.safe_load((ROOT / "tests/terraform/selection.json").read_text())
+    upstream = ROOT / "third_party/terraform-provider-google/manifest.json"
+    extracted = yaml.safe_load(upstream.read_text())["functions"]
+    tf_label = "tests/terraform/selection.json"
+    if set(selection["upstream_test_ids"]) != {n for n in extracted if n.startswith("Test")}:
+        errors.append(f"{tf_label}: upstream_test_ids must match the extracted functions")
+    errors.extend(
+        f"{tf_label}: local case {name} must start with TestLocal"
+        for name in selection["local_test_ids"]
+        if not name.startswith("TestLocal")
+    )
     for kind, required in (
         ("recording", sorted(layout.replay.recordings(ROOT))),
-        ("Terraform case", selection["test_ids"]),
+        ("Terraform case", selection["upstream_test_ids"] + selection["local_test_ids"]),
     ):
         errors.extend(
             f"{label}: {kind} {name} missing from the summary table"

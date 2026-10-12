@@ -31,7 +31,7 @@ Pinned roles: `roles/iam.serviceAccountAdmin`, `.serviceAccountViewer`, `.servic
 sh scripts/check/recordings.sh
 ```
 
-`TestAccServiceAccount` passes ([Terraform](../../contributing/terraform-compatibility.md)).
+`TestLocalServiceAccount` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
 To re-record, get an approved `.gcp-local/serviceaccounts-scope.json` (`LIMITS` in `gcp_validation/services/security/serviceaccounts.py`) and a temporary `roles/iam.serviceAccountAdmin` on the fixture identity:
 

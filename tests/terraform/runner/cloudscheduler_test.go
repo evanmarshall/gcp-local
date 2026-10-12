@@ -34,10 +34,10 @@ func localSchedulerCase(t *testing.T, test resource.TestCase) {
 	resource.Test(t, test)
 }
 
-// TestAccCloudSchedulerJob creates a yearly Pub/Sub target job, updates its
+// TestLocalCloudSchedulerJob creates a yearly Pub/Sub target job, updates its
 // description and schedule and pauses it, then destroys it. The job never
 // runs inside the test.
-func TestAccCloudSchedulerJob(t *testing.T) {
+func TestLocalCloudSchedulerJob(t *testing.T) {
 	name := "gcp-local-tf-job-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 
 	localSchedulerCase(t, resource.TestCase{

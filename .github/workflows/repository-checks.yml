@@ -238,7 +238,7 @@ jobs:
         run: |
           sh scripts/go.sh -C tests/terraform/runner test -c -o "$PWD/bin/terraform-tests" .
           sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance
-      - name: Run upstream acceptance cases and the metadata negative control without egress
+      - name: Run Terraform acceptance cases and the metadata negative control without egress
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             GCP_LOCAL_JAVA=/usr/lib/jvm/java-17-openjdk-amd64/bin/java sh scripts/check/terraform.sh

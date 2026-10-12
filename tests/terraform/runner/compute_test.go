@@ -39,8 +39,8 @@ func computeName() string {
 	return "gcp-local-tf-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccComputeNetworkAndSubnetwork creates a network, a subnetwork, and destroys both.
-func TestAccComputeNetworkAndSubnetwork(t *testing.T) {
+// TestLocalComputeNetworkAndSubnetwork creates a network, a subnetwork, and destroys both.
+func TestLocalComputeNetworkAndSubnetwork(t *testing.T) {
 	name := computeName()
 
 	localComputeCase(t, resource.TestCase{

@@ -39,8 +39,8 @@ func arName() string {
 	return "gcp-local-tf-" + fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000)
 }
 
-// TestAccArtifactRegistryRepository creates a repository and destroys it.
-func TestAccArtifactRegistryRepository(t *testing.T) {
+// TestLocalArtifactRegistryRepository creates a repository and destroys it.
+func TestLocalArtifactRegistryRepository(t *testing.T) {
 	name := arName()
 
 	localArtifactRegistryCase(t, resource.TestCase{

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the allowlisted compiled upstream acceptance tests inside local isolation."""
+"""Run the allowlisted Terraform acceptance tests (upstream-extracted and local) in isolation."""
 
 import argparse
 import json
@@ -44,7 +44,7 @@ def negative_control(root: Path) -> int:
 
 
 def main() -> int:
-    """Run the allowlisted compiled upstream acceptance tests in isolation."""
+    """Run the allowlisted Terraform acceptance tests in isolation."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test", help="One exact allowlisted ID; defaults to the entire selection")
     parser.add_argument("--output", default=".artifacts/terraform")
@@ -67,9 +67,10 @@ def main() -> int:
     artifacts = root / args.output
     artifacts.mkdir(parents=True, exist_ok=True)
     selection = json.loads((root / "tests/terraform/selection.json").read_text())
-    if args.test and args.test not in selection["test_ids"]:
+    selected = selection["upstream_test_ids"] + selection["local_test_ids"]
+    if args.test and args.test not in selected:
         parser.error("Test ID is outside the pinned selection")
-    tests = [args.test] if args.test else selection["test_ids"]
+    tests = [args.test] if args.test else selected
     with tempfile.TemporaryDirectory(prefix="gcp-local-tf-run-") as temporary:
         config = Path(temporary) / "terraform.rc"
         config.write_text(

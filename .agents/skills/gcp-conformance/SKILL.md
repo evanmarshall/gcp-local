@@ -38,7 +38,7 @@ When a new scenario is cheap and leaves nothing behind, add it to `.github/drift
 
 ## Terraform and networking
 
-Pin the provider and the selected acceptance tests. Cover create, read, update, delete, refresh, polling, and an unchanged second plan. Keep unknown and unsupported reachability results; a local socket connection is not a GCP reachability oracle.
+Pin the provider and the selected acceptance tests. A case extracted from the upstream provider keeps its `TestAcc*` name and goes in `upstream_test_ids` of `tests/terraform/selection.json`; a case written here is named `TestLocal*` and goes in `local_test_ids`. Never call a local case upstream. Cover create, read, update, delete, refresh, polling, and an unchanged second plan. Keep unknown and unsupported reachability results; a local socket connection is not a GCP reachability oracle.
 
 ## Report
 

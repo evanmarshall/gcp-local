@@ -67,7 +67,7 @@ Locations, CMEK config, and operations methods return `UNIMPLEMENTED`. An anonym
 sh scripts/check/recordings.sh
 ```
 
-`TestAccCloudSchedulerJob` passes ([Terraform](../../contributing/terraform-compatibility.md)). The Go, Python, and Node.js clients pass the [client matrix](../../contributing/clients.md).
+`TestLocalCloudSchedulerJob` passes ([Terraform](../../contributing/terraform-compatibility.md)). The Go, Python, and Node.js clients pass the [client matrix](../../contributing/clients.md).
 
 ## Gaps
 

@@ -34,6 +34,7 @@ Replace any list of services or recording counts outside `docs/coverage.md` with
 - **Recorded** means a committed recording under `tests/conformance/recordings/<id>/` with `"source": "gcp"` and `"reviewed": true`, and the local check passed against it. Anything else is "modeled locally" or "not recorded".
 - **Methods served** counts methods that run. Routes that return `UNIMPLEMENTED` don't count. Recount from the provider's dispatch or permission plans, not from `api/generated/*_routes.go`, which lists every route.
 - Don't write "matches" or "passes" unless you ran the check in this change.
+- Name the evidence's source. A Terraform case is upstream only when it is in `upstream_test_ids`.
 
 ## Verify
 

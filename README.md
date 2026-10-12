@@ -77,7 +77,7 @@ IAM allow policies use predefined roles recorded from Google Cloud. IAM conditio
 
 A single gateway routes requests to per-service providers, following [LocalStack](https://github.com/localstack/localstack)'s architecture. Providers authenticate and authorize before touching state, and reuse real backends (Google's emulators, PostgreSQL, MySQL, Redis) where they exist. API routes are generated from Google's published API definitions ([design](docs/design.md), [LocalStack comparison](docs/architecture/localstack-comparison.md)).
 
-Scenarios are recorded once against a sandbox Google Cloud project and replayed against the emulator in CI, alongside pinned Terraform provider acceptance tests and client-library tests ([validation](docs/contributing/validation.md)).
+Scenarios are recorded once against a sandbox Google Cloud project and replayed against the emulator in CI, alongside Terraform acceptance cases run with the pinned google provider (3 extracted from the provider's upstream tests, the rest written locally; [Terraform](docs/contributing/terraform-compatibility.md)) and client-library tests ([validation](docs/contributing/validation.md)).
 
 ## Limitations
 

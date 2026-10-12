@@ -60,8 +60,8 @@ data "google_iam_policy" "policy" {%s}
 `, projectID, bindings)
 }
 
-// TestAccProjectIamPolicy sets and reads the project IAM policy.
-func TestAccProjectIamPolicy(t *testing.T) {
+// TestLocalProjectIamPolicy sets and reads the project IAM policy.
+func TestLocalProjectIamPolicy(t *testing.T) {
 	localResourceManagerCase(t, resource.TestCase{
 		PreCheck:          func() { preCheck(t) },
 		ExternalProviders: pinnedProvider(),
