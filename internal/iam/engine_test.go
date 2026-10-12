@@ -584,44 +584,6 @@ func TestDenyRulesOverrideAllowBindings(t *testing.T) {
 	}
 }
 
-func TestPrincipalAccessBoundaryBoundsServiceAgents(t *testing.T) {
-	engine, _ := setup(t)
-	// A service-agent principal outside the boundary policy.
-	agent := "serviceAgent:service-1234@gcp-sa-storage.iam.gserviceaccount.com"
-	read := call("storage.objects.get", fixture, testProject)
-	read.Principal = gateway.Principal{
-		State: gateway.Authenticated, Subject: agent,
-		Scopes: []string{testCloudPlatformScope},
-	}
-	pab := iam.Policy{
-		Version: 3,
-		PAB: &iam.PABPolicy{Rules: []iam.PABRule{{
-			BoundCloudResources: []string{"//cloudresourcemanager.googleapis.com/projects/" + testProject},
-		}}},
-	}
-	if _, err := engine.SetPolicy(projectA, pab); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("out-of-boundary service agent was not denied: %v", err)
-	}
-	// A user principal is not bounded by PAB policies. Clearing the PAB and
-	// granting the user reads the object.
-	user := call("storage.objects.get", fixture, testProject)
-	user.Principal = gateway.Principal{
-		State: gateway.Authenticated, Subject: "user:person@example.com",
-		Scopes: []string{testCloudPlatformScope},
-	}
-	if _, err := engine.SetPolicy(projectA, iam.Policy{
-		Bindings: []iam.Binding{{Role: "roles/storage.objectViewer", Members: []string{"user:person@example.com"}}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.Authorize(user, object(), nil); status.Code(err) == codes.PermissionDenied {
-		t.Fatalf("bounded-policy removal still denied the user: %v", err)
-	}
-}
-
 func TestOrgPolicyAndVPCSCSignalDistinctFromIAMDenial(t *testing.T) {
 	engine, _ := setup(t)
 	// A granted user read plus a dry-run org-policy violation and a perimeter.

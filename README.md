@@ -69,7 +69,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [IAM](docs/serviceaccounts.md) and [project IAM](docs/project-iam.md) | gcp-local | Service accounts and policies |
 | [VPC networking](docs/networking.md) | gcp-local | Connectivity verdicts; no real traffic |
 
-IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage; on other services a conditional binding grants nothing. Deny policies and principal access boundaries are modeled locally but not recorded; organization policy and VPC Service Controls are not enforced ([IAM](docs/iam.md)).
+IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage and also evaluated for Cloud SQL; on other services a condition that reads `resource.*` grants nothing. Deny rules and principal access boundaries for service accounts are enforced locally but not recorded; organization policy and VPC Service Controls are not enforced ([IAM](docs/iam.md)).
 
 ## How it works
 

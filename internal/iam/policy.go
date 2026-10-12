@@ -25,13 +25,13 @@ type Policy struct {
 	ETag string     `json:"etag"`
 }
 
-// PABPolicy bounds the cloud resources service agents of this hierarchy may
-// touch; a service-agent request outside every bound fails closed.
+// PABPolicy bounds the resources the principal set of the resource-manager
+// node it is stored on may reach; see pabViolation.
 type PABPolicy struct {
 	Rules []PABRule `json:"rules"`
 }
 
-// PABRule is one boundary rule: a resource list its service agents stay in.
+// PABRule is one boundary rule: the resources its enrolled principals stay in.
 type PABRule struct {
 	BoundCloudResources []string `json:"boundCloudResources"`
 }
@@ -105,7 +105,10 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	if err := validatePolicyShape(policy); err != nil {
 		return Policy{}, err
 	}
-	denies, err := compileDenies(policy.DenyRules)
+	if policy.PAB != nil && (owner.Service != "resourcemanager" || owner.Kind == "") {
+		return Policy{}, status.Error(codes.InvalidArgument, "A principal access boundary binds only to a project, folder, or organization principal set")
+	}
+	denies, err := e.compileDenies(policy.DenyRules)
 	if err != nil {
 		return Policy{}, err
 	}
@@ -153,11 +156,35 @@ func validateVersion(policy Policy) error {
 	return nil
 }
 
-// compileDenies compiles each deny rule's optional denial condition.
-func compileDenies(rules []DenyRule) ([]storedDeny, error) {
+// Deny-policy identifier prefixes, the project node prefix, and its kind.
+const (
+	userIdentifierPrefix           = "principal://goog/subject/"
+	serviceAccountIdentifierPrefix = "principal://iam.googleapis.com/projects/-/serviceAccounts/"
+	projectNodePrefix              = "//cloudresourcemanager.googleapis.com/projects/"
+	kindProject                    = "project"
+)
+
+// compileDenies validates each deny rule's principals and permissions and
+// compiles its optional denial condition. An identifier or permission the
+// engine cannot match is refused, so a rule never silently fails to deny.
+func (e *Engine) compileDenies(rules []DenyRule) ([]storedDeny, error) {
 	var compiled []storedDeny
 	for _, rule := range rules {
-		deny := storedDeny{rule: rule}
+		for _, principal := range append(append([]string(nil), rule.DeniedPrincipals...), rule.ExceptionPrincipals...) {
+			if !denyPrincipalSupported(principal) {
+				return nil, status.Error(codes.Unimplemented, "Deny principal identifier is unsupported: "+principal)
+			}
+		}
+		denied, err := e.denyPermissions(rule.DeniedPermissions)
+		if err != nil {
+			return nil, err
+		}
+		excepted, err := e.denyPermissions(rule.ExceptionPermissions)
+		if err != nil {
+			return nil, err
+		}
+		deny := storedDeny{rule: DenyRule{DeniedPrincipals: append([]string(nil), rule.DeniedPrincipals...),
+			ExceptionPrincipals: append([]string(nil), rule.ExceptionPrincipals...), DeniedPermissions: denied, ExceptionPermissions: excepted}}
 		if len(rule.DenialCondition) > 0 {
 			condition, err := compileCondition(rule.DenialCondition)
 			if err != nil {
@@ -168,6 +195,38 @@ func compileDenies(rules []DenyRule) ([]storedDeny, error) {
 		compiled = append(compiled, deny)
 	}
 	return compiled, nil
+}
+
+// denyPrincipalSupported accepts the public set, GCP's v2 user and service
+// account identifiers, and the allow-policy user:/serviceAccount: members.
+func denyPrincipalSupported(principal string) bool {
+	if principal == publicPrincipalSet {
+		return true
+	}
+	for _, prefix := range []string{userIdentifierPrefix, serviceAccountIdentifierPrefix, "user:", "serviceAccount:"} {
+		if email, ok := strings.CutPrefix(principal, prefix); ok && strings.Contains(email, "@") {
+			return true
+		}
+	}
+	return false
+}
+
+// denyPermissions converts v2 names (storage.googleapis.com/objects.get) to
+// the v1 names checks use, and refuses a name no pinned role contains. A
+// trailing * matches every permission with that prefix.
+func (e *Engine) denyPermissions(permissions []string) ([]string, error) {
+	converted := make([]string, 0, len(permissions))
+	for _, permission := range permissions {
+		if service, rest, ok := strings.Cut(permission, ".googleapis.com/"); ok {
+			permission = service + "." + rest
+		}
+		prefix, wildcard := strings.CutSuffix(permission, "*")
+		if (wildcard && !strings.Contains(prefix, ".")) || (!wildcard && !e.roleGrants(permission)) {
+			return nil, status.Error(codes.Unimplemented, "Deny permission is outside the pinned roles: "+permission)
+		}
+		converted = append(converted, permission)
+	}
+	return converted, nil
 }
 
 // compileBindings validates each binding in order and compiles its condition.

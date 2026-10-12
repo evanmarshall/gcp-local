@@ -11,19 +11,13 @@ import (
 )
 
 // conditionContext is the CEL evaluation context of one authorization check.
-// Only the fields the local emulator can resolve are exposed; everything else
-// stays unset and any condition referencing it fails closed.
+// Only the fields the provider supplied are exposed; an empty field is absent,
+// and any expression that reads it fails to evaluate.
 type conditionContext struct {
 	ResourceType string
 	ResourceName string
 	Service      string
 	Now          time.Time
-}
-
-// conditionResult is the verdict of one condition evaluation.
-type conditionResult struct {
-	Allowed bool
-	Reason  string
 }
 
 // evaluated runs the CEL program against the context.
@@ -67,25 +61,30 @@ func compileCondition(raw json.RawMessage) (*evaluated, error) {
 	return &evaluated{program: program, title: shape.Title}, nil
 }
 
-// evaluate evaluates one compiled condition; any error fails closed.
-func (e *evaluated) evaluate(ctx conditionContext) conditionResult {
-	values := map[string]any{
-		"resource": map[string]string{
-			"type":    ctx.ResourceType,
-			"name":    ctx.ResourceName,
-			"service": ctx.Service,
-		},
-		// request.time is a timestamp, so comparisons with timestamp() work.
-		"request": map[string]any{"time": ctx.Now},
+// errConditionValue reports an expression that produced no boolean.
+var errConditionValue = errors.New("the condition did not produce a boolean")
+
+// evaluate runs one compiled condition. Only attributes the provider supplied
+// are present, so an expression that reads a missing attribute returns an
+// error instead of comparing against a default. Callers decide what an error
+// means: it never grants an allow binding and always applies a deny rule.
+func (e *evaluated) evaluate(ctx conditionContext) (bool, error) {
+	resource := map[string]string{}
+	for key, value := range map[string]string{"type": ctx.ResourceType, "name": ctx.ResourceName, "service": ctx.Service} {
+		if value != "" {
+			resource[key] = value
+		}
 	}
-	out, _, err := e.program.Eval(values)
+	// request.time is a timestamp, so comparisons with timestamp() work.
+	out, _, err := e.program.Eval(map[string]any{"resource": resource, "request": map[string]any{"time": ctx.Now}})
 	if err != nil {
-		return conditionResult{Allowed: false, Reason: "condition " + e.title + " could not be evaluated"}
+		return false, fmt.Errorf("evaluate the condition: %w", err)
 	}
-	if truth, ok := out.Value().(bool); ok && truth {
-		return conditionResult{Allowed: true, Reason: "condition " + e.title + " matched"}
+	truth, ok := out.Value().(bool)
+	if !ok {
+		return false, errConditionValue
 	}
-	return conditionResult{Allowed: false, Reason: "condition " + e.title + " did not match"}
+	return truth, nil
 }
 
 // conditionGuard is the compiled form of a policy's conditions by binding.
@@ -94,13 +93,21 @@ type conditionGuard struct {
 	condition    *evaluated
 }
 
-// evaluateBinding evaluates the condition of one stored binding index.
-func (s storedPolicy) evaluateBinding(index int, attributes conditionContext) conditionResult {
+// evaluateBinding evaluates the condition of one stored binding index. A
+// condition that is missing, false, or cannot be evaluated grants nothing.
+func (s storedPolicy) evaluateBinding(index int, attributes conditionContext) (bool, string) {
 	for _, guard := range s.conditions {
 		if guard.bindingIndex != index {
 			continue
 		}
-		return guard.condition.evaluate(attributes)
+		matched, err := guard.condition.evaluate(attributes)
+		switch {
+		case err != nil:
+			return false, "condition " + guard.condition.title + " could not be evaluated"
+		case matched:
+			return true, "condition " + guard.condition.title + " matched"
+		}
+		return false, "condition " + guard.condition.title + " did not match"
 	}
-	return conditionResult{Allowed: false, Reason: "the binding condition was not compiled"}
+	return false, "the binding condition was not compiled"
 }

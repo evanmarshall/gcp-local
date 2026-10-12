@@ -160,7 +160,7 @@ func publishHierarchy(index *state.Index, engine *Engine, resources []state.Reso
 func validateHierarchyResource(resource state.Resource) error {
 	prefix := "//cloudresourcemanager.googleapis.com/"
 	switch resource.Kind {
-	case "project":
+	case kindProject:
 		if resource.Name != prefix+"projects/"+resource.Scope.Project {
 			return errConfigProject
 		}

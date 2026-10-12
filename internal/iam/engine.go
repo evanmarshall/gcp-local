@@ -192,7 +192,7 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 	if refused {
 		return finish(outcomeUnsupported, refusal, codes.Unimplemented)
 	}
-	if violation := e.pabViolation(ancestors, call); violation != "" {
+	if violation := e.pabViolation(ancestors, decision.Principal); violation != "" {
 		return finish(outcomeDeny, violation, codes.PermissionDenied)
 	}
 	denied := e.collectChecks(&decision, permissions, ancestors, decision.Principal)
@@ -403,17 +403,12 @@ func (e *Engine) collectChecks(decision *Decision, permissions []string, ancesto
 // bindings for one permission, returning the recorded check.
 func (e *Engine) evaluatePermission(decision *Decision, ancestors []state.Resource, permission string, principal gateway.Principal) Check {
 	check := Check{Permission: permission, Target: decision.Method, Policies: []string{}}
-	denyMatch, excepted := e.denialPhase(ancestors, permission, principal, &check)
-	switch {
-	case denyMatch != "" && !excepted:
+	if denyMatch := e.denialPhase(ancestors, permission, principal, decision.conditions, &check); denyMatch != "" {
 		check.Conditions = append(check.Conditions, "denied by "+denyMatch)
-	case excepted:
-		check.Conditions = append(check.Conditions, "denial excepted for "+principal.Subject)
+		return check
 	}
-	if denyMatch == "" || excepted {
-		for _, ancestor := range ancestors {
-			e.matchBindings(&check, ancestor.Name, permission, principal, decision.conditions)
-		}
+	for _, ancestor := range ancestors {
+		e.matchBindings(&check, ancestor.Name, permission, principal, decision.conditions)
 	}
 	return check
 }
@@ -428,9 +423,9 @@ func (e *Engine) matchBindings(check *Check, policyName, permission string, prin
 			continue
 		}
 		if len(binding.Condition) > 0 {
-			verdict := stored.evaluateBinding(index, attributes)
-			check.Conditions = append(check.Conditions, verdict.Reason)
-			if !verdict.Allowed {
+			matched, reason := stored.evaluateBinding(index, attributes)
+			check.Conditions = append(check.Conditions, reason)
+			if !matched {
 				continue
 			}
 		}
@@ -471,7 +466,7 @@ func (e *Engine) ancestry(target Target) ([]state.Resource, error) {
 		}
 		result = append(result, resource)
 		if resource.Parent == "" {
-			if resource.Kind != "project" && resource.Kind != "organization" {
+			if resource.Kind != kindProject && resource.Kind != "organization" {
 				return nil, errHierarchyRoot
 			}
 			return result, nil
@@ -508,91 +503,135 @@ func (e *Engine) Decision(id string) (Decision, bool) {
 	return cloneDecision(decision), ok
 }
 
-// matchDenies returns the first deny rule that matches one permission check,
-// honoring exceptions; deny policies override allow bindings.
-func (e *Engine) matchDenies(policyName, permission string, principal gateway.Principal) (string, bool) {
-	stored := e.policies[policyName]
-	for _, deny := range stored.denies {
-		if permissionDeniedBy(deny.rule, permission, principal) {
-			return "deny rule on " + policyName, false
-		}
-		if principalExcepted(deny.rule, principal) {
-			return "deny rule on " + policyName, true
-		}
-	}
-	return "", false
-}
-
-// principalExcepted reports whether the principal is exempted from a rule.
-func principalExcepted(rule DenyRule, principal gateway.Principal) bool {
-	return slices.Contains(rule.ExceptionPrincipals, principal.Subject)
-}
-
-// permissionDeniedBy reports whether one deny rule denies the check.
-func permissionDeniedBy(rule DenyRule, permission string, principal gateway.Principal) bool {
-	if principal.State != gateway.Authenticated || principalExcepted(rule, principal) {
-		return false
-	}
-	return permissionDenied(permission, rule) && principalDenied(rule, principal)
-}
-
-// permissionDenied reports whether the rule covers one permission.
-func permissionDenied(permission string, rule DenyRule) bool {
-	if slices.Contains(rule.ExceptionPermissions, permission) {
-		return false
-	}
-	return slices.Contains(rule.DeniedPermissions, permission) ||
-		slices.ContainsFunc(rule.DeniedPermissions, func(denied string) bool {
-			return strings.HasSuffix(denied, "*") && strings.HasPrefix(permission, strings.TrimSuffix(denied, "*"))
-		})
-}
-
-// principalDenied reports whether the rule covers one authenticated principal.
-func principalDenied(rule DenyRule, principal gateway.Principal) bool {
-	return slices.Contains(rule.DeniedPrincipals, principal.Subject) ||
-		slices.Contains(rule.DeniedPrincipals, "principalSet://all")
-}
-
-// denialPhase scans the ancestor chain for a matching deny rule and records
-// the considered policies on the check.
-func (e *Engine) denialPhase(ancestors []state.Resource, permission string, principal gateway.Principal, check *Check) (string, bool) {
-	denyMatch, excepted := "", false
+// denialPhase evaluates every deny rule at every ancestor independently and
+// returns the first that applies. An exception exempts the principal from its
+// own rule only.
+func (e *Engine) denialPhase(ancestors []state.Resource, permission string, principal gateway.Principal, attributes conditionContext, check *Check) string {
+	match := ""
 	for _, ancestor := range ancestors {
 		check.Policies = append(check.Policies, ancestor.Name)
-		if denyMatch == "" {
-			denyMatch, excepted = e.matchDenies(ancestor.Name, permission, principal)
+		for index, deny := range e.policies[ancestor.Name].denies {
+			if match == "" && deny.applies(permission, principal, attributes, check) {
+				match = fmt.Sprintf("deny rule %d on %s", index, ancestor.Name)
+			}
 		}
 	}
-	return denyMatch, excepted
+	return match
 }
 
-// pabViolation reports whether a service-agent request falls outside every
-// principal access boundary configured on the ancestor chain. Only
-// service-agent principals are bounded; user and workload principals are not.
-func (e *Engine) pabViolation(ancestors []state.Resource, call gateway.Call) string {
-	if !strings.Contains(call.Principal.Subject, ".iam.gserviceaccount.com") ||
-		!strings.HasPrefix(call.Principal.Subject, "serviceAgent:") {
-		return ""
+// applies reports whether one deny rule denies the check. GCP applies a rule
+// whose denial condition is true or cannot be evaluated.
+func (d storedDeny) applies(permission string, principal gateway.Principal, attributes conditionContext, check *Check) bool {
+	identities := denyIdentities(principal)
+	if !permissionDenied(permission, d.rule) || !slices.ContainsFunc(d.rule.DeniedPrincipals, identities) {
+		return false
 	}
-	for _, ancestor := range ancestors {
-		stored := e.policies[ancestor.Name]
-		if stored.pab == nil {
+	if slices.ContainsFunc(d.rule.ExceptionPrincipals, identities) {
+		check.Conditions = append(check.Conditions, "deny rule excepts the principal")
+		return false
+	}
+	if d.condition == nil {
+		return true
+	}
+	matched, err := d.condition.evaluate(attributes)
+	switch {
+	case err != nil:
+		check.Conditions = append(check.Conditions, "denial condition "+d.condition.title+" could not be evaluated; the rule applies")
+		return true
+	case matched:
+		check.Conditions = append(check.Conditions, "denial condition "+d.condition.title+" matched")
+		return true
+	}
+	check.Conditions = append(check.Conditions, "denial condition "+d.condition.title+" did not match")
+	return false
+}
+
+// permissionDenied reports whether the rule covers one permission. Stored
+// rules hold v1 permission names (storage.objects.get).
+func permissionDenied(permission string, rule DenyRule) bool {
+	covers := func(denied string) bool {
+		return denied == permission || (strings.HasSuffix(denied, "*") && strings.HasPrefix(permission, strings.TrimSuffix(denied, "*")))
+	}
+	return slices.ContainsFunc(rule.DeniedPermissions, covers) && !slices.ContainsFunc(rule.ExceptionPermissions, covers)
+}
+
+// publicPrincipalSet is the deny-policy identifier for every caller,
+// including anonymous ones.
+const publicPrincipalSet = "principalSet://goog/public:all"
+
+// denyIdentities returns a matcher for the deny-policy identifiers that name
+// the principal: the public set, GCP's v2 identifiers, and the allow-policy
+// member form the local engine also accepts.
+func denyIdentities(principal gateway.Principal) func(string) bool {
+	names := map[string]bool{publicPrincipalSet: true}
+	if principal.State == gateway.Authenticated {
+		names[principal.Subject] = true
+		if email, ok := strings.CutPrefix(principal.Subject, "user:"); ok {
+			names[userIdentifierPrefix+email] = true
+		}
+		if email, ok := strings.CutPrefix(principal.Subject, "serviceAccount:"); ok {
+			names[serviceAccountIdentifierPrefix+email] = true
+		}
+	}
+	return func(identifier string) bool { return names[identifier] }
+}
+
+// pabViolation enforces principal access boundaries. A service account
+// NAME@PROJECT.iam.gserviceaccount.com is enrolled in the principal sets of its
+// project and that project's folders and organization; a boundary stored on
+// one of those nodes binds it. An enrolled principal may only reach resources
+// inside the union of its boundaries' bound resources and their descendants.
+func (e *Engine) pabViolation(ancestors []state.Resource, principal gateway.Principal) string {
+	sets, err := e.principalSets(principal)
+	if err != nil {
+		return "Principal access boundary enrollment cannot be resolved: " + err.Error()
+	}
+	enrolled := false
+	for _, set := range sets {
+		pab := e.policies[set.Name].pab
+		if pab == nil {
 			continue
 		}
-		if pabBounds(stored.pab, call.Resource) {
+		enrolled = true
+		if pabBounds(pab, ancestors) {
 			return ""
 		}
-		return "The request is outside every principal access boundary bound at " + ancestor.Name
+	}
+	if enrolled {
+		return "The request is outside every principal access boundary the principal is subject to"
 	}
 	return ""
 }
 
-// pabBounds reports whether any boundary rule covers the requested resource.
-func pabBounds(pab *PABPolicy, resource string) bool {
-	for _, rule := range pab.Rules {
-		for _, bound := range rule.BoundCloudResources {
-			if strings.Contains(resource, bound) {
-				return true
+// principalSets resolves the resource-manager nodes whose principal sets
+// contain the caller. Only service accounts of an indexed project are enrolled;
+// users, Google-managed service agents, and anonymous callers are not.
+func (e *Engine) principalSets(principal gateway.Principal) ([]state.Resource, error) {
+	email, ok := strings.CutPrefix(principal.Subject, "serviceAccount:")
+	if principal.State != gateway.Authenticated || !ok {
+		return nil, nil
+	}
+	_, domain, _ := strings.Cut(email, "@")
+	project, ok := strings.CutSuffix(domain, ".iam.gserviceaccount.com")
+	if !ok {
+		return nil, nil
+	}
+	name := projectNodePrefix + project
+	if _, found := e.index.Get(name); !found {
+		return nil, nil
+	}
+	return e.ancestry(Target{Name: name})
+}
+
+// pabBounds reports whether any boundary rule lists the target or one of its
+// ancestors, by resource name or, for a project, by project number.
+func pabBounds(pab *PABPolicy, ancestors []state.Resource) bool {
+	for _, ancestor := range ancestors {
+		for _, rule := range pab.Rules {
+			for _, bound := range rule.BoundCloudResources {
+				if bound == ancestor.Name || (ancestor.Kind == kindProject && ancestor.Number != "" && bound == projectNodePrefix+ancestor.Number) {
+					return true
+				}
 			}
 		}
 	}

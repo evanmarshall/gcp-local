@@ -19,12 +19,33 @@ Each provider registers its plans with `Engine.Register` when it starts (Storage
 - Missing parents, cycles, conflicting ownership, and unverified target shapes fail closed.
 - Members: exact `user:` and `serviceAccount:`, `allUsers`, `allAuthenticatedUsers`. Absent credentials never become an administrator; unknown or expired tokens stay unauthenticated.
 - OAuth scopes are checked before policy: when none of the token's scopes covers every permission the plan resolves to, the call is 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`. `cloud-platform` covers every plan; the [scope table](local-identity.md#oauth-scopes) lists the rest. Scopes outside the allowlist cover nothing.
-- IAM conditions (CEL) see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers pass resource attributes through `iam.Target.Attributes`; only Storage and Cloud SQL do, so conditions elsewhere fail closed. Storage conditions are recorded (`storage-iam-conditions`).
-- Deny rules (deny overrides allow) and principal access boundary policies are modeled locally and not recorded. Recording deny policies needs `roles/iam.denyAdmin`, which is grantable only at an organization.
+- Deny rules run before allow bindings, and principal access boundaries run before both ([below](#conditions-deny-rules-and-boundaries)).
 - `MarkUnsupported` stores known advanced configuration as a fail-closed marker; a matching allow can't bypass it.
 - Not supported: groups, custom roles, roles without a committed snapshot.
 
 Policies are stored once per owning service and scope, returned as copies, and replaced only with a matching etag. A service reset clears that service's resource policies for the scope and keeps project and organization policy.
+
+## Conditions, deny rules, and boundaries
+
+Only allow-binding conditions on Storage are recorded against GCP (`storage-iam-conditions`). Deny rules and principal access boundaries are enforced locally and not recorded.
+
+**Conditions (CEL).** Expressions see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers supply the `resource.*` values through `iam.Target.Attributes`; only Storage and Cloud SQL do. An attribute the provider didn't supply is absent, so reading it is an evaluation error, not `""`. An allow binding grants only when its condition returns `true`; `false`, an error, or a non-boolean grants nothing. So `!resource.name.startsWith("x")` grants nothing on a service without `resource.name`. GCP documents the same outcome: a condition part that reads an attribute the resource doesn't provide "is never interpreted as granting access" ([attribute reference](https://cloud.google.com/iam/docs/conditions-attribute-reference)).
+
+**Deny rules** (`denyRules` on a v3 policy) are checked at every node of the target's ancestry, each rule independently:
+
+- A rule applies when it lists the permission (not in `exceptionPermissions`), names the caller in `deniedPrincipals`, doesn't name the caller in its own `exceptionPrincipals`, and its `denialCondition` is absent, `true`, or can't be evaluated. GCP: "If the condition evaluates to `true` or cannot be evaluated, the deny rule applies" ([deny overview](https://cloud.google.com/iam/docs/deny-overview)). An exception exempts the caller from that rule only.
+- Any applying rule denies, regardless of allow bindings. An anonymous caller gets 401, others 403.
+- Principals: `principalSet://goog/public:all` (every caller, including anonymous), `principal://goog/subject/EMAIL`, `principal://iam.googleapis.com/projects/-/serviceAccounts/EMAIL`, and the local-only `user:EMAIL` / `serviceAccount:EMAIL`. Anything else, such as groups, is refused with `UNIMPLEMENTED` at write time.
+- Permissions: v1 (`storage.objects.get`) or v2 (`storage.googleapis.com/objects.get`) names, with a trailing `*` as a prefix match. A name outside the pinned roles is refused with `UNIMPLEMENTED`.
+- Deny rules are stored on the resource's own policy. GCP attaches separate deny policies to organizations, folders, and projects; that API isn't implemented.
+
+**Principal access boundaries** (`principalAccessBoundary` on a project, folder, or organization policy; refused elsewhere with `INVALID_ARGUMENT`):
+
+- A boundary binds the principal set of the node it's stored on. A service account `NAME@PROJECT.iam.gserviceaccount.com` is enrolled in the sets of its project and that project's folders and organization.
+- An enrolled caller may reach only targets inside the union of its boundaries' `boundCloudResources` (by resource name or `projects/NUMBER`) and their descendants. Anything else is 403 before allow or deny evaluation.
+- Not enrolled: users (Workspace domains aren't modeled), Google-managed service agents, workload and workforce pools, and anonymous callers. Boundary conditions and enforcement versions aren't modeled.
+
+Not recorded: deny rules and boundaries need organization-level setup (`roles/iam.denyAdmin` and principal access boundary admin are grantable only at an organization), which the sandbox doesn't allow ([#33](https://github.com/evanmarshall/gcp-local/issues/33), [#18](https://github.com/evanmarshall/gcp-local/issues/18)). Conditions on Cloud SQL are not recorded.
 
 ## Role snapshots
 
