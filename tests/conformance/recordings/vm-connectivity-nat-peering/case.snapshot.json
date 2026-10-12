@@ -1,0 +1,141 @@
+{
+  "vm-connectivity-nat-peering": {
+    "recorded-date": "12-10-2026, 00:00:15",
+    "recorded-content": {
+      "network-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "instance-vm1": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "instance-vm2": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "instance-vm3": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "open-port": {
+        "abort_cause": null,
+        "drop_cause": null,
+        "final_state": "DELIVER",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "REACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DELIVER"
+        ],
+        "trace_count": 1
+      },
+      "closed-port": {
+        "abort_cause": null,
+        "drop_cause": "FIREWALL_RULE",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "unpeered": {
+        "abort_cause": null,
+        "drop_cause": "PRIVATE_TRAFFIC_TO_INTERNET",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "peered": {
+        "abort_cause": null,
+        "drop_cause": null,
+        "final_state": "DELIVER",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "REACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "ARRIVE_AT_INSTANCE",
+          "APPLY_INGRESS_FIREWALL_RULE",
+          "DELIVER"
+        ],
+        "trace_count": 1
+      },
+      "internet-without-nat": {
+        "abort_cause": null,
+        "drop_cause": "PRIVATE_GOOGLE_ACCESS_DISALLOWED",
+        "final_state": "DROP",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "UNREACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "DROP"
+        ],
+        "trace_count": 1
+      },
+      "router-operation": {
+        "error": false,
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "internet-with-nat": {
+        "abort_cause": null,
+        "drop_cause": null,
+        "final_state": "DELIVER",
+        "firewall": "default-allow-egress",
+        "http_status": 200,
+        "result": "REACHABLE",
+        "step_states": [
+          "START_FROM_INSTANCE",
+          "APPLY_EGRESS_FIREWALL_RULE",
+          "APPLY_ROUTE",
+          "DELIVER"
+        ],
+        "trace_count": 1
+      },
+      "cleanup": {
+        "owned_resources_absent": true
+      }
+    }
+  }
+}
