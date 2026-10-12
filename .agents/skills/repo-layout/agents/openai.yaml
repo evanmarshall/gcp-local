@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Layout"
+  short_description: "Keep the root minimal and directories small"
+  default_prompt: "Use $repo-layout to place these files."

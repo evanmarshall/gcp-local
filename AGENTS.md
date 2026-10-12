@@ -16,6 +16,7 @@ Skills live in `.agents/skills/`.
 - [gcp-conformance](.agents/skills/gcp-conformance/SKILL.md): recordings, permission probes, Terraform cases, fidelity claims.
 - [gcp-code-quality](.agents/skills/gcp-code-quality/SKILL.md): the lint and dead-code gate, and new abstractions.
 - [gcp-docs](.agents/skills/gcp-docs/SKILL.md): any change to what a service supports or how it's verified.
+- [repo-layout](.agents/skills/repo-layout/SKILL.md): where files go; minimal root, at most 12 children per directory.
 - [concise-and-blunt](.agents/skills/concise-and-blunt/SKILL.md): all documentation.
 - [moo-code](.agents/skills/moo-code/SKILL.md) and [moo-golden-image](.agents/skills/moo-golden-image/SKILL.md): isolated machines ([moo guide](docs/moo.md)). One worktree and one machine per concurrent task.
 
