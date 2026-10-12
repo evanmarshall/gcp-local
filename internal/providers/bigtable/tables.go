@@ -138,7 +138,7 @@ func (t tableAdmin) remove(ctx context.Context) (*gateway.RESTResponse, error) {
 	if _, err := t.admin.DeleteTable(ctx, &adminpb.DeleteTableRequest{Name: t.table()}); err != nil {
 		return nil, backendStatus(err)
 	}
-	if err := t.provider.forget(t.scope, tableResource(t.scope.Project, t.request.Path["instance"], t.request.Path["table"])); err != nil {
+	if err := t.provider.forgetTable(t.scope, t.request.Path["instance"], t.request.Path["table"]); err != nil {
 		return nil, err
 	}
 	return emptyResponse(), nil
@@ -170,7 +170,7 @@ func (t tableAdmin) deleteInstance(ctx context.Context) (*gateway.RESTResponse, 
 			return nil, backendStatus(deleteErr)
 		}
 		id := listed.GetName()[strings.LastIndexByte(listed.GetName(), '/')+1:]
-		if forgetErr := t.provider.forget(t.scope, tableResource(t.scope.Project, instance, id)); forgetErr != nil {
+		if forgetErr := t.provider.forgetTable(t.scope, instance, id); forgetErr != nil {
 			return nil, forgetErr
 		}
 	}

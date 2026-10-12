@@ -1,0 +1,48 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T08:26:05.112666+00:00",
+  "scenario": {
+    "id": "logging-filter-precedence",
+    "service": "logging",
+    "transport": "rest-v2",
+    "revision": "1739ddc0c60c5b14e721058f3923281cbaa1679645f4d0e6c8158aafb2a6272f",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "99caeec723404386557d60478381ae28fb474d4d212380e7d5824529fa2d1b64",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/cloudlogging_precedence.py": "d36eeba72a75ebf18aeb6f50ad6b108f7dc5167516e5dde774c8f194d01b4734",
+      "gcp_validation/cloudlogging.py": "170b6d33422bcca2f09241ac1643bdff37c65475ce59bf6b90f97b64bc567c16",
+      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
+      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "tests/conformance/cloudlogging/conftest.py": "71139dfcfc265f78afc5bc81920114a6635de80c0c47d520b5af1cbdbb379fd7"
+    },
+    "scope": {
+      "services": [
+        "logging"
+      ],
+      "location": "global",
+      "limits": {
+        "max_entries": 10,
+        "max_run_seconds": 600
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

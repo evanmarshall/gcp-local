@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // exhaustedRetention keeps a task that ran out of attempts readable briefly
@@ -196,13 +199,19 @@ func (p *Provider) removeTask(scope state.Scope, key string) {
 }
 
 // send performs one HTTP dispatch. A transport failure has no response and
-// reports UNKNOWN, as GCP does for an unreachable target.
+// reports UNKNOWN, as GCP does for an unreachable target. A token that cannot
+// be minted fails the attempt with the mint's status before anything is sent;
+// the queue's retryConfig then schedules the next attempt.
 func (p *Provider) send(ctx context.Context, scope state.Scope, record taskRecord) (codes.Code, string, bool) {
 	request, err := http.NewRequestWithContext(ctx, record.Method, record.URL, bytes.NewReader(record.Body))
 	if err != nil {
 		return codes.Unknown, "The task request could not be built", false
 	}
-	for key, value := range p.dispatchHeaders(ctx, scope, record) {
+	headers, err := p.dispatchHeaders(ctx, scope, record)
+	if err != nil {
+		return status.Code(err), status.Convert(err).Message(), false
+	}
+	for key, value := range headers {
 		request.Header.Set(key, value)
 	}
 	response, err := p.client.Do(request)
@@ -217,9 +226,11 @@ func (p *Provider) send(ctx context.Context, scope state.Scope, record taskRecor
 	return provider.HTTPCode(response.StatusCode), http.StatusText(response.StatusCode), true
 }
 
-// dispatchHeaders builds the delivered headers, minting the OIDC token as
-// the service agent when an issuer is configured.
-func (p *Provider) dispatchHeaders(ctx context.Context, scope state.Scope, record taskRecord) map[string]string {
+// dispatchHeaders builds the delivered headers. An OIDC task's token is
+// minted for every attempt by the project's Cloud Tasks service agent,
+// service-NUMBER@gcp-sa-cloudtasks.iam.gserviceaccount.com, never by the
+// task's creator.
+func (p *Provider) dispatchHeaders(ctx context.Context, scope state.Scope, record taskRecord) (map[string]string, error) {
 	headers := map[string]string{"Content-Type": "application/octet-stream"}
 	maps.Copy(headers, record.Headers)
 	headers["User-Agent"] = userAgent
@@ -227,13 +238,27 @@ func (p *Provider) dispatchHeaders(ctx context.Context, scope state.Scope, recor
 	headers["X-Cloudtasks-Taskname"] = record.ID
 	headers["X-Cloudtasks-Taskretrycount"] = strconv.Itoa(record.Dispatches - 1)
 	headers["X-Cloudtasks-Taskexecutioncount"] = strconv.Itoa(record.Responses)
-	if record.ServiceAccount != "" && p.tokens != nil {
-		call := gateway.Call{Context: ctx, Principal: gateway.Principal{
-			State: gateway.Authenticated, Subject: "serviceAgent:cloudtasks", Project: scope.Project,
-		}}
-		if minted, err := p.tokens.Mint(call, "serviceAccount:"+record.ServiceAccount, record.Audience); err == nil {
-			headers["Authorization"] = "Bearer " + minted
-		}
+	if record.ServiceAccount == "" {
+		return headers, nil
 	}
-	return headers
+	project, ok := p.index.Get(provider.ProjectResource(scope.Project))
+	if !ok || project.Number == "" {
+		return nil, gap("OIDC tokens need the numeric project of the Cloud Tasks service agent")
+	}
+	call := gateway.Call{Context: ctx, Project: scope.Project, Principal: gateway.Principal{
+		State: gateway.Authenticated, Subject: serviceAgent(project.Number), Project: scope.Project,
+		Scopes: []string{identity.CloudPlatform},
+	}}
+	minted, err := p.tokens.Mint(call, iam.AccountResource(scope.Project, record.ServiceAccount), record.Audience)
+	if err != nil {
+		return nil, status.Errorf(status.Code(err), "The Cloud Tasks service agent could not mint an OIDC token for %s: %s",
+			record.ServiceAccount, status.Convert(err).Message())
+	}
+	headers["Authorization"] = "Bearer " + minted
+	return headers, nil
+}
+
+// serviceAgent is the member of a project's Cloud Tasks service agent.
+func serviceAgent(number string) string {
+	return "serviceAccount:service-" + number + "@gcp-sa-cloudtasks.iam.gserviceaccount.com"
 }

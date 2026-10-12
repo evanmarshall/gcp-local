@@ -201,7 +201,7 @@ func parseFilter(filter string) (*node, error) {
 		return nil, err
 	}
 	p := &parser{tokens: tokens}
-	expression, err := p.or()
+	expression, err := p.and()
 	if err != nil {
 		return nil, err
 	}
@@ -223,41 +223,45 @@ func (p *parser) keyword(word string) bool {
 	return ok && next.kind == tokenWord && next.text == word
 }
 
+// Cloud Logging binds OR tighter than AND: "NOT has the highest precedence,
+// followed by OR and AND in that order", so a OR b AND c is (a OR b) AND c
+// (https://cloud.google.com/logging/docs/view/logging-query-language#boolean_operators).
+// A space between terms is an AND.
+func (p *parser) and() (*node, error) {
+	left, err := p.or()
+	if err != nil {
+		return nil, err
+	}
+	for {
+		next, ok := p.peek()
+		if !ok || next.kind == tokenClose {
+			return left, nil
+		}
+		if p.keyword("AND") {
+			p.at++
+		}
+		right, err := p.or()
+		if err != nil {
+			return nil, err
+		}
+		left = &node{kind: nodeAnd, left: left, right: right}
+	}
+}
+
 func (p *parser) or() (*node, error) {
-	left, err := p.and()
+	left, err := p.unary()
 	if err != nil {
 		return nil, err
 	}
 	for p.keyword("OR") {
 		p.at++
-		right, err := p.and()
+		right, err := p.unary()
 		if err != nil {
 			return nil, err
 		}
 		left = &node{kind: nodeOr, left: left, right: right}
 	}
 	return left, nil
-}
-
-func (p *parser) and() (*node, error) {
-	left, err := p.unary()
-	if err != nil {
-		return nil, err
-	}
-	for {
-		next, ok := p.peek()
-		if !ok || next.kind == tokenClose || p.keyword("OR") {
-			return left, nil
-		}
-		if p.keyword("AND") {
-			p.at++
-		}
-		right, err := p.unary()
-		if err != nil {
-			return nil, err
-		}
-		left = &node{kind: nodeAnd, left: left, right: right}
-	}
 }
 
 func (p *parser) unary() (*node, error) {
@@ -287,7 +291,7 @@ func (p *parser) primary() (*node, error) {
 	p.at++
 	switch next.kind {
 	case tokenOpen:
-		inner, err := p.or()
+		inner, err := p.and()
 		if err != nil {
 			return nil, err
 		}

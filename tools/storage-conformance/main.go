@@ -110,6 +110,20 @@ func main() {
 			Scope:  state.Scope{Project: "gcp-local-test", Location: state.Global},
 		}))
 	}
+	// Cloud Run deploys without a template account run as the project's
+	// default compute account; the fixture may act as it (and only it), so
+	// the Terraform Cloud Run case deploys while Cloud Tasks still refuses
+	// the fixture an OIDC token for the denied identity.
+	defaultCompute := iam.AccountResource("gcp-local-test", "000000000001-compute@developer.gserviceaccount.com")
+	must(index.Put("iam", state.Resource{
+		Name: defaultCompute, Service: "iam", Kind: "serviceAccount", Number: "100000000000000000099",
+		Parent: "//cloudresourcemanager.googleapis.com/projects/gcp-local-test",
+		Scope:  state.Scope{Project: "gcp-local-test", Location: state.Global},
+	}))
+	_, err = engine.SetPolicy(defaultCompute, iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
+	}})
+	must(err)
 	// The resumable and signed URL scenario signs as the allowed identity with
 	// signBlob, which needs Token Creator on the account itself, as in GCP.
 	// The Cloud Scheduler scenario creates an OIDC job as the fixture for the

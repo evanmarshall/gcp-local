@@ -35,6 +35,7 @@ func TestRevisionMetadataServesConfiguredIdentity(t *testing.T) {
 		t.Fatalf("build the identity service: %v", err)
 	}
 	h := newHarness(t)
+	h.declareWorker(t)
 	h.provider.metadata = identities.Metadata
 	h.provider.metabind = func(handler http.Handler) (string, func(), error) {
 		var listen net.ListenConfig

@@ -31,10 +31,10 @@ func validateIngress(value string) error {
 	return status.Errorf(codes.InvalidArgument, "Invalid ingress setting %q", value)
 }
 
-// resource builds the canonical Cloud Run v2 resource name.
-func resource(project, location, kind, id string) string {
+// serviceResource builds the canonical Cloud Run v2 service resource name.
+func serviceResource(project, location, id string) string {
 	return "//run.googleapis.com/projects/" + url.PathEscape(project) +
-		"/locations/" + url.PathEscape(location) + "/" + kind + "/" + url.PathEscape(id)
+		"/locations/" + url.PathEscape(location) + "/" + kindService + "/" + url.PathEscape(id)
 }
 
 // requestEnvelope is the decoded services.create or services.update body.

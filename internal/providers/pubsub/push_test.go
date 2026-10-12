@@ -155,8 +155,14 @@ func TestPushAccountMustBeSameProjectAndNumbered(t *testing.T) {
 		t.Fatalf("unknown push account = %v", err)
 	}
 	scope := state.Scope{Project: testProject, Location: state.Global}
+	// Removing the project drops its policy; the unnumbered project gets it back.
+	policy, err := p.iam.GetPolicy(provider.ProjectResource(testProject))
+	must(t, err)
+	policy.ETag = ""
 	must(t, p.index.Remove(hierarchy, scope, provider.ProjectResource(testProject)))
 	must(t, p.index.Put(hierarchy, state.Resource{Name: provider.ProjectResource(testProject), Service: hierarchy, Kind: kindProject, Scope: scope}))
+	_, err = p.iam.SetPolicy(provider.ProjectResource(testProject), policy)
+	must(t, err)
 	_, err = invokeAs(registry, owner, subscriber+"CreateSubscription", testSub, &pb.Subscription{Name: testSub, Topic: testTopic, PushConfig: pushOIDC("http://127.0.0.1:9/push", pushWorkerEmail, "")})
 	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "project number") {
 		t.Fatalf("unnumbered project = %v", err)

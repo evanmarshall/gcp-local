@@ -2,7 +2,6 @@ package run
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net"
@@ -53,14 +52,19 @@ func (p *Provider) Invocation() http.Handler {
 			writeInvocationError(w, err)
 			return
 		}
-		p.touchActivity(serving)
-		if restarted := p.coldStart(r.Context(), serving); restarted {
-			serving, err = p.lookupServing(host)
+		if serving.address == "" {
+			// The reaper stopped the container: start it again, or wait for
+			// the cold start another invocation began.
+			p.coldStart(serving) //nolint:contextcheck // the restarted revision outlives the invocation by design
+			if serving, err = p.lookupServing(host); err == nil && serving.address == "" {
+				err = status.Error(codes.Unavailable, "The revision container failed to cold-start")
+			}
 			if err != nil {
 				writeInvocationError(w, err)
 				return
 			}
 		}
+		p.touchActivity(serving)
 		if err := p.authorizeInvocation(r, serving); err != nil {
 			writeInvocationError(w, err)
 			return
@@ -100,20 +104,35 @@ type servingRef struct {
 	address  string
 }
 
-// lookupServing resolves the host to a running service revision.
+// lookupServing resolves the host to its serving revision. A reaped revision
+// resolves with an empty address, for the caller to cold-start.
 func (p *Provider) lookupServing(host string) (servingRef, error) {
-	record, scope, err := p.lookupHost(host)
-	if err != nil {
-		return servingRef{}, err
+	p.hostMu.RLock()
+	entry, ok := p.hosts[host]
+	p.hostMu.RUnlock()
+	unbound := status.Errorf(codes.NotFound, "No service is bound to host %q", host)
+	if !ok {
+		return servingRef{}, unbound
 	}
-	latest := latestRevision(record)
-	if latest == nil || latest.Address == "" {
+	scope := state.Scope{Project: entry.project, Location: entry.location}
+	serving := servingRef{project: scope.Project, location: scope.Location, id: entry.id}
+	var unavailable bool
+	if err := p.withService(scope, entry.id, func(_ *scopeState, record *serviceRecord) error {
+		latest := latestRevision(record)
+		switch {
+		case latest == nil || (latest.Address == "" && !latest.reaped):
+			unavailable = true
+		default:
+			serving.revision, serving.address = latest.ID, latest.Address
+		}
+		return nil
+	}); err != nil {
+		return servingRef{}, unbound
+	}
+	if unavailable {
 		return servingRef{}, status.Error(codes.Unavailable, "No ready revision is serving traffic")
 	}
-	return servingRef{
-		project: scope.Project, location: scope.Location, id: record.Name,
-		revision: latest.ID, address: latest.Address,
-	}, nil
+	return serving, nil
 }
 
 // forward proxies the request to the revision container. Only the method,
@@ -228,7 +247,7 @@ func (p *Provider) authorizeToken(r *http.Request, bearer string, serving servin
 			Scopes: []string{identity.CloudPlatform},
 		},
 	}
-	target := iam.Target{Name: resource(serving.project, serving.location, kindService, serving.id)}
+	target := iam.Target{Name: serviceResource(serving.project, serving.location, serving.id)}
 	decision, authorizeErr := p.engine.Authorize(call, target, nil)
 	if authorizeErr != nil {
 		if status.Code(authorizeErr) == codes.PermissionDenied || status.Code(authorizeErr) == codes.Unauthenticated {
@@ -243,7 +262,7 @@ func (p *Provider) authorizeToken(r *http.Request, bearer string, serving servin
 // requirePublic refuses anonymous traffic unless the service policy grants
 // run.invoker to allUsers.
 func (p *Provider) requirePublic(serving servingRef) error {
-	target := resource(serving.project, serving.location, kindService, serving.id)
+	target := serviceResource(serving.project, serving.location, serving.id)
 	policy, err := p.engine.GetPolicy(target)
 	if err != nil {
 		return status.Error(codes.Unauthenticated, "Anonymous callers must be granted the run.invoker role")
@@ -271,22 +290,6 @@ type hostEntry struct {
 // hostOf builds the local service host from the Cloud Run hostname shape.
 func hostOf(scope state.Scope, id string) string {
 	return id + "-" + scope.Project + "." + scope.Location + ".run.app"
-}
-
-// lookupHost resolves one local service host to its record and scope.
-func (p *Provider) lookupHost(host string) (*serviceRecord, state.Scope, error) {
-	p.hostMu.RLock()
-	entry, ok := p.hosts[host]
-	p.hostMu.RUnlock()
-	if !ok {
-		return nil, state.Scope{}, status.Errorf(codes.NotFound, "No service is bound to host %q", host)
-	}
-	scope := state.Scope{Project: entry.project, Location: entry.location}
-	record, refused, err := p.serviceRecordLookUp(scope, entry.id)
-	if err != nil || refused != nil {
-		return nil, state.Scope{}, status.Errorf(codes.NotFound, "No service is bound to host %q", host)
-	}
-	return record, scope, nil
 }
 
 // indexHost publishes the local host mapping after a service launch.
@@ -323,46 +326,76 @@ func revisionAddress(address string) bool {
 // touchActivity records one invocation against the revision's idle clock.
 func (p *Provider) touchActivity(serving servingRef) {
 	scope := state.Scope{Project: serving.project, Location: serving.location}
-	p.recordMu.Lock()
-	defer p.recordMu.Unlock()
-	var record *serviceRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		record = s.services[serving.id]
+	_ = p.withService(scope, serving.id, func(_ *scopeState, record *serviceRecord) error {
+		if revision := record.Revisions[serving.revision]; revision != nil {
+			revision.lastActivity = p.clock()
+		}
 		return nil
 	})
-	if record == nil {
-		return
-	}
-	if revision := record.Revisions[serving.revision]; revision != nil {
-		revision.lastActivity = p.clock()
-	}
 }
 
-// coldStart restarts a reaped revision's container for its next invocation;
-// it reports whether the serving address may have changed.
-func (p *Provider) coldStart(_ context.Context, serving servingRef) bool {
+// coldStart restarts a reaped revision's container. The launch runs outside
+// the store lock; concurrent invocations wait for the one in flight.
+func (p *Provider) coldStart(serving servingRef) {
 	scope := state.Scope{Project: serving.project, Location: serving.location}
-	p.recordMu.Lock()
-	defer p.recordMu.Unlock()
-	var record *serviceRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		record = s.services[serving.id]
+	spec, done, wait := p.claimColdStart(scope, serving)
+	if wait != nil {
+		<-wait
+	}
+	if done == nil {
+		return
+	}
+	defer close(done)
+	started, err := p.launch(spec)
+	if err != nil {
+		p.endColdStart(scope, serving, done, nil)
+		return
+	}
+	if !p.endColdStart(scope, serving, done, &started) {
+		p.discard(started)
+		return
+	}
+	// The reaper ended when it stopped the container; the restarted one needs
+	// its own.
+	p.startReaper(scope, serving.id)
+}
+
+// claimColdStart marks a reaped revision as starting and returns its launch
+// inputs, or the channel of a cold start already in flight.
+func (p *Provider) claimColdStart(scope state.Scope, serving servingRef) (launchSpec, chan struct{}, chan struct{}) {
+	var spec launchSpec
+	var done, wait chan struct{}
+	_ = p.withService(scope, serving.id, func(_ *scopeState, record *serviceRecord) error {
+		revision := record.Revisions[serving.revision]
+		switch {
+		case revision == nil || !revision.reaped:
+		case revision.starting != nil:
+			wait = revision.starting
+		default:
+			done = make(chan struct{})
+			revision.starting = done
+			spec = launchSpecOf(record, revision)
+		}
 		return nil
 	})
-	if record == nil {
-		return false
-	}
-	revision := record.Revisions[serving.revision]
-	if revision == nil || revision.Container != "" {
-		return false
-	}
-	revision.lastActivity = p.clock()
-	// The launch outlives the invoking request's context; startRevision
-	// already runs its work detached.
-	if err := p.startRevision(record, revision); err != nil { //nolint:contextcheck // startRevision launches detached by design
-		return false
-	}
-	return true
+	return spec, done, wait
+}
+
+// endColdStart clears the claim and attaches the started container, when
+// there is one, if the revision is still there. It reports the attach.
+func (p *Provider) endColdStart(scope state.Scope, serving servingRef, done chan struct{}, started *launched) bool {
+	attached := false
+	_ = p.withService(scope, serving.id, func(_ *scopeState, record *serviceRecord) error {
+		if revision := record.Revisions[serving.revision]; revision != nil && revision.starting == done {
+			revision.starting = nil
+			if started != nil {
+				p.attach(revision, *started)
+				attached = true
+			}
+		}
+		return nil
+	})
+	return attached
 }
 
 // invocationBodyLimit bounds the buffered invocation request body.

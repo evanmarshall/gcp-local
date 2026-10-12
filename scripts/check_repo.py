@@ -162,7 +162,7 @@ DISTINCT_PER_PROVIDER = {
     "fleet.Reset": "stops the package's own server fleet",
     **{
         f"{package}.{name}": "an in-flight rewrite owns this package; switch to provider.NoBackend"
-        for package in ("bigquery", "run")
+        for package in ("bigquery",)
         for name in (
             "emptyBackend",
             "emptyBackend.Start",

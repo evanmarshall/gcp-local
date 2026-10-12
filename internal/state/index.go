@@ -26,6 +26,10 @@ type Resource struct {
 type Index struct {
 	mu        sync.RWMutex
 	resources map[string]Resource
+	// removed runs after each name leaves the index, outside the index lock.
+	// The IAM engine registers here so a deleted resource never keeps its
+	// policy: GCP gives a recreated resource of the same name an empty one.
+	removed []func(name string)
 }
 
 func NewIndex() *Index { return &Index{resources: map[string]Resource{}} }
@@ -86,21 +90,49 @@ func (i *Index) ProjectByNumber(number string) (Resource, bool) {
 	return Resource{}, false
 }
 
-func (i *Index) Remove(owner string, scope Scope, name string) error {
+// OnRemove registers a hook that runs for every name Remove or RemoveScope
+// deletes. Hooks run after the index lock is released, so they may take
+// locks of their own that are also held around index reads.
+func (i *Index) OnRemove(hook func(name string)) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if existing, ok := i.resources[name]; ok && (existing.Service != owner || existing.Scope != scope) {
+	i.removed = append(i.removed, hook)
+}
+
+func (i *Index) Remove(owner string, scope Scope, name string) error {
+	i.mu.Lock()
+	existing, ok := i.resources[name]
+	if ok && (existing.Service != owner || existing.Scope != scope) {
+		i.mu.Unlock()
 		return errResourceScope
 	}
 	delete(i.resources, name)
+	hooks := i.removed
+	i.mu.Unlock()
+	if ok {
+		notify(hooks, []string{name})
+	}
 	return nil
 }
 func (i *Index) RemoveScope(owner string, scope Scope) {
 	i.mu.Lock()
-	defer i.mu.Unlock()
+	var names []string
 	for name, resource := range i.resources {
 		if resource.Service == owner && resource.Scope == scope {
 			delete(i.resources, name)
+			names = append(names, name)
+		}
+	}
+	hooks := i.removed
+	i.mu.Unlock()
+	notify(hooks, names)
+}
+
+// notify runs every removal hook for each removed name.
+func notify(hooks []func(string), names []string) {
+	for _, name := range names {
+		for _, hook := range hooks {
+			hook(name)
 		}
 	}
 }

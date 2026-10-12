@@ -874,8 +874,8 @@ func (p *Provider) deleteBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	}
 	noContentOnSuccess(response)
 	if response.Status == 204 {
+		// Unindexing the bucket also drops its policy.
 		err = p.catalog.ForgetBucket(scope, bucket)
-		p.iam.Forget(BucketResource(bucket))
 	}
 	return response, err
 }

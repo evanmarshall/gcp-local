@@ -15,6 +15,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -31,6 +32,8 @@ type harness struct {
 	t        *testing.T
 	gate     *gateway.Gateway
 	engine   *iam.Engine
+	index    *state.Index
+	tokens   *identity.IDTokens
 	provider *Provider
 }
 
@@ -53,7 +56,11 @@ func newHarness(t *testing.T) *harness {
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)
 	}
-	provider, err := New(context.Background(), DeliveryConfig{}, registry, backend.NewManager(time.Second, time.Second), index, engine)
+	tokens, err := identity.NewIDTokens(engine, index)
+	if err != nil {
+		t.Fatalf("build the ID-token issuer: %v", err)
+	}
+	provider, err := New(context.Background(), DeliveryConfig{Tokens: tokens}, registry, backend.NewManager(time.Second, time.Second), index, engine)
 	if err != nil {
 		t.Fatalf("build the cloudtasks provider: %v", err)
 	}
@@ -67,7 +74,7 @@ func newHarness(t *testing.T) *harness {
 	g := gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token + "@" + testProject + ".iam.gserviceaccount.com", Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &harness{t: t, gate: g, engine: engine, provider: provider}
+	return &harness{t: t, gate: g, engine: engine, index: index, tokens: tokens, provider: provider}
 }
 
 // email names one test principal's service account.

@@ -17,6 +17,7 @@ var permissions = map[string]string{
 	methodOperationsList:   "run.operations.list",
 	methodOperationsDelete: "run.operations.delete",
 	methodServicesInvoke:   "run.routes.invoke",
+	methodServicesActAs:    "iam.serviceAccounts.actAs",
 }
 
 // Method name constants; the gateway route table uses the same identifiers.

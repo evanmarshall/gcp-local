@@ -145,10 +145,10 @@ func (p *Provider) publish(m mutation, present bool) error {
 			return nil
 		}
 		for _, name := range append(m.children, m.name) {
+			// The index removal also drops the resource's policy.
 			if err := p.index.Remove(serviceName, m.scope, fullName(name)); err != nil {
 				return err //nolint:wrapcheck // wrapped by settle
 			}
-			p.engine.Forget(fullName(name))
 			delete(*times, name)
 		}
 		return nil

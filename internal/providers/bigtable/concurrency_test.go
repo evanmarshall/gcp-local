@@ -29,6 +29,9 @@ func TestConcurrentInstanceRequests(t *testing.T) {
 	h := newHarness(t)
 	instance := testInstances + "/" + testInstance
 	table := instance + "/tables/" + testTable
+	policy := map[string]any{"policy": map[string]any{"bindings": []any{map[string]any{
+		"role": "roles/bigtable.user", "members": []any{"serviceAccount:reader@" + testProject + ".iam.gserviceaccount.com"},
+	}}}}
 	providertest.Hammer(t, h.gate, testToken, 8, 10, func(int) []providertest.Request {
 		return []providertest.Request{
 			{Method: http.MethodPost, Path: testInstances, Body: createBody(), Want: []int{200, 409}},
@@ -39,6 +42,10 @@ func TestConcurrentInstanceRequests(t *testing.T) {
 			{Method: http.MethodGet, Path: instance + "/clusters/" + testCluster, Want: []int{200, 404}},
 			{Method: http.MethodPost, Path: instance + "/tables", Body: map[string]any{"tableId": testTable}, Want: []int{200, 404, 409}},
 			{Method: http.MethodGet, Path: table, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: instance + ":setIamPolicy", Body: policy, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: instance + ":getIamPolicy", Body: map[string]any{}, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: table + ":setIamPolicy", Body: policy, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: table + ":getIamPolicy", Body: map[string]any{}, Want: []int{200, 404}},
 			{Method: http.MethodDelete, Path: table, Want: []int{200, 404}},
 			{Method: http.MethodDelete, Path: instance, Want: []int{200, 404}},
 		}

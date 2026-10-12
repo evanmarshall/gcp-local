@@ -529,7 +529,7 @@ func TestGRPCPolicyOmitsLocalDenyRules(t *testing.T) {
 	g := newGRPCHarness(t)
 	client := g.services(t, ownerSubject)
 	g.deploy(t, client)
-	if _, err := g.engine.SetPolicy(resource("demo-project", "us-central1", kindService, "svc"), iam.Policy{
+	if _, err := g.engine.SetPolicy(serviceResource("demo-project", "us-central1", "svc"), iam.Policy{
 		Version: 3, Bindings: []iam.Binding{{Role: "roles/run.invoker", Members: []string{"allUsers"}}},
 		DenyRules: []iam.DenyRule{{DeniedPrincipals: []string{peerSubject}, DeniedPermissions: []string{"run.routes.invoke"}}},
 	}); err != nil {

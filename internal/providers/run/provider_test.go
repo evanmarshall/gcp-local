@@ -107,7 +107,11 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("register the project: %v", err)
 	}
 	if _, err := engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/demo-project", iam.Policy{
-		Bindings: []iam.Binding{{Role: "roles/run.admin", Members: []string{"serviceAccount:fixture-actor@demo-project.iam.gserviceaccount.com"}}},
+		Bindings: []iam.Binding{
+			{Role: "roles/run.admin", Members: []string{"serviceAccount:fixture-actor@demo-project.iam.gserviceaccount.com"}},
+			// Deploying needs actAs on the runtime service account.
+			{Role: "roles/iam.serviceAccountUser", Members: []string{"serviceAccount:fixture-actor@demo-project.iam.gserviceaccount.com"}},
+		},
 	}); err != nil {
 		t.Fatalf("grant the project: %v", err)
 	}
@@ -383,6 +387,7 @@ func TestInvocationRequiresInvokerGrant(t *testing.T) {
 
 func TestWorkloadMetadataBindsPerRevisionListener(t *testing.T) {
 	h := newHarness(t)
+	h.declareWorker(t)
 	harnessBind := ""
 	h.provider.metadata = func(subject string) (http.Handler, error) {
 		if subject != "serviceAccount:worker@demo-project.iam.gserviceaccount.com" {
@@ -562,24 +567,39 @@ func TestInvocationAcceptsBareServiceRoot(t *testing.T) {
 	}
 }
 
-// A service deleted between registration and launch fails the create with a
-// plain 500 error body rather than a successful response that wraps it.
-func TestLaunchOfVanishedServiceIsInternalError(t *testing.T) {
+// A service deleted while its first revision launches finishes the create's
+// rollout as aborted, and the launched container is stopped rather than leaked.
+func TestServiceDeletedDuringLaunchDiscardsTheContainer(t *testing.T) {
 	h := newHarness(t)
-	scope := state.Scope{Project: "demo-project", Location: "us-central1"}
-	response := h.provider.launchOperation(scope, "svc")
-	if response.Status != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", response.Status)
+	blocking := &blockingRuntime{fakeRuntime: h.runtime, entered: make(chan struct{}), release: make(chan struct{})}
+	h.provider.runtime = blocking
+	created := make(chan string, 1)
+	go func() {
+		created <- h.invoke(http.MethodPost, servicesPath, serviceBody("")).Body.String()
+	}()
+	<-blocking.entered
+	if recorder := h.invoke(http.MethodDelete, "/v2/"+serviceReference, nil); recorder.Code != http.StatusOK {
+		t.Fatalf("delete during launch = %d %s", recorder.Code, recorder.Body.String())
 	}
-	body, err := json.Marshal(response.JSON)
-	if err != nil {
-		t.Fatal(err)
+	close(blocking.release)
+	if body := <-created; !strings.Contains(body, `"done":true`) || !strings.Contains(body, `"code":10`) {
+		t.Fatalf("create of a deleted service = %s", body)
 	}
-	want := `{"error":{"code":500,"message":"The created service vanished before its launch","status":"INTERNAL"}}`
-	if string(body) != want {
-		t.Fatalf("body = %s, want %s", body, want)
+	h.runtime.mu.Lock()
+	defer h.runtime.mu.Unlock()
+	if !slices.Contains(h.runtime.stopped, imageReference+"-container") {
+		t.Fatalf("the launched container leaked: stopped %v", h.runtime.stopped)
 	}
-	if len(h.runtime.started) != 0 {
-		t.Fatal("launched a container for a missing service")
-	}
+}
+
+// blockingRuntime holds each launch until the test releases it.
+type blockingRuntime struct {
+	*fakeRuntime
+	entered, release chan struct{}
+}
+
+func (b *blockingRuntime) Start(ctx context.Context, spec StartSpec) (Started, error) {
+	b.entered <- struct{}{}
+	<-b.release
+	return b.fakeRuntime.Start(ctx, spec)
 }

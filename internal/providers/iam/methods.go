@@ -238,7 +238,9 @@ func (p *Provider) accountsUpdate(request *gateway.RESTRequest, scope state.Scop
 // accountsDelete removes one account, its keys, and its index entry together.
 func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	account := request.Path["serviceAccount"]
-	if err := p.withAccount(scope, account, func(s *scopeState, _ *accountRecord) error {
+	var uniqueID string
+	if err := p.withAccount(scope, account, func(s *scopeState, record *accountRecord) error {
+		uniqueID = accountUniqueID(record)
 		email := accountEmail(scope.Project, account)
 		if err := p.index.Remove(serviceName, scope, accountResource(scope.Project, email)); err != nil {
 			return fmt.Errorf("unregister the service account: %w", err)
@@ -250,6 +252,9 @@ func (p *Provider) accountsDelete(request *gateway.RESTRequest, scope state.Scop
 	}); err != nil {
 		return nil, err
 	}
+	// Removing the index entry dropped the account's own policy; grants made
+	// to the account elsewhere become deleted members.
+	p.engine.RetireMember("serviceAccount:"+accountEmail(scope.Project, account), uniqueID)
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 

@@ -618,7 +618,7 @@ func (p *Provider) forget(call gateway.Call) error {
 		p.poisoned.Store(scopeOf(call), true)
 		return status.Error(codes.FailedPrecondition, "Backend deletion could not be indexed; reset this scope")
 	}
-	p.iam.Forget(canonical(call.Resource))
+	// The index removal also dropped the resource's policy.
 	return nil
 }
 func ambiguous(err error) bool {

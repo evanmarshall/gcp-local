@@ -305,14 +305,17 @@ func (p *Provider) deleteJob(scope state.Scope, location, id string) (*gateway.R
 		if s.jobs[key] == nil {
 			return provider.NotFound("jobs", id)
 		}
+		// The job and its index entry (and with it any policy) leave together.
+		if err := p.index.Remove(serviceName, scope, jobResource(scope.Project, location, id)); err != nil {
+			return fmt.Errorf("unindex the job: %w", err)
+		}
 		delete(s.jobs, key)
 		return nil
 	})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // status errors carry the wire status
+		return nil, err //nolint:wrapcheck // a wire status or the wrapped index error
 	}
 	p.stopWorker(scope, key)
-	_ = p.index.Remove(serviceName, scope, jobResource(scope.Project, location, id))
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 

@@ -1,0 +1,59 @@
+{
+  "logging-filter-precedence": {
+    "recorded-date": "12-10-2026, 08:26:05",
+    "recorded-content": {
+      "write": {
+        "http_status": 200
+      },
+      "list-all": {
+        "http_status": 200,
+        "payloads": [
+          "first",
+          "second",
+          {
+            "step": "third"
+          }
+        ]
+      },
+      "filter-and-or": {
+        "http_status": 200,
+        "payloads": []
+      },
+      "filter-or-and": {
+        "http_status": 200,
+        "payloads": [
+          "second"
+        ]
+      },
+      "filter-or-implicit-and": {
+        "http_status": 200,
+        "payloads": [
+          "second"
+        ]
+      },
+      "filter-parenthesized": {
+        "http_status": 200,
+        "payloads": [
+          {
+            "step": "third"
+          }
+        ]
+      },
+      "filter-not-or-and": {
+        "http_status": 200,
+        "payloads": [
+          "second"
+        ]
+      },
+      "filter-documented-example": {
+        "http_status": 200,
+        "payloads": [
+          "first"
+        ]
+      },
+      "cleanup": {
+        "log_deleted": true
+      }
+    }
+  }
+}

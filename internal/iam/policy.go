@@ -3,6 +3,7 @@ package iam
 import (
 	"encoding/base64"
 	"encoding/json"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -262,13 +263,24 @@ func isPublicMember(member string) bool {
 	return member == memberAllUsers || member == memberAllAuthenticated
 }
 
+// deletedMember is GCP's form of a deleted user or service account binding.
+var deletedMember = regexp.MustCompile(`^deleted:(user|serviceAccount):[^\s?]+@[^\s?]+\?uid=[0-9]+$`)
+
+// publicOrDeleted reports the members that name no live identity: the public
+// principals, and a deleted principal, which reads back in its deleted form.
+// Accepting the deleted form keeps read-modify-write working; it never
+// matches a caller.
+func publicOrDeleted(member string) bool {
+	return isPublicMember(member) || deletedMember.MatchString(member)
+}
+
 // validateMembers accepts the public principals and user/service-account emails.
 func validateMembers(members []string) error {
 	if len(members) == 0 || len(members) > 1000 {
 		return status.Error(codes.InvalidArgument, "Supply one to one thousand members per binding")
 	}
 	for _, member := range members {
-		if isPublicMember(member) {
+		if publicOrDeleted(member) {
 			continue
 		}
 		if (!strings.HasPrefix(member, "user:") && !strings.HasPrefix(member, "serviceAccount:")) || !strings.Contains(member, "@") || strings.ContainsAny(member, " \r\n\t") {
@@ -315,11 +327,43 @@ func (e *Engine) MarkUnsupported(resource string, features []string) error {
 	e.unsupported[resource] = unsupportedPolicy{features: append([]string(nil), features...), owner: owner.Service, scope: owner.Scope}
 	return nil
 }
+
+// Forget drops everything attached to one resource: its allow policy,
+// unsupported markers, org-policy constraints, and perimeter membership. The
+// index calls it whenever a resource is removed.
 func (e *Engine) Forget(resource string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.policies, resource)
 	delete(e.unsupported, resource)
+	delete(e.orgPolicies, resource)
+	delete(e.perimeters, resource)
+}
+
+// RetireMember rewrites every binding of a deleted principal to the form GCP
+// shows, deleted:serviceAccount:EMAIL?uid=UNIQUE_ID. A recreated account has
+// a new unique ID and the same email, so it inherits none of the grants
+// (https://cloud.google.com/iam/docs/service-accounts-delete-undelete).
+func (e *Engine) RetireMember(member, uniqueID string) {
+	retired := "deleted:" + member + "?uid=" + uniqueID
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for name, stored := range e.policies {
+		policy, changed := clonePolicy(stored.policy), false
+		for i := range policy.Bindings {
+			for j, existing := range policy.Bindings[i].Members {
+				if existing == member {
+					policy.Bindings[i].Members[j], changed = retired, true
+				}
+			}
+		}
+		if changed {
+			e.revision++
+			policy.ETag = base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(e.revision, 10)))
+			stored.policy = policy
+			e.policies[name] = stored
+		}
+	}
 }
 func (e *Engine) ClearScope(owner string, scope state.Scope) {
 	e.mu.Lock()

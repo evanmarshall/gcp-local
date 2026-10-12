@@ -53,6 +53,9 @@ func (p *Provider) createTask(call gateway.Call, request *gateway.RESTRequest, s
 		if err := p.authorizeActAs(call, scope.Project, record.ServiceAccount); err != nil {
 			return nil, err
 		}
+		if p.tokens == nil {
+			return nil, gap("OIDC tokens need the local ID-token issuer")
+		}
 	}
 	document, err := p.storeTask(scope, request.Path["location"], record, full)
 	if err != nil {

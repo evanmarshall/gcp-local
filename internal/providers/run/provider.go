@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -22,13 +22,15 @@ import (
 )
 
 // Provider owns the Cloud Run v2 control plane and its container lifecycle.
+// Service records live in the scope store and are read and changed only
+// inside its callbacks; container launches and stops run outside it.
 type Provider struct {
 	index    *state.Index
 	metadata func(subject string) (http.Handler, error)
 	metabind func(http.Handler) (string, func(), error)
 	reapers  map[string]context.CancelFunc
 	reaperMu sync.Mutex
-	recordMu sync.RWMutex
+	rollouts atomic.Uint64
 	tokens   *identity.IDTokens
 	baseURL  string
 	hosts    map[string]hostEntry
@@ -62,7 +64,8 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 	}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.Scope.Validate,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		// The control plane is in memory and container work is provider-owned.
+		New: provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			// The manager's reset hooks carry no request context by design, so the
 			// cleanup runs under an uncancellable child of the provider context.
@@ -93,21 +96,18 @@ func registerMethods(registry *gateway.Registry, p *Provider) error {
 	return nil
 }
 
-// emptyBackend satisfies the backend contract for a provider without a child
-// process: the control plane is in-memory and container work is provider-owned.
-type emptyBackend struct{}
+// reaperKey addresses one service's idle reaper. Service IDs repeat across
+// projects and locations, so the key carries both.
+func reaperKey(scope state.Scope, id string) string {
+	return scope.Project + "\x00" + scope.Location + "\x00" + id
+}
 
-func (emptyBackend) Start(context.Context) error { return nil }
-func (emptyBackend) Ready(context.Context) error { return nil }
-func (emptyBackend) Stop(context.Context) error  { return nil }
-func (emptyBackend) Reset(context.Context) error { return nil }
-
-// stopReapers cancels the idle reapers of one scope. Reset calls this before
-// clearing state so no reaper outlives the scope it watches.
+// stopReapers cancels the idle reapers of one project and location. Reset
+// calls this before clearing state so no reaper outlives the scope it watches.
 func (p *Provider) stopReapers(scope state.Scope) {
 	p.reaperMu.Lock()
 	for key, cancel := range p.reapers {
-		if strings.HasPrefix(key, scope.Project+"/") {
+		if strings.HasPrefix(key, reaperKey(scope, "")) {
 			cancel()
 			delete(p.reapers, key)
 		}
@@ -115,11 +115,23 @@ func (p *Provider) stopReapers(scope state.Scope) {
 	p.reaperMu.Unlock()
 }
 
+// stopReaper cancels one service's idle reaper.
+func (p *Provider) stopReaper(scope state.Scope, id string) {
+	p.reaperMu.Lock()
+	if cancel := p.reapers[reaperKey(scope, id)]; cancel != nil {
+		cancel()
+		delete(p.reapers, reaperKey(scope, id))
+	}
+	p.reaperMu.Unlock()
+}
+
 // Reset stops every container in the scope, then clears the provider state.
 func (p *Provider) Reset(ctx context.Context, scope state.Scope) error {
 	p.stopReapers(scope)
+	var ids []string
 	if err := p.scopes.With(scope, func(s *scopeState) error {
-		for _, service := range s.services {
+		for id, service := range s.services {
+			ids = append(ids, id)
 			for _, revision := range service.Revisions {
 				_ = p.runtime.Stop(context.WithoutCancel(ctx), revision.Container)
 				releaseMetadata(revision)
@@ -130,50 +142,40 @@ func (p *Provider) Reset(ctx context.Context, scope state.Scope) error {
 	}); err != nil {
 		return fmt.Errorf("clear the run scope: %w", err)
 	}
+	for _, id := range ids {
+		p.forgetHost(scope, id)
+	}
 	return nil
 }
 
-// resolve builds the IAM target and scope for one request and, when the method
-// addresses an existing service, its live record.
-func (p *Provider) resolve(_ gateway.Call, parts map[string]string, kind, id string) (iam.Target, state.Scope, *serviceRecord, error) {
-	location := parts["location"]
-	if !uidPattern.MatchString(id) || location == "" {
-		return iam.Target{}, state.Scope{}, nil, status.Error(codes.InvalidArgument, "Invalid Cloud Run resource name")
-	}
-	scope := state.Scope{Project: parts["project"], Location: location}
-	target := iam.Target{Name: resource(scope.Project, scope.Location, kind, id)}
-	var record *serviceRecord
-	if err := p.scopes.With(scope, func(s *scopeState) error {
-		if kind == kindService {
-			record = s.services[id]
-		}
-		return nil
-	}); err != nil {
-		return iam.Target{}, state.Scope{}, nil, fmt.Errorf("open the run scope: %w", err)
-	}
-	if kind == kindService && record == nil {
-		return iam.Target{}, state.Scope{}, nil, status.Errorf(codes.NotFound, "service %q is not found", id)
-	}
-	return target, scope, record, nil
+// errNoService reports a service that does not exist (or no longer does).
+func errNoService(id string) error {
+	return status.Errorf(codes.NotFound, "service %q is not found", id)
 }
 
-// authorize evaluates the method's permission plan for one call.
-func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[string]bool) (iam.Decision, error) {
-	decision, authorizeErr := p.engine.Authorize(call, target, features)
-	if authorizeErr != nil {
-		return decision, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-	}
-	return decision, nil
+// withService runs use on an existing service under its scope lock. The
+// callback may read and change the record and must render anything it
+// returns: the record is never used outside the lock.
+func (p *Provider) withService(scope state.Scope, id string, use func(*scopeState, *serviceRecord) error) error {
+	return p.scopes.With(scope, func(s *scopeState) error { //nolint:wrapcheck // status errors carry the wire status
+		record := s.services[id]
+		if record == nil {
+			return errNoService(id)
+		}
+		return use(s, record)
+	})
 }
+
+// gap refuses a request shape the provider does not model. Clients do not
+// retry UNIMPLEMENTED.
+var gap = provider.CoverageGap("Cloud Run")
 
 // errUnimplemented is the default dispatch gap for unregistered methods.
-var errUnimplemented = status.Error(codes.Unimplemented, "Cloud Run coverage gap: this method is not implemented")
+var errUnimplemented = gap("this method is not implemented")
 
 // coverageGap refuses one documented request feature the provider does not
-// model. Clients do not retry UNIMPLEMENTED.
-func coverageGap(feature string) error {
-	return status.Errorf(codes.Unimplemented, "Cloud Run coverage gap: %s is not implemented", feature)
-}
+// model.
+func coverageGap(feature string) error { return gap(feature + " is not implemented") }
 
 // refusedOptions are the Admin API v2 query options (services.create, list,
 // patch, delete; revisions.list, delete; operations.list) the provider does
@@ -209,24 +211,23 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Cloud Run request")
 	}
-	target, scope, record, err := p.resolveCall(call, request)
+	target, scope, id, err := resolveCall(call, request)
 	if err != nil {
 		return nil, err
 	}
-	decision, authorizeErr := p.authorize(call, target, nil)
-	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-		}
-		return denied(call, target, decision), nil
+	decision, refusal, err := p.authorize(call, target, scope, id)
+	if err != nil {
+		return nil, err
 	}
-	if refused := refuseOptions(request.Query); refused != nil {
-		return nil, refused
+	if refusal != nil {
+		return refusal, nil
+	}
+	if err := p.preflight(call, request, scope); err != nil {
+		return nil, err
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
-	response, err := p.execute(call, request, scope, record)
+	response, err := p.execute(call, request, scope, id)
 	if err != nil {
 		return nil, err
 	}
@@ -237,62 +238,66 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
-// resolveCall derives the target and record for the method's resource shape.
-func (p *Provider) resolveCall(call gateway.Call, request *gateway.RESTRequest) (iam.Target, state.Scope, *serviceRecord, error) {
-	parts := request.Path
-	switch call.Method {
-	case methodServicesCreate, methodServicesList, methodOperationsList:
-		// Project-scoped methods authorize against the project ancestor; the
-		// location namespace may not exist yet on a first create.
-		scope := state.Scope{Project: parts["project"], Location: parts["location"]}
-		return iam.Target{Name: provider.ProjectResource(scope.Project)}, scope, nil, nil
-	case methodOperationsGet, methodOperationsDelete:
-		// Operations authorize on the project ancestor like collection methods.
-		scope := state.Scope{Project: parts["project"], Location: parts["location"]}
-		return iam.Target{Name: provider.ProjectResource(scope.Project)}, scope, nil, nil
-	case methodRevisionsList, methodRevisionsGet, methodRevisionsDelete:
-		// Revisions are not indexed IAM resources; they authorize on their
-		// service, which inherits the project's policy.
-		return p.resolve(call, parts, kindService, parts["service"])
-	default:
-		return p.resolve(call, parts, kindService, parts["service"])
+// authorize evaluates the method's permission plan and returns the denial
+// response of a refused caller. A service-addressed call checks existence and
+// authorizes under one scope lock, and delete removes the index entry under
+// that lock, so a call racing a delete reads NOT_FOUND rather than an
+// unverified target.
+func (p *Provider) authorize(call gateway.Call, target iam.Target, scope state.Scope, id string) (iam.Decision, *gateway.RESTResponse, error) {
+	var decision iam.Decision
+	var authorizeErr error
+	evaluate := func(*scopeState, *serviceRecord) error {
+		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+		return nil
 	}
+	if id == "" {
+		_ = evaluate(nil, nil)
+	} else if err := p.withService(scope, id, evaluate); err != nil {
+		return decision, nil, err
+	}
+	switch status.Code(authorizeErr) {
+	case codes.OK:
+		return decision, nil, nil
+	case codes.PermissionDenied, codes.Unauthenticated:
+		return decision, denied(call, target, decision), nil
+	default:
+		return decision, nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
+	}
+}
+
+// preflight refuses unmodeled request options and, for a deploy, a caller
+// that cannot act as the revision's service account.
+func (p *Provider) preflight(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) error {
+	if refused := refuseOptions(request.Query); refused != nil {
+		return refused
+	}
+	if call.Method == methodServicesCreate || call.Method == methodServicesUpdate {
+		return p.authorizeRuntimeAccount(call, request, scope)
+	}
+	return nil
+}
+
+// resolveCall derives the IAM target, scope, and addressed service ID ("" for
+// project-scoped methods) of one request.
+func resolveCall(call gateway.Call, request *gateway.RESTRequest) (iam.Target, state.Scope, string, error) {
+	parts := request.Path
+	scope := state.Scope{Project: parts["project"], Location: parts["location"]}
+	switch call.Method {
+	case methodServicesCreate, methodServicesList, methodOperationsList, methodOperationsGet, methodOperationsDelete:
+		// Project-scoped methods and operations authorize against the project
+		// ancestor; the location namespace may not exist yet on a first create.
+		return iam.Target{Name: provider.ProjectResource(scope.Project)}, scope, "", nil
+	}
+	// Revisions are not indexed IAM resources; they authorize on their
+	// service, which inherits the project's policy.
+	id := parts["service"]
+	if !uidPattern.MatchString(id) || scope.Location == "" {
+		return iam.Target{}, state.Scope{}, "", status.Error(codes.InvalidArgument, "Invalid Cloud Run resource name")
+	}
+	return iam.Target{Name: serviceResource(scope.Project, scope.Location, id)}, scope, id, nil
 }
 
 // locationTarget names the parent collection for project-scoped methods.
 func locationTarget(scope state.Scope) string {
 	return fmt.Sprintf("//run.googleapis.com/projects/%s/locations/%s", scope.Project, scope.Location)
-}
-
-// serviceIDs returns the sorted service identifiers of one scope.
-func (p *Provider) serviceIDs(scope state.Scope) []string {
-	p.recordMu.RLock()
-	defer p.recordMu.RUnlock()
-	var names []string
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for id := range s.services {
-			names = append(names, id)
-		}
-		return nil
-	})
-	sort.Strings(names)
-	return names
-}
-
-// serviceRecordLookUp returns the live record or a not-found response. Callers
-// must hold the provider record lock while reading or mutating the record.
-func (p *Provider) serviceRecordLookUp(scope state.Scope, id string) (*serviceRecord, *gateway.RESTResponse, error) {
-	p.recordMu.RLock()
-	defer p.recordMu.RUnlock()
-	var record *serviceRecord
-	if err := p.scopes.With(scope, func(s *scopeState) error {
-		record = s.services[id]
-		return nil
-	}); err != nil {
-		return nil, nil, fmt.Errorf("open the run scope: %w", err)
-	}
-	if record == nil {
-		return nil, provider.WireError(404, "NOT_FOUND", "service "+id+" is not found"), nil
-	}
-	return record, nil, nil
 }

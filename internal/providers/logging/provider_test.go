@@ -316,6 +316,29 @@ func TestFilters(t *testing.T) {
 	}
 }
 
+// Cloud Logging binds NOT, then OR, then AND: a AND b OR c is a AND (b OR c)
+// (https://cloud.google.com/logging/docs/view/logging-query-language#boolean_operators).
+func TestFilterPrecedence(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	cases := []struct {
+		filter string
+		want   []string
+	}{
+		{"severity=ERROR AND severity=INFO OR severity=WARNING", nil},
+		{"severity=INFO OR severity=ERROR AND timeout", []string{textFailed}},
+		{"severity=INFO OR severity=ERROR timeout", []string{textFailed}},
+		{"(severity=ERROR AND severity=INFO) OR severity=WARNING", []string{textDisk}},
+		{"NOT severity=INFO OR severity=ERROR AND -severity=NOTICE", []string{textDisk, textFailed}},
+	}
+	for _, item := range cases {
+		value, code := h.listA(actorViewer, map[string]any{"filter": item.filter})
+		if code != http.StatusOK || !reflect.DeepEqual(payloads(t, value), item.want) {
+			t.Fatalf("filter %q: %d %v, want %v", item.filter, code, payloads(t, value), item.want)
+		}
+	}
+}
+
 func TestInvalidRequests(t *testing.T) {
 	h := newHarness(t)
 	for _, bad := range []map[string]any{

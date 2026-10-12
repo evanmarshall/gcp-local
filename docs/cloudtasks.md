@@ -31,13 +31,14 @@ client = tasks_v2.CloudTasksClient(transport=CloudTasksGrpcTransport(channel=cha
 
 gRPC `TestIamPermissions`, `BatchCreateTasks`, `BatchDeleteTasks`, `GetCmekConfig`, and `UpdateCmekConfig` return `UNIMPLEMENTED`; the client libraries do not retry that code. An anonymous call gets `UNAUTHENTICATED` (REST 401).
 
-Dispatch follows the queue's `retryConfig` (defaults: 100 attempts, 0.1 s min backoff, 3600 s max, 16 doublings). Each attempt sets `dispatchCount`, `firstAttempt`, and `lastAttempt`. A successful task is removed; a task that exhausts its attempts is removed 3 s later (local choice). With `oidcToken`, each request carries a local ID token for the service account, audience defaulting to the URL, as in [Pub/Sub push](pubsub.md#push).
+Dispatch follows the queue's `retryConfig` (defaults: 100 attempts, 0.1 s min backoff, 3600 s max, 16 doublings). Each attempt sets `dispatchCount`, `firstAttempt`, and `lastAttempt`. A successful task is removed; a task that exhausts its attempts is removed 3 s later (local choice). With `oidcToken`, each attempt carries a local ID token for the service account, audience defaulting to the URL, minted by the project's Cloud Tasks service agent. When the token can't be minted, the attempt fails with the mint's status (for example `PERMISSION_DENIED`), nothing is sent, and the queue's retry policy applies.
 
 ## IAM
 
 - Queue and task methods authorize on the queue, so a queue-level `roles/cloudtasks.enqueuer` allows task creation. A missing queue is authorized on the project, then returns 404.
 - The FULL view (body and token) needs `cloudtasks.tasks.fullView`.
 - A task with `oidcToken` needs `iam.serviceAccounts.actAs` on that account. The account must be a declared same-project local service account.
+- The service agent, `serviceAccount:service-NUMBER@gcp-sa-cloudtasks.iam.gserviceaccount.com`, needs `iam.serviceAccounts.getOpenIdToken` on the account. GCP grants it `roles/cloudtasks.serviceAgent` when the API is enabled; that role isn't pinned here, so grant the agent `roles/iam.serviceAccountTokenCreator` on the account, as for [Pub/Sub push](pubsub.md#push).
 - Pinned roles: `roles/cloudtasks.admin`, `roles/cloudtasks.enqueuer`.
 
 ## Verification

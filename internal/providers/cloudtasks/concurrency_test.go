@@ -68,6 +68,10 @@ func TestConcurrentQueueAndTaskRequests(t *testing.T) {
 			{Method: http.MethodPost, Path: queue + ":resume", Want: []int{200, 404}},
 			{Method: http.MethodDelete, Path: task, Want: []int{200, 404}},
 			{Method: http.MethodPost, Path: queue + ":purge", Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: queue + ":setIamPolicy", Body: map[string]any{"policy": map[string]any{"bindings": []any{map[string]any{
+				"role": "roles/cloudtasks.enqueuer", "members": []any{"serviceAccount:" + email("enqueuer")},
+			}}}}, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: queue + ":getIamPolicy", Body: map[string]any{}, Want: []int{200, 404}},
 			{Method: http.MethodDelete, Path: queue, Want: []int{200, 404}},
 		}
 	})

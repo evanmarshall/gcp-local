@@ -10,6 +10,8 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // execute dispatches one authorized method to its resource family.
@@ -47,9 +49,9 @@ func (p *Provider) executeQueue(call gateway.Call, request *gateway.RESTRequest,
 	case methodQueuesUpdate:
 		return p.updateQueue(request, scope)
 	case methodQueuesGetIam:
-		return p.getQueueIam(scope, request)
+		return p.getQueueIam(call, request, scope)
 	case methodQueuesSetIam:
-		return p.setQueueIam(request, scope)
+		return p.setQueueIam(call, request, scope)
 	default:
 		return p.executeQueueState(call, request, scope)
 	}
@@ -227,6 +229,7 @@ func (p *Provider) deleteQueue(request *gateway.RESTRequest, scope state.Scope) 
 		if s.queues[id] == nil {
 			return provider.NotFound("queues", id)
 		}
+		// Removing the index entry also drops the queue's policy.
 		if err := p.index.Remove(serviceName, scope, name); err != nil {
 			return fmt.Errorf("unindex the queue: %w", err)
 		}
@@ -240,7 +243,6 @@ func (p *Provider) deleteQueue(request *gateway.RESTRequest, scope state.Scope) 
 	for _, key := range removed {
 		p.stopWorker(scope, key)
 	}
-	p.engine.Forget(name)
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
@@ -265,34 +267,54 @@ func (p *Provider) purgeQueue(request *gateway.RESTRequest, scope state.Scope) (
 	return response, err
 }
 
-// getQueueIam returns the stored queue policy.
-func (p *Provider) getQueueIam(scope state.Scope, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
-	if _, err := p.getQueue(request, scope); err != nil {
-		return nil, err
-	}
-	policy, err := p.engine.GetPolicy(queueResource(scope.Project, request.Path["location"], request.Path["queue"]))
-	if err != nil {
-		return nil, fmt.Errorf("read queue policy: %w", err)
-	}
-	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
+// getQueueIam reads the queue's policy.
+func (p *Provider) getQueueIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	return p.queuePolicy(call, request, scope, p.engine.GetPolicy)
 }
 
 // setQueueIam stores one unconditional version-1 queue policy.
-func (p *Provider) setQueueIam(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+func (p *Provider) setQueueIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	var envelope struct {
 		Policy iam.Policy `json:"policy"`
 	}
 	if json.Unmarshal(request.JSON, &envelope) != nil {
 		return nil, provider.Invalid("Invalid IAM policy")
 	}
-	if _, err := p.getQueue(request, scope); err != nil {
-		return nil, err
-	}
-	policy, err := p.engine.SetPolicy(queueResource(scope.Project, request.Path["location"], request.Path["queue"]), envelope.Policy)
+	return p.queuePolicy(call, request, scope, func(name string) (iam.Policy, error) {
+		return p.engine.SetPolicy(name, envelope.Policy)
+	})
+}
+
+// queuePolicy checks the queue exists, authorizes the caller on it, and
+// reads or writes its policy under one scope lock. Queue delete removes the
+// index entry (and so the policy) under that lock, so a policy call racing a
+// delete reads NOT_FOUND and never touches a recreated queue's policy.
+func (p *Provider) queuePolicy(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, change func(string) (iam.Policy, error)) (*gateway.RESTResponse, error) {
+	name := queueResource(scope.Project, request.Path["location"], request.Path["queue"])
+	var response *gateway.RESTResponse
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		if s.queues[request.Path["queue"]] == nil {
+			return provider.NotFound("queues", request.Path["queue"])
+		}
+		target := iam.Target{Name: name}
+		if decision, err := p.engine.Authorize(call, target, nil); err != nil {
+			if code := status.Code(err); code != codes.PermissionDenied && code != codes.Unauthenticated {
+				return fmt.Errorf("authorize %s: %w", call.Method, err)
+			}
+			response = p.denied(call, decision, target)
+			return nil
+		}
+		policy, err := change(name)
+		if err != nil {
+			return fmt.Errorf("change the queue policy: %w", err)
+		}
+		response = &gateway.RESTResponse{JSON: policy.Wire()}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("write queue policy: %w", err)
+		return nil, err //nolint:wrapcheck // status errors carry the wire status
 	}
-	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
+	return response, nil
 }
 
 // updateQueue patches one queue's rate limits and retry configuration.

@@ -55,7 +55,7 @@ bin/gcp-local -services run -identity-config ... -iam-config ... \
 
 - `-run-docker-socket` runs one container per revision and publishes its port on the default bridge, for a core on the Docker host. Without a socket or a process mapping, every launch is refused.
 - `-run-docker-network NAME` and `-run-docker-environment LABEL` attach revisions to a network the core shares and label them; the packaged Docker mode sets both. Either without a socket is refused, and a network needs a label.
-- `-run-process IMAGE=COMMAND` runs a mapped image as a local process. It can't be combined with `-run-docker-socket`.
+- `-run-process IMAGE=COMMAND` runs a mapped image as a local process in its own process group. It can't be combined with `-run-docker-socket`. The revision is ready only once a process in that group listens on its `PORT` (checked through `/proc` on Linux and `lsof` elsewhere), so another program that takes the port first can't make it look ready.
 
 ## Methods
 
@@ -66,7 +66,9 @@ Routes are `/v2/projects/{project}/locations/{location}/...`.
 | Services | `create`, `get`, `list`, `patch`, `delete` | `serviceId` query; one container; port from `ports[0].containerPort` (default 8080) |
 | Services | `getIamPolicy`, `setIamPolicy` | `allUsers` with `roles/run.invoker` allows anonymous calls |
 | Revisions | `get`, `list`, `delete` | Stopped after 5 minutes idle; the next call cold-starts |
-| Operations | `get`, `list`, `delete` | Create and update operations finish when the container is ready; an early exit fails them. Deletes return a finished operation |
+| Operations | `get`, `list`, `delete` | Create and update operations finish when the container is ready; an early exit fails them. A finished operation never changes. Deletes return a finished operation |
+
+Containers launch outside the provider's state lock. An update that loses a race with another update returns 409 `ABORTED` and starts nothing; a service deleted while its create launches finishes that rollout with `ABORTED`. Requests racing a delete read 404.
 
 The same 13 methods run over gRPC on port 4567 (`google.cloud.run.v2.Services`, `google.cloud.run.v2.Revisions`, and `google.longrunning.Operations`), with the same permissions. Operation metadata and response are the `Service` (or the deleted `Revision`), so client LRO helpers work. Point the client at the gRPC endpoint with local ADC on a plaintext local channel:
 
@@ -90,6 +92,10 @@ Tested clients are listed in [coverage](coverage.md#client-compatibility).
 ## IAM
 
 Permissions are `run.services.*`, `run.revisions.*`, `run.operations.*`, and `run.routes.invoke`. Pinned roles: `roles/run.admin`, `.developer`, `.invoker`, `.viewer`.
+
+Every create and update deploys a revision, and needs `iam.serviceAccounts.actAs` on its runtime service account, as in GCP ([service identity](https://cloud.google.com/run/docs/configuring/services/service-identity)). Grant `roles/iam.serviceAccountUser` on the account (or the project). Without it the call is 403 `Permission 'iam.serviceaccounts.actAs' denied on service account EMAIL (or it may not exist).` and nothing is stored or launched; the same goes for an account that isn't declared. A template without `serviceAccount` deploys as the default compute account, `NUMBER-compute@developer.gserviceaccount.com`: the check uses that account's policy when the environment declares it, and the project's otherwise. The revision still gets no metadata server. An account from another project is refused with `UNIMPLEMENTED`.
+
+A deleted service's policy goes with it; a service recreated with the same name starts empty.
 
 ## Verification
 

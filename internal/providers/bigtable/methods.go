@@ -30,27 +30,61 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodClustersGet:
 		return p.clustersGet(request, scope)
 	case methodInstancesGetIam, methodTablesGetIam:
-		if err := p.policyTarget(call, request, target); err != nil {
-			return nil, err
-		}
-		return p.getIam(target)
+		return p.policy(call, request, scope, target, p.engine.GetPolicy)
 	case methodInstancesSetIam, methodTablesSetIam:
-		if err := p.policyTarget(call, request, target); err != nil {
-			return nil, err
+		var envelope struct {
+			Policy iam.Policy `json:"policy"`
 		}
-		return p.setIam(request, target)
+		if json.Unmarshal(request.JSON, &envelope) != nil {
+			return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+		}
+		return p.policy(call, request, scope, target, func(name string) (iam.Policy, error) {
+			return p.engine.SetPolicy(name, envelope.Policy)
+		})
 	default:
 		return p.mutate(call, request, scope)
 	}
 }
 
-// policyTarget requires an existing table for table policy methods; a table
-// that was never published authorizes against its instance and has no policy.
-func (p *Provider) policyTarget(call gateway.Call, request *gateway.RESTRequest, target iam.Target) error {
+// policy checks the instance (and, for a table method, the published table)
+// exists, authorizes the caller on it, and reads or writes its policy under
+// one instance lock. Instance and table deletes unpublish under that lock, so
+// a policy call racing a delete reads NOT_FOUND and never touches a recreated
+// resource's policy. A table that was never published has no policy.
+func (p *Provider) policy(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target, change func(string) (iam.Policy, error)) (*gateway.RESTResponse, error) {
+	var response *gateway.RESTResponse
+	err := p.withInstance(scope, request.Path["instance"], func(*scopeState, *instanceRecord) error {
+		if err := p.publishedTable(call, request, target); err != nil {
+			return err
+		}
+		if decision, err := p.engine.Authorize(call, target, nil); err != nil {
+			if code := status.Code(err); code != codes.PermissionDenied && code != codes.Unauthenticated {
+				return fmt.Errorf("authorize %s: %w", call.Method, err)
+			}
+			response = provider.Denied(decision, target.Name)
+			return nil
+		}
+		policy, err := change(target.Name)
+		if err != nil {
+			return err
+		}
+		response = &gateway.RESTResponse{JSON: policy.Wire()}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+// publishedTable requires a table policy method's table to be published and
+// to be the authorization target; instance methods pass.
+func (p *Provider) publishedTable(call gateway.Call, request *gateway.RESTRequest, target iam.Target) error {
 	if call.Method != methodTablesGetIam && call.Method != methodTablesSetIam {
 		return nil
 	}
-	if target.Name != tableResource(request.Path["project"], request.Path["instance"], request.Path["table"]) {
+	table := tableResource(request.Path["project"], request.Path["instance"], request.Path["table"])
+	if _, published := p.index.Get(table); !published || target.Name != table {
 		return provider.NotFound(kindTable, request.Path["table"])
 	}
 	return nil
@@ -322,14 +356,21 @@ func (p *Provider) instancesUpdate(request *gateway.RESTRequest, scope state.Sco
 	})
 }
 
-// forget unregisters a deleted resource and drops its IAM policy so a
-// recreated resource of the same name starts without bindings.
+// forget unregisters a deleted resource; the index removal drops its IAM
+// policy, so a recreated resource of the same name starts without bindings.
 func (p *Provider) forget(scope state.Scope, resource string) error {
 	if err := p.index.Remove(serviceName, scope, resource); err != nil {
 		return fmt.Errorf("unregister %s: %w", resource, err)
 	}
-	p.engine.Forget(resource)
 	return nil
+}
+
+// forgetTable unpublishes a deleted table under its instance's lock, which
+// policy calls hold while they check, authorize, and change the policy.
+func (p *Provider) forgetTable(scope state.Scope, instance, table string) error {
+	return p.withInstance(scope, instance, func(*scopeState, *instanceRecord) error {
+		return p.forget(scope, tableResource(scope.Project, instance, table))
+	})
 }
 
 // emptyResponse is the 200 {} body GCP returns for admin deletes.
@@ -350,28 +391,4 @@ func (p *Provider) clustersGet(request *gateway.RESTRequest, scope state.Scope) 
 		}
 		return clusterWire(scope.Project, record.Name, record.Cluster), nil
 	})
-}
-
-// getIam returns the stored policy of an instance or table.
-func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
-	policy, err := p.engine.GetPolicy(target.Name)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "read the Bigtable policy: %v", err)
-	}
-	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
-}
-
-// setIam stores the policy of an instance or table.
-func (p *Provider) setIam(request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
-	var envelope struct {
-		Policy iam.Policy `json:"policy"`
-	}
-	if json.Unmarshal(request.JSON, &envelope) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
-	}
-	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
-	if err != nil {
-		return nil, err //nolint:wrapcheck // already a wire status
-	}
-	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }

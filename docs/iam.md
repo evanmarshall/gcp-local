@@ -25,6 +25,8 @@ Each provider registers its plans with `Engine.Register` when it starts (Storage
 
 Policies are stored once per owning service and scope, returned as copies, and replaced only with a matching etag. A service reset clears that service's resource policies for the scope and keeps project and organization policy.
 
+A resource that leaves the index takes its policy with it, whichever provider deleted it, so a resource recreated with the same name starts with an empty policy, as in GCP. Deleting a service account also rewrites every grant to it as `deleted:serviceAccount:EMAIL?uid=UNIQUE_ID`; an account recreated with the same email has a new unique ID and inherits nothing ([GCP](https://cloud.google.com/iam/docs/service-accounts-delete-undelete)). Policies accept that form back, so read-modify-write keeps working. Undelete isn't modeled.
+
 ## Conditions, deny rules, and boundaries
 
 Only allow-binding conditions on Storage are recorded against GCP (`storage-iam-conditions`). Deny rules and principal access boundaries are enforced locally and not recorded.

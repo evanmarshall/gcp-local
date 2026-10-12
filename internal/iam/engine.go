@@ -125,7 +125,13 @@ func New(index *state.Index) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string][]orgPolicyRecord{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}, nil
+	engine := &Engine{index: index, roles: roles, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string][]orgPolicyRecord{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}
+	// A resource that leaves the index takes its policy with it, whichever
+	// provider deleted it: GCP gives a recreated resource an empty policy.
+	// A delete racing a same-name recreate can drop the new policy, never
+	// keep the old one.
+	index.OnRemove(engine.Forget)
+	return engine, nil
 }
 func (e *Engine) Register(method string, plan Rule) error {
 	rule, err := e.validateRule(plan)

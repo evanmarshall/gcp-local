@@ -1,6 +1,6 @@
 # Cloud Logging
 
-Cloud Logging v2 entries write and list, logs list, and logs delete over REST and gRPC. Entries are stored in memory per project. The scenario `logging-entries-lifecycle` is recorded against GCP.
+Cloud Logging v2 entries write and list, logs list, and logs delete over REST and gRPC. Entries are stored in memory per project. The scenarios `logging-entries-lifecycle` and `logging-filter-precedence` are recorded against GCP.
 
 ## Use
 
@@ -67,6 +67,8 @@ List takes `resourceNames` of the form `projects/{project}`, `orderBy` `timestam
 | Global text term (case-insensitive substring of payloads, labels, log name, insert ID) | `timeout`, `"disk full"` |
 | `AND` (or a space), `OR`, `NOT` or `-`, parentheses | `severity=ERROR OR (resource.type=gce_instance AND -labels.env=prod)` |
 
+Precedence is Cloud Logging's, not the usual one: `NOT`, then `OR`, then `AND` ([query language](https://cloud.google.com/logging/docs/view/logging-query-language#boolean_operators)). `a AND b OR c` means `a AND (b OR c)`, and `a OR b c` means `(a OR b) AND c`. Use parentheses to say otherwise.
+
 Fields: `logName`, `severity` (name or number), `timestamp`, `receiveTimestamp`, `insertId`, `textPayload`, `trace`, `spanId`, `resource.type`, `resource.labels.KEY`, `labels.KEY`, and `jsonPayload.PATH`. Any other field returns 400.
 
 ## Verification
@@ -74,6 +76,7 @@ Fields: `logName`, `severity` (name or number), `timestamp`, `receiveTimestamp`,
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
 | `logging-entries-lifecycle` | 2026-10-12 | Write, list, severity, text, and JSON filters, descending pages, logs list, denied write and list, invalid filter, delete |
+| `logging-filter-precedence` | 2026-10-12 | `AND` with `OR`, `OR` with implicit `AND`, `NOT` with both, parentheses, and the query-language page's own example |
 
 ```sh
 sh scripts/check_rest_recordings.sh   # the recording
