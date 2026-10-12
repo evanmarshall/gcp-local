@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -757,5 +759,58 @@ func TestRejectedUpdatesChangeNothing(t *testing.T) {
 	h.expectCode(http.MethodPost, globalPath+"/networks/"+testNetwork+"/removePeering", map[string]any{keyName: "missing"}, 400)
 	if after := h.expectCode(http.MethodGet, globalPath+"/networks/"+testNetwork, nil, 200).Body.String(); after != before {
 		t.Fatalf("a refused peering removal changed the network:\n%s\n%s", before, after)
+	}
+}
+
+// listNames lists one collection and returns its item names in order.
+func (h *harness) listNames(path string) []string {
+	h.t.Helper()
+	recorder := h.invoke(http.MethodGet, path, nil)
+	var list struct {
+		Items []struct {
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &list); err != nil || recorder.Code != 200 {
+		h.t.Fatalf("list %s = %d %s", path, recorder.Code, recorder.Body.String())
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, item := range list.Items {
+		names = append(names, item.Name)
+	}
+	return names
+}
+
+// Compute lists every collection in name order, whatever order the resources
+// were created in (recorded: vm-firewall-service-accounts).
+func TestListsAreOrderedByName(t *testing.T) {
+	h := newHarness(t)
+	names := []string{"n7", "n6", "n5", "n4", "n3", "n2", "n1", "n0"}
+	for i, name := range names {
+		h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/networks", map[string]any{keyName: name, keyAutoSubnets: false}, 200)
+		h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/regions/us-central1/subnetworks", map[string]any{
+			keyName: "s" + name, keyNetwork: name, keyIPCIDR: "10." + strconv.Itoa(i) + ".0.0/24",
+		}, 200)
+		h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/firewalls", map[string]any{
+			keyName: "f" + name, keyNetwork: name, "allowed": []any{map[string]any{keyIPProto: "tcp"}},
+		}, 200)
+		h.expectCode(http.MethodPost, "/compute/v1/projects/demo-net/global/routes", map[string]any{
+			keyName: "r" + name, keyNetwork: name, keyDestRange: "10.200." + strconv.Itoa(i) + ".0/24", "nextHopIp": "10.0.0.9",
+		}, 200)
+	}
+	sorted := slices.Sorted(slices.Values(names))
+	for prefix, path := range map[string]string{
+		"":  "/compute/v1/projects/demo-net/global/networks",
+		"s": "/compute/v1/projects/demo-net/regions/us-central1/subnetworks",
+		"f": "/compute/v1/projects/demo-net/global/firewalls",
+		"r": "/compute/v1/projects/demo-net/global/routes",
+	} {
+		want := make([]string, 0, len(sorted))
+		for _, name := range sorted {
+			want = append(want, prefix+name)
+		}
+		if got := h.listNames(path); !slices.Equal(got, want) {
+			t.Fatalf("%s order = %v, want %v", path, got, want)
+		}
 	}
 }

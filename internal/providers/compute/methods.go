@@ -92,16 +92,31 @@ func (p *Provider) getNetwork(request *gateway.RESTRequest, scope state.Scope) (
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// listNetworks returns the scope's networks.
-func (p *Provider) listNetworks(scope state.Scope) (*gateway.RESTResponse, error) {
+// listRecords renders one collection in name order, as Compute lists it.
+// keep selects the request's region or zone for a regional or zonal kind;
+// nil keeps every record.
+func listRecords[T any](p *Provider, scope state.Scope, listKind string, records func(*scopeState) map[string]*T,
+	keep func(*T) bool, render func(*scopeState, *T) map[string]any,
+) (*gateway.RESTResponse, error) {
 	items := []any{}
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for name := range s.networks {
-			items = append(items, s.renderNetwork(scope.Project, s.networks[name]))
+		values := records(s)
+		for _, key := range sortedKeys(values) {
+			if record := values[key]; keep == nil || keep(record) {
+				items = append(items, render(s, record))
+			}
 		}
 		return nil
 	})
-	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
+	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items, keyKind: listKind}}, nil
+}
+
+// listNetworks returns the scope's networks.
+func (p *Provider) listNetworks(scope state.Scope) (*gateway.RESTResponse, error) {
+	return listRecords(p, scope, "compute#networkList", func(s *scopeState) map[string]*networkRecord { return s.networks }, nil,
+		func(s *scopeState, record *networkRecord) map[string]any {
+			return s.renderNetwork(scope.Project, record)
+		})
 }
 
 // deleteNetwork removes one network. Compute accepts the delete of a network
@@ -306,14 +321,13 @@ func (p *Provider) getSubnetwork(request *gateway.RESTRequest, scope state.Scope
 
 // listSubnetworks returns the scope's subnetworks.
 func (p *Provider) listSubnetworks(scope state.Scope) (*gateway.RESTResponse, error) {
-	items := []any{}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for name := range s.subnetworks {
-			items = append(items, subnetworkDocument(scope.Project, s.subnetworks[name]))
-		}
-		return nil
-	})
-	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
+	return listRecords(p, scope, "compute#subnetworkList", func(s *scopeState) map[string]*subnetworkRecord { return s.subnetworks }, nil,
+		inProject(scope, subnetworkDocument))
+}
+
+// inProject adapts a document renderer that needs only the project.
+func inProject[T any](scope state.Scope, render func(string, *T) map[string]any) func(*scopeState, *T) map[string]any {
+	return func(_ *scopeState, record *T) map[string]any { return render(scope.Project, record) }
 }
 
 // deleteSubnetwork removes one subnetwork. Like a network, a subnetwork that
@@ -496,14 +510,8 @@ func (p *Provider) getFirewall(request *gateway.RESTRequest, scope state.Scope) 
 
 // listFirewalls returns the scope's firewall rules.
 func (p *Provider) listFirewalls(scope state.Scope) (*gateway.RESTResponse, error) {
-	items := []any{}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for name := range s.firewalls {
-			items = append(items, firewallDocument(scope.Project, s.firewalls[name]))
-		}
-		return nil
-	})
-	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
+	return listRecords(p, scope, "compute#firewallList", func(s *scopeState) map[string]*firewallRecord { return s.firewalls }, nil,
+		inProject(scope, firewallDocument))
 }
 
 // deleteFirewall removes one firewall rule.
@@ -620,14 +628,8 @@ func (p *Provider) getRoute(request *gateway.RESTRequest, scope state.Scope) (*g
 
 // listRoutes returns the scope's routes.
 func (p *Provider) listRoutes(scope state.Scope) (*gateway.RESTResponse, error) {
-	items := []any{}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for name := range s.routes {
-			items = append(items, routeDocument(scope.Project, s.routes[name]))
-		}
-		return nil
-	})
-	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
+	return listRecords(p, scope, "compute#routeList", func(s *scopeState) map[string]*routeRecord { return s.routes }, nil,
+		inProject(scope, routeDocument))
 }
 
 func (p *Provider) deleteRoute(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
@@ -787,14 +789,8 @@ func (p *Provider) getRouter(request *gateway.RESTRequest, scope state.Scope) (*
 
 // listRouters returns the scope's routers.
 func (p *Provider) listRouters(scope state.Scope) (*gateway.RESTResponse, error) {
-	items := []any{}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for name := range s.routers {
-			items = append(items, routerDocument(scope.Project, s.routers[name]))
-		}
-		return nil
-	})
-	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
+	return listRecords(p, scope, "compute#routerList", func(s *scopeState) map[string]*routerRecord { return s.routers }, nil,
+		inProject(scope, routerDocument))
 }
 
 func (p *Provider) deleteRouter(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {

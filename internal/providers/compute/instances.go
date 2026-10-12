@@ -278,16 +278,8 @@ func (p *Provider) getInstance(request *gateway.RESTRequest, scope state.Scope) 
 // listInstances returns the zone's instances in name order.
 func (p *Provider) listInstances(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	zone := request.Path["zone"]
-	items := []any{}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for _, key := range sortedKeys(s.instances) {
-			if record := s.instances[key]; record.Zone == zone {
-				items = append(items, instanceDocument(scope.Project, record))
-			}
-		}
-		return nil
-	})
-	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items, keyKind: "compute#instanceList"}}, nil
+	return listRecords(p, scope, "compute#instanceList", func(s *scopeState) map[string]*instanceRecord { return s.instances },
+		func(record *instanceRecord) bool { return record.Zone == zone }, inProject(scope, instanceDocument))
 }
 
 // deleteInstance removes one instance, releasing its internal address.
