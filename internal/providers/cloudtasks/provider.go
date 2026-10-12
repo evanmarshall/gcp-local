@@ -156,9 +156,6 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// workerKey addresses one task's dispatch worker.
-func workerKey(scope state.Scope, key string) string { return scope.Project + "\x00" + key }
-
 // stopWorkers cancels the dispatch workers of one scope.
 func (p *Provider) stopWorkers(scope state.Scope) {
 	p.mu.Lock()
@@ -174,9 +171,9 @@ func (p *Provider) stopWorkers(scope state.Scope) {
 // stopWorker cancels one task's dispatch worker.
 func (p *Provider) stopWorker(scope state.Scope, key string) {
 	p.mu.Lock()
-	if active := p.workers[workerKey(scope, key)]; active != nil {
+	if active := p.workers[provider.WorkerKey(scope, key)]; active != nil {
 		active.cancel()
-		delete(p.workers, workerKey(scope, key))
+		delete(p.workers, provider.WorkerKey(scope, key))
 	}
 	p.mu.Unlock()
 }

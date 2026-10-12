@@ -175,15 +175,12 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// workerKey addresses one job's worker.
-func workerKey(scope state.Scope, key string) string { return scope.Project + "\x00" + key }
-
 // stopWorker cancels one job's worker.
 func (p *Provider) stopWorker(scope state.Scope, key string) {
 	p.mu.Lock()
-	if cancel := p.workers[workerKey(scope, key)]; cancel != nil {
+	if cancel := p.workers[provider.WorkerKey(scope, key)]; cancel != nil {
 		cancel()
-		delete(p.workers, workerKey(scope, key))
+		delete(p.workers, provider.WorkerKey(scope, key))
 	}
 	p.mu.Unlock()
 }

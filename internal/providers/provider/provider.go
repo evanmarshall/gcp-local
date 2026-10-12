@@ -148,3 +148,7 @@ func (metadataOnly) Reset(context.Context) error { return nil }
 func CoverageGap(service string) func(what string) error {
 	return func(what string) error { return status.Error(codes.Unimplemented, service+" coverage gap: "+what) }
 }
+
+// WorkerKey addresses one background worker (a task dispatch or a scheduled
+// job) within a project scope.
+func WorkerKey(scope state.Scope, key string) string { return scope.Project + "\x00" + key }

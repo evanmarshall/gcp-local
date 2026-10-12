@@ -43,7 +43,7 @@ func (p *Provider) launchDispatch(scope state.Scope, key string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	active := &worker{cancel: cancel}
 	p.mu.Lock()
-	p.workers[workerKey(scope, key)] = active
+	p.workers[provider.WorkerKey(scope, key)] = active
 	p.mu.Unlock()
 	go func() {
 		defer p.finishWorker(scope, key, active)
@@ -55,8 +55,8 @@ func (p *Provider) launchDispatch(scope state.Scope, key string) {
 func (p *Provider) finishWorker(scope state.Scope, key string, active *worker) {
 	active.cancel()
 	p.mu.Lock()
-	if p.workers[workerKey(scope, key)] == active {
-		delete(p.workers, workerKey(scope, key))
+	if p.workers[provider.WorkerKey(scope, key)] == active {
+		delete(p.workers, provider.WorkerKey(scope, key))
 	}
 	p.mu.Unlock()
 }

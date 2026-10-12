@@ -30,10 +30,10 @@ const publishMethod = "/google.pubsub.v1.Publisher/Publish"
 func (p *Provider) launch(scope state.Scope, key string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.mu.Lock()
-	if previous := p.workers[workerKey(scope, key)]; previous != nil {
+	if previous := p.workers[provider.WorkerKey(scope, key)]; previous != nil {
 		previous()
 	}
-	p.workers[workerKey(scope, key)] = cancel
+	p.workers[provider.WorkerKey(scope, key)] = cancel
 	p.mu.Unlock()
 	go p.work(ctx, scope, key)
 }
