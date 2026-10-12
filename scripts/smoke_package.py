@@ -17,6 +17,9 @@ import venv
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from gcp_local.bootstrap import SERVICES  # noqa: E402
+
 DOCKER = shutil.which("docker") or "docker"
 
 
@@ -72,7 +75,7 @@ def main() -> int:
             assert started["image"] == image, "the installed CLI did not use the selected image"
             status = json.loads(run(*base, "status", cwd=work))
             assert status["ready"], status
-            assert len(status["providers"]) == 14, status
+            assert len(status["providers"]) == len(SERVICES), status
             env = json.loads(run(*base, "env", cwd=work))
             assert env["GCP_LOCAL_ENDPOINT"] == f"http://127.0.0.1:{args.port}"
             for example, greeting in (

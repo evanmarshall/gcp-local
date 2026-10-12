@@ -6,12 +6,11 @@
 package main
 
 import (
-	"sync"
-	"fmt"
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,8 +33,8 @@ import (
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
-	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/iam"
+	memorystoreprovider "github.com/evanmarshall/gcp-local/internal/providers/memorystore"
 	pubsubprovider "github.com/evanmarshall/gcp-local/internal/providers/pubsub"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/resourcemanager"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"

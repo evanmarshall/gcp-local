@@ -87,3 +87,7 @@ Fidelity is tested, not assumed: scenarios are recorded once against a dedicated
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks, and the recording workflow, and the [issue tracker](https://github.com/evanmarshall/gcp-local/issues) for planned work.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

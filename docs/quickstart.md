@@ -137,8 +137,8 @@ CI runs all three on Linux; they were also run on macOS Docker. Host application
 Before the first tag, the repository owner must:
 
 1. Allow the workflow to publish `ghcr.io/evanmarshall/gcp-local` (Actions workflow permissions with package write; after the first push, link the package to this repository and make it public for anonymous pulls).
-2. Register a PyPI trusted publisher for project `gcp-local`, owner `evanmarshall`, repository `gcp-local`, workflow `release.yml`, environment `pypi`, and create the `pypi` environment (with required reviewers if desired).
-3. Choose and add a license before publishing; the distribution metadata currently declares none.
+2. Register a PyPI trusted publisher for project `gcp-local`, owner `evanmarshall`, repository `gcp-local`, workflow `release.yml`, environment `pypi`. The `pypi` environment exists; add required reviewers to it if you want a manual gate.
+3. Make the repository public, or the README's clone instructions and the GHCR image link will not work for other people.
 4. Bump `gcp_local/__init__.py` and tag that commit `v<version>`.
 
 Verify a release with `gh attestation verify --owner evanmarshall oci://ghcr.io/evanmarshall/gcp-local:<version>` and `sha256sum --check SHA256SUMS`.

@@ -1,7 +1,6 @@
 package iam
 
 import (
-	"time"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -10,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -23,6 +23,7 @@ type Rule struct {
 	Baseline []string
 	When     map[string][]string
 }
+
 // Target names the resource a call acts on. Attributes are the CEL
 // resource.* values GCP exposes to IAM conditions for that resource.
 type Target struct {

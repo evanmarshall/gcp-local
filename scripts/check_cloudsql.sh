@@ -11,5 +11,11 @@ if [ "$(id -u)" = 0 ] && [ -z "${GCP_LOCAL_POSTGRES_UID:-}" ]; then
     GCP_LOCAL_POSTGRES_GID=$(id -g nobody)
     export GCP_LOCAL_POSTGRES_UID GCP_LOCAL_POSTGRES_GID
 fi
+if [ -n "${GCP_LOCAL_POSTGRES_UID:-}" ] && command -v setpriv >/dev/null &&
+    ! setpriv --reuid "$GCP_LOCAL_POSTGRES_UID" --regid "${GCP_LOCAL_POSTGRES_GID:-$GCP_LOCAL_POSTGRES_UID}" --clear-groups \
+        test -x "$GCP_LOCAL_POSTGRES_ROOT"; then
+    echo "uid $GCP_LOCAL_POSTGRES_UID cannot reach $GCP_LOCAL_POSTGRES_ROOT; make its parent directories traversable (chmod o+x)" >&2
+    exit 1
+fi
 sh scripts/go.sh test -c -tags=cloudsqlintegration -race -o bin/cloudsql-integration ./internal/providers/cloudsql
 python3 scripts/run_isolated.py --timeout 300 -- bin/cloudsql-integration -test.v -test.run TestPostgresThroughConnector

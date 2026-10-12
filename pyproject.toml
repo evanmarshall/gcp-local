@@ -11,6 +11,8 @@ dynamic = ["version"]
 description = "Start, reset, and stop a private local GCP emulator environment with local ADC and IAM."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = []
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -45,6 +47,7 @@ include = [
   "/compose.yaml",
   "/packaging/haproxy.cfg",
   "/README.md",
+  "/LICENSE",
   "/pyproject.toml",
 ]
 

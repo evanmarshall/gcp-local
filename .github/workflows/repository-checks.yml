@@ -52,7 +52,9 @@ jobs:
             sh scripts/check_redis.sh
       - run: sh scripts/go.sh test -c -tags=cloudsqlintegration -race -o bin/cloudsql-integration ./internal/providers/cloudsql
       - name: Verify Cloud SQL against real PostgreSQL behind the connector
+        # The servers run as nobody, which must traverse the runner's home.
         run: |
+          chmod o+x "$HOME"
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             sh scripts/check_cloudsql.sh
       - name: Compare local REST providers against their recorded contracts
@@ -134,6 +136,7 @@ jobs:
           python-version: '3.12'
       - run: python scripts/install_go.py
       - run: python scripts/install_terraform.py
+      - run: python scripts/install_pubsub.py
       - run: python scripts/install_firestore.py
       - run: python scripts/install_spanner.py
       - run: python scripts/install_redis.py

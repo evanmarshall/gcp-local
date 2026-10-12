@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -68,6 +69,9 @@ func (p *ProcessRuntime) Start(ctx context.Context, spec StartSpec) (Started, er
 	// Workloads get only their declared environment, never the core's own
 	// variables (credentials, configuration, or proxy settings).
 	run.Env = append(append([]string{"PATH=/usr/local/bin:/usr/bin:/bin"}, spec.Env...), "PORT="+strconv.Itoa(port))
+	// Like Cloud Run's container logs, revision output goes to the core's
+	// own log stream instead of being discarded.
+	run.Stdout, run.Stderr = os.Stderr, os.Stderr
 	if err := run.Start(); err != nil {
 		return Started{}, fmt.Errorf("launch the revision process: %w", err)
 	}
