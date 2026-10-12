@@ -7,6 +7,7 @@ from unittest import mock
 from urllib.parse import urlsplit
 
 import google.auth
+import google.auth.exceptions
 import requests
 from google.auth import _helpers
 from google.auth.transport.requests import AuthorizedSession, Request
@@ -32,6 +33,14 @@ class LocalSession(requests.Session):
 
 base = LocalSession()
 transport = Request(session=base)
+if mode == "external":
+    # Unscoped ADC sends scope=; real STS refuses it, and so does gcp-local.
+    unscoped, _ = google.auth.default(request=transport)
+    try:
+        unscoped.refresh(transport)
+        raise AssertionError("unscoped external-account refresh succeeded")
+    except google.auth.exceptions.OAuthError as error:
+        assert "Scope(s) must be provided." in str(error), error
 credentials, project = google.auth.default(
     scopes=["https://www.googleapis.com/auth/cloud-platform"], request=transport
 )

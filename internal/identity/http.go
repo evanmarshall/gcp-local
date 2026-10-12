@@ -84,7 +84,7 @@ func (s *Service) exchange(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, 400, "invalid_grant", "Unknown local subject credential")
 		return
 	}
-	value, lifetime, err := s.mint(p, requestedScopes(r, p.scopes))
+	value, lifetime, err := s.mint(p, strings.Fields(r.PostForm.Get("scope")))
 	if err != nil {
 		oauthError(w, 400, "invalid_scope", err.Error())
 		return
@@ -135,16 +135,6 @@ func introspectionForm(r *http.Request) (int, [2]string, bool) {
 	return 0, [2]string{}, false
 }
 
-// requestedScopes returns the exchange's scopes. Like the metadata server, an
-// exchange without one gets the principal's configured scopes; client
-// libraries that rely on default scopes omit it.
-func requestedScopes(r *http.Request, configured []string) []string {
-	if scopes := strings.Fields(r.PostForm.Get("scope")); len(scopes) > 0 {
-		return scopes
-	}
-	return configured
-}
-
 // clientAuthentication accepts the OAuth client authentication an
 // external-account credential may send (RFC 6749 section 2.3.1): one Basic
 // header, or client_id with an optional client_secret in the form, never both.
@@ -162,7 +152,8 @@ func clientAuthentication(r *http.Request) bool {
 	return ok && id != ""
 }
 
-// optionalFields are the exchange fields a client may omit.
+// optionalFields are the exchange fields besides the required ones. An empty
+// scope is refused separately, with real STS's error.
 var optionalFields = []string{"scope", "client_id", "client_secret"}
 
 // unexpectedField reports a repeated field or one that is neither required nor
@@ -197,6 +188,12 @@ func exchangeForm(r *http.Request) (int, [2]string, bool) {
 	}
 	if r.PostForm.Get("audience") != Audience || r.PostForm.Get("requested_token_type") != AccessTokenType || r.PostForm.Get("subject_token_type") != AccessTokenType {
 		return refuse(400, "invalid_target", "Select the local audience and access-token types")
+	}
+	// Real STS refuses an external-credential exchange whose scope is absent or
+	// empty (probed 2026-10-12 with an OIDC subject token); client libraries
+	// send scope= when the caller set no scopes.
+	if len(strings.Fields(r.PostForm.Get("scope"))) == 0 {
+		return refuse(400, "invalid_request", "Scope(s) must be provided.")
 	}
 	return 0, [2]string{}, false
 }

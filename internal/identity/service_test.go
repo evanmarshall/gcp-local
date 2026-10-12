@@ -93,17 +93,21 @@ func requireAppPrincipal(t *testing.T, s *Service, token string) gateway.Princip
 	return p
 }
 
-// Client libraries using default scopes omit scope; the token gets the
-// principal's configured scopes, or cloud-platform, as the metadata server does.
-func TestExchangeWithoutScopeUsesPrincipalScopes(t *testing.T) {
+// Real STS refuses an exchange whose scope is absent or empty with 400
+// invalid_request "Scope(s) must be provided." (probed 2026-10-12); the Python
+// auth library sends scope= when the caller set no scopes.
+func TestExchangeRefusesMissingScope(t *testing.T) {
 	s, _ := service(t)
+	for _, scope := range []string{"", " "} {
+		values := form()
+		values.Set("scope", scope)
+		code, body := exchange(t, s, values)
+		requireOAuthError(t, code, body, 400, "invalid_request", "Scope(s) must be provided.")
+	}
 	values := form()
 	values.Del("scope")
 	code, body := exchange(t, s, values)
-	if code != http.StatusOK {
-		t.Fatalf("scope-less exchange = %d %v", code, body)
-	}
-	requireAppPrincipal(t, s, accessToken(t, body))
+	requireOAuthError(t, code, body, 400, "invalid_request", "Scope(s) must be provided.")
 }
 
 // requireScopes resolves an exchange's token and requires exactly scopes.
@@ -163,7 +167,7 @@ func TestExchangeRefusesUnknownAndUnenrolledScopes(t *testing.T) {
 	code, body = exchange(t, restricted, form())
 	requireOAuthError(t, code, body, 400, "invalid_scope", `scope is not enrolled for this principal "`+CloudPlatform+`"`)
 	values = form()
-	values.Del("scope")
+	values.Set("scope", readOnly)
 	code, body = exchange(t, restricted, values)
 	requireScopes(t, restricted, code, body, readOnly)
 

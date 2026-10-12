@@ -32,7 +32,7 @@ Set each client's API endpoint to `http://127.0.0.1:4566` and keep the SDK's nor
 
 - The creator refuses an existing directory and accepts only a numeric loopback HTTP endpoint.
 - Access tokens last one hour. Set `token_lifetime_seconds` (1-3600) in `server.json` to test refresh.
-- Tokens carry the requested [OAuth scopes](#oauth-scopes). An exchange without `scope` gets `cloud-platform`, or the enrollment's `scopes` when it lists them, as the metadata server does. Real STS acceptance of a scope-less exchange is not recorded.
+- Tokens carry the requested [OAuth scopes](#oauth-scopes). An exchange with no or an empty `scope` is 400 `invalid_request`, "Scope(s) must be provided.", as real STS answers an external-credential exchange (probed 2026-10-12 with a workload identity provider; not a recorded scenario). Client libraries send their default scopes; code that loads ADC itself must pass scopes, for example `google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])`.
 - The exchange accepts OAuth client authentication: one `Authorization: Basic` header (gcloud sends its client ID this way) or `client_id` and optional `client_secret` form fields, never both. The values grant nothing; the subject token alone picks the principal. Any other `Authorization` header is 401 `invalid_client`.
 - `POST /v1/introspect` answers RFC 7662 introspection with client authentication. gcloud calls it to name the account: `username` is the enrolled subject's email. ADC files written by gcp-local set `token_info_url` to it. Real STS introspection is not recorded.
 - Tokens die when the core restarts.
