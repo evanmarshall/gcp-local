@@ -256,60 +256,42 @@
       "client": "go",
       "package": "cloud.google.com/go/spanner",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 61,
-      "gap": "no admin gRPC listener",
-      "match": "unknown service google.spanner.admin.instance.v1.InstanceAdmin"
+      "expect": "pass"
     },
     {
       "service": "spanner",
       "client": "node",
       "package": "@google-cloud/spanner",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 61,
-      "gap": "no admin gRPC listener",
-      "match": "unknown service google.spanner.admin.instance.v1.InstanceAdmin"
+      "expect": "pass"
     },
     {
       "service": "spanner",
       "client": "python",
       "package": "google-cloud-spanner",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 61,
-      "gap": "no admin gRPC listener",
-      "match": "unknown service google.spanner.admin.instance.v1.InstanceAdmin"
+      "expect": "pass"
     },
     {
       "service": "bigtable",
       "client": "go",
       "package": "cloud.google.com/go/bigtable",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 62,
-      "gap": "no admin gRPC listener",
-      "match": "unknown service google.bigtable.admin.v2.BigtableInstanceAdmin"
+      "expect": "pass"
     },
     {
       "service": "bigtable",
       "client": "node",
       "package": "@google-cloud/bigtable",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 62,
-      "gap": "no admin gRPC listener",
-      "match": "unknown service google.bigtable.admin.v2.BigtableInstanceAdmin"
+      "expect": "pass"
     },
     {
       "service": "bigtable",
       "client": "python",
       "package": "google-cloud-bigtable",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 62,
-      "gap": "no admin gRPC listener",
-      "match": "unknown service google.bigtable.admin.v2.BigtableInstanceAdmin"
+      "expect": "pass"
     },
     {
       "service": "logging",
@@ -337,10 +319,7 @@
       "client": "go",
       "package": "cloud.google.com/go/iam",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 63,
-      "gap": "no gRPC listener",
-      "match": "unknown service google.iam.admin.v1.IAM"
+      "expect": "pass"
     },
     {
       "service": "iam",
@@ -354,10 +333,7 @@
       "client": "python",
       "package": "google-cloud-iam",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 63,
-      "gap": "no gRPC listener",
-      "match": "unknown service google.iam.admin.v1.IAM"
+      "expect": "pass"
     }
   ]
 }

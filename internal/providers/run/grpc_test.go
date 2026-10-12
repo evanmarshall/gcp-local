@@ -359,11 +359,17 @@ func TestGRPCMapsProviderErrors(t *testing.T) {
 	if status.Code(err) != codes.NotFound || status.Convert(err).Message() != "operation is not found" {
 		t.Fatalf("missing GetOperation = %v", err)
 	}
-	// Only Cloud Run's operation names reach the provider; no other service
-	// binds the Operations mixin.
-	_, err = operations.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: "projects/demo-project/instances/i/operations/o"})
-	if status.Code(err) != codes.Unimplemented || status.Convert(err).Message() != "No provider implements /google.longrunning.Operations/GetOperation" {
-		t.Fatalf("foreign GetOperation = %v", err)
+	// Only Cloud Run's operation names reach the provider: a Spanner name
+	// goes to Spanner, which this server does not run, and a name no service
+	// binds is a gap.
+	for name, message := range map[string]string{
+		"projects/demo-project/instances/i/operations/o": "Service spanner is not enabled on this server; add spanner to -services",
+		"operations/o": "No provider implements /google.longrunning.Operations/GetOperation",
+	} {
+		_, err = operations.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: name})
+		if status.Code(err) != codes.Unimplemented || status.Convert(err).Message() != message {
+			t.Fatalf("GetOperation %s = %v", name, err)
+		}
 	}
 }
 

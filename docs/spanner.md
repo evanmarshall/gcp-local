@@ -1,6 +1,6 @@
 # Spanner
 
-Spanner admin v1 over REST and the `google.spanner.v1.Spanner` data plane over gRPC and REST, with IAM checked before the call reaches Google's official emulator (1.5.58, [pin](../toolchains/spanner.json)). Admin and REST data-plane scenarios are recorded against GCP. The emulator is Linux only; `-services spanner` refuses to start on macOS.
+Spanner admin v1 over REST and gRPC and the `google.spanner.v1.Spanner` data plane over gRPC and REST, with IAM checked before the call reaches Google's official emulator (1.5.58, [pin](../toolchains/spanner.json)). Admin and REST data-plane scenarios are recorded against GCP. The emulator is Linux only; `-services spanner` refuses to start on macOS.
 
 ## Use
 
@@ -23,7 +23,9 @@ client, _ := spanner.NewClientWithConfig(ctx, "projects/p/instances/i/databases/
 	spanner.ClientConfig{DisableNativeMetrics: true}, option.WithGRPCConn(conn))
 ```
 
-The Go client (v1.95.1) is tested. The Python client is not.
+Admin over gRPC (`google.spanner.admin.instance.v1.InstanceAdmin`, `google.spanner.admin.database.v1.DatabaseAdmin`) runs through the REST provider methods, so permissions, decorated fields, and errors are the same. Clients poll operations on the same connection: `google.longrunning.Operations` `GetOperation` serves Spanner instance and database operation names.
+
+The Go client (v1.95.1) is tested, data and admin. The client matrix also drives the Node and Python clients over the TLS port ([clients](clients.md#grpc-over-tls)).
 
 ## Methods
 
@@ -72,7 +74,7 @@ sh scripts/check_rest_recordings.sh  # both recordings
 
 ## Gaps
 
-- Not served: backup create and restore, instance partitions, database roles, operation list and cancel, `testIamPermissions`, REST `:executeStreamingSql` and `:streamingRead`.
+- Not served: backup create and restore, instance partitions, database roles, operation list and cancel, `testIamPermissions`, REST `:executeStreamingSql` and `:streamingRead`. Over gRPC these return `UNIMPLEMENTED` "No provider implements ...", as do backup and backup-schedule IAM policies and `ListOperations`, `CancelOperation`, and `DeleteOperation` on Spanner operation names.
 - `UNIMPLEMENTED`: partitioned DML, Data Boost, `creator_role`, single-use read-write `ExecuteSql`/`Read`, `BatchWrite`.
 - Requests are limited to 2 MiB. Query and lock behavior is the emulator's, including one read-write transaction at a time.
 - State is in memory; reset or restart discards it.

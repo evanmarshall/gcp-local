@@ -1,10 +1,10 @@
 # Bigtable
 
-Bigtable admin v2 over REST (instances with one cluster, tables, column families, IAM) and the v2 data API over gRPC, with IAM checked before any backend call. Tables and rows run in Google's in-process emulator, `bttest` v1.58.0 ([pin](../third_party/bigtable-bttest/manifest.json)); the provider owns instances and clusters. The admin scenario is recorded against GCP; the data plane is modeled locally.
+Bigtable admin v2 over REST and gRPC (instances with one cluster, tables, column families, IAM) and the v2 data API over gRPC, with IAM checked before any backend call. Tables and rows run in Google's in-process emulator, `bttest` v1.58.0 ([pin](../third_party/bigtable-bttest/manifest.json)); the provider owns instances and clusters. The admin scenario is recorded against GCP; the data plane is modeled locally.
 
 ## Use
 
-Select `-services ...,bigtable`. Admin routes are `/v2/projects/{project}/...` on port 4566; the data API is gRPC on 4567. Never set `BIGTABLE_EMULATOR_HOST`; it selects anonymous credentials, which the gateway refuses. The gateway is plaintext loopback, so the per-RPC credential must not require TLS:
+Select `-services ...,bigtable`. Admin routes are `/v2/projects/{project}/...` on port 4566; admin (`google.bigtable.admin.v2.BigtableInstanceAdmin`, `BigtableTableAdmin`) and the data API are gRPC on 4567. gRPC admin runs through the REST provider methods, so permissions and errors are the same. Never set `BIGTABLE_EMULATOR_HOST`; it selects anonymous credentials, which the gateway refuses. The gateway is plaintext loopback, so the per-RPC credential must not require TLS:
 
 ```go
 conn, _ := grpc.NewClient("127.0.0.1:4567",
@@ -15,7 +15,7 @@ client, _ := bigtable.NewClientWithConfig(ctx, project, instance,
 	option.WithGRPCConn(conn))
 ```
 
-The Go client (v1.58.0) is tested. The Python client is not.
+The Go client (v1.58.0) is tested, data and admin. The client matrix also drives the Node and Python clients over the TLS port ([clients](clients.md#grpc-over-tls)).
 
 ## Methods
 
@@ -57,7 +57,7 @@ sh scripts/check_go.sh                # provider and Go data-plane tests
 
 - The data plane, table IAM, table list contents, and `tables.update` operations are not recorded. `edition` and `knowledgeCatalogRegion` values are not recorded.
 - No REST data routes. Authorized views, materialized views, `ExecuteQuery`, `PrepareQuery`, change streams, and `OpenTable` return `UNIMPLEMENTED`.
-- Not routed: operation polling, app profiles, backups, snapshots, consistency tokens.
+- Not routed: operation polling, app profiles, backups, snapshots, consistency tokens. Over gRPC these return `UNIMPLEMENTED` "No provider implements ...", as do `PartialUpdateInstance` (the REST update returns the instance, not an operation), `UpdateInstance`, `TestIamPermissions`, and materialized-view, logical-view, backup, and authorized-view policies. Instance creates return completed operations, so clients don't poll.
 - One cluster per instance; no replication. Instance type carries no quota behavior.
 - Error messages are bttest's. Dropping an unknown family returns 500.
 - State is in memory; reset or restart discards it.

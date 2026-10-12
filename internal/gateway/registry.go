@@ -79,6 +79,11 @@ func NewRegistry() *Registry {
 	r.registerData("cloudkms", generated.CloudKMSMethods)
 	r.registerData("run", generated.RunServicesMethods)
 	r.registerData("run", generated.RunRevisionsMethods)
+	r.registerData("spanner", generated.SpannerInstanceAdminMethods)
+	r.registerData("spanner", generated.SpannerDatabaseAdminMethods)
+	r.registerData("bigtable", generated.BigtableInstanceAdminMethods)
+	r.registerData("bigtable", generated.BigtableTableAdminMethods)
+	r.registerData("iam", generated.IAMAdminMethods)
 	return r
 }
 

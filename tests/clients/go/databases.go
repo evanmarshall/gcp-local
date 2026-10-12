@@ -54,7 +54,13 @@ func runSpanner(ctx context.Context, e *env) error {
 	databaseName := instanceName + "/databases/matrix"
 	// Native metrics would export to monitoring.googleapis.com; nothing may leave loopback.
 	config := spanner.ClientConfig{DisableNativeMetrics: true}
-	client, err := spanner.NewClientWithConfig(ctx, databaseName, config, conn)
+	// The data client closes its connection, so it gets its own; the admin
+	// clients still need theirs to drop the database.
+	dataConn, err := e.grpcOption(e.owner)
+	if err != nil {
+		return err
+	}
+	client, err := spanner.NewClientWithConfig(ctx, databaseName, config, dataConn)
 	if err != nil {
 		return step("new data client", err)
 	}

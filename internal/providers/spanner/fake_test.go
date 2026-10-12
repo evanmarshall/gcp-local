@@ -99,6 +99,8 @@ func (f *fakeDriver) serve(request proto.Message) (proto.Message, error) {
 		return f.instance(request.GetName())
 	case *instancepb.DeleteInstanceRequest:
 		return f.deleteInstance(request.GetName())
+	case *databasepb.DropDatabaseRequest:
+		return f.dropDatabase(request.GetDatabase())
 	default:
 		return f.serveDatabases(request)
 	}
@@ -147,9 +149,20 @@ func (f *fakeDriver) serveDatabases(request proto.Message) (proto.Message, error
 	}
 }
 
-// serveData answers the data-plane RPCs the unit tests forward.
+func (f *fakeDriver) dropDatabase(name string) (proto.Message, error) {
+	if !f.databaseNames[name] {
+		return nil, status.Error(codes.NotFound, "Database not found")
+	}
+	delete(f.databaseNames, name)
+	return &emptypb.Empty{}, nil
+}
+
+// serveData answers the data-plane RPCs the unit tests forward, and polls of
+// the fake's operations, which are always done.
 func (f *fakeDriver) serveData(request proto.Message) (proto.Message, error) {
 	switch request := request.(type) {
+	case *longrunningpb.GetOperationRequest:
+		return &longrunningpb.Operation{Name: request.GetName(), Done: true}, nil
 	case *spannerpb.CreateSessionRequest:
 		if !f.databaseNames[request.GetDatabase()] {
 			return nil, status.Error(codes.NotFound, "Database not found")

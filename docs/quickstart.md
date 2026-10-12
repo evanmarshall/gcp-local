@@ -38,7 +38,7 @@ Options go before the command: `--directory`, `--port`, `--data-ports FIRST-LAST
 | `env` key | Value |
 | --- | --- |
 | `GCP_LOCAL_ENDPOINT` | `http://127.0.0.1:4566` (all REST APIs) |
-| `GCP_LOCAL_GRPC_ENDPOINT` | `127.0.0.1:4567` (Pub/Sub, Bigtable, Spanner, Firestore, Cloud Logging, Secret Manager v1, Cloud Tasks v2, Cloud KMS, Cloud Run v2) |
+| `GCP_LOCAL_GRPC_ENDPOINT` | `127.0.0.1:4567` (Pub/Sub, Bigtable and Spanner data and admin, Firestore, Cloud Logging, Secret Manager v1, Cloud Tasks v2, Cloud KMS, Cloud Run v2, IAM service accounts) |
 | `GCP_LOCAL_GRPC_TLS_ENDPOINT` | `127.0.0.1:4584`: the same gRPC services over TLS, for Node.js and Python's Spanner, Bigtable, and Logging clients ([gRPC over TLS](clients.md#grpc-over-tls)) |
 | `GCP_LOCAL_GRPC_TLS_CA` | `<directory>/tls/ca.pem`, the environment's own CA certificate |
 | `GCP_LOCAL_DATA_PORTS` | `4568-4583`: one port per Redis or public-IP Cloud SQL instance |

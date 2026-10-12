@@ -35,11 +35,11 @@ Notes on counts:
 
 - API totals use these discovery documents: storage v1, pubsub v1, firestore v1, spanner v1, bigtableadmin v2 plus bigtable v2, sqladmin v1beta4, redis v1, bigquery v2, secretmanager v1, cloudkms v1, cloudtasks v2beta3, artifactregistry v1, iam v1, cloudresourcemanager v1, compute v1 plus networkmanagement v1, run v2, logging v2, aiplatform v1.
 - Pub/Sub counts gRPC methods. 12 REST routes serve topic and subscription create, get, list, delete, and IAM policy; snapshots and seek are gRPC only.
-- Spanner: 21 admin and 15 data-plane session methods.
-- Bigtable: 17 admin methods (bigtableadmin v2) and 7 data methods (bigtable v2, gRPC).
+- Spanner: 21 admin and 15 data-plane session methods. All 21 admin methods are also served over gRPC (`google.spanner.admin.instance.v1.InstanceAdmin`, `google.spanner.admin.database.v1.DatabaseAdmin`, and `google.longrunning.Operations` GetOperation for Spanner operation names).
+- Bigtable: 17 admin methods (bigtableadmin v2) and 7 data methods (bigtable v2, gRPC). 16 admin methods are also served over gRPC (`google.bigtable.admin.v2`); instance update is REST only.
 - Firestore: 14 document methods (all on gRPC; all but Listen on REST) and 2 Admin field methods on REST.
 - Logging serves its 4 methods over both REST and gRPC.
-- IAM counts `signBlob` from IAM Service Account Credentials v1 with the 11 IAM v1 methods.
+- IAM counts `signBlob` from IAM Service Account Credentials v1 with the 11 IAM v1 methods. 10 of the IAM v1 methods are also served over gRPC `google.iam.admin.v1.IAM`; key create and `signBlob` are REST only.
 - Secret Manager also serves 14 of its 15 methods over gRPC `google.cloud.secretmanager.v1`; locations list is REST only.
 - Cloud Tasks also serves 15 of its 16 methods over gRPC `google.cloud.tasks.v2`; locations list is REST only. REST is v2beta3.
 - Cloud KMS serves 25 of its 26 methods over gRPC as well; only the location list is REST only ([transport](cloudkms.md#transport)).
@@ -58,7 +58,10 @@ A recording proves only the requests it sends. This table lists the real clients
 | pubsub (ordering, `resume_publish`, dead-letter, filters, exactly-once) | Python `google-cloud-pubsub` 2.42.0 | gRPC | `internal/providers/pubsub/testdata/sdk_delivery.py` |
 | firestore | Python `google-cloud-firestore` 2.34.1 | gRPC | `internal/providers/firestore/testdata/sdk.py` |
 | spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | `internal/providers/spanner/data_integration_test.go` |
+| spanner | Go `cloud.google.com/go/spanner` 1.95.1 admin clients | gRPC | `internal/providers/spanner/admin_grpc_test.go` |
 | bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 | gRPC | `internal/providers/bigtable/data_test.go` |
+| bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 admin clients | gRPC | `internal/providers/bigtable/admin_grpc_test.go` |
+| iam | Go `cloud.google.com/go/iam` 1.11.0 (`admin/apiv1`) | gRPC | `internal/providers/iam/grpc_test.go` |
 | logging | Python `google-cloud-logging` 3.17.0 | REST and gRPC | `internal/providers/logging/testdata/sdk.py` |
 | cloudkms | Python `google-cloud-kms` 3.18.0 | REST and gRPC | `internal/providers/cloudkms/testdata/sdk.py` |
 | cloudkms | Go `cloud.google.com/go/kms` 1.35.0 | gRPC | `internal/providers/cloudkms/grpc_test.go` |
@@ -99,7 +102,15 @@ A recording proves only the requests it sends. This table lists the real clients
 | logging | Go `cloud.google.com/go/logging` 1.18.0 | gRPC | `tests/clients/go` |
 | logging | Node `@google-cloud/logging` 12.2.0 | gRPC | `tests/clients/node` |
 | logging | Python `google-cloud-logging` 3.17.0 | gRPC | `tests/clients/python` |
+| spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | `tests/clients/go` |
+| spanner | Node `@google-cloud/spanner` 9.0.0 | gRPC | `tests/clients/node` |
+| spanner | Python `google-cloud-spanner` 3.71.0 | gRPC | `tests/clients/python` |
+| bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 | gRPC | `tests/clients/go` |
+| bigtable | Node `@google-cloud/bigtable` 7.4.0 | gRPC | `tests/clients/node` |
+| bigtable | Python `google-cloud-bigtable` 2.50.0 | gRPC | `tests/clients/python` |
+| iam | Go `cloud.google.com/go/iam` 1.11.0 | gRPC | `tests/clients/go` |
 | iam | Node `@googleapis/iam` 42.1.0 | REST | `tests/clients/node` |
+| iam | Python `google-cloud-iam` 2.26.0 | gRPC | `tests/clients/python` |
 
 ### Known client failures
 
@@ -110,14 +121,6 @@ These matrix pairs fail today. `sh scripts/check_clients.sh` fails if one starts
 | storage | `gcloud` 588.0.0 | JSON REST | bucket create refuses the enableObjectRetention query option | [#65](https://github.com/evanmarshall/gcp-local/issues/65) |
 | storage | `rclone` 1.75.2 | JSON REST | bucket create without publicAccessPrevention and softDeletePolicy (the GCP defaults) is refused | [#64](https://github.com/evanmarshall/gcp-local/issues/64) |
 | pubsub | `gcloud` 588.0.0 | REST | REST publish and pull are not served | [#66](https://github.com/evanmarshall/gcp-local/issues/66) |
-| spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |
-| spanner | Node `@google-cloud/spanner` 9.0.0 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |
-| spanner | Python `google-cloud-spanner` 3.71.0 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |
-| bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 | gRPC | no admin gRPC listener | [#62](https://github.com/evanmarshall/gcp-local/issues/62) |
-| bigtable | Node `@google-cloud/bigtable` 7.4.0 | gRPC | no admin gRPC listener | [#62](https://github.com/evanmarshall/gcp-local/issues/62) |
-| bigtable | Python `google-cloud-bigtable` 2.50.0 | gRPC | no admin gRPC listener | [#62](https://github.com/evanmarshall/gcp-local/issues/62) |
-| iam | Go `cloud.google.com/go/iam` 1.11.0 | gRPC | no gRPC listener | [#63](https://github.com/evanmarshall/gcp-local/issues/63) |
-| iam | Python `google-cloud-iam` 2.26.0 | gRPC | no gRPC listener | [#63](https://github.com/evanmarshall/gcp-local/issues/63) |
 
 Untested: Java clients, `gsutil`, the Node.js and gcloud clients of Cloud Run, and every client of Artifact Registry, Cloud SQL, Memorystore, and Compute.
 

@@ -174,12 +174,15 @@ func (g *Gateway) restFor(binding generated.Transcoding, resource string, reques
 }
 
 // splitFields separates the JSON body from the query parameters. A path
-// field stays only inside a body field that contains it (secret.name).
+// field stays only inside a body field that contains it (secret.name, or
+// serviceAccount.name under a "*" body).
 func splitFields(binding generated.Transcoding, fields map[string]any) (any, url.Values) {
 	var body any
 	switch binding.Body {
 	case "*":
-		delete(fields, binding.Field)
+		if variable := variables.FindStringSubmatch(binding.Path)[1]; !strings.Contains(variable[:strings.IndexByte(variable, '=')], ".") {
+			delete(fields, binding.Field)
+		}
 		body, fields = fields, nil
 	case "":
 		delete(fields, binding.Field)

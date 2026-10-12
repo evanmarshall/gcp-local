@@ -66,7 +66,9 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 		g.rpcs[rpc.Method] = rpc
 	}
 	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods, generated.CloudKMSMethods,
-		generated.RunServicesMethods, generated.RunRevisionsMethods, generated.OperationsMethods} {
+		generated.RunServicesMethods, generated.RunRevisionsMethods, generated.OperationsMethods,
+		generated.SpannerInstanceAdminMethods, generated.SpannerDatabaseAdminMethods,
+		generated.BigtableInstanceAdminMethods, generated.BigtableTableAdminMethods, generated.IAMAdminMethods} {
 		for _, rpc := range table {
 			g.rpcs[rpc.Method] = rpc
 		}
@@ -88,7 +90,9 @@ func (g *Gateway) addTranscoding() {
 		g.shared[rpc.Method] = true
 	}
 	for _, table := range [][]generated.Transcoding{generated.SecretManagerTranscoding, generated.CloudTasksTranscoding, generated.CloudKMSTranscoding,
-		generated.RunServicesTranscoding, generated.RunRevisionsTranscoding} {
+		generated.RunServicesTranscoding, generated.RunRevisionsTranscoding,
+		generated.SpannerInstanceAdminTranscoding, generated.SpannerDatabaseAdminTranscoding,
+		generated.BigtableInstanceAdminTranscoding, generated.BigtableTableAdminTranscoding, generated.IAMAdminTranscoding} {
 		for _, binding := range table {
 			g.transcoded[binding.RPC] = append(g.transcoded[binding.RPC], binding)
 		}

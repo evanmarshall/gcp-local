@@ -89,6 +89,11 @@ func main() {
 	write("cloudkms_dispatch.go", transcodedDispatch(cloudKMSRPC, false), *check)
 	write("run_services_dispatch.go", transcodedDispatch(runServicesRPC, false), *check)
 	write("run_revisions_dispatch.go", transcodedDispatch(runRevisionsRPC, false), *check)
+	write("spanner_instance_admin_dispatch.go", transcodedDispatch(spannerInstanceAdminRPC, false), *check)
+	write("spanner_database_admin_dispatch.go", transcodedDispatch(spannerDatabaseAdminRPC, false), *check)
+	write("bigtable_instance_admin_dispatch.go", transcodedDispatch(bigtableInstanceAdminRPC, false), *check)
+	write("bigtable_table_admin_dispatch.go", transcodedDispatch(bigtableTableAdminRPC, false), *check)
+	write("iam_admin_dispatch.go", transcodedDispatch(iamAdminRPC, false), *check)
 	write("operations_dispatch.go", operationsDispatch(), *check)
 }
 
@@ -696,11 +701,16 @@ func bigqueryRoutes() []byte {
 
 // spannerRoutes generates the Spanner admin v1 route table slice.
 func spannerRoutes() []byte {
+	return routeTable("SpannerRoutes", "is the Spanner admin v1 route table slice.", spannerRows())
+}
+
+// spannerRows lists the Spanner v1 REST routes.
+func spannerRows() []route {
 	const (
 		base     = "/v1/projects/{project}"
 		sessions = base + "/instances/{instance}/databases/{database}/sessions"
 	)
-	rows := []route{
+	return []route{
 		{"spanner.instanceConfigs.get", http.MethodGet, base + "/instanceConfigs/{instanceConfig}", false, false},
 		{"spanner.instanceConfigs.list", http.MethodGet, base + "/instanceConfigs", false, false},
 		{"spanner.instances.create", http.MethodPost, base + "/instances", true, false},
@@ -737,13 +747,17 @@ func spannerRoutes() []byte {
 		{"spanner.sessions.partitionQuery", http.MethodPost, sessions + "/{session}:partitionQuery", true, false},
 		{"spanner.sessions.partitionRead", http.MethodPost, sessions + "/{session}:partitionRead", true, false},
 	}
-	return routeTable("SpannerRoutes", "is the Spanner admin v1 route table slice.", rows)
 }
 
 // bigtableRoutes generates the Bigtable admin v2 route table slice.
 func bigtableRoutes() []byte {
+	return routeTable("BigtableRoutes", "is the Bigtable admin v2 route table slice.", bigtableRows())
+}
+
+// bigtableRows lists the Bigtable admin v2 REST routes.
+func bigtableRows() []route {
 	const base = "/v2/projects/{project}"
-	rows := []route{
+	return []route{
 		{"bigtable.instances.create", http.MethodPost, base + "/instances", true, false},
 		{"bigtable.instances.get", http.MethodGet, base + "/instances/{instance}", false, false},
 		{"bigtable.instances.list", http.MethodGet, base + "/instances", false, false},
@@ -762,7 +776,6 @@ func bigtableRoutes() []byte {
 		{"bigtable.tables.getIamPolicy", http.MethodPost, base + "/instances/{instance}/tables/{table}:getIamPolicy", true, false},
 		{"bigtable.tables.setIamPolicy", http.MethodPost, base + "/instances/{instance}/tables/{table}:setIamPolicy", true, false},
 	}
-	return routeTable("BigtableRoutes", "is the Bigtable admin v2 route table slice.", rows)
 }
 
 // artifactRegistryRoutes generates the Artifact Registry v1 route slice.
@@ -791,8 +804,13 @@ func resourceManagerRoutes() []byte {
 
 // iamRoutes generates the IAM service-account route slice.
 func iamRoutes() []byte {
+	return routeTable("IAMRoutes", "is the IAM service-account route table slice.", iamRows())
+}
+
+// iamRows lists the IAM service-account REST routes.
+func iamRows() []route {
 	const base = "/v1/projects/{project}/serviceAccounts"
-	rows := []route{
+	return []route{
 		{"iam.serviceAccounts.create", http.MethodPost, base, true, false},
 		{"iam.serviceAccounts.list", http.MethodGet, base, false, false},
 		{"iam.serviceAccounts.get", http.MethodGet, base + "/{serviceAccount}", false, false},
@@ -802,13 +820,12 @@ func iamRoutes() []byte {
 		{"iam.serviceAccounts.setIamPolicy", http.MethodPost, base + "/{serviceAccount}:setIamPolicy", true, false},
 		{"iam.serviceAccountKeys.create", http.MethodPost, base + "/{serviceAccount}/keys", true, false},
 		{"iam.serviceAccountKeys.list", http.MethodGet, base + "/{serviceAccount}/keys", false, false},
-		{"iam.serviceAccountKeys.get", http.MethodGet, base + "/{serviceAccount}/keys/{keyId}", false, false}, {"iam.serviceAccountKeys.get", http.MethodGet, base + "/{serviceAccount}/keys/{keyId}", false, false},
+		{"iam.serviceAccountKeys.get", http.MethodGet, base + "/{serviceAccount}/keys/{keyId}", false, false},
 		{"iam.serviceAccountKeys.delete", http.MethodDelete, base + "/{serviceAccount}/keys/{keyId}", false, false},
 		// IAM Service Account Credentials v1 shares the path shape; the ID is
 		// its discovery method ID.
 		{"iamcredentials.projects.serviceAccounts.signBlob", http.MethodPost, base + "/{serviceAccount}:signBlob", true, false},
 	}
-	return routeTable("IAMRoutes", "is the IAM service-account route table slice.", rows)
 }
 
 // pubsubRestRoutes generates the Pub/Sub JSON REST route table slice: the

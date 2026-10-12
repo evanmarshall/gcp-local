@@ -219,14 +219,11 @@ func transcodedDispatch(d transcodedService, declare bool) []byte {
 		}
 		id := "/" + string(d.service.FullName()) + "/" + methodName
 		input, output := typeOf(m.Input()), typeOf(m.Output())
-		rule, ok := proto.GetExtension(m.Options(), annotations.E_Http).(*annotations.HttpRule)
-		if !ok || rule == nil {
-			panic("Missing HTTP annotation for " + id)
-		}
-		field, pattern := bindingSelector(id, rule)
-		unaryStub(&stubs, name, methodName, input, output, id)
-		rpcDescriptor(&descriptors, id, field, pattern, false, input, output)
+		rule, _ := proto.GetExtension(m.Options(), annotations.E_Http).(*annotations.HttpRule)
 		restID, served := d.rest[methodName]
+		unaryStub(&stubs, name, methodName, input, output, id)
+		field, pattern := transcodedSelector(id, rule, served)
+		rpcDescriptor(&descriptors, id, field, pattern, false, input, output)
 		if !served {
 			continue
 		}
@@ -315,6 +312,20 @@ func bindingRow(routes []route, m protoreflect.MethodDescriptor, id, restID stri
 	}
 	return fmt.Sprintf("{%q,%q,%q,%q,%q,%q,%s},\n", id, restID, verb, rulePath(rule),
 		jsonName(m.Input(), strings.SplitN(field, ".", 2)[0]), bodyName(m.Input(), rule.GetBody()), others)
+}
+
+// transcodedSelector reads a method's resource selector. A served method needs
+// exactly one resource variable. An unserved method only needs a selector for
+// its gap; one with no HTTP binding or no resource variable (IAM ListRoles,
+// Spanner InternalUpdateGraphOperation) has none and reaches the gap.
+func transcodedSelector(id string, rule *annotations.HttpRule, served bool) (string, string) {
+	if served && rule == nil {
+		panic("Missing HTTP annotation for " + id)
+	}
+	if !served && (rule == nil || len(resourceVariable.FindAllStringSubmatch(rulePath(rule), -1)) != 1) {
+		return "", ""
+	}
+	return bindingSelector(id, rule)
 }
 
 // bindingSelector reads the single resource variable of one HTTP binding.

@@ -6,9 +6,11 @@ import (
 	"io"
 	"strings"
 
+	btadminpb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
+	iamadminpb "cloud.google.com/go/iam/admin/apiv1/adminpb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
@@ -16,6 +18,8 @@ import (
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/run/apiv2/runpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
+	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"cloud.google.com/go/spanner/apiv1/spannerpb"
 	"github.com/evanmarshall/gcp-local/api/generated"
 	"google.golang.org/grpc"
@@ -40,6 +44,11 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	kmspb.RegisterKeyManagementServiceServer(server, &generated.KeyManagementServiceServer{Dispatch: g})
 	runpb.RegisterServicesServer(server, &generated.ServicesServer{Dispatch: g})
 	runpb.RegisterRevisionsServer(server, &generated.RevisionsServer{Dispatch: g})
+	instancepb.RegisterInstanceAdminServer(server, &generated.InstanceAdminServer{Dispatch: g})
+	databasepb.RegisterDatabaseAdminServer(server, &generated.DatabaseAdminServer{Dispatch: g})
+	btadminpb.RegisterBigtableInstanceAdminServer(server, &generated.BigtableInstanceAdminServer{Dispatch: g})
+	btadminpb.RegisterBigtableTableAdminServer(server, &generated.BigtableTableAdminServer{Dispatch: g})
+	iamadminpb.RegisterIAMServer(server, &generated.IAMServer{Dispatch: g})
 	longrunningpb.RegisterOperationsServer(server, &generated.OperationsServer{Dispatch: g})
 	return server
 }

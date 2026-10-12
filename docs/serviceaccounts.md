@@ -1,10 +1,12 @@
 # IAM service accounts
 
-IAM v1 service accounts, per-account IAM policy, local RSA keys, and IAM Credentials `signBlob` over REST. Modeled locally. The scenario `serviceaccount-lifecycle-authorization` is recorded against GCP. For local identity and token minting, see [local identity](local-identity.md).
+IAM v1 service accounts, per-account IAM policy, local RSA keys, and IAM Credentials `signBlob` over REST, and most of them over gRPC `google.iam.admin.v1.IAM`. Modeled locally. The scenario `serviceaccount-lifecycle-authorization` is recorded against GCP. For local identity and token minting, see [local identity](local-identity.md).
 
 ## Use
 
 Select `-services ...,iam`. Routes are `/v1/projects/{project}/serviceAccounts` on port 4566. Accounts are addressed by email.
+
+gRPC `google.iam.admin.v1.IAM` on port 4567 serves every method below except key `create` and `signBlob`, through the REST provider methods, so permissions and errors are the same ([clients](clients.md)). The Go `cloud.google.com/go/iam/admin/apiv1` 1.11.0 and Python `google-cloud-iam` 2.26.0 clients are tested.
 
 ## Methods
 
@@ -43,6 +45,8 @@ To re-record, get an approved `.gcp-local/serviceaccounts-scope.json` (`LIMITS` 
 After an interrupted run, `python -m gcp_validation.serviceaccounts cleanup --profile ... --scope ... --manifest ... --allow-live` deletes only the account in the manifest.
 
 ## Gaps
+
+- gRPC refuses with `UNIMPLEMENTED`: `CreateServiceAccountKey` (the key file's `token_uri` names the HTTP origin, which a gRPC request doesn't carry; create keys over REST), the deprecated IAM `SignBlob` and `SignJwt` (REST `signBlob` is the IAM Credentials API), `UpdateServiceAccount` (PUT), `TestIamPermissions`, and every role and other method.
 
 - Keys and `signBlob` are modeled locally, not recorded; recording keys would mint real credentials.
 - A key file's `token_uri` names this emulator, which does not accept JWT-bearer grants: a key signs but cannot mint access tokens.
