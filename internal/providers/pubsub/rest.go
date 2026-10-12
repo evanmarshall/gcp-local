@@ -8,12 +8,14 @@ import (
 
 	"errors"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -146,31 +148,35 @@ func (p *Provider) handleRest(call gateway.Call, raw any) (any, error) {
 	return &gateway.RESTResponse{JSON: restWire(call.Method, response)}, nil
 }
 
-// handleRestPolicy serves the REST topic/subscription IAM surface straight
-// from the shared IAM engine, mirroring the gRPC policy handler's shape.
+// handleRestPolicy serves the REST topic/subscription IAM surface through the
+// same validation, authorization, and engine update as the gRPC handler.
 func (p *Provider) handleRestPolicy(call gateway.Call, request *gateway.RESTRequest, project, restMethod string) (*gateway.RESTResponse, error) {
 	call.Method = restTwins[restMethod]
-	if !strings.Contains(call.Resource, "/topics/") && !strings.Contains(call.Resource, "/subscriptions/") {
-		return nil, status.Error(codes.InvalidArgument, "Invalid policy resource")
-	}
+	call.Project = project
+	var protoRequest proto.Message
 	if call.Method == policyRPC+"GetIamPolicy" {
-		policy, err := p.iam.GetPolicy(canonical(call.Resource))
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "read the policy: %v", err)
+		protoRequest = &iampb.GetIamPolicyRequest{Resource: call.Resource}
+	} else {
+		set := &iampb.SetIamPolicyRequest{}
+		if protojson.Unmarshal(request.JSON, set) != nil {
+			return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
 		}
-		return &gateway.RESTResponse{JSON: policy}, nil
+		set.Resource = call.Resource
+		protoRequest = set
 	}
-	var envelope struct {
-		Policy iam.Policy `json:"policy"`
-	}
-	if json.Unmarshal(request.JSON, &envelope) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
-	}
-	policy, err := p.iam.SetPolicy(canonical(call.Resource), envelope.Policy)
+	result, err := p.policy(call, protoRequest)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "write the policy: %v", err)
+		return nil, err
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	policy, ok := result.(proto.Message)
+	if !ok {
+		return nil, status.Error(codes.Internal, "Invalid IAM policy response")
+	}
+	encoded, err := protojson.Marshal(policy)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "Unable to encode the IAM policy")
+	}
+	return &gateway.RESTResponse{JSON: json.RawMessage(encoded)}, nil
 }
 
 // restSession opens the backend session and runs the same authorize, invoke,

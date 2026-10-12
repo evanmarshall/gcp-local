@@ -12,21 +12,21 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 )
 
-// restClient drives the Pub/Sub JSON surface through the real REST gateway.
-type restClient struct {
+// restHarness drives the Pub/Sub JSON surface through the real REST gateway.
+type restHarness struct {
 	t *testing.T
 	g *gateway.Gateway
 }
 
-func newRESTClient(t *testing.T, registry *gateway.Registry) *restClient {
+func newRESTClient(t *testing.T, registry *gateway.Registry) *restHarness {
 	t.Helper()
-	return &restClient{t: t, g: gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
+	return &restHarness{t: t, g: gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: "serviceAccount:" + token, Project: testProject, Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})}
 }
 
 // do sends one request as actor ("" is anonymous) and checks the HTTP status.
-func (c *restClient) do(actor, method, path, body string, want int) map[string]any {
+func (c *restHarness) do(actor, method, path, body string, want int) map[string]any {
 	c.t.Helper()
 	r := httptest.NewRequestWithContext(context.Background(), method, path, strings.NewReader(body))
 	if actor != "" {
@@ -155,14 +155,9 @@ func TestRESTPolicyRoundTrip(t *testing.T) {
 }
 
 // TestRESTPolicyRequiresAuthorization proves the REST IAM surface evaluates the
-// caller the way the gRPC IAMPolicy surface does.
-//
-// Known defect: handleRestPolicy reads and writes the engine policy without calling
-// p.authorize, so any caller -- a principal from another project, or an
-// anonymous request -- can read a topic's policy and grant itself access.
-// The gRPC twin (p.policy) authorizes first and is not affected.
+// caller the way the gRPC IAMPolicy surface does: a foreign or anonymous
+// caller cannot read or grant itself access, and a missing topic is 404.
 func TestRESTPolicyRequiresAuthorization(t *testing.T) {
-	t.Skip("known bug: REST get/setIamPolicy skips authorization (handleRestPolicy never calls p.authorize)")
 	p, registry, _ := memoryFixture(t)
 	c := newRESTClient(t, registry)
 	c.do(owner, http.MethodPut, restTopicPath, `{}`, 200)

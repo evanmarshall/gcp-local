@@ -34,7 +34,6 @@
 1	nestif	internal/providers/pubsub/provider.go
 1	nestif	internal/providers/storage/bucket_updates.go
 1	nestif	internal/providers/storage/provider.go
-1	revive	internal/providers/pubsub/rest.go
 1	unparam	internal/providers/resourcemanager/provider_test.go
 1	wrapcheck	internal/providers/artifactregistry/methods.go
 1	wrapcheck	internal/providers/bigquery/methods.go

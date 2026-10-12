@@ -4,6 +4,7 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -101,6 +102,7 @@ func (c *Catalog) ForgetBucket(scope state.Scope, name string) error {
 			return fmt.Errorf("unindex bucket %s: %w", name, err)
 		}
 		delete(value.Buckets, name)
+		maps.DeleteFunc(value.Folders, func(_ string, folder Folder) bool { return folder.Bucket == name })
 		return nil
 	}); err != nil {
 		return fmt.Errorf("delete bucket %s: %w", name, err)

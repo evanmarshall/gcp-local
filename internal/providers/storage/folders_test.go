@@ -53,12 +53,7 @@ func TestFolderLifecycleAndAuthorization(t *testing.T) {
 
 // TestDeletedBucketDropsItsFolders proves a bucket recreated under the same
 // name does not inherit the deleted bucket's folders.
-//
-// Known defect: Catalog.ForgetBucket deletes the bucket entry but leaves its
-// projectState.Folders entries in place, so a later bucket with the same name
-// in the same project lists and serves the old folders until a scope reset.
 func TestDeletedBucketDropsItsFolders(t *testing.T) {
-	t.Skip("known bug: Catalog.ForgetBucket does not remove the bucket's folders")
 	f := setup(t)
 	f.bucket(testProject, "reused-bucket", 200)
 	f.request(admin, "POST", "/storage/v1/b/reused-bucket/folders", []byte(`{"name":"stale"}`), 200)
