@@ -13,7 +13,7 @@ apt-get update -qq
 # them (see CONTRIBUTING.md's checks table). Keep this list current when a
 # check gains a dependency.
 apt-get install -y --no-install-recommends ca-certificates curl git python3 python3-venv \
-    build-essential pkg-config iproute2 procps openjdk-17-jre-headless
+    build-essential pkg-config iproute2 procps openjdk-17-jre-headless libaio1 libnuma1
 python3 -m venv .venv-tools
 .venv-tools/bin/python -m pip install --disable-pip-version-check \
     -r requirements-tools.txt -r requirements-sdk.txt -r requirements-cloud.txt \
@@ -24,6 +24,7 @@ python3 scripts/install_emulator_jar.py firestore
 python3 scripts/install_spanner.py
 python3 scripts/install_redis.py
 python3 scripts/install_postgres.py
+python3 scripts/install_mysql.py
 python3 scripts/install_terraform.py
 python3 scripts/install_client_tools.py
 PATH="$PWD/.tools/clients/node/bin:$PATH" npm ci --prefix tests/clients/node --no-audit --no-fund

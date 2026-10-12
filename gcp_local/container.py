@@ -100,6 +100,7 @@ def core_arguments(identity: Path, iam: Path, tls: Path) -> list[str]:
         "-spanner-libraries=/opt/spanner/lib",
         "-redis-server=/opt/redis/redis-server",
         "-cloudsql-postgres=/opt/postgres",
+        "-cloudsql-mysql=/opt/mysql",
     ]
     return arguments + run_arguments()
 

@@ -115,6 +115,10 @@ type admission func(ctx context.Context, target connectorTarget, user string) (s
 func (p *Provider) serve(ctx context.Context, target connectorTarget, client net.Conn, admit admission) {
 	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(startupTimeout))
+	if mysql, _ := p.engineOf(target.project, target.instance); mysql {
+		p.serveMySQL(ctx, target, client, admit)
+		return
+	}
 	reader := bufio.NewReader(client)
 	startup, user, err := readStartup(reader, client)
 	if err != nil {
@@ -125,8 +129,26 @@ func (p *Provider) serve(ctx context.Context, target connectorTarget, client net
 		return
 	}
 	_ = client.SetDeadline(time.Time{})
+	err = p.session(ctx, target, func(ctx context.Context, server net.Conn, removed <-chan struct{}) error {
+		if _, err := server.Write(startup); err != nil {
+			return fmt.Errorf("forward the startup packet: %w", err)
+		}
+		pipe(ctx, removed, client, reader, server)
+		return nil
+	})
+	if err != nil {
+		_, _ = client.Write(errorResponse("08006", unavailable))
+	}
+}
+
+// unavailable is the refusal when the instance's server cannot be reached.
+const unavailable = "gcp-local: the Cloud SQL instance is unavailable"
+
+// session dials the instance's private socket inside a backend session;
+// forward receives the session context, which reset and shutdown cancel.
+func (p *Provider) session(ctx context.Context, target connectorTarget, forward func(context.Context, net.Conn, <-chan struct{}) error) error {
 	key := backend.Key{Service: serviceName, Scope: provider.ProjectScope(target.project)}
-	err = p.manager.Session(ctx, key, func(ctx context.Context, active backend.Backend) error {
+	err := p.manager.Session(ctx, key, func(ctx context.Context, active backend.Backend) error {
 		fleet, err := driverOf(active)
 		if err != nil {
 			return err
@@ -141,15 +163,82 @@ func (p *Provider) serve(ctx context.Context, target connectorTarget, client net
 			return fmt.Errorf("dial the instance socket: %w", err)
 		}
 		defer server.Close()
-		if _, err := server.Write(startup); err != nil {
-			return fmt.Errorf("forward the startup packet: %w", err)
+		return forward(ctx, server, removed)
+	})
+	if err != nil {
+		return fmt.Errorf("cloud SQL session: %w", err)
+	}
+	return nil
+}
+
+// serveMySQL admits and forwards one MySQL client connection. MySQL servers
+// speak first, so the instance is authorized before its socket is dialed;
+// the server's greeting is forwarded without its TLS capability, and the
+// client's handshake response is read for its user before any credential
+// reaches the server.
+func (p *Provider) serveMySQL(ctx context.Context, target connectorTarget, client net.Conn, admit admission) {
+	if code, message := admit(ctx, target, ""); code != "" {
+		_, _ = client.Write(mysqlErrorPacket(0, mysqlRefusal(code), code, message))
+		return
+	}
+	sent := false
+	err := p.session(ctx, target, func(ctx context.Context, server net.Conn, removed <-chan struct{}) error {
+		reader, forwarded, err := relayMySQLHandshake(client, server, &sent)
+		if err != nil || !forwarded {
+			return err
 		}
+		_ = client.SetDeadline(time.Time{})
+		_ = server.SetDeadline(time.Time{})
 		pipe(ctx, removed, client, reader, server)
 		return nil
 	})
-	if err != nil {
-		_, _ = client.Write(errorResponse("08006", "gcp-local: the Cloud SQL instance is unavailable"))
+	if err != nil && !sent {
+		_, _ = client.Write(mysqlErrorPacket(0, mysqlHostRefused, "08006", unavailable))
 	}
+}
+
+// relayMySQLHandshake forwards the server greeting without its TLS capability,
+// reads the client's handshake response, and forwards it unless it is
+// malformed or names the administrative account, which it refuses. sent
+// reports whether the greeting reached the client.
+func relayMySQLHandshake(client, server net.Conn, sent *bool) (*bufio.Reader, bool, error) {
+	_ = server.SetDeadline(time.Now().Add(startupTimeout))
+	hello, _, err := readMySQLPacket(server)
+	if err != nil {
+		return nil, false, err
+	}
+	if !withoutTLS(hello) {
+		return nil, false, errMySQLPacket
+	}
+	if _, err := client.Write(mysqlPacket(0, hello)); err != nil {
+		return nil, false, nil //nolint:nilerr // the client went away; nothing to report
+	}
+	*sent = true
+	reader := bufio.NewReader(client)
+	response, sequence, err := readMySQLPacket(reader)
+	if err != nil {
+		return nil, false, nil //nolint:nilerr // the client went away; nothing to report
+	}
+	if user, ok := handshakeUser(response); !ok || user == adminRole {
+		message := "gcp-local: the Cloud SQL connector requires a MySQL 4.1 handshake without TLS"
+		if ok {
+			message = "gcp-local: the internal administrative role is not reachable through the connector"
+		}
+		_, _ = client.Write(mysqlErrorPacket(sequence+1, mysqlAccessDenied, "28000", message))
+		return nil, false, nil
+	}
+	if _, err := server.Write(mysqlPacket(sequence, response)); err != nil {
+		return nil, false, fmt.Errorf("forward the handshake response: %w", err)
+	}
+	return reader, true, nil
+}
+
+// mysqlRefusal maps a connector refusal's SQLSTATE onto a MySQL error number.
+func mysqlRefusal(state string) uint16 {
+	if state == "28000" {
+		return mysqlAccessDenied
+	}
+	return mysqlHostRefused
 }
 
 // admit checks the bound principal's cloudsql.instances.connect permission and

@@ -29,6 +29,8 @@ type fakeServer struct {
 	databases []string
 	users     []string
 	received  chan []byte
+	// greeting is the MySQL handshake a MySQL server sends first; nil for PostgreSQL.
+	greeting []byte
 }
 
 func newFakeFleet() *fakeFleet { return &fakeFleet{servers: map[string]*fakeServer{}} }
@@ -74,6 +76,9 @@ func (f *fakeFleet) create(ctx context.Context, spec serverSpec) error {
 	}
 	server := &fakeServer{listener: listener, socket: socket, done: make(chan struct{}), databases: []string{"postgres"},
 		users: []string{defaultUser}, received: make(chan []byte, 8)}
+	if isMySQL(spec.Version) {
+		server.databases, server.users, server.greeting = []string{"information_schema", "mysql"}, []string{mysqlRootUser}, fakeGreeting()
+	}
 	go server.accept()
 	f.servers[spec.Instance] = server
 	return nil
@@ -86,9 +91,14 @@ func (s *fakeServer) accept() {
 		if err != nil {
 			return
 		}
+		if s.greeting != nil {
+			_, _ = conn.Write(mysqlPacket(0, s.greeting))
+		}
 		buffer := make([]byte, 4096)
 		n, _ := conn.Read(buffer)
-		s.received <- buffer[:n]
+		if n > 0 { // a refused MySQL handshake closes the dialed socket without sending
+			s.received <- buffer[:n]
+		}
 		_ = conn.Close()
 	}
 }
@@ -120,29 +130,58 @@ func (f *fakeFleet) exec(_ context.Context, instance, _, sql string) ([][]string
 	f.statement = append(f.statement, sql)
 	name := ""
 	if fields := strings.Fields(sql); len(fields) > 2 {
-		name = strings.Trim(fields[2], `"`)
+		name, _, _ = strings.Cut(strings.Trim(fields[2], `"`+"`'"), "'")
 	}
 	switch {
 	case strings.HasPrefix(sql, "CREATE DATABASE "):
 		server.databases = append(server.databases, name)
-	case strings.HasPrefix(sql, "CREATE ROLE "):
+	case strings.HasPrefix(sql, "CREATE ROLE "), strings.HasPrefix(sql, "CREATE USER "):
 		server.users = append(server.users, name)
-	case strings.HasPrefix(sql, "SELECT datname"):
+	case strings.HasPrefix(sql, "SELECT datname"), strings.HasPrefix(sql, "SELECT SCHEMA_NAME"):
 		return server.databaseRows(sql), nil
 	case strings.HasPrefix(sql, "SELECT rolname"):
 		return rowsOf(server.users), nil
-	case strings.HasPrefix(sql, "DROP DATABASE "):
+	case strings.HasPrefix(sql, "DROP DATABASE ") && server.greeting == nil:
 		return nil, &pgError{Severity: "ERROR", Code: "55006", Message: "database is being accessed by other users"}
 	default:
+		return server.mysqlRows(sql)
 	}
 	return nil, nil
+}
+
+// mysqlRows answers the MySQL-only statements the provider issues.
+func (s *fakeServer) mysqlRows(sql string) ([][]string, error) {
+	switch {
+	case strings.HasPrefix(sql, "SELECT User, Host"):
+		rows := rowsOf(s.users)
+		for i := range rows {
+			rows[i] = append(rows[i], mysqlAnyHost)
+		}
+		return rows, nil
+	case strings.HasPrefix(sql, "DROP USER 'missing'"):
+		return nil, &mysqlError{Code: 1396, State: "HY000", Message: "Operation DROP USER failed for 'missing'@'%'"}
+	default:
+		return nil, nil
+	}
+}
+
+// fakeGreeting is a minimal MySQL 8 Handshake v10 that advertises TLS.
+func fakeGreeting() []byte {
+	payload := append([]byte{mysqlProtocolVersion}, "8.0.46\x00"...)
+	payload = append(payload, 1, 0, 0, 0)                                // thread id
+	payload = append(payload, "abcdefgh"...)                             // scramble part 1
+	payload = append(payload, 0, 0xff, 0xff)                             // filler, capabilities (with CLIENT_SSL)
+	payload = append(payload, mysqlCharsetUTF8MB4, 2, 0, 0xff, 0x0f, 21) // charset, status, capabilities, scramble length
+	payload = append(payload, make([]byte, 10)...)                       // reserved
+	payload = append(payload, "ijklmnopqrst\x00"...)                     // scramble part 2
+	return append(payload, mysqlNativePassword+"\x00"...)
 }
 
 // databaseRows answers the provider's pg_database query.
 func (s *fakeServer) databaseRows(sql string) [][]string {
 	var rows [][]string
 	for _, name := range s.databases {
-		if !strings.Contains(sql, "datname = ") || strings.Contains(sql, "'"+name+"'") {
+		if !strings.Contains(sql, " = ") || strings.Contains(sql, "'"+name+"'") {
 			rows = append(rows, []string{name, "UTF8", "C"})
 		}
 	}

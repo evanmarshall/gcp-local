@@ -40,7 +40,7 @@ Run the checks for every area you change; CI runs all of them. "Linux" means CI 
 | `sh scripts/check_firestore.sh` | Firestore provider and the Python SDK | Linux | Java 17, `install_emulator_jar.py firestore`, `requirements-services.txt` |
 | `sh scripts/check_spanner.sh` | Spanner provider against the official emulator | Linux | `install_spanner.py` |
 | `sh scripts/check_redis.sh` | Memorystore against real Redis | Linux | `install_redis.py` |
-| `sh scripts/check_cloudsql.sh` | Cloud SQL against real PostgreSQL | Linux; non-root, or root with `.tools/postgres` traversable by `nobody` | `install_postgres.py` |
+| `sh scripts/check_cloudsql.sh` | Cloud SQL against real PostgreSQL and MySQL | Linux; non-root, or root with `.tools/postgres` and `.tools/mysql` traversable by `nobody`; `libaio.so.1` and `libnuma.so.1` | `install_postgres.py`, `install_mysql.py` |
 | `sh scripts/check_vertexai.sh` | Vertex AI with the google-genai SDK | Linux | `requirements-services.txt` |
 | `sh scripts/check_logging.sh` | Cloud Logging with the Python SDK | Linux | `requirements-services.txt` |
 | `sh scripts/check_cloudkms.sh` | Cloud KMS with the Python SDK over REST and gRPC, and the Go client over gRPC | Linux | `requirements-services.txt` |
@@ -55,7 +55,7 @@ Run the checks for every area you change; CI runs all of them. "Linux" means CI 
 | `scripts/smoke_package.py` | The built wheel's `gcp-local` CLI against an image | Docker | `requirements-pubsub.txt` |
 | `scripts/smoke_cloudrun.py` | Cloud Run deploying a real container | Linux with Docker | None |
 
-"Every backend" means `install_emulator_jar.py pubsub`, `install_emulator_jar.py firestore`, `install_spanner.py`, `install_redis.py`, and `install_postgres.py`. There is no single runner; CI splits the Linux checks across jobs.
+"Every backend" means `install_emulator_jar.py pubsub`, `install_emulator_jar.py firestore`, `install_spanner.py`, `install_redis.py`, `install_postgres.py`, and `install_mysql.py`. There is no single runner; CI splits the Linux checks across jobs.
 
 ## Scripts and requirements
 
@@ -65,7 +65,7 @@ Every other file in `scripts/` supports a check or a documented workflow:
 | --- | --- |
 | `go.sh` | Run the pinned Go toolchain in `.tools/go` |
 | `install_go.py`, `install_quality_tools.py`, `install_terraform.py`, `install_client_tools.py` | Install pinned tools under `.tools/` (`install_client_tools.py`: Node.js, gcloud, rclone for the client matrix) |
-| `install_emulator_jar.py`, `install_spanner.py`, `install_redis.py`, `install_postgres.py` | Install pinned backends under `.tools/`; the Dockerfile runs them too |
+| `install_emulator_jar.py`, `install_spanner.py`, `install_redis.py`, `install_postgres.py`, `install_mysql.py` | Install pinned backends under `.tools/`; the Dockerfile runs them too |
 | `backend_env.sh` | Sourced by check scripts to export the `.tools/` backend paths |
 | `run_isolated.py` | Run a server and a test command in a loopback-only Linux namespace |
 | `run_pubsub.py`, `run_terraform.py`, `run_clients.py`, `probe_pubsub_backend.py`, `smoke_storage.py`, `smoke_runtime.py` | Called by the check scripts |

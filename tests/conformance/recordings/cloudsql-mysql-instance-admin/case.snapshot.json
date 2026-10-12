@@ -1,0 +1,369 @@
+{
+  "cloudsql-mysql-instance-admin": {
+    "recorded-date": "12-10-2026, 08:10:46",
+    "recorded-content": {
+      "instance-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "CREATE",
+        "status": "DONE"
+      },
+      "instance-read": {
+        "backendType": "SECOND_GEN",
+        "connectionName": "<project>:us-central1:<instance>",
+        "databaseVersion": "MYSQL_8_0",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "instanceType": "CLOUD_SQL_INSTANCE",
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "kind": "sql#instance",
+        "name": "<instance>",
+        "region": "us-central1",
+        "settings": {
+          "deletionProtectionEnabled": false,
+          "edition": "ENTERPRISE",
+          "tier": "db-f1-micro",
+          "userLabels": {
+            "gcp-local-run": "<run>",
+            "managed-by": "gcp-local"
+          }
+        },
+        "state": "RUNNABLE"
+      },
+      "denied-read": {
+        "code": 403,
+        "http_status": 403,
+        "status": null
+      },
+      "denied-create-database": {
+        "code": 403,
+        "http_status": 403,
+        "status": null
+      },
+      "initial-databases": {
+        "http_status": 200,
+        "names": [
+          "information_schema",
+          "mysql",
+          "performance_schema",
+          "sys"
+        ]
+      },
+      "initial-users": {
+        "fields": [
+          "etag",
+          "host",
+          "iamStatus",
+          "instance",
+          "kind",
+          "name",
+          "passwordPolicy",
+          "project"
+        ],
+        "http_status": 200,
+        "users": [
+          [
+            "root",
+            "%"
+          ]
+        ]
+      },
+      "database-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "CREATE_DATABASE",
+        "status": "DONE"
+      },
+      "database-read": {
+        "charset": "utf8mb4",
+        "collation": "utf8mb4_unicode_ci",
+        "fields": [
+          "charset",
+          "collation",
+          "etag",
+          "instance",
+          "kind",
+          "name",
+          "project",
+          "selfLink"
+        ],
+        "http_status": 200,
+        "instance": "<instance>",
+        "kind": "sql#database",
+        "name": "gl_db",
+        "project": "<project>"
+      },
+      "duplicate-database": {
+        "code": 400,
+        "http_status": 400,
+        "status": null
+      },
+      "default-database-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "CREATE_DATABASE",
+        "status": "DONE"
+      },
+      "default-database-read": {
+        "charset": "utf8mb4",
+        "collation": "utf8mb4_0900_ai_ci",
+        "fields": [
+          "charset",
+          "collation",
+          "etag",
+          "instance",
+          "kind",
+          "name",
+          "project",
+          "selfLink"
+        ],
+        "http_status": 200,
+        "instance": "<instance>",
+        "kind": "sql#database",
+        "name": "gl_default",
+        "project": "<project>"
+      },
+      "databases-list": {
+        "http_status": 200,
+        "names": [
+          "gl_db",
+          "gl_default",
+          "information_schema",
+          "mysql",
+          "performance_schema",
+          "sys"
+        ]
+      },
+      "database-deleted": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "DELETE_DATABASE",
+        "status": "DONE"
+      },
+      "default-database-deleted": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "DELETE_DATABASE",
+        "status": "DONE"
+      },
+      "database-absent": {
+        "http_status": 404
+      },
+      "user-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "CREATE_USER",
+        "status": "DONE"
+      },
+      "users-list": {
+        "fields": [
+          "etag",
+          "host",
+          "iamStatus",
+          "instance",
+          "kind",
+          "name",
+          "passwordPolicy",
+          "project"
+        ],
+        "http_status": 200,
+        "users": [
+          [
+            "gl_user",
+            "%"
+          ],
+          [
+            "root",
+            "%"
+          ]
+        ]
+      },
+      "user-deleted": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "DELETE_USER",
+        "status": "DONE"
+      },
+      "users-after-delete": {
+        "fields": [
+          "etag",
+          "host",
+          "iamStatus",
+          "instance",
+          "kind",
+          "name",
+          "passwordPolicy",
+          "project"
+        ],
+        "http_status": 200,
+        "users": [
+          [
+            "root",
+            "%"
+          ]
+        ]
+      },
+      "instance-deleted": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "DELETE",
+        "status": "DONE"
+      },
+      "instance-absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": null
+      },
+      "cleanup": {
+        "instance_absent": true
+      }
+    }
+  }
+}

@@ -319,7 +319,7 @@ def verify_services(directory: Path) -> None:
 
 
 class WireError(Exception):
-    """A protocol-level refusal from Redis or PostgreSQL."""
+    """A protocol-level refusal from Redis, PostgreSQL, or MySQL."""
 
 
 def resp_call(sock: socket.socket, *args: str) -> str:
@@ -423,6 +423,78 @@ def pg_query(sock: socket.socket, sql: str) -> list[list[str]]:
             return rows
 
 
+def my_read(sock: socket.socket) -> tuple[int, bytes]:
+    """Read one MySQL packet and return its sequence id and payload; ERR raises."""
+    header = b""
+    while len(header) < 4:
+        chunk = sock.recv(4 - len(header))
+        if not chunk:
+            raise ConnectionError("MySQL closed the connection")
+        header += chunk
+    size = int.from_bytes(header[:3], "little")
+    body = b""
+    while len(body) < size:
+        chunk = sock.recv(size - len(body))
+        if not chunk:
+            raise ConnectionError("MySQL closed the connection")
+        body += chunk
+    if body[:1] == b"\xff":
+        raise WireError(f"{int.from_bytes(body[1:3], 'little')} {body[9:].decode()}")
+    return header[3], body
+
+
+def my_connect(port: int, user: str, password: str) -> socket.socket:
+    """Open a MySQL session with mysql_native_password over the TLS-less connector."""
+    sock = socket.create_connection(("127.0.0.1", port), timeout=10)
+    _, greeting = my_read(sock)
+    rest = greeting[greeting.index(b"\0") + 1 :]
+    auth = native_scramble(rest[4:12] + rest[31:43], password)
+    # CLIENT_LONG_PASSWORD | PROTOCOL_41 | SECURE_CONNECTION | PLUGIN_AUTH
+    flags = 0x1 | 0x200 | 0x8000 | 0x80000
+    response = struct.pack("<IIB23x", flags, 1 << 24, 45) + user.encode() + b"\0"
+    response += bytes([len(auth)]) + auth + b"mysql_native_password\0"
+    sock.sendall(len(response).to_bytes(3, "little") + b"\x01" + response)
+    sequence, reply = my_read(sock)
+    # The server may restart authentication with an AuthSwitchRequest.
+    while reply[:1] == b"\xfe" and reply[1:].startswith(b"mysql_native_password\0"):
+        auth = native_scramble(reply[len(b"\xfemysql_native_password\0") :][:20], password)
+        sock.sendall(len(auth).to_bytes(3, "little") + bytes([sequence + 1]) + auth)
+        sequence, reply = my_read(sock)
+    if reply[:1] != b"\x00":
+        raise AssertionError(f"unexpected MySQL authentication reply {reply[:1]!r}")
+    return sock
+
+
+def native_scramble(scramble: bytes, password: str) -> bytes:
+    """Compute the mysql_native_password response for one scramble."""
+    stage1 = hashlib.sha1(password.encode(), usedforsecurity=False).digest()
+    stage2 = hashlib.sha1(stage1, usedforsecurity=False).digest()
+    mixed = hashlib.sha1(scramble + stage2, usedforsecurity=False).digest()
+    return bytes(a ^ b for a, b in zip(stage1, mixed, strict=True))
+
+
+def my_query(sock: socket.socket, sql: str) -> list[list[str]]:
+    """Run one COM_QUERY and return its text rows."""
+    payload = b"\x03" + sql.encode()
+    sock.sendall(len(payload).to_bytes(3, "little") + b"\x00" + payload)
+    _, first = my_read(sock)
+    if first[:1] == b"\x00":
+        return []
+    for _ in range(first[0] + 1):  # column definitions, then EOF
+        my_read(sock)
+    rows = []
+    while True:
+        _, row = my_read(sock)
+        if row[:1] == b"\xfe" and len(row) < 9:
+            return rows
+        values, offset = [], 0
+        while offset < len(row):
+            size = row[offset]
+            values.append(row[offset + 1 : offset + 1 + size].decode())
+            offset += 1 + size
+        rows.append(values)
+
+
 def expect_closed(port: int, probe: bytes) -> None:
     """Require a published port to give no protocol answer.
 
@@ -522,6 +594,40 @@ def verify_cloudsql(directory: Path) -> None:
     finally:
         session.close()
     expect_closed(port, struct.pack("!II", 8, 80877103))
+
+
+def verify_cloudsql_mysql(directory: Path) -> None:
+    """Create a Cloud SQL for MySQL instance and user, connect with a password, and delete it."""
+    endpoint, project, token = developer_token(directory)
+    base = f"/sql/v1beta4/projects/{project}/instances"
+    api(endpoint, token, "POST", base, {
+        "name": "smoke-mysql", "region": "us-central1", "databaseVersion": "MYSQL_8_4",
+        "rootPassword": "smoke-root", "settings": {"tier": "db-f1-micro"},
+    })  # fmt: skip
+    api(endpoint, token, "POST", base + "/smoke-mysql/users", {"name": "app", "password": "app-pw"})
+    instance = api(endpoint, token, "GET", base + "/smoke-mysql")
+    primary = next(item for item in instance["ipAddresses"] if item["type"] == "PRIMARY")
+    first, last = json.loads((directory / "environment.json").read_text())["data_ports"]
+    port = primary["port"]
+    assert primary["ipAddress"] == "127.0.0.1", primary
+    assert first <= port <= last, primary
+    try:
+        my_connect(port, "app", "wrong").close()
+        raise AssertionError("MySQL accepted a wrong password")
+    except WireError as error:
+        assert str(error).startswith("1045"), error
+    session = my_connect(port, "app", "app-pw")
+    try:
+        assert my_query(session, "SELECT CURRENT_USER(), 40 + 2") == [["app@%", "42"]]
+        api(endpoint, token, "DELETE", base + "/smoke-mysql")
+        try:
+            my_query(session, "SELECT 1")
+            raise AssertionError("A MySQL session survived instance deletion")
+        except (ConnectionError, OSError, WireError):
+            pass
+    finally:
+        session.close()
+    expect_closed(port, b"\x01\x00\x00\x00\x01")
 
 
 def json_call(endpoint: str, method: str, path: str, token: str, body: object) -> tuple[int, Any]:
@@ -797,6 +903,7 @@ def main() -> int:
             verify_services(first)
             verify_redis(first)
             verify_cloudsql(first)
+            verify_cloudsql_mysql(first)
             verify_redis(second, auth=False)
             verify_dataplane(first)
             # Each environment has its own CA.
@@ -821,7 +928,7 @@ def main() -> int:
     print(
         "Packaged workflow passed: local ADC/Storage and Pub/Sub, Spanner and Bigtable "
         "rows, every packaged service with IAM enforced, gRPC over TLS with a per-environment CA, "
-        "Redis and Cloud SQL from the host, "
+        "Redis and Cloud SQL (PostgreSQL and MySQL) from the host, "
         "isolated reset, failed startup, "
         "portable doctor, standalone docker run, and teardown."
     )

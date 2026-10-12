@@ -36,3 +36,24 @@ func TestConcurrentInstanceRequests(t *testing.T) {
 		}
 	})
 }
+
+// TestConcurrentMySQLRequests races the MySQL paths on one instance: insert,
+// get, database and user create, list, and delete, and instance delete, so
+// every engine branch reads the catalog under its lock and a request that
+// loses to a delete gets 404.
+func TestConcurrentMySQLRequests(t *testing.T) {
+	h := newHarness(t)
+	providertest.Hammer(t, h.gate, adminToken, 8, 20, func(int) []providertest.Request {
+		return []providertest.Request{
+			{Method: http.MethodPost, Path: testInstances, Body: mysqlInsertBody(), Want: []int{200, 409}},
+			{Method: http.MethodGet, Path: testMySQLPath, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: testMySQLPath + "/databases", Body: map[string]any{keyName: testDatabase, "charset": "utf8mb4"}, Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: testMySQLPath + "/databases", Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: testMySQLPath + "/users", Body: map[string]any{keyName: "app", "password": "pw"}, Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: testMySQLPath + "/users", Want: []int{200, 404}},
+			{Method: http.MethodDelete, Path: testMySQLPath + "/users?name=app", Want: []int{200, 404}},
+			{Method: http.MethodDelete, Path: testMySQLPath + "/databases/" + testDatabase, Want: []int{200, 404}},
+			{Method: http.MethodDelete, Path: testMySQLPath, Want: []int{200, 404}},
+		}
+	})
+}

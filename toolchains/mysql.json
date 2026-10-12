@@ -1,0 +1,64 @@
+{
+  "name": "MySQL Community Server binaries for the Cloud SQL backend",
+  "distribution": "Oracle's generic Linux (glibc 2.28) MySQL Community Server tarballs from dev.mysql.com/downloads, served by cdn.mysql.com; downloaded, not vendored. md5 is the digest dev.mysql.com publishes; sha256 was computed from the same download. scripts/install_mysql.py extracts the server, its private libraries, the ICU data, one component, English error messages, and character sets, then drops non-loadable ELF sections (debug information and symbol tables); binaries holds the digest of the result",
+  "project": "https://dev.mysql.com/downloads/mysql/",
+  "license": "GPL-2.0 with the Universal FOSS Exception for the server; the bundled OpenSSL, protobuf, Abseil, and ICU libraries keep their own licenses (LICENSE file in each tarball)",
+  "retrieved_at": "2026-10-12",
+  "runtime_libraries": "glibc 2.28 or newer, libstdc++, libaio.so.1 (Debian/Ubuntu 22.04: libaio1; Ubuntu 24.04: libaio1t64 plus a libaio.so.1 link), and libnuma.so.1 (libnuma1) come from the host. mysqld refuses to run as root without --user, so a root caller must configure an unprivileged uid/gid.",
+  "versions": {
+    "MYSQL_8_4": {
+      "version": "8.4.11",
+      "platforms": {
+        "linux/arm64": {
+          "url": "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.11-linux-glibc2.28-aarch64.tar.xz",
+          "size": 821708368,
+          "sha256": "04b2f9791d314167a9eb83abcb476f45a7cd9e4aa88fa7a638cba40d1bc2a109",
+          "md5": "b22fb0240514099ff95251b1c8ed2127",
+          "prefix": "mysql-8.4.11-linux-glibc2.28-aarch64",
+          "upstream_mysqld_sha256": "62a5584f39fff8e659d63c87043fac29a0d85d4ea381ffcb58487dcb600a8f43",
+          "binaries": {
+            "bin/mysqld": "c572ff8332cd2f9600fb59cdcd472958f7cd8d755e7c030e5c7647769bcdf7ee"
+          }
+        },
+        "linux/amd64": {
+          "url": "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.11-linux-glibc2.28-x86_64.tar.xz",
+          "size": 832331100,
+          "sha256": "94e204cc94dede3746d2773fa5818f28f555cd8368c75ca0612eac124e6f3e58",
+          "md5": "c5a7dabc8c0d91b5974d2ca43872aeeb",
+          "prefix": "mysql-8.4.11-linux-glibc2.28-x86_64",
+          "upstream_mysqld_sha256": "0ae85e8c4efb8457e9230e42a1b54b9b542a3b27a711f0ac4b190649bc857dc9",
+          "binaries": {
+            "bin/mysqld": "b4f8367f8edb7ddc68db48803982aa800562d0f3e7009eb3ee17abd92948c31d"
+          }
+        }
+      }
+    },
+    "MYSQL_8_0": {
+      "version": "8.0.46",
+      "platforms": {
+        "linux/arm64": {
+          "url": "https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.46-linux-glibc2.28-aarch64.tar.xz",
+          "size": 880055484,
+          "sha256": "49cda0de886b021df1c2e3e382164ca3c61e93e7e5c4ee90849e13862e30dd7f",
+          "md5": "62376634565907ec31b74da3bc645b2b",
+          "prefix": "mysql-8.0.46-linux-glibc2.28-aarch64",
+          "upstream_mysqld_sha256": "9aec6970e0bb196926993a2e1169e5825c58acf6c5ba9e62f0e4766daf55161a",
+          "binaries": {
+            "bin/mysqld": "c90066c4c334253e2a3bd87063388a40259602a9b26d36e78f7ce5e5f5b3120b"
+          }
+        },
+        "linux/amd64": {
+          "url": "https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.46-linux-glibc2.28-x86_64.tar.xz",
+          "size": 892567132,
+          "sha256": "0fcdb2e88b5bb151118420745070a34621463dd85a50e1eacd7c3aa1b9d1f4a2",
+          "md5": "367c6adbd976c0e4bcbe39bda4ea6ecf",
+          "prefix": "mysql-8.0.46-linux-glibc2.28-x86_64",
+          "upstream_mysqld_sha256": "2c3420d4307fb65e537a1458abcb8d66ea4e5a173a264cb4332797a3df7ca719",
+          "binaries": {
+            "bin/mysqld": "eb80259f78723db02f2bfeab0a39a9b10464a33176da4319c562297bbaae2d0a"
+          }
+        }
+      }
+    }
+  }
+}

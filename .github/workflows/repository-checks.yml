@@ -21,6 +21,12 @@ jobs:
       - run: python3 scripts/install_spanner.py
       - run: python3 scripts/install_redis.py
       - run: python3 scripts/install_postgres.py
+      - run: python3 scripts/install_mysql.py
+      - name: Install the libraries mysqld links from the host
+        # Ubuntu 24.04 renamed libaio.so.1; mysqld still asks for the old name.
+        run: |
+          sudo apt-get update && sudo apt-get install -y libaio1t64 libnuma1
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
       - run: python3 -m venv .venv-tools
       - run: .venv-tools/bin/python -m pip install -r requirements-services.txt
       - run: .venv-tools/bin/python -m pip check
@@ -51,7 +57,7 @@ jobs:
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             sh scripts/check_redis.sh
       - run: sh scripts/go.sh test -c -tags=cloudsqlintegration -race -o bin/cloudsql-integration ./internal/providers/cloudsql
-      - name: Verify Cloud SQL against real PostgreSQL behind the connector
+      - name: Verify Cloud SQL against real PostgreSQL and MySQL behind the connector
         # The servers run as nobody, which must traverse the runner's home.
         run: |
           chmod o+x "$HOME"

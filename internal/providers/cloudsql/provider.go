@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Provider is the authorization gate in front of the PostgreSQL fleet. It
+// Provider is the authorization gate in front of the PostgreSQL and MySQL fleet. It
 // owns instance metadata, operations, and index references; the servers own
 // databases, roles, and data.
 type Provider struct {
@@ -36,7 +37,7 @@ type Provider struct {
 // handler serves one authorized method for one project.
 type handler func(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error)
 
-// New registers the Cloud SQL provider backed by the pinned PostgreSQL binaries.
+// New registers the Cloud SQL provider backed by the pinned PostgreSQL and MySQL binaries.
 func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, config Config) (*Provider, error) {
 	versions, err := config.validate()
 	if err != nil {
@@ -272,8 +273,12 @@ func subject(principal gateway.Principal) string {
 	return principal.Subject
 }
 
-// backendFailure maps PostgreSQL errors onto API errors; other failures stay internal.
+// backendFailure maps PostgreSQL and MySQL errors onto API errors; other
+// failures stay internal.
 func backendFailure(err error) (*gateway.RESTResponse, error) {
+	if my, ok := errors.AsType[*mysqlError](err); ok {
+		return mysqlFailure(my), nil
+	}
 	var pg *pgError
 	if !errors.As(err, &pg) {
 		return nil, err
@@ -285,5 +290,19 @@ func backendFailure(err error) (*gateway.RESTResponse, error) {
 		return apiError(http.StatusNotFound, "NOT_FOUND", "", pg.Message), nil
 	default:
 		return apiError(http.StatusBadRequest, "FAILED_PRECONDITION", "", pg.Message), nil
+	}
+}
+
+// mysqlFailure maps a MySQL server error onto an API error. Recorded
+// (cloudsql-mysql-instance-admin): a duplicate database (1007) is a 400, not
+// a 409, so it takes the default branch.
+func mysqlFailure(my *mysqlError) *gateway.RESTResponse {
+	switch {
+	case my.Code == 1396 && strings.Contains(my.Message, "CREATE USER"): // account exists
+		return apiError(http.StatusConflict, "ALREADY_EXISTS", "", my.Message)
+	case my.Code == 1008, my.Code == 1049, my.Code == 1396: // database or account missing
+		return apiError(http.StatusNotFound, "NOT_FOUND", "", my.Message)
+	default:
+		return apiError(http.StatusBadRequest, "FAILED_PRECONDITION", "", my.Message)
 	}
 }

@@ -54,6 +54,14 @@ COPY scripts/install_postgres.py scripts/install_postgres.py
 COPY toolchains/postgres.json toolchains/postgres.json
 RUN python3 scripts/install_postgres.py
 
+# Downloads the checksum-pinned official MySQL Community Server tarballs and keeps
+# only the server, its private libraries, and its data files (about 80 MB per version).
+FROM python:3.12.15-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS mysql
+WORKDIR /src
+COPY scripts/install_mysql.py scripts/install_mysql.py
+COPY toolchains/mysql.json toolchains/mysql.json
+RUN python3 scripts/install_mysql.py
+
 # The launcher (gcp_local/container.py) and the bundled workflow worker need
 # Python. The interpreter and standard library come from the same digest-pinned
 # image as the build stage and link against the runtime base's glibc and
@@ -68,7 +76,9 @@ RUN set -eu; cd /usr/local/lib/python3.12; \
 # are JVMs their providers start lazily, so the image carries the pinned JRE and JARs. Java's
 # temporary directory lives on the Compose tmpfs because the root filesystem is read-only.
 FROM eclipse-temurin:17-jre-jammy@sha256:8993f1aed8b25fcea7a7047a7949c1866fa558fc6830d938c22c4f13b26be9d7
-RUN set -eu; mkdir -p /opt/pubsub /opt/firestore; ln -sf "$(readlink -f "$(command -v java)")" /usr/bin/java
+# mysqld links libaio and libnuma, which its tarball does not ship.
+RUN set -eu; apt-get update; apt-get install -y --no-install-recommends libaio1 libnuma1; rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /opt/pubsub /opt/firestore; ln -sf "$(readlink -f "$(command -v java)")" /usr/bin/java
 COPY --from=build /gcp-local /gcp-local
 COPY --from=pubsub /src/.tools/pubsub/emulator.jar /opt/pubsub/emulator.jar
 COPY --from=firestore /src/.tools/firestore/emulator.jar /opt/firestore/emulator.jar
@@ -79,6 +89,8 @@ COPY --from=spanner /src/.tools/spanner /opt/spanner
 COPY --from=redis /src/.tools/redis/bin/redis-server /opt/redis/redis-server
 # Cloud SQL runs one PostgreSQL server per instance, on a private Unix socket.
 COPY --from=postgres /src/.tools/postgres /opt/postgres
+# Cloud SQL for MySQL runs one mysqld per instance, also on a private Unix socket.
+COPY --from=mysql /src/.tools/mysql /opt/mysql
 COPY --from=python /usr/local/lib/ /usr/local/lib/
 COPY --from=python /usr/local/bin/python3.12 /usr/local/bin/python3
 COPY gcp_local /usr/local/lib/python3.12/site-packages/gcp_local

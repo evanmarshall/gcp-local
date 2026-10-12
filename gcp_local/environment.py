@@ -59,6 +59,8 @@ SOURCE_FILES = (
     "toolchains/redis.json",
     "scripts/install_postgres.py",
     "toolchains/postgres.json",
+    "scripts/install_mysql.py",
+    "toolchains/mysql.json",
     "examples/workflow/worker.py",
 )
 SOURCE_DIRECTORIES = ("api", "cmd", "internal", "gcp_local")

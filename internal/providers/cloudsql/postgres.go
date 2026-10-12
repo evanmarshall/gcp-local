@@ -20,21 +20,22 @@ import (
 
 // Fleet sentinels.
 var (
-	errServerExists  = errors.New("a PostgreSQL server already exists for this instance")
-	errServerMissing = errors.New("no PostgreSQL server exists for this instance")
+	errServerExists  = errors.New("a database server already exists for this instance")
+	errServerMissing = errors.New("no database server exists for this instance")
 	errVersion       = errors.New("database version is not installed")
 	errFleetStopped  = errors.New("the Cloud SQL backend is not started")
-	errSocketPath    = errors.New("PostgreSQL socket path exceeds the Unix limit")
+	errSocketPath    = errors.New("database server socket path exceeds the Unix limit")
 )
 
 // maxSocketPath keeps the socket under the 107-byte sun_path limit.
 const maxSocketPath = 100
 
-// fleet is one project's set of PostgreSQL servers. Each server keeps its
-// data directory and Unix socket under one private temporary root. Servers
-// listen on no TCP address: only the provider and the authorized connector
-// reach the socket. Administrative sessions use a random per-server SCRAM
-// secret that stays in this process's memory.
+// fleet is one project's set of PostgreSQL and MySQL servers. Each server
+// keeps its data directory and Unix socket under one private temporary root.
+// Servers listen on no TCP address: only the provider and the authorized
+// connector reach the socket. Administrative sessions use a random per-server
+// secret (SCRAM for PostgreSQL, mysql_native_password for MySQL) that stays in
+// this process's memory.
 type fleet struct {
 	versions map[string]distribution
 	runAs    *syscall.Credential
@@ -44,9 +45,10 @@ type fleet struct {
 	servers  map[string]*server
 }
 
-// server is one instance's running PostgreSQL.
+// server is one instance's running PostgreSQL or MySQL server.
 type server struct {
 	directory, socket, password string
+	mysql                       bool
 	process                     *backend.Process
 	done                        chan struct{}
 }
@@ -139,21 +141,41 @@ func (f *fleet) create(ctx context.Context, spec serverSpec) error {
 		return errServerExists
 	}
 	f.next++
-	s := &server{directory: filepath.Join(f.root, "i"+strconv.Itoa(f.next)), password: hex.EncodeToString(randomBytes(24)), done: make(chan struct{})}
+	s := &server{directory: filepath.Join(f.root, "i"+strconv.Itoa(f.next)), password: hex.EncodeToString(randomBytes(24)),
+		mysql: dist.mysql, done: make(chan struct{})}
 	s.socket = filepath.Join(s.directory, "s", ".s.PGSQL.5432")
+	initialize, launch := f.initialize, f.launch
+	if s.mysql {
+		s.socket = filepath.Join(s.directory, "s", "mysql.sock")
+		initialize, launch = f.initializeMySQL, f.launchMySQL
+	}
 	if len(s.socket) > maxSocketPath {
 		return errSocketPath
 	}
-	if err := f.initialize(ctx, dist, s); err != nil {
+	if err := initialize(ctx, dist, s); err != nil {
 		_ = os.RemoveAll(s.directory)
 		return err
 	}
-	if err := f.launch(ctx, dist, s, spec); err != nil {
+	if err := launch(ctx, dist, s, spec); err != nil {
 		_ = s.stop(context.WithoutCancel(ctx))
 		_ = os.RemoveAll(s.directory)
 		return err
 	}
 	f.servers[spec.Instance] = s
+	return nil
+}
+
+// instanceDirectories creates the instance directory and its socket
+// directory, owned by the server user.
+func (f *fleet) instanceDirectories(s *server) error {
+	for _, directory := range []string{s.directory, filepath.Join(s.directory, "s")} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			return fmt.Errorf("create the instance directory: %w", err)
+		}
+		if err := f.own(directory); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -164,13 +186,8 @@ func environment(dist distribution, home string) []string {
 
 // initialize runs initdb with SCRAM-only local authentication and no TCP access.
 func (f *fleet) initialize(ctx context.Context, dist distribution, s *server) error {
-	for _, directory := range []string{s.directory, filepath.Join(s.directory, "s")} {
-		if err := os.Mkdir(directory, 0o700); err != nil {
-			return fmt.Errorf("create the instance directory: %w", err)
-		}
-		if err := f.own(directory); err != nil {
-			return err
-		}
+	if err := f.instanceDirectories(s); err != nil {
+		return err
 	}
 	secret := filepath.Join(s.directory, "pw")
 	if err := os.WriteFile(secret, []byte(s.password+"\n"), 0o600); err != nil {
@@ -268,6 +285,9 @@ func (s *server) waitReady(ctx context.Context) error {
 
 // exec runs SQL in one administrative session.
 func (s *server) exec(ctx context.Context, database, sql string) ([][]string, error) {
+	if s.mysql {
+		return s.execMySQL(ctx, sql)
+	}
 	session, err := dialPostgres(ctx, "unix", s.socket, adminRole, database, s.password)
 	if err != nil {
 		return nil, err

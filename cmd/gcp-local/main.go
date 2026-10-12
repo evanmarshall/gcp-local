@@ -153,7 +153,8 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.spannerLibraries, "spanner-libraries", "", "absolute directory holding the emulator's pinned libstdc++.so.6")
 	flags.StringVar(&options.redisServer, "redis-server", "", "absolute redis-server built by scripts/install_redis.py (Memorystore)")
 	flags.StringVar(&options.cloudsql.postgres, "cloudsql-postgres", "", "absolute root of the checksum-pinned PostgreSQL installs (Linux only)")
-	flags.StringVar(&options.cloudsql.runAs, "cloudsql-run-as", "", "uid:gid the PostgreSQL servers run as; required when gcp-local runs as root")
+	flags.StringVar(&options.cloudsql.mysql, "cloudsql-mysql", "", "absolute root of the checksum-pinned MySQL installs (Linux only)")
+	flags.StringVar(&options.cloudsql.runAs, "cloudsql-run-as", "", "uid:gid the PostgreSQL and MySQL servers run as; required when gcp-local runs as root")
 	flags.Var(connectorList{&options.cloudsql.connectors}, "cloudsql-connector", "project:region:instance,principal,loopback-address; repeatable")
 	flags.StringVar(&options.dataPorts, "data-ports", "", "FIRST-LAST port range that publishes Redis and public-IP Cloud SQL instances; empty publishes none")
 	flags.StringVar(&options.dataListen, "data-listen", "127.0.0.1", "IP address the data-plane ports bind")
@@ -580,9 +581,9 @@ func (m processMap) Set(value string) error {
 
 // cloudSQLOptions carries the Cloud SQL backend and connector flags.
 type cloudSQLOptions struct {
-	postgres, runAs string
-	connectors      []string
-	publish         *dataplane.Pool
+	postgres, mysql, runAs string
+	connectors             []string
+	publish                *dataplane.Pool
 }
 
 // errCloudSQLFlags rejects malformed Cloud SQL flag values.
@@ -610,7 +611,7 @@ func assembleCloudSQL(ctx context.Context, options cloudSQLOptions, selected map
 	if !selected["cloudsql"] {
 		return nil
 	}
-	config := cloudsqlprovider.Config{Root: options.postgres, Publish: options.publish}
+	config := cloudsqlprovider.Config{Root: options.postgres, MySQLRoot: options.mysql, Publish: options.publish}
 	if options.runAs != "" {
 		uid, gid, found := strings.Cut(options.runAs, ":")
 		user, userErr := strconv.ParseUint(uid, 10, 32)

@@ -207,8 +207,8 @@ func main() {
 	// Vertex AI answers from the deterministic stub; nothing calls Google.
 	_, err = vertexaiprovider.New(context.Background(), registry, index, engine, vertexaiprovider.Config{})
 	must(err)
-	if root := os.Getenv("GCP_LOCAL_POSTGRES_ROOT"); root != "" {
-		must(addCloudSQL(root, registry, server, index, engine))
+	if postgres, mysql := os.Getenv("GCP_LOCAL_POSTGRES_ROOT"), os.Getenv("GCP_LOCAL_MYSQL_ROOT"); postgres != "" || mysql != "" {
+		must(addCloudSQL(cloudsqlprovider.Config{Root: postgres, MySQLRoot: mysql}, registry, server, index, engine))
 	}
 	if *trace || *fault {
 		handler := server.HTTP.Handler
@@ -288,17 +288,16 @@ func (r *servingRuntime) Stop(ctx context.Context, container string) error {
 	return nil
 }
 
-// addCloudSQL registers the Cloud SQL provider only when its PostgreSQL
-// install is supplied, granting the fixture principal roles/cloudsql.admin on
-// both projects. Registration fails until the roles/cloudsql.* snapshots are
-// recorded, so the default fixture never selects it.
-func addCloudSQL(root string, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
-	config := cloudsqlprovider.Config{Root: root}
+// addCloudSQL registers the Cloud SQL provider only when a PostgreSQL or
+// MySQL install is supplied, granting the fixture principal
+// roles/cloudsql.admin on both projects. Registration fails until the
+// roles/cloudsql.* snapshots are recorded, so the default fixture never selects it.
+func addCloudSQL(config cloudsqlprovider.Config, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
 	if uid := os.Getenv("GCP_LOCAL_POSTGRES_UID"); uid != "" {
 		user, userErr := strconv.ParseUint(uid, 10, 32)
 		group, groupErr := strconv.ParseUint(os.Getenv("GCP_LOCAL_POSTGRES_GID"), 10, 32)
 		if userErr != nil || groupErr != nil {
-			return fmt.Errorf("parse the PostgreSQL uid/gid: %w", errors.Join(userErr, groupErr))
+			return fmt.Errorf("parse the database server uid/gid: %w", errors.Join(userErr, groupErr))
 		}
 		config.RunAs = &syscall.Credential{Uid: uint32(user), Gid: uint32(group)}
 	}

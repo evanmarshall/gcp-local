@@ -1,9 +1,9 @@
-// Package cloudsql serves a Cloud SQL Admin v1beta4 slice for PostgreSQL. The
-// provider authenticates and authorizes each call with the shared IAM engine
-// before any backend effect. Each Cloud SQL instance is one real PostgreSQL
-// server, started after authorization inside the project's backend lifecycle;
-// databases and built-in users are real objects in that server. A local
-// connector forwards PostgreSQL wire traffic only after checking
+// Package cloudsql serves a Cloud SQL Admin v1beta4 slice for PostgreSQL and
+// MySQL. The provider authenticates and authorizes each call with the shared
+// IAM engine before any backend effect. Each Cloud SQL instance is one real
+// PostgreSQL or MySQL server, started after authorization inside the
+// project's backend lifecycle; databases and built-in users are real objects
+// in that server. A local connector forwards wire traffic only after checking
 // cloudsql.instances.connect for the identity bound to it. The raw server is
 // reachable only through a private Unix socket, never a TCP port.
 package cloudsql

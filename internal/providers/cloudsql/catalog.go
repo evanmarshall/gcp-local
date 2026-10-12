@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"maps"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -95,16 +96,21 @@ func (r instanceRecord) wire(project string, release string) map[string]any {
 	}
 	address := map[string]any{"type": ipType, "ipAddress": loopbackIPv4}
 	if r.Port > 0 {
-		// gcp-local extension: GCP serves PostgreSQL on 5432 and has no port
-		// field; locally each instance has its own published port.
+		// gcp-local extension: GCP serves PostgreSQL on 5432 and MySQL on 3306
+		// and has no port field; locally each instance has its own published port.
 		address["port"] = r.Port
+	}
+	addresses := []any{address}
+	if !isMySQL(r.Version) {
+		// Recorded: PostgreSQL instances list an OUTGOING address; MySQL instances do not.
+		addresses = append(addresses, map[string]any{"type": "OUTGOING", "ipAddress": loopbackIPv4})
 	}
 	value := map[string]any{
 		keyKind: "sql#instance", keyName: r.Name, pathProject: project, "region": r.Region, "databaseVersion": r.Version,
 		"state": statusRunnable, "backendType": "SECOND_GEN", "instanceType": "CLOUD_SQL_INSTANCE",
 		"connectionName": project + ":" + r.Region + ":" + r.Name, keySelfLink: instanceLink(project, r.Name),
 		"createTime": r.Created.UTC().Format(time.RFC3339Nano), "etag": r.etag(),
-		"ipAddresses": []any{address, map[string]any{"type": "OUTGOING", "ipAddress": loopbackIPv4}}, keySettings: settings,
+		"ipAddresses": addresses, keySettings: settings,
 		// Recorded (cloudsql-postgres-instance-admin): GCP always returns these
 		// service-managed fields; the values are local stand-ins, only presence is compared.
 		"gceZone": r.Region + "-a", "geminiConfig": map[string]any{"entitled": false},
@@ -114,7 +120,8 @@ func (r instanceRecord) wire(project string, release string) map[string]any {
 		"sqlNetworkArchitecture":     "NEW_NETWORK_ARCHITECTURE", "upgradableDatabaseVersions": []any{},
 	}
 	if release != "" {
-		value["databaseInstalledVersion"] = "POSTGRES_" + release
+		engine, _, _ := strings.Cut(r.Version, "_")
+		value["databaseInstalledVersion"] = engine + "_" + release
 	}
 	return value
 }

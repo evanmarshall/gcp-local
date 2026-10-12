@@ -12,9 +12,11 @@
 !scripts/install_spanner.py
 !scripts/install_redis.py
 !scripts/install_postgres.py
+!scripts/install_mysql.py
 !toolchains/spanner.json
 !toolchains/redis.json
 !toolchains/postgres.json
+!toolchains/mysql.json
 !api
 !api/**
 !cmd

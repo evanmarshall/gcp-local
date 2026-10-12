@@ -62,7 +62,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Vertex AI](docs/vertexai.md) | Deterministic stub or Ollama | Generate, stream, count tokens, embed; answers are not from Gemini |
 | [Firestore](docs/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners |
 | [BigQuery](docs/bigquery.md) | gcp-local | Streaming inserts, simple SELECT |
-| [Cloud SQL for PostgreSQL](docs/cloudsql.md) | Real PostgreSQL | PostgreSQL clients on `127.0.0.1` with a user password |
+| [Cloud SQL for PostgreSQL and MySQL](docs/cloudsql.md) | Real PostgreSQL or MySQL | PostgreSQL and MySQL clients on `127.0.0.1` with a user password |
 | [Memorystore for Redis](docs/memorystore.md) | Real Redis | Redis clients on the reported port, with AUTH |
 | [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Your own images with `--cloud-run-docker`; ID-token invocation; admin API over REST and gRPC |
 | [Spanner](docs/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions |
@@ -75,7 +75,7 @@ IAM allow policies use predefined roles recorded from Google Cloud. IAM conditio
 
 ## How it works
 
-A single gateway routes requests to per-service providers, following [LocalStack](https://github.com/localstack/localstack)'s architecture. Providers authenticate and authorize before touching state, and reuse real backends (Google's emulators, PostgreSQL, Redis) where they exist. API routes are generated from Google's published API definitions ([design](docs/design.md), [LocalStack comparison](docs/localstack-comparison.md)).
+A single gateway routes requests to per-service providers, following [LocalStack](https://github.com/localstack/localstack)'s architecture. Providers authenticate and authorize before touching state, and reuse real backends (Google's emulators, PostgreSQL, MySQL, Redis) where they exist. API routes are generated from Google's published API definitions ([design](docs/design.md), [LocalStack comparison](docs/localstack-comparison.md)).
 
 Scenarios are recorded once against a sandbox Google Cloud project and replayed against the emulator in CI, alongside pinned Terraform provider acceptance tests and client-library tests ([validation](docs/validation.md)).
 
@@ -85,7 +85,7 @@ Scenarios are recorded once against a sandbox Google Cloud project and replayed 
 - State is in memory; `reset` and `down` discard it.
 - Storage buckets need uniform bucket-level access; ACLs, versioning, and object retention are not modeled. Public access prevention and soft delete work, but deleted buckets are not soft-deleted and organization policies are not applied ([Storage](docs/storage.md#gaps)).
 - Packaged Cloud Run runs your own images only with `gcp-local --cloud-run-docker up`, which mounts the Docker socket (root-equivalent on the host). Revisions have no internet access ([Cloud Run](docs/cloudrun.md)).
-- Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379 or 5432; read the port from the API. Neither accepts TLS.
+- Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379, 5432, or 3306; read the port from the API. Neither accepts TLS.
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.
 - Networking verdicts are analytical, not packet routing.
 - Vertex AI answers come from a stub or local Ollama, not Gemini.

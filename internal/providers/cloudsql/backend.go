@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -30,32 +31,47 @@ var pinned = map[string]map[string]struct{ initdb, postgres, release string }{
 	},
 }
 
+// mysqlPinned are the SHA-256 checksums of the installed (section-stripped)
+// mysqld binaries. They mirror the binaries entries of toolchains/mysql.json.
+var mysqlPinned = map[string]map[string]struct{ mysqld, release string }{
+	"arm64": {
+		"MYSQL_8_4": {"c572ff8332cd2f9600fb59cdcd472958f7cd8d755e7c030e5c7647769bcdf7ee", "8_4_11"},
+		"MYSQL_8_0": {"c90066c4c334253e2a3bd87063388a40259602a9b26d36e78f7ce5e5f5b3120b", "8_0_46"},
+	},
+	"amd64": {
+		"MYSQL_8_4": {"b4f8367f8edb7ddc68db48803982aa800562d0f3e7009eb3ee17abd92948c31d", "8_4_11"},
+		"MYSQL_8_0": {"eb80259f78723db02f2bfeab0a39a9b10464a33176da4319c562297bbaae2d0a", "8_0_46"},
+	},
+}
+
 // Backend configuration sentinels.
 var (
-	errPlatform      = errors.New("the Cloud SQL PostgreSQL backend runs only on linux/amd64 and linux/arm64")
-	errPostgresRoot  = errors.New("cloud SQL requires an absolute PostgreSQL install root")
-	errPostgresNone  = errors.New("no pinned PostgreSQL version is installed under the install root")
-	errPinMismatch   = errors.New("PostgreSQL binary does not match the committed pin")
-	errRunAsRequired = errors.New("PostgreSQL refuses to run as root; configure an unprivileged uid:gid")
+	errPlatform      = errors.New("the Cloud SQL backends run only on linux/amd64 and linux/arm64")
+	errInstallRoot   = errors.New("cloud SQL requires an absolute PostgreSQL or MySQL install root")
+	errVersionsNone  = errors.New("no pinned PostgreSQL or MySQL version is installed under the install roots")
+	errPinMismatch   = errors.New("database server binary does not match the committed pin")
+	errRunAsRequired = errors.New("PostgreSQL and MySQL refuse to run as root; configure an unprivileged uid:gid")
 )
 
 // maxPinnedFile bounds hashing of the pinned binaries.
-const maxPinnedFile = 64 << 20
+const maxPinnedFile = 128 << 20
 
-// Config locates the installed binaries: Root holds one directory per major
-// version (Root/16, Root/15), as scripts/install_postgres.py lays them out.
-// RunAs is the unprivileged user the servers run as when gcp-local runs as root.
-// Publish, when set, gives every public-IP instance a port from the
-// data-plane range.
+// Config locates the installed binaries. Root holds one directory per
+// PostgreSQL major version (Root/16, Root/15), as scripts/install_postgres.py
+// lays them out; MySQLRoot holds Root/8.4 and Root/8.0 from
+// scripts/install_mysql.py. Either may be empty. RunAs is the unprivileged
+// user the servers run as when gcp-local runs as root. Publish, when set,
+// gives every public-IP instance a port from the data-plane range.
 type Config struct {
-	Root    string
-	RunAs   *syscall.Credential
-	Publish *dataplane.Pool
+	Root, MySQLRoot string
+	RunAs           *syscall.Credential
+	Publish         *dataplane.Pool
 }
 
-// distribution is one verified major version.
+// distribution is one verified server version.
 type distribution struct {
 	root, release string
+	mysql         bool
 }
 
 // validate verifies the installed binaries and returns the usable versions.
@@ -64,35 +80,77 @@ func (c Config) validate() (map[string]distribution, error) {
 	if runtime.GOOS != "linux" || !ok {
 		return nil, errPlatform
 	}
-	if !filepath.IsAbs(c.Root) {
-		return nil, errPostgresRoot
+	if !c.rootsValid() {
+		return nil, errInstallRoot
 	}
 	if os.Geteuid() == 0 && (c.RunAs == nil || c.RunAs.Uid == 0) {
 		return nil, errRunAsRequired
 	}
-	return installed(c.Root, pins)
+	versions := map[string]distribution{}
+	if err := c.installed(pins, mysqlPinned[runtime.GOARCH], versions); err != nil {
+		return nil, err
+	}
+	if len(versions) == 0 {
+		return nil, errVersionsNone
+	}
+	return versions, nil
 }
 
-// installed verifies every installed major version under root against its pins.
-func installed(root string, pins map[string]struct{ initdb, postgres, release string }) (map[string]distribution, error) {
-	versions := map[string]distribution{}
+// installed verifies the versions under every configured install root.
+func (c Config) installed(pins map[string]struct{ initdb, postgres, release string }, mysql map[string]struct{ mysqld, release string }, versions map[string]distribution) error {
+	if c.Root != "" {
+		if err := installed(c.Root, pins, versions); err != nil {
+			return err
+		}
+	}
+	if c.MySQLRoot != "" {
+		return installedMySQL(c.MySQLRoot, mysql, versions)
+	}
+	return nil
+}
+
+// rootsValid reports whether at least one install root is set and every set root is absolute.
+func (c Config) rootsValid() bool {
+	for _, root := range []string{c.Root, c.MySQLRoot} {
+		if root != "" && !filepath.IsAbs(root) {
+			return false
+		}
+	}
+	return c.Root != "" || c.MySQLRoot != ""
+}
+
+// installed verifies every installed PostgreSQL major version under root against its pins.
+func installed(root string, pins map[string]struct{ initdb, postgres, release string }, versions map[string]distribution) error {
 	for version, pin := range pins {
 		directory := filepath.Join(root, version[len("POSTGRES_"):])
 		if _, err := os.Stat(filepath.Join(directory, "bin", "postgres")); errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err := verifyPin(filepath.Join(directory, "bin", "postgres"), pin.postgres); err != nil {
-			return nil, err
+			return err
 		}
 		if err := verifyPin(filepath.Join(directory, "bin", "initdb"), pin.initdb); err != nil {
-			return nil, err
+			return err
 		}
 		versions[version] = distribution{root: directory, release: pin.release}
 	}
-	if len(versions) == 0 {
-		return nil, errPostgresNone
+	return nil
+}
+
+// installedMySQL verifies every installed MySQL version under root against its
+// pins: MYSQL_8_4 lives in root/8.4.
+func installedMySQL(root string, pins map[string]struct{ mysqld, release string }, versions map[string]distribution) error {
+	for version, pin := range pins {
+		directory := filepath.Join(root, strings.ReplaceAll(version[len("MYSQL_"):], "_", "."))
+		if _, err := os.Stat(filepath.Join(directory, "bin", "mysqld")); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err := verifyPin(filepath.Join(directory, "bin", "mysqld"), pin.mysqld); err != nil {
+			return err
+		}
+		versions[version] = distribution{root: directory, release: pin.release, mysql: true}
 	}
-	return versions, nil
+	return nil
 }
 
 // verifyPin compares one file's SHA-256 with its pin.
@@ -118,12 +176,13 @@ type serverSpec struct {
 }
 
 // driver is the backend contract the provider uses: a project's fleet of
-// PostgreSQL servers, one per Cloud SQL instance.
+// PostgreSQL and MySQL servers, one per Cloud SQL instance.
 type driver interface {
 	backend.Backend
 	create(ctx context.Context, spec serverSpec) error
 	remove(ctx context.Context, instance string) error
-	// exec runs SQL as the private administrative role in one database.
+	// exec runs SQL as the private administrative account; database selects
+	// the PostgreSQL database and is ignored by MySQL.
 	exec(ctx context.Context, instance, database, sql string) ([][]string, error)
 	// endpoint returns the server's private socket and a channel closed when
 	// the server is removed or stopped.
@@ -131,7 +190,7 @@ type driver interface {
 }
 
 // errBackendType reports a backend that is not a Cloud SQL driver.
-var errBackendType = errors.New("cloud SQL backend is not a PostgreSQL fleet")
+var errBackendType = errors.New("cloud SQL backend is not a database server fleet")
 
 // driverOf narrows the manager's backend to the fleet contract.
 func driverOf(active backend.Backend) (driver, error) {

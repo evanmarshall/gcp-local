@@ -21,19 +21,20 @@ import (
 
 // Names repeated across the provider tests.
 const (
-	testProject    = "demo-sql"
-	peerProject    = "peer-sql"
-	testInstance   = "demo-pg"
-	testInstances  = "/sql/v1beta4/projects/" + testProject + "/instances"
-	testOperations = "/sql/v1beta4/projects/" + testProject + "/operations"
-	testVersion    = "POSTGRES_16"
-	testDatabase   = "app"
-	smallTier      = "db-g1-small"
-	testPath       = testInstances + "/" + testInstance
-	adminToken     = "admin"
-	clientToken    = "client"
-	viewerToken    = "viewer"
-	peerToken      = "peer"
+	testProject      = "demo-sql"
+	peerProject      = "peer-sql"
+	testInstance     = "demo-pg"
+	testInstances    = "/sql/v1beta4/projects/" + testProject + "/instances"
+	testOperations   = "/sql/v1beta4/projects/" + testProject + "/operations"
+	testVersion      = "POSTGRES_16"
+	testMySQLVersion = "MYSQL_8_0"
+	testDatabase     = "app"
+	smallTier        = "db-g1-small"
+	testPath         = testInstances + "/" + testInstance
+	adminToken       = "admin"
+	clientToken      = "client"
+	viewerToken      = "viewer"
+	peerToken        = "peer"
 )
 
 // harness drives the provider through the gateway with one fake fleet per project.
@@ -96,7 +97,7 @@ func newHarness(t *testing.T) *harness {
 	grants(t, h.index, engine)
 	h.manager = backend.NewManager(time.Second, time.Second)
 	registry := gateway.NewRegistry()
-	h.provider, err = newProvider(registry, h.manager, h.index, engine, map[string]string{testVersion: "16_15"}, func(scope state.Scope) (backend.Backend, error) {
+	h.provider, err = newProvider(registry, h.manager, h.index, engine, map[string]string{testVersion: "16_15", testMySQLVersion: "8_0_46"}, func(scope state.Scope) (backend.Backend, error) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		fleet := newFakeFleet()
@@ -200,9 +201,9 @@ func TestDeniedInsertStartsNoBackend(t *testing.T) {
 	if status := h.manager.Status(); len(status) != 0 || h.fleet() != nil {
 		t.Fatalf("a denied request started a backend: %+v", status)
 	}
-	body := h.expect(h.invoke(adminToken, http.MethodPost, testInstances, map[string]any{keyName: "mysql", "databaseVersion": "MYSQL_8_0",
+	body := h.expect(h.invoke(adminToken, http.MethodPost, testInstances, map[string]any{keyName: "mssql", "databaseVersion": "SQLSERVER_2022_EXPRESS",
 		keySettings: map[string]any{"tier": "db-f1-micro"}}), http.StatusNotImplemented)
-	if message, _ := object(t, body["error"])["message"].(string); !strings.Contains(message, "coverage gap") {
+	if message, _ := object(t, body["error"])["message"].(string); !strings.Contains(message, `coverage gap: databaseVersion "SQLSERVER_2022_EXPRESS" (installed: MYSQL_8_0, POSTGRES_16)`) {
 		t.Fatalf("unsupported version = %v", body)
 	}
 	if h.fleet() != nil {

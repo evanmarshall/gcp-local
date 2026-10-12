@@ -25,7 +25,7 @@ import (
 // realConfig reads the installed binaries and, under root, the server user.
 func realConfig(t *testing.T) Config {
 	t.Helper()
-	config := Config{Root: os.Getenv("GCP_LOCAL_POSTGRES_ROOT")}
+	config := Config{Root: os.Getenv("GCP_LOCAL_POSTGRES_ROOT"), MySQLRoot: os.Getenv("GCP_LOCAL_MYSQL_ROOT")}
 	if uid := os.Getenv("GCP_LOCAL_POSTGRES_UID"); uid != "" {
 		user, err := strconv.ParseUint(uid, 10, 32)
 		must(t, err)
@@ -48,7 +48,10 @@ func fleetRoots(t *testing.T) []string {
 // before any server starts, real databases and roles, SQL through the
 // authorized connector, refusal for an unauthorized identity, isolation, and
 // reset discarding the server and its data.
-func TestPostgresThroughConnector(t *testing.T) {
+// realHarness drives the provider with the installed servers, publishing
+// public-IP instances on ports.
+func realHarness(t *testing.T, ports string) *harness {
+	t.Helper()
 	interfaces, err := net.Interfaces()
 	must(t, err)
 	if os.Getenv("GCP_LOCAL_ISOLATED") != "1" || len(interfaces) != 1 || interfaces[0].Name != "lo" {
@@ -66,13 +69,18 @@ func TestPostgresThroughConnector(t *testing.T) {
 	t.Cleanup(func() { must(t, h.manager.Shutdown(context.Background())) })
 	registry := gateway.NewRegistry()
 	config := realConfig(t)
-	config.Publish, err = dataplane.Parse("16400-16401", "127.0.0.1")
+	config.Publish, err = dataplane.Parse(ports, "127.0.0.1")
 	must(t, err)
 	h.provider, err = New(context.Background(), registry, h.manager, h.index, h.engine, config)
 	must(t, err)
 	h.gate = gateway.New(registry, func(_ context.Context, token string) (gateway.Principal, error) {
 		return gateway.Principal{State: gateway.Authenticated, Subject: principal(token), Scopes: []string{cloudPlatform}}, nil
 	})
+	return h
+}
+
+func TestPostgresThroughConnector(t *testing.T) {
+	h := realHarness(t, "16400-16401")
 	before := len(fleetRoots(t))
 
 	h.expect(h.invoke(viewerToken, http.MethodPost, testInstances, insertBody()), http.StatusForbidden)

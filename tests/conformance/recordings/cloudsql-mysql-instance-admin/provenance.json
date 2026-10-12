@@ -1,0 +1,50 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T08:10:46.164713+00:00",
+  "scenario": {
+    "id": "cloudsql-mysql-instance-admin",
+    "service": "cloudsql",
+    "transport": "rest-v1beta4",
+    "revision": "64d69872043e2308bf953a9c09a88cea5cf83d5de64df47c468b0db7abf3fe07",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "6847512768397e80fc3ad5444bc0dcf9b79fc161f90503fbddf214029d997d01",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/cloudsql_mysql.py": "41c5ca365d0b6887815521ebf6a74b3839df1cf492429c690999f14a8981b3b0",
+      "gcp_validation/cloudsql.py": "629f8e6ceeb7729bb22b66531b1207df5193e51b555b1737bf8a16267c4d4235",
+      "gcp_validation/live_rest.py": "ceb8746bd0c3787f4869df8138156a7215700d525109ecb15f3d33c24bd6bd34",
+      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "tests/conformance/cloudsqlmysql/conftest.py": "15ddbc460f7da3f382d300d58594f28d63ab87753cf14df3cbdcff07111fb5c7"
+    },
+    "scope": {
+      "services": [
+        "cloudsql"
+      ],
+      "location": "global",
+      "limits": {
+        "max_instances": 1,
+        "max_databases": 2,
+        "max_users": 1,
+        "max_run_seconds": 2700
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}
