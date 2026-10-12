@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -517,6 +518,40 @@ func TestResetEndsUploadSessions(t *testing.T) {
 	}
 	f.bucket(testProject, "reset-bucket", 200)
 	f.session("", "PUT", location, nil, []byte("x"), 404)
+}
+
+// TestUploadSessionsExpire forgets sessions a week after initiation, as GCP
+// does, whether abandoned, committed, or cancelled, freeing their bytes.
+func TestUploadSessionsExpire(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "week-bucket", 200)
+	scope := state.Scope{Project: testProject, Location: state.Global}
+	idOf := func(location string) string {
+		parsed, _ := url.Parse(location)
+		return parsed.Query().Get("upload_id")
+	}
+	abandoned := f.startSession(admin, "week-bucket", "&name=abandoned.txt", "", nil, 200)
+	f.session("", "PUT", abandoned, span(0, 1, "*"), []byte("ab"), 308)
+	committed := f.startSession(admin, "week-bucket", "&name=done.txt", "", nil, 200)
+	f.session("", "PUT", committed, nil, []byte("done"), 200)
+	cancelled := f.startSession(admin, "week-bucket", "&name=cancelled.txt", "", nil, 200)
+	f.session("", "DELETE", cancelled, nil, nil, 499)
+	sessions := func() int {
+		count := 0
+		_ = f.p.catalog.store.With(scope, func(value *projectState) error {
+			count = len(value.Uploads)
+			return nil
+		})
+		return count
+	}
+	expectf(t, sessions() == 3, "sessions before expiry = %d", sessions())
+	weekLater := time.Now().Add(uploadLifetime)
+	expectf(t, f.p.catalog.upload(scope, "week-bucket", idOf(abandoned), weekLater.Add(-time.Minute)) != nil, "a six-day-old session expired")
+	expectf(t, f.p.catalog.upload(scope, "week-bucket", idOf(abandoned), weekLater) == nil, "a week-old session is still served")
+	expectf(t, sessions() == 2, "the expired session stayed in memory: %d", sessions())
+	// A new initiation forgets every other expired session of its project.
+	expectf(t, f.p.catalog.publishUpload(scope, "fresh", &uploadSession{bucket: "week-bucket", expires: weekLater.Add(uploadLifetime)}, weekLater) == nil, "publish failed")
+	expectf(t, sessions() == 1, "expired sessions remain after an initiation: %d", sessions())
 }
 
 // xmlRequest sends one XML API request with explicit headers.

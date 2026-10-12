@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -44,7 +45,14 @@ type uploadSession struct {
 	// cancelled marks a session ended by DELETE. It stays in the catalog so
 	// later requests get GCP's 499, not the 404 of an unknown session.
 	cancelled bool
+	// expires is when the catalog forgets the session, whatever its state.
+	expires time.Time
 }
+
+// uploadLifetime is how long a session URI lasts: "Resumable upload sessions
+// expire after one week" (Storage resumable uploads). An expired session is
+// unknown, so its URI answers 404 and its bytes are freed.
+const uploadLifetime = 7 * 24 * time.Hour
 
 const uploadIDHeader = "X-GUploader-UploadID"
 
@@ -59,8 +67,9 @@ func (p *Provider) startUpload(req request, current map[string]any) (*gateway.RE
 		return nil, status.Error(codes.Internal, "Unable to create an upload ID")
 	}
 	id := base64.RawURLEncoding.EncodeToString(raw)
-	session := &uploadSession{bucket: req.bucket, upload: req.upload, principal: req.call.Principal}
-	if err := p.catalog.publishUpload(req.scope, id, session); err != nil {
+	now := time.Now()
+	session := &uploadSession{bucket: req.bucket, upload: req.upload, principal: req.call.Principal, expires: now.Add(uploadLifetime)}
+	if err := p.catalog.publishUpload(req.scope, id, session, now); err != nil {
 		return nil, fmt.Errorf("publish the upload session: %w", err)
 	}
 	query := url.Values{queryUploadType: {uploadResumable}, keyName: {req.upload.name}, "upload_id": {id}}
@@ -84,7 +93,7 @@ func (p *Provider) continueUpload(call gateway.Call, r *gateway.RESTRequest) (*g
 	}
 	var response *gateway.RESTResponse
 	err := p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: resource.Scope}, func(ctx context.Context, driver backend.Backend) error {
-		session := p.catalog.upload(resource.Scope, bucket, id)
+		session := p.catalog.upload(resource.Scope, bucket, id, time.Now())
 		if session == nil {
 			response = uploadMissing()
 			return nil

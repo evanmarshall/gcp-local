@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -23,8 +24,8 @@ type Bucket struct{ Name, Location, Metadata string }
 type projectState struct {
 	Buckets map[string]Bucket
 	Folders map[string]Folder
-	// Uploads holds resumable sessions by upload ID until their final chunk
-	// commits the object to the backend.
+	// Uploads holds resumable sessions by upload ID until they expire, a week
+	// after initiation (uploadLifetime), or a refused commit ends them.
 	Uploads map[string]*uploadSession
 	// SoftDeleted holds soft-deleted object generations by bucket, name, and
 	// generation until their hard-delete time (softdelete.go).
@@ -208,13 +209,19 @@ func (c *Catalog) Folders(scope state.Scope, bucket string) ([]Folder, error) {
 	return items, nil
 }
 
-// publishUpload records a resumable session after its initiation is authorized.
-func (c *Catalog) publishUpload(scope state.Scope, id string, upload *uploadSession) error {
+// publishUpload records a resumable session after its initiation is
+// authorized, and forgets the scope's sessions that expired by now.
+func (c *Catalog) publishUpload(scope state.Scope, id string, upload *uploadSession, now time.Time) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.store.With(scope, func(value *projectState) error {
 		if _, ok := value.Buckets[upload.bucket]; !ok {
 			return errBucketAbsent
+		}
+		for known, session := range value.Uploads {
+			if !now.Before(session.expires) {
+				delete(value.Uploads, known)
+			}
 		}
 		value.Uploads[id] = upload
 		return nil
@@ -224,13 +231,19 @@ func (c *Catalog) publishUpload(scope state.Scope, id string, upload *uploadSess
 	return nil
 }
 
-// upload returns one resumable session of a bucket, or nil.
-func (c *Catalog) upload(scope state.Scope, bucket, id string) *uploadSession {
+// upload returns one unexpired resumable session of a bucket, or nil. An
+// expired session is forgotten.
+func (c *Catalog) upload(scope state.Scope, bucket, id string, now time.Time) *uploadSession {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var found *uploadSession
 	_ = c.store.With(scope, func(value *projectState) error {
-		if upload := value.Uploads[id]; upload != nil && upload.bucket == bucket {
+		upload := value.Uploads[id]
+		switch {
+		case upload == nil:
+		case !now.Before(upload.expires):
+			delete(value.Uploads, id)
+		case upload.bucket == bucket:
 			found = upload
 		}
 		return nil
