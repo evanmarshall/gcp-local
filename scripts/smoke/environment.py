@@ -526,15 +526,29 @@ def api(endpoint: str, token: str, method: str, path: str, body: object = None) 
     return json.loads(reply)
 
 
+def finished(endpoint: str, token: str, operation: dict) -> dict:
+    """Poll a long-running operation until it is done, as client libraries do."""
+    deadline = time.monotonic() + 120
+    while not operation.get("done"):
+        if time.monotonic() > deadline:
+            raise AssertionError(f"operation {operation.get('name')} never finished")
+        time.sleep(0.2)
+        operation = api(endpoint, token, "GET", "/v1/" + operation["name"])
+    if "error" in operation:
+        raise AssertionError(f"operation failed: {operation['error']}")
+    return operation
+
+
 def verify_redis(directory: Path, *, auth: bool = True) -> None:
     """Create a Memorystore instance, use it from the host, and require delete to close it."""
     endpoint, project, token = developer_token(directory)
     base = f"/v1/projects/{project}/locations/us-central1/instances"
     first, last = json.loads((directory / "environment.json").read_text())["data_ports"]
-    created = api(
+    operation = api(
         endpoint, token, "POST", base + "?instanceId=smoke-redis",
         {"tier": "BASIC", "memorySizeGb": 1, "authEnabled": auth},
-    )["response"]  # fmt: skip
+    )  # fmt: skip
+    created = finished(endpoint, token, operation)["response"]
     assert created["host"] == "127.0.0.1", created
     assert first <= created["port"] <= last, created
     port = created["port"]
