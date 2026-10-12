@@ -51,6 +51,9 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 			return nil, fmt.Errorf("register %s: %w", method, err)
 		}
 	}
+	if err := p.registerData(registry, engine); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 

@@ -20,6 +20,13 @@ type RPC struct {
 	Streaming                              bool
 	NewRequest, NewResponse                func() proto.Message
 }
+
+// GRPCDispatch adds server-streaming dispatch: the client sends one request
+// and the provider relays a response stream.
+type GRPCDispatch interface {
+	PubSubDispatch
+	ServerStream(string, proto.Message, grpc.ServerStream) error
+}
 type PublisherServer struct {
 	pb.UnimplementedPublisherServer
 	Dispatch PubSubDispatch

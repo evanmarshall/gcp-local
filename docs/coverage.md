@@ -17,8 +17,8 @@ What each service supports and how it is verified. Every service authenticates c
 | `storage` | [Cloud Storage](storage.md) | fake-gcs-server, in-process | 15 | 88 | Yes: object read, write, list, delete | storage-authorization, storage-bucket-updates, storage-cross-project, storage-iam-conditions, storage-multipart-query-name, storage-object-lifecycle, storage-object-replacement, storage-python-sdk | TestAccStorageBucket_basic, TestAccStorageBucket_labels, TestAccStorageObject_recreate |
 | `pubsub` | [Pub/Sub](pubsub.md) | Official emulator | 13 | 46 | Yes: publish, pull, streaming pull, push | pubsub-pull-authorization | TestAccPubSubTopicAndSubscription |
 | `firestore` | [Firestore](firestore.md) | Official emulator | 7 | 60 | Partial: single documents only; no queries, transactions, or batch writes | firestore-document-lifecycle | TestAccFirestoreDocument |
-| `spanner` | [Spanner](spanner.md) | Official emulator | 21 | 99 | No: admin and schema only; SQL reads and writes are not routed | spanner-instance-database-admin | TestAccSpannerInstanceAndDatabase |
-| `bigtable` | [Bigtable](bigtable.md) | Official emulator code (bttest) | 17 | 82 | No: instance and table admin only; row reads and writes are not routed | bigtable-instance-table-admin | none |
+| `spanner` | [Spanner](spanner.md) | Official emulator | 36 | 99 | Yes, modeled locally, not recorded: sessions, SQL queries, DML, reads, mutations, transactions over gRPC (unary methods also over REST) | spanner-instance-database-admin | TestAccSpannerInstanceAndDatabase |
+| `bigtable` | [Bigtable](bigtable.md) | Official emulator code (bttest) | 24 | 101 | Yes, modeled locally, not recorded: row reads, scans, and mutations over gRPC | bigtable-instance-table-admin | none |
 | `cloudsql` | [Cloud SQL for PostgreSQL](cloudsql.md) | Real PostgreSQL per instance | 14 | 85 | Yes: PostgreSQL on a published `127.0.0.1` port with a user password; no TLS | cloudsql-postgres-instance-admin | none |
 | `redis` | [Memorystore for Redis](memorystore.md) | Real Redis per instance | 8 | 47 | Yes: Redis on the reported `127.0.0.1` port, with AUTH; no TLS | memorystore-redis-instance-admin | none |
 | `bigquery` | [BigQuery](bigquery.md) | gcp-local | 18 | 47 | Partial: streaming inserts and single-table SELECT with an equality filter | bigquery-dataset-rows-query | TestAccBigQueryDatasetAndTable |
@@ -32,10 +32,11 @@ What each service supports and how it is verified. Every service authenticates c
 | `run` | [Cloud Run](cloudrun.md) | Local processes or Docker | 13 | 59 | Partial: invocation works; the packaged environment runs only the bundled worker | none | TestAccCloudRunV2Service |
 
 API totals come from these discovery documents: storage v1, pubsub v1, firestore v1, spanner v1,
-bigtableadmin v2, sqladmin v1beta4, redis v1, bigquery v2, secretmanager v1, cloudkms v1, cloudtasks
+bigtableadmin v2 plus bigtable v2, sqladmin v1beta4, redis v1, bigquery v2, secretmanager v1, cloudkms v1, cloudtasks
 v2beta3, artifactregistry v1, iam v1, cloudresourcemanager v1, compute v1 plus networkmanagement v1,
 and run v2. Pub/Sub counts the gRPC methods with permission plans; the same operations are also
-served over 12 REST routes.
+served over 12 REST routes. Spanner counts 21 admin and 15 data-plane session methods. Bigtable
+counts 17 admin methods (bigtableadmin v2) and 7 gRPC methods of the separate Bigtable v2 data API.
 
 ## Cross-service behavior
 

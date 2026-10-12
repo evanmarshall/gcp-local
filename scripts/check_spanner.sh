@@ -7,4 +7,4 @@ GCP_LOCAL_SPANNER_EMULATOR=${GCP_LOCAL_SPANNER_EMULATOR:-"$PWD/.tools/spanner/em
 GCP_LOCAL_SPANNER_LIBRARIES=${GCP_LOCAL_SPANNER_LIBRARIES:-"$PWD/.tools/spanner/lib"}
 export GCP_LOCAL_SPANNER_EMULATOR GCP_LOCAL_SPANNER_LIBRARIES
 sh scripts/go.sh test -c -tags=spannerintegration -race -o bin/spanner-integration ./internal/providers/spanner
-python3 scripts/run_isolated.py --timeout 180 -- bin/spanner-integration -test.v -test.run TestOfficialEmulatorLifecycle
+python3 scripts/run_isolated.py --timeout 180 -- bin/spanner-integration -test.v -test.run 'TestOfficialEmulator(Lifecycle|DataPlane)'

@@ -1,10 +1,10 @@
 // Package spanner fronts Google's official Cloud Spanner emulator with the
-// Spanner admin v1 REST surface. The provider authenticates and authorizes
-// each call with the shared IAM engine, then forwards it over gRPC to one
-// emulator per project scope and renders the response as proto3 JSON. The
-// emulator owns instances, databases, schemas, and operations; the provider
-// owns IAM policies and the shared resource index entries used for policy
-// inheritance. Data-plane sessions/queries are not exposed.
+// Spanner admin v1 REST surface and the v1 data plane (gRPC, plus the unary
+// REST session routes). The provider authenticates and authorizes each call
+// with the shared IAM engine, then forwards it over gRPC to one emulator per
+// project scope. The emulator owns instances, databases, schemas, operations,
+// sessions, and transactions; the provider owns IAM policies and the shared
+// resource index entries used for policy inheritance.
 package spanner
 
 import (

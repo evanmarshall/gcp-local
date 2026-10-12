@@ -1,7 +1,8 @@
 // Package bigtable implements the Bigtable admin v2 control plane. The provider
 // owns instances, their one modeled cluster, and per-resource IAM; tables and
 // column families are served by Google's Bigtable emulator (bttest) running
-// in-process per project. Data-plane row reads/writes are not exposed. The
+// in-process per project. The v2 data plane (row reads and writes) is served
+// over gRPC after authorization against the table. The
 // bigtable-instance-table-admin recording covers the instance, cluster, table,
 // column-family, and instance IAM shapes.
 package bigtable

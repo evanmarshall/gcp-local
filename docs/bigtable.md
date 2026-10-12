@@ -1,9 +1,10 @@
-# Bigtable (admin control plane)
+# Bigtable
 
-Modeled surface for the Bigtable admin v2 API: instances with one cluster,
-tables with column families, and per-resource IAM. The endpoint lives at
-`/v2/projects/{project}/...` and the provider is selected with
-`--services=...,bigtable`.
+Modeled surface for the Bigtable admin v2 API (instances with one cluster,
+tables with column families, per-resource IAM) and the v2 data API over gRPC
+(row reads and writes). The admin endpoint lives at
+`/v2/projects/{project}/...`; the data API is on the gRPC port (4567 locally).
+Select the provider with `--services=...,bigtable`.
 
 ## Backend
 
@@ -31,9 +32,50 @@ Ownership:
 Every request authorizes before any backend call; a denied request neither
 starts nor calls the emulator. Table methods authorize against the published
 table, or against its instance when the table is not published, so a missing
-table is reported as `404` only to callers holding the permission. The
-emulator's data API (`ReadRows`, `MutateRow`, ...) is registered on its private
-listener but no gateway route reaches it.
+table is reported as `404` only to callers holding the permission.
+
+## Data plane
+
+Applications can read and write rows with the official client libraries over
+gRPC using local ADC credentials. Modeled locally, not recorded.
+
+| gRPC method | Permission |
+| --- | --- |
+| `ReadRows` | `bigtable.tables.readRows` |
+| `SampleRowKeys` | `bigtable.tables.sampleRowKeys` |
+| `MutateRow`, `MutateRows` | `bigtable.tables.mutateRows` |
+| `CheckAndMutateRow`, `ReadModifyWriteRow` | `bigtable.tables.mutateRows` and `bigtable.tables.readRows` |
+| `PingAndWarm` | `bigtable.instances.ping` on the instance |
+
+Permissions follow [Bigtable access control](https://docs.cloud.google.com/bigtable/docs/access-control).
+Calls authorize against the published table, else its instance; a call to a
+missing instance authorizes against the project and then returns `NOT_FOUND`.
+`roles/bigtable.user` and `roles/bigtable.admin` hold every data permission;
+`roles/bigtable.viewer` holds none. Authorization runs once per call before the
+emulator receives anything; streaming calls then relay bttest's stream, and
+client cancellation or scope reset cancels it.
+
+Go client example (plaintext loopback, so the per-RPC credential must not
+require TLS):
+
+```go
+conn, _ := grpc.NewClient("127.0.0.1:4567",
+	grpc.WithTransportCredentials(insecure.NewCredentials()),
+	grpc.WithPerRPCCredentials(localToken)) // RequireTransportSecurity() == false
+client, _ := bigtable.NewClientWithConfig(ctx, project, instance,
+	bigtable.ClientConfig{MetricsProvider: bigtable.NoopMetricsProvider{}},
+	option.WithGRPCConn(conn))
+```
+
+Never set `BIGTABLE_EMULATOR_HOST`: it selects anonymous credentials, which the
+gateway refuses. The Python client is not verified.
+
+Limits:
+
+- No REST data routes (`:readRows`, `:mutateRow`, ...).
+- Authorized views, materialized views, `ExecuteQuery`, `PrepareQuery`, change
+  streams, and the session API (`OpenTable`) return `UNIMPLEMENTED`.
+- App profiles are accepted and ignored. Request messages are limited to 2 MiB.
 
 ## What is modeled
 
@@ -70,7 +112,13 @@ policy, table and column-family creation, duplicate table/instance conflicts,
 and deletes. The table steps of that recording are now served by bttest and
 match without response patches; `sh scripts/check_rest_recordings.sh` compares
 them. Provider unit tests cover the same shapes, that denied requests never
-reach the emulator, reset clearing tables, and project isolation.
+reach the emulator, reset clearing tables, and project isolation. Data-plane
+tests (`sh scripts/check_go.sh`) run the official Go client
+(`cloud.google.com/go/bigtable` v1.58.0) with local-STS tokens over the gRPC
+gateway against bttest: single and bulk mutations, point and range reads,
+row-key samples, conditional and read-modify-write mutations, and
+`PingAndWarm`. Viewer, anonymous, and authorized-view calls fail before any
+emulator call.
 
 ## Explicit gaps
 
@@ -79,10 +127,8 @@ reach the emulator, reset clearing tables, and project isolation.
   are not recorded values.
 - Instance creation completes immediately; operation polling
   (`GET /v2/operations/...`) is not routed.
-- App profiles are not modeled. Row data-plane (read/write/scan) is not
-  exposed, although bttest implements it; adding it needs routing and
-  permission plans first. Backups, snapshots, authorized views, and
-  consistency tokens are not routed.
+- App profiles are not modeled. Backups, snapshots, authorized views, and
+  consistency tokens are not routed. The data plane is not recorded.
 - Error messages are bttest's (for example `table "projects/..." already
   exists`); only the codes and statuses are recorded. Dropping an unknown
   family returns bttest's untyped error, which surfaces as `500`.

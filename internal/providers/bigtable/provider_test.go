@@ -288,7 +288,7 @@ func TestRecordedInstanceIam(t *testing.T) {
 	}
 	allowed := "serviceAccount:allowed@" + testProject + ".iam.gserviceaccount.com"
 	recorder = h.invoke(http.MethodPost, path+":setIamPolicy", map[string]any{"policy": map[string]any{
-		"etag": policy["etag"], "bindings": []any{map[string]any{"role": "roles/bigtable.viewer", "members": []string{allowed}}},
+		"etag": policy["etag"], "bindings": []any{map[string]any{"role": roleViewer, "members": []string{allowed}}},
 	}})
 	if recorder.Code != 200 || fields(decode(t, recorder)) != "bindings,etag,version" {
 		t.Fatalf("set policy = %d %s", recorder.Code, recorder.Body.String())
@@ -349,7 +349,7 @@ func TestUnknownAndDeniedPaths(t *testing.T) {
 
 	// A viewer may read but not create.
 	if _, err := h.engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testProject, iam.Policy{
-		Bindings: []iam.Binding{{Role: "roles/bigtable.viewer", Members: []string{testActor}}},
+		Bindings: []iam.Binding{{Role: roleViewer, Members: []string{testActor}}},
 	}); err != nil {
 		t.Fatalf("switch the role: %v", err)
 	}

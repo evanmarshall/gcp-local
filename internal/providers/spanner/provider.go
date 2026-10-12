@@ -65,22 +65,31 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 	}); err != nil {
 		return nil, fmt.Errorf("register the Spanner backend: %w", err)
 	}
-	for method := range permissions {
-		if err := registry.Register(method, p.handle); err != nil {
-			return nil, fmt.Errorf("register %s: %w", method, err)
-		}
+	if err := p.registerHandlers(registry); err != nil {
+		return nil, err
 	}
 	return p, nil
 }
 
-// registerPermissions binds every method to its permission.
+// registerHandlers binds the admin REST handlers and the data-plane handlers.
+func (p *Provider) registerHandlers(registry *gateway.Registry) error {
+	for method := range permissions {
+		if err := registry.Register(method, p.handle); err != nil {
+			return fmt.Errorf("register %s: %w", method, err)
+		}
+	}
+	return p.registerData(registry)
+}
+
+// registerPermissions binds every admin method to its permission, then the
+// data-plane plans.
 func registerPermissions(engine *iam.Engine) error {
 	for method, permission := range permissions {
 		if err := engine.Register(method, iam.Rule{Baseline: []string{permission}}); err != nil {
 			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}
-	return nil
+	return registerDataPermissions(engine)
 }
 
 // handle is the gateway entry point for every Spanner method. Authorization

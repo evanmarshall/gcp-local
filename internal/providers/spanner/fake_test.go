@@ -8,6 +8,7 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
+	"cloud.google.com/go/spanner/apiv1/spannerpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -141,6 +142,25 @@ func (f *fakeDriver) serveDatabases(request proto.Message) (proto.Message, error
 			}
 		}
 		return response, nil
+	default:
+		return f.serveData(request)
+	}
+}
+
+// serveData answers the data-plane RPCs the unit tests forward.
+func (f *fakeDriver) serveData(request proto.Message) (proto.Message, error) {
+	switch request := request.(type) {
+	case *spannerpb.CreateSessionRequest:
+		if !f.databaseNames[request.GetDatabase()] {
+			return nil, status.Error(codes.NotFound, "Database not found")
+		}
+		return &spannerpb.Session{Name: request.GetDatabase() + "/sessions/fake"}, nil
+	case *spannerpb.ExecuteSqlRequest:
+		return &spannerpb.ResultSet{}, nil
+	case *spannerpb.BeginTransactionRequest:
+		return &spannerpb.Transaction{Id: []byte("tx")}, nil
+	case *spannerpb.CommitRequest:
+		return &spannerpb.CommitResponse{}, nil
 	default:
 		return nil, status.Error(codes.Unimplemented, "fake does not serve this request")
 	}

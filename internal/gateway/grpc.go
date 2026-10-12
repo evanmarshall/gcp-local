@@ -6,8 +6,10 @@ import (
 	"io"
 	"strings"
 
+	"cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/spanner/apiv1/spannerpb"
 	"github.com/evanmarshall/gcp-local/api/generated"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -22,6 +24,8 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	pb.RegisterPublisherServer(server, &generated.PublisherServer{Dispatch: g})
 	pb.RegisterSubscriberServer(server, &generated.SubscriberServer{Dispatch: g})
 	iampb.RegisterIAMPolicyServer(server, &generated.IAMPolicyServer{Dispatch: g})
+	spannerpb.RegisterSpannerServer(server, &generated.SpannerServer{Dispatch: g})
+	bigtablepb.RegisterBigtableServer(server, &generated.BigtableServer{Dispatch: g})
 	return server
 }
 func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Message) (Call, error) {
@@ -115,6 +119,27 @@ func (g *Gateway) Stream(method string, transport grpc.ServerStream) error {
 	}
 	_ = transport.SetHeader(metadata.Pairs("x-gcp-local-trace-id", call.TraceID))
 	stream := &rpcStream{ServerStream: transport, first: first, requestType: first.ProtoReflect().Descriptor().FullName(), responseType: info.NewResponse().ProtoReflect().Descriptor().FullName()}
+	return normalizeError(handler(call, stream))
+}
+
+// ServerStream dispatches a server-streaming RPC. The transport already decoded
+// the single client request; the provider reads it once through Recv, then
+// relays responses until it returns or the client cancels.
+func (g *Gateway) ServerStream(method string, request proto.Message, transport grpc.ServerStream) error {
+	handler, err := g.Registry.streamHandler(method)
+	if err != nil {
+		return err
+	}
+	info, ok := g.rpcs[method]
+	if !ok || !info.Streaming {
+		return gap(method)
+	}
+	call, err := g.rpcCall(transport.Context(), method, request)
+	if err != nil {
+		return err
+	}
+	_ = transport.SetHeader(metadata.Pairs("x-gcp-local-trace-id", call.TraceID))
+	stream := &rpcStream{ServerStream: transport, first: request, requestType: request.ProtoReflect().Descriptor().FullName(), responseType: info.NewResponse().ProtoReflect().Descriptor().FullName()}
 	return normalizeError(handler(call, stream))
 }
 

@@ -23,6 +23,7 @@ from urllib.request import ProxyHandler, build_opener
 from urllib.request import Request as HTTPRequest
 
 import google.auth
+import grpc
 import requests
 from google.api_core.exceptions import NotFound
 from google.auth.transport.requests import AuthorizedSession, Request
@@ -529,6 +530,142 @@ def verify_cloudsql(directory: Path) -> None:
     expect_closed(port, struct.pack("!II", 8, 80877103))
 
 
+def json_call(endpoint: str, method: str, path: str, token: str, body: object) -> tuple[int, Any]:
+    """Issue one authenticated loopback JSON request and decode the reply."""
+    request = HTTPRequest(  # noqa: S310 -- the environment's own numeric loopback base
+        endpoint + path, data=json.dumps(body).encode(), method=method,
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+    )  # fmt: skip
+    try:
+        with build_opener(ProxyHandler({})).open(request, timeout=90) as response:
+            return response.status, json.loads(response.read() or b"{}")
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}")
+
+
+def varint(value: int) -> bytes:
+    """Encode one non-negative protobuf varint."""
+    out = bytearray()
+    while True:
+        byte, value = value & 0x7F, value >> 7
+        out.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(out)
+
+
+def field(number: int, value: bytes | int) -> bytes:
+    """Encode one length-delimited or varint protobuf field."""
+    if isinstance(value, int):
+        return varint(number << 3) + varint(value)
+    return varint(number << 3 | 2) + varint(len(value)) + value
+
+
+def developer_tokens(directory: Path) -> tuple[dict[str, str], str, str]:
+    """Return the environment settings and the developer and ungranted access tokens."""
+    env = json.loads(cli(directory, "env").stdout)
+    endpoint = env["GCP_LOCAL_ENDPOINT"]
+    principals = json.loads((directory / "identity/server.json").read_text())["principals"]
+    tokens = {
+        principal["subject"].split(":", 1)[1].split("@", 1)[0]: exchange(
+            endpoint, principal["subject_token"]
+        )
+        for principal in principals
+    }
+    return env, tokens["developer"], tokens[UNGRANTED]
+
+
+def spanner_rows(env: dict[str, str], developer: str, ungranted: str) -> str:
+    """Create a Spanner database, write and query one row over REST; return the session."""
+    endpoint, project = env["GCP_LOCAL_ENDPOINT"], env["GOOGLE_CLOUD_PROJECT"]
+    instances = f"/v1/projects/{project}/instances"
+    config = f"projects/{project}/instanceConfigs/regional-us-central1"
+    instance = {"config": config, "displayName": "smoke", "processingUnits": 100}
+    created = {"instanceId": "smoke", "instance": instance}
+    assert json_call(endpoint, "POST", instances, developer, created)[0] == 200
+    table = "CREATE TABLE Items (Id STRING(36) NOT NULL) PRIMARY KEY (Id)"
+    database = {"createStatement": "CREATE DATABASE `smoke_db`", "extraStatements": [table]}
+    databases = instances + "/smoke/databases"
+    assert json_call(endpoint, "POST", databases, developer, database)[0] == 200
+    sessions = instances + "/smoke/databases/smoke_db/sessions"
+    status, session = json_call(endpoint, "POST", sessions, developer, {})
+    assert status == 200, session
+    path = sessions + "/" + session["name"].rsplit("/", 1)[1]
+    insert = {"insert": {"table": "Items", "columns": ["Id"], "values": [["a"]]}}
+    commit = {"singleUseTransaction": {"readWrite": {}}, "mutations": [insert]}
+    assert json_call(endpoint, "POST", path + ":commit", developer, commit)[0] == 200
+    query = {"sql": "SELECT Id FROM Items"}
+    status, result = json_call(endpoint, "POST", path + ":executeSql", developer, query)
+    assert status == 200, result
+    assert result.get("rows") == [["a"]], result
+    denied, _ = json_call(endpoint, "POST", sessions, ungranted, {})
+    assert denied == 403, f"Spanner sessions accepted an ungranted caller: {denied}"
+    return session["name"]
+
+
+def bigtable_table(env: dict[str, str], developer: str) -> str:
+    """Create a Bigtable instance and table over REST; return the table name."""
+    endpoint, project = env["GCP_LOCAL_ENDPOINT"], env["GOOGLE_CLOUD_PROJECT"]
+    instances = f"/v2/projects/{project}/instances"
+    cluster = {
+        "location": f"projects/{project}/locations/us-central1-b",
+        "serveNodes": 1,
+        "defaultStorageType": "SSD",
+    }
+    created = {
+        "instanceId": "smoke-bt",
+        "instance": {"displayName": "smoke", "type": "PRODUCTION"},
+        "clusters": {"smoke-btc": cluster},
+    }
+    assert json_call(endpoint, "POST", instances, developer, created)[0] == 200
+    table = {"tableId": "t", "table": {"columnFamilies": {"cf": {}}}}
+    assert json_call(endpoint, "POST", instances + "/smoke-bt/tables", developer, table)[0] == 200
+    return f"projects/{project}/instances/smoke-bt/tables/t"
+
+
+def grpc_status(
+    channel: grpc.Channel, method: str, request: bytes, token: str, *, stream: bool
+) -> grpc.StatusCode:
+    """Call one raw gRPC method as a token; a stream must yield at least one reply."""
+    metadata = (("authorization", "Bearer " + token),)
+    try:
+        if stream:
+            replies = list(channel.unary_stream(method)(request, metadata=metadata, timeout=30))
+            if not replies:
+                return grpc.StatusCode.UNKNOWN
+        else:
+            channel.unary_unary(method)(request, metadata=metadata, timeout=30)
+    except grpc.RpcError as error:
+        return error.code()
+    return grpc.StatusCode.OK
+
+
+def verify_dataplane(directory: Path) -> None:
+    """Write and read Spanner and Bigtable rows through the packaged gateway, IAM enforced."""
+    env, developer, ungranted = developer_tokens(directory)
+    session = spanner_rows(env, developer, ungranted)
+    table = bigtable_table(env, developer).encode()
+    set_cell = field(1, b"cf") + field(2, b"c") + field(3, 1000) + field(4, b"v")
+    checks = [
+        (
+            "/google.bigtable.v2.Bigtable/MutateRow",
+            field(1, table) + field(2, b"row") + field(3, field(1, set_cell)),
+            False,
+        ),
+        ("/google.bigtable.v2.Bigtable/ReadRows", field(1, table), True),
+        (
+            "/google.spanner.v1.Spanner/ExecuteStreamingSql",
+            field(1, session.encode()) + field(3, b"SELECT Id FROM Items"),
+            True,
+        ),
+    ]
+    with grpc.insecure_channel(env["GCP_LOCAL_GRPC_ENDPOINT"]) as channel:
+        for method, request, stream in checks:
+            allowed = grpc_status(channel, method, request, developer, stream=stream)
+            assert allowed == grpc.StatusCode.OK, (method, allowed)
+            denied = grpc_status(channel, method, request, ungranted, stream=stream)
+            assert denied == grpc.StatusCode.PERMISSION_DENIED, (method, denied)
+
+
 def verify_standalone(image: str, temporary: Path) -> None:
     """Run the image with docker run alone and require the SDK examples to pass."""
     state = temporary / "standalone"
@@ -665,6 +802,7 @@ def main() -> int:
             verify_redis(first)
             verify_cloudsql(first)
             verify_redis(second, auth=False)
+            verify_dataplane(first)
             # Bind a port to require a visible startup failure
             # without affecting the working environment.
             with socket.socket() as occupied:
@@ -682,8 +820,9 @@ def main() -> int:
                 resource.close()
             teardown(directories)
     print(
-        "Packaged workflow passed: local ADC/Storage and Pub/Sub, every packaged service "
-        "with IAM enforced, Redis and Cloud SQL from the host, isolated reset, failed startup, "
+        "Packaged workflow passed: local ADC/Storage and Pub/Sub, Spanner and Bigtable "
+        "rows, every packaged service with IAM enforced, Redis and Cloud SQL from the host, "
+        "isolated reset, failed startup, "
         "portable doctor, standalone docker run, and teardown."
     )
     return 0

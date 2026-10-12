@@ -51,8 +51,10 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 	for _, rpc := range generated.PubSubMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
-	for _, rpc := range generated.IAMMethods {
-		g.rpcs[rpc.Method] = rpc
+	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods} {
+		for _, rpc := range table {
+			g.rpcs[rpc.Method] = rpc
+		}
 	}
 	return g
 }

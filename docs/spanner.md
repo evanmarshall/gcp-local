@@ -1,12 +1,13 @@
-# Spanner (admin control plane)
+# Spanner
 
-The Spanner provider serves the admin v1 REST surface at `/v1/projects/{project}/...` (select it with `-services=...,spanner`). Its backend is Google's official **Cloud Spanner emulator 1.5.58** (`emulator_main`), pinned in [toolchains/spanner.json](../toolchains/spanner.json). The provider is the authentication and authorization gate: it authorizes each call with the shared IAM engine before any backend start or call, then forwards it over gRPC to the emulator and renders the response as proto3 JSON.
+The Spanner provider serves the admin v1 REST surface at `/v1/projects/{project}/...` and the `google.spanner.v1.Spanner` data plane over gRPC (select it with `-services=...,spanner`). Its backend is Google's official **Cloud Spanner emulator 1.5.58** (`emulator_main`), pinned in [toolchains/spanner.json](../toolchains/spanner.json). The provider is the authentication and authorization gate: it authorizes each call with the shared IAM engine before any backend start or call, then forwards it over gRPC to the emulator and renders the response as proto3 JSON.
 
 ## Ownership
 
 | Data | Owner |
 | --- | --- |
 | Instances, databases, schemas (DDL), long-running operations, instance configs | Emulator, one process per project scope |
+| Sessions, transactions, rows | Emulator |
 | Instance and database IAM policies | IAM engine (`getIamPolicy`/`setIamPolicy` never reach the emulator; it does not enforce IAM) |
 | Instance/database references used for policy inheritance | Shared index, published after backend success and removed after confirmed deletion (an instance delete removes its databases' references and policies) |
 | Database `createTime` | Provider, recorded when it observes a successful create |
@@ -33,7 +34,47 @@ The emulator accepts any instance config name on create but lists and serves onl
 
 Predefined roles pinned: `roles/spanner.admin`, `roles/spanner.databaseAdmin`, `roles/spanner.viewer`. The Terraform `TestAccSpannerInstanceAndDatabase` case drives `google_spanner_instance` (with `force_destroy`) and `google_spanner_database` through `spanner_custom_endpoint` (see [terraform-compatibility.md](terraform-compatibility.md)).
 
-Not exposed: the data plane (sessions, queries, mutations), backups/restores, instance partitions, database roles, operation list/cancel, and `testIamPermissions`.
+Not exposed: backups/restores, instance partitions, database roles, operation list/cancel, and `testIamPermissions`.
+
+## Data plane
+
+Applications can read and write rows with the official client libraries over gRPC (port 4567 locally) using local ADC credentials. Modeled locally, not recorded.
+
+| gRPC method | REST route (unary only) | Permission on the session's database |
+| --- | --- | --- |
+| `CreateSession`, `BatchCreateSessions` | `sessions`, `sessions:batchCreate` | `spanner.sessions.create` |
+| `GetSession`, `ListSessions`, `DeleteSession` | `sessions/{s}`, `sessions` | `spanner.sessions.get` / `.list` / `.delete` |
+| `ExecuteSql`, `ExecuteStreamingSql` | `:executeSql` | `spanner.databases.select` |
+| `ExecuteBatchDml` | `:executeBatchDml` | `spanner.databases.write` |
+| `Read`, `StreamingRead` | `:read` | `spanner.databases.read` |
+| `BeginTransaction` | `:beginTransaction` | read-write: `spanner.databases.beginOrRollbackReadWriteTransaction`; read-only: `spanner.databases.beginReadOnlyTransaction` |
+| `Commit` | `:commit` | `spanner.databases.write` |
+| `Rollback` | `:rollback` | `spanner.databases.beginOrRollbackReadWriteTransaction` |
+| `PartitionQuery`, `PartitionRead` | `:partitionQuery`, `:partitionRead` | `spanner.databases.partitionQuery` / `.partitionRead` |
+
+Permissions come from the per-method "Authorization requires" rows of [the v1 REST reference](https://docs.cloud.google.com/spanner/docs/reference/rest/v1/projects.instances.databases.sessions). A request that begins a transaction inline (`transaction.begin`, or a single-use read-write `Commit`) also needs the matching `BeginTransaction` permission; that addition is a local model, not documented per method. `roles/spanner.viewer` holds no data permission except `beginReadOnlyTransaction`; `roles/spanner.databaseAdmin` and `roles/spanner.admin` hold all of them.
+
+Authorization runs once per call, before the emulator starts or receives anything. Streaming calls authorize the single request, then relay the emulator's stream; client cancellation and scope reset cancel the backend call. The emulator owns sessions and transactions, one emulator per project.
+
+Go client example (the gateway listens on plaintext loopback, so the per-RPC credential must not require TLS):
+
+```go
+conn, _ := grpc.NewClient("127.0.0.1:4567",
+	grpc.WithTransportCredentials(insecure.NewCredentials()),
+	grpc.WithPerRPCCredentials(localToken)) // RequireTransportSecurity() == false
+client, _ := spanner.NewClientWithConfig(ctx, "projects/p/instances/i/databases/d",
+	spanner.ClientConfig{DisableNativeMetrics: true}, option.WithGRPCConn(conn))
+```
+
+The Python client is not verified; the channel setup from [Pub/Sub](pubsub.md#run-the-provider) is the expected starting point. Never set `SPANNER_EMULATOR_HOST`: it selects anonymous credentials, which the gateway refuses.
+
+Limits:
+
+- `ExecuteStreamingSql` and `StreamingRead` are gRPC only; the REST `:executeStreamingSql` and `:streamingRead` routes are not served.
+- Partitioned DML, Data Boost, fine-grained access control (`creator_role`), single-use read-write `ExecuteSql`/`Read`, and `BatchWrite` return `UNIMPLEMENTED`.
+- Request messages are limited to 2 MiB.
+- Query, transaction, and lock behavior is the emulator's, including its one-read-write-transaction-at-a-time limit.
+- The `spanner-data-plane-rest` scenario (`tests/conformance/spannerdata`) is not recorded; local runs report it unverified.
 
 ## Platforms and installation
 
@@ -63,4 +104,4 @@ sh scripts/check_rest_recordings.sh  # includes the Spanner recording
 sh scripts/check_terraform.sh
 ```
 
-`check_spanner.sh` drives the provider against the real emulator: a denied call starts no backend, the recorded DDL canonical form, project isolation, and reset discarding emulator state while another project's survives. Go unit tests with a fake driver cover authorization before any backend call, reset, project isolation, path binding over body names, reference publication, and reconciliation of uncertain creates.
+`check_spanner.sh` drives the provider against the real emulator: a denied call starts no backend, the recorded DDL canonical form, project isolation, and reset discarding emulator state while another project's survives. Its data-plane test runs the official Go client (`cloud.google.com/go/spanner` v1.95.1) with local-STS tokens over the gRPC gateway: mutations, DML, batch DML, point reads, streaming queries, read-only and partitioned transactions, rollback, cancellation, and viewer/anonymous denial before the emulator starts. Go unit tests with a fake driver cover authorization before any backend call, reset, project isolation, path binding over body names, reference publication, and reconciliation of uncertain creates.

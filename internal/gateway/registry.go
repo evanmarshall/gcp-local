@@ -70,6 +70,8 @@ func NewRegistry() *Registry {
 	r := &Registry{contracts: map[string]methodInfo{}, unary: map[string]Handler{}, stream: map[string]StreamHandler{}}
 	r.registerRoutes()
 	r.registerPubSub()
+	r.registerData("spanner", generated.SpannerMethods)
+	r.registerData("bigtable", generated.BigtableMethods)
 	return r
 }
 
@@ -112,6 +114,13 @@ func (r *Registry) registerPubSub() {
 	}
 	for _, rpc := range generated.IAMMethods {
 		r.contracts[rpc.Method] = methodInfo{service: "pubsub"}
+	}
+}
+
+// registerData binds one service's gRPC data-plane contracts.
+func (r *Registry) registerData(service string, rpcs []generated.RPC) {
+	for _, rpc := range rpcs {
+		r.contracts[rpc.Method] = methodInfo{service: service, streaming: rpc.Streaming}
 	}
 }
 func (r *Registry) Register(method string, handler Handler) error {
