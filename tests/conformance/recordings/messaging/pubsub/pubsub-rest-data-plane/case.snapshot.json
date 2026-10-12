@@ -1,6 +1,6 @@
 {
   "pubsub-rest-data-plane": {
-    "recorded-date": "12-10-2026, 17:11:37",
+    "recorded-date": "12-10-2026, 22:47:04",
     "recorded-content": {
       "topic-created": {
         "http_status": 200,
@@ -121,6 +121,77 @@
       "acknowledged": {
         "body": {},
         "http_status": 200
+      },
+      "condition-needs-version-3": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "topic-condition-refused": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "subscription-condition-refused": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "unconditional-v3-written": {
+        "bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/pubsub.publisher",
+            "withcond_suffix": null
+          }
+        ],
+        "http_status": 200,
+        "version": 1
+      },
+      "read-v3": {
+        "bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/pubsub.publisher",
+            "withcond_suffix": null
+          }
+        ],
+        "http_status": 200,
+        "version": 1
+      },
+      "read-v1": {
+        "bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/pubsub.publisher",
+            "withcond_suffix": null
+          }
+        ],
+        "http_status": 200,
+        "version": 1
+      },
+      "read-unversioned": {
+        "bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/pubsub.publisher",
+            "withcond_suffix": null
+          }
+        ],
+        "http_status": 200,
+        "version": 1
       },
       "empty-pull": {
         "body": {},

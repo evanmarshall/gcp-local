@@ -45,7 +45,7 @@ Use `SubscriberGrpcTransport(channel=channel)` for subscribers and `SchemaServic
 | Publisher (gRPC) | `CreateTopic`, `GetTopic`, `ListTopics`, `DeleteTopic`, `Publish` | Labels at create; 1 MiB per publish request |
 | Subscriber (gRPC) | `CreateSubscription`, `GetSubscription`, `ListSubscriptions`, `DeleteSubscription`, `Pull`, `Acknowledge`, `ModifyAckDeadline`, `StreamingPull`, `Seek`, `CreateSnapshot`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot` | Same-project only; delivery settings below are fixed at create; `ModifyAckDeadline=0` redelivers. StreamingPull `protocol_version` 0 or 1 (the Go client sends 1) on the first request only; with 1 the emulator answers keepalive requests. Other versions return `UNIMPLEMENTED` |
 | SchemaService (gRPC) | `CreateSchema`, `GetSchema`, `ListSchemas`, `ListSchemaRevisions`, `CommitSchema`, `RollbackSchema`, `DeleteSchemaRevision`, `DeleteSchema`, `ValidateSchema`, `ValidateMessage` | [Schemas](#schemas) |
-| IAMPolicy (gRPC) | `GetIamPolicy`, `SetIamPolicy` | Topics, subscriptions, and schemas; version-1 policies with etag checks |
+| IAMPolicy (gRPC) | `GetIamPolicy`, `SetIamPolicy` | Topics, subscriptions, and schemas; version-1 policies with etag checks. A conditional binding is refused (below) |
 | REST | Topic and subscription `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy`; `topics.publish`, `subscriptions.pull`, `subscriptions.acknowledge`, `subscriptions.modifyAckDeadline`; every `projects.schemas` method | The data-plane methods run the gRPC twins' validation, permissions, and delivery features, and answer in the REST reference's JSON (base64 `data`, `messageIds`, `receivedMessages` with `ackId`, `message`, and `deliveryAttempt`). A body may repeat the path's topic or subscription; a different one returns 400. No REST StreamingPull, snapshots, or seek. Unknown body fields return 400; known unsupported fields return 501 |
 | Push | Authenticated HTTP push to a numeric loopback URL | Modeled locally, not recorded |
 
@@ -105,6 +105,7 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 - `CreateSnapshot` needs `pubsub.snapshots.create` on the project and `pubsub.subscriptions.consume` on the source. `Seek` needs `pubsub.subscriptions.consume`, plus `pubsub.snapshots.seek` on the snapshot when seeking to one. `GetSnapshot` uses `pubsub.snapshots.get`, which the access-control table omits; the Viewer role carries it.
 - Push creation needs `iam.serviceAccounts.actAs`; each delivery needs the service agent's `iam.serviceAccounts.getOpenIdToken`. Without it messages stay pending.
 - An open stream rechecks access before each delivery and ack, so revoking stops delivery.
+- A binding with a condition is refused with 400 "Can't set conditional policy on this resource", and a policy written as version 3 reads back as version 1, at any requested version. Recorded on topics and subscriptions; schemas follow the same rule, not recorded.
 - Schema rows follow the access-control table: `pubsub.schemas.create`, `list`, and `validate` (both `ValidateSchema` and `ValidateMessage`) on the project; `get`, `listRevisions`, `commit`, `rollback`, and `delete` (also for `DeleteSchemaRevision`) on the schema. Creating a topic with `schema_settings` also needs `pubsub.schemas.attach` on the schema.
 
 ## Verification
@@ -113,7 +114,7 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 | --- | --- | --- |
 | `pubsub-pull-authorization` | 2026-10-12 | Topic-scoped Publisher and subscription-scoped Subscriber grants, denied publish and pull, message identity, ack, cleanup |
 | `pubsub-delivery-features` | 2026-10-12 | Delivery settings echoed at create, denied pull, key order before and after a nack, filtered delivery, an invalid filter, a repeated exactly-once ack, dead-letter attempts and forwarding with and without the service agent's grants, cleanup |
-| `pubsub-rest-data-plane` | 2026-10-12 | REST publish, pull, nack (`modifyAckDeadline` 0), redelivery, and acknowledge in the shapes gcloud 588.0.0 sends; denied publish, pull, and acknowledge; a topic-scoped publisher that cannot pull; an out-of-range deadline; an empty pull; a pull without `maxMessages`; a publish body that repeats the topic; cleanup |
+| `pubsub-rest-data-plane` | 2026-10-12 | REST publish, pull, nack (`modifyAckDeadline` 0), redelivery, and acknowledge in the shapes gcloud 588.0.0 sends; denied publish, pull, and acknowledge; a topic-scoped publisher that cannot pull; an out-of-range deadline; an empty pull; a pull without `maxMessages`; a publish body that repeats the topic; conditional bindings refused on a topic and a subscription, and a version 3 write read back as version 1 at requested versions 1, 3, and none; cleanup |
 | `pubsub-schemas` | 2026-10-12 | Avro and Protocol Buffer schemas: create, commit (including refused commits), revision listing and views, rollback, revision deletion, `ValidateSchema` and `ValidateMessage`, topics with schema settings, valid and invalid publishes and their attributes, schema-scoped Viewer and denied callers, deleted schemas, cleanup |
 
 `sh scripts/check/recordings.sh` replays all four: `pubsub-pull-authorization`, `pubsub-delivery-features`, and `pubsub-schemas` through the provider's Go harness, and `pubsub-rest-data-plane` (`tests/conformance/messaging/pubsub/rest`, live scope service `pubsub-rest`) over REST. Re-recording `pubsub-delivery-features` (`tests/conformance/messaging/pubsub/delivery`) or `pubsub-schemas` (`tests/conformance/messaging/pubsub/schemas`) needs its own approved scope (`python3 scripts/live/plan_pubsub.py --scenario delivery|schemas ...`). Pass `--rootdir . -c pyproject.toml`, or write `--gcp-profile=PATH`, when the profile is outside the checkout.
@@ -140,7 +141,7 @@ A run creates one topic and one subscription and makes at most ten publish attem
 
 ## Gaps
 
-- Not recorded: StreamingPull, push, retry backoff, snapshots, and seek. IAM policy calls are recorded only as the REST grants in `pubsub-rest-data-plane`.
+- Not recorded: StreamingPull, push, retry backoff, snapshots, and seek. IAM policy calls are recorded only over REST in `pubsub-rest-data-plane`.
 - GCP accepted a publish sent right after its topic was deleted (2026-10-12); locally it returns 404.
 - Dead-letter attempts counted before the service agent's grants exist restart at 1 once both grants are held.
 - No KMS, topic retention, subscription expiration TTL, BigQuery or Cloud Storage export subscriptions, `UpdateTopic`, `UpdateSubscription`, `UpdateSnapshot`, `ModifyPushConfig`, `DetachSubscription`, or `ListTopicSnapshots`/`ListTopicSubscriptions`. Subscriptions never expire.
@@ -149,5 +150,5 @@ A run creates one topic and one subscription and makes at most ten publish attem
 - The dead-letter grants are re-checked at delivery decisions; an ack-deadline expiry between them uses the last checked state.
 - `UpdateTopic` is not served, so schema settings are fixed at create.
 - No snapshot IAM policies, cross-project dead-letter topics, or cross-project snapshots.
-- No `testIamPermissions`, conditional policies, cross-project subscriptions, or anonymous, remote, or HTTPS push.
+- No `testIamPermissions`, cross-project subscriptions, or anonymous, remote, or HTTPS push.
 - Messages are in memory; restart loses them.

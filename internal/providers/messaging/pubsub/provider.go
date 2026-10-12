@@ -4,11 +4,9 @@ package pubsub
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,10 +21,12 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/providers/messaging/pubsub/validation"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/genproto/googleapis/type/expr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -862,7 +862,13 @@ func decodeSetPolicy(r *iampb.SetIamPolicyRequest) (*iam.Policy, error) {
 	if err := validation.Fields(r.GetPolicy(), "version", "bindings", "etag"); err != nil {
 		return nil, err
 	}
-	policy := iam.Policy{Version: int(r.GetPolicy().GetVersion()), ETag: base64.StdEncoding.EncodeToString(r.GetPolicy().GetEtag())}
+	// GCP returns a policy written as version 3 as version 1, since no Pub/Sub
+	// policy can hold a condition (recorded: pubsub-rest-data-plane).
+	version := int(r.GetPolicy().GetVersion())
+	if version == 3 {
+		version = 1
+	}
+	policy := iam.Policy{Version: version, ETag: base64.StdEncoding.EncodeToString(r.GetPolicy().GetEtag())}
 	for _, binding := range r.GetPolicy().GetBindings() {
 		if binding == nil {
 			return nil, provider.Invalid("Missing IAM binding")
@@ -870,12 +876,11 @@ func decodeSetPolicy(r *iampb.SetIamPolicyRequest) (*iam.Policy, error) {
 		if err := validation.Fields(binding, "role", "members", "condition"); err != nil {
 			return nil, err
 		}
-		bindingShape := iam.Binding{Role: binding.GetRole(), Members: append([]string(nil), binding.GetMembers()...)}
-		if condition := binding.GetCondition(); condition != nil {
-			// The expr proto carries the CEL source text verbatim.
-			bindingShape.Condition = json.RawMessage(`{"expression":` + strconv.Quote(condition.GetExpression()) + `}`)
+		if binding.GetCondition() != nil {
+			// Recorded on topics and subscriptions at versions 1 and 3.
+			return nil, provider.Invalid("Can't set conditional policy on this resource")
 		}
-		policy.Bindings = append(policy.Bindings, bindingShape)
+		policy.Bindings = append(policy.Bindings, iam.Binding{Role: binding.GetRole(), Members: append([]string(nil), binding.GetMembers()...)})
 	}
 	return &policy, nil
 }
@@ -916,7 +921,17 @@ func wirePolicy(result iam.Policy) (*iampb.Policy, error) {
 	}
 	response := &iampb.Policy{Version: int32(result.Version), Etag: etag}
 	for _, binding := range result.Bindings {
-		response.Bindings = append(response.Bindings, &iampb.Binding{Role: binding.Role, Members: binding.Members})
+		wire := &iampb.Binding{Role: binding.Role, Members: binding.Members}
+		// Pub/Sub refuses conditional writes, but a policy placed in the engine
+		// directly may hold one; dropping it would widen the grant on write-back.
+		if len(binding.Condition) > 0 {
+			condition := &expr.Expr{}
+			if err := protojson.Unmarshal(binding.Condition, condition); err != nil {
+				return nil, status.Error(codes.Internal, "Stored IAM condition is unreadable")
+			}
+			wire.Condition = condition
+		}
+		response.Bindings = append(response.Bindings, wire)
 	}
 	return response, nil
 }

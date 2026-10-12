@@ -217,6 +217,7 @@ def run_scenario(
     for label, observation in created_observations(observe, *created).items():
         snapshot.match(label, observation)
     authorize_and_deliver(fixture, snapshot, observe)
+    conditional_policy(fixture, snapshot, observe)
     probe_requests(fixture, snapshot, observe)
     snapshot.match("subscription-deleted", {"http_status": fixture.sub("DELETE").status})
     # GCP accepted a publish sent just after the topic delete while this
@@ -256,6 +257,75 @@ def authorize_and_deliver(
     snapshot.match("deadline-out-of-range", outcome(observe, long))
     acked = fixture.sub("POST", ":acknowledge", actor="allowed", body=acks)
     snapshot.match("acknowledged", {"http_status": acked.status, "body": acked.json()})
+
+
+CONDITION = {
+    "title": "gcp-local-conformance",
+    "description": "Expires in 2100",
+    "expression": 'request.time < timestamp("2100-01-01T00:00:00Z")',
+}
+
+
+def read_policy(fixture: DataPlaneFixture, version: int | None) -> Response:
+    """Read the topic policy as gcloud does, requesting a version when one is given."""
+    query = {"alt": "json"}
+    if version is not None:
+        query["options.requestedPolicyVersion"] = str(version)
+    return fixture.client.request(
+        "fixture", "GET", fixture.topic_path + ":getIamPolicy", query=query,
+        timeout=fixture.remaining(),
+    )
+
+
+def policy_view(observe: Observations, response: Response) -> dict:
+    """Describe a policy's version and bindings; a _withcond_ role suffix is opaque."""
+    if response.status >= HTTP_ERROR:
+        return observe.error(response)
+    value = response.json()
+    bindings = []
+    for binding in value.get("bindings", []):
+        role, marker, suffix = binding["role"].partition("_withcond_")
+        shape = {"length": len(suffix), "hex": all(c in "0123456789abcdef" for c in suffix)}
+        bindings.append({
+            "role": role,
+            "withcond_suffix": shape if marker else None,
+            "members": sorted(observe.text(member) for member in binding["members"]),
+            "condition": binding.get("condition"),
+        })
+    return {
+        "http_status": response.status,
+        "version": value.get("version"),
+        "bindings": sorted(
+            bindings, key=lambda item: (item["role"], item["condition"] is not None)
+        ),
+    }
+
+
+def conditional_policy(
+    fixture: DataPlaneFixture, snapshot: SnapshotCase, observe: Observations
+) -> None:
+    """Try conditional bindings on the topic and subscription, and read the policy versions."""
+    member = "serviceAccount:" + fixture.client.emails["allowed"]
+    current = read_policy(fixture, 3)
+    if current.status != 200:
+        raise Inconclusive(f"Topic getIamPolicy returned HTTP {current.status}")
+    kept = current.json().get("bindings", [])
+    conditional = {"role": "roles/pubsub.viewer", "members": [member], "condition": CONDITION}
+    policy = {"bindings": [*kept, conditional], "etag": current.json().get("etag", "")}
+    rejected = fixture.topic("POST", ":setIamPolicy", body={"policy": {**policy, "version": 1}})
+    snapshot.match("condition-needs-version-3", observe.error(rejected))
+    written = fixture.topic("POST", ":setIamPolicy", body={"policy": {**policy, "version": 3}})
+    snapshot.match("topic-condition-refused", policy_view(observe, written))
+    only = {"bindings": [conditional], "version": 3}
+    sub = fixture.sub("POST", ":setIamPolicy", body={"policy": only})
+    snapshot.match("subscription-condition-refused", policy_view(observe, sub))
+    # A version 3 write without conditions, then reads at each requested version.
+    unconditional = {"bindings": kept, "etag": current.json().get("etag", ""), "version": 3}
+    rewritten = fixture.topic("POST", ":setIamPolicy", body={"policy": unconditional})
+    snapshot.match("unconditional-v3-written", policy_view(observe, rewritten))
+    snapshot.match("read-v3", policy_view(observe, read_policy(fixture, 3)))
+    snapshot.match("read-v1", policy_view(observe, read_policy(fixture, 1)))
+    snapshot.match("read-unversioned", policy_view(observe, read_policy(fixture, None)))
 
 
 def probe_requests(

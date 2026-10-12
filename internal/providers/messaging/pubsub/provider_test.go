@@ -374,13 +374,74 @@ func TestIAMPolicyRoundTripOverGRPC(t *testing.T) {
 	// The topic grant does not reach the subscription's policy surface.
 	_, err = invokeAs(registry, consumer, getIAM, testSub, &iampb.GetIamPolicyRequest{Resource: testSub})
 	expectCode(t, err, codes.PermissionDenied)
-	_, err = invokeAs(registry, owner, setIAM, testSub, &iampb.SetIamPolicyRequest{Resource: testSub, Policy: &iampb.Policy{
-		Version:  3,
-		Bindings: []*iampb.Binding{{Role: roleSubscriber, Members: []string{consumer}, Condition: &expr.Expr{Expression: `request.time < timestamp("2999-01-01T00:00:00Z")`}}},
-	}})
-	must(t, err)
 	if b.called(setIAM) != 0 {
 		t.Fatal("the provider-owned policy surface reached the emulator")
+	}
+}
+
+// TestConditionalPoliciesAreRefused follows the pubsub-rest-data-plane
+// recording: GCP refuses a conditional binding on a topic or subscription at
+// any policy version, and returns a policy written as version 3 as version 1.
+func TestConditionalPoliciesAreRefused(t *testing.T) {
+	p, registry, _ := memoryFixture(t)
+	_, err := invokeAs(registry, owner, publisher+"CreateTopic", testTopic, &pb.Topic{Name: testTopic})
+	must(t, err)
+	_, err = invokeAs(registry, owner, subscriber+"CreateSubscription", testSub, &pb.Subscription{Name: testSub, Topic: testTopic})
+	must(t, err)
+	conditional := []*iampb.Binding{{Role: roleSubscriber, Members: []string{consumer}, Condition: &expr.Expr{
+		Title: "until 2999", Description: "expires", Expression: `request.time < timestamp("2999-01-01T00:00:00Z")`,
+	}}}
+	for _, resource := range []string{testTopic, testSub} {
+		for _, version := range []int32{1, 3} {
+			_, err = invokeAs(registry, owner, setIAM, resource, &iampb.SetIamPolicyRequest{Resource: resource, Policy: &iampb.Policy{Version: version, Bindings: conditional}})
+			if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "Can't set conditional policy on this resource") {
+				t.Fatalf("conditional v%d policy on %s: %v", version, resource, err)
+			}
+		}
+		policy, err := p.iam.GetPolicy(canonical(resource))
+		must(t, err)
+		if len(policy.Bindings) != 0 {
+			t.Fatalf("a refused conditional policy was stored on %s: %+v", resource, policy)
+		}
+	}
+	unconditional := []*iampb.Binding{{Role: roleSubscriber, Members: []string{consumer}}}
+	raw, err := invokeAs(registry, owner, setIAM, testSub, &iampb.SetIamPolicyRequest{Resource: testSub, Policy: &iampb.Policy{Version: 3, Bindings: unconditional}})
+	must(t, err)
+	if written, _ := raw.(*iampb.Policy); written.GetVersion() != 1 {
+		t.Fatalf("a version 3 write without conditions returned version %d", written.GetVersion())
+	}
+	for _, requested := range []int32{0, 1, 3} {
+		raw, err = invokeAs(registry, owner, getIAM, testSub, &iampb.GetIamPolicyRequest{Resource: testSub, Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: requested}})
+		must(t, err)
+		if read, _ := raw.(*iampb.Policy); read.GetVersion() != 1 || len(read.GetBindings()) != 1 {
+			t.Fatalf("read at requested version %d = %v", requested, read)
+		}
+	}
+}
+
+// TestStoredConditionsAreRendered reads a conditional policy placed in the
+// engine directly, over gRPC and REST: a returned policy keeps each binding's
+// condition, so a read-modify-write cannot drop it.
+func TestStoredConditionsAreRendered(t *testing.T) {
+	p, registry, _ := memoryFixture(t)
+	_, err := invokeAs(registry, owner, publisher+"CreateTopic", testTopic, &pb.Topic{Name: testTopic})
+	must(t, err)
+	condition := `{"title":"until 2999","description":"expires","expression":"request.time \u003c timestamp(\"2999-01-01T00:00:00Z\")"}`
+	_, err = p.iam.SetPolicy(canonical(testTopic), iam.Policy{Version: 3, Bindings: []iam.Binding{{Role: roleSubscriber, Members: []string{consumer}, Condition: json.RawMessage(condition)}}})
+	must(t, err)
+	raw, err := invokeAs(registry, owner, getIAM, testTopic, &iampb.GetIamPolicyRequest{Resource: testTopic, Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 3}})
+	must(t, err)
+	read, _ := raw.(*iampb.Policy)
+	got := read.GetBindings()[0].GetCondition()
+	if read.GetVersion() != 3 || got.GetTitle() != "until 2999" || got.GetDescription() != "expires" || got.GetExpression() != `request.time < timestamp("2999-01-01T00:00:00Z")` {
+		t.Fatalf("gRPC policy = %v", read)
+	}
+	c := newRESTClient(t, registry)
+	wire := c.do(owner, http.MethodGet, "/v1/"+testTopic+":getIamPolicy?options.requestedPolicyVersion=3", "", 200)
+	bindings, _ := wire["bindings"].([]any)
+	binding, _ := bindings[0].(map[string]any)
+	if rendered, _ := binding["condition"].(map[string]any); rendered["title"] != "until 2999" || rendered["expression"] != got.GetExpression() {
+		t.Fatalf("REST policy = %v", wire)
 	}
 }
 
