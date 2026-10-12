@@ -13,6 +13,7 @@ require (
 	cloud.google.com/go/spanner v1.95.1
 	github.com/fsouza/fake-gcs-server v1.56.1
 	github.com/google/cel-go v0.26.1
+	google.golang.org/api v0.293.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260807164820-c8921c73eeea
 	google.golang.org/grpc v1.84.0
@@ -70,7 +71,6 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/api v0.293.0 // indirect
 	google.golang.org/genproto v0.0.0-20260519071638-aa98bba5eb94 // indirect
 	rsc.io/binaryregexp v0.2.0 // indirect
 )
