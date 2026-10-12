@@ -50,6 +50,53 @@ func (g *Gateway) transcode(ctx context.Context, binding generated.Transcoding, 
 	return g.rpcResponse(ctx, binding, result)
 }
 
+// transcodingFor picks the binding that serves one request. A service's own
+// RPC has at most one. A shared mixin RPC (IAMPolicy) has one per resource
+// kind a transcoded service owns, chosen by the request's resource; any other
+// resource keeps the RPC's own dispatch (Pub/Sub). A shared RPC that no
+// binding serves for an owned resource kind, such as TestIamPermissions on a
+// crypto key, is a coverage gap rather than a Pub/Sub request.
+func (g *Gateway) transcodingFor(method string, request proto.Message) (generated.Transcoding, bool, error) {
+	bindings := g.transcoded[method]
+	if !g.shared[method] {
+		if len(bindings) == 0 {
+			return generated.Transcoding{}, false, nil
+		}
+		return bindings[0], true, nil
+	}
+	// A request without a resource keeps the RPC's own dispatch, which
+	// refuses it.
+	resource, ok := requestResource(request, g.rpcs[method].ResourceField)
+	if !ok {
+		return generated.Transcoding{}, false, nil
+	}
+	for _, binding := range bindings {
+		if bindResource(&Call{}, resource, bindingPattern(binding)) == nil {
+			return binding, true, nil
+		}
+	}
+	for shared := range g.shared {
+		for _, binding := range g.transcoded[shared] {
+			if pattern := bindingPattern(binding); bindResource(&Call{}, resource, pattern) == nil {
+				return generated.Transcoding{}, false, status.Errorf(codes.Unimplemented, "No provider implements %s for %s resources", method, pattern)
+			}
+		}
+	}
+	return generated.Transcoding{}, false, nil
+}
+
+// requestResource reads a request's resource selector field.
+func requestResource(request proto.Message, field string) (string, bool) {
+	resource, err := resourceField(request, field)
+	return resource, err == nil
+}
+
+// bindingPattern returns the resource pattern of a binding's path variable.
+func bindingPattern(binding generated.Transcoding) string {
+	_, pattern, _ := strings.Cut(variables.FindStringSubmatch(binding.Path)[1], "=")
+	return pattern
+}
+
 // rpcResponse renders a provider's REST result as the gRPC response or
 // status, and forwards the IAM decision ID as gRPC header metadata.
 func (g *Gateway) rpcResponse(ctx context.Context, binding generated.Transcoding, result any) (proto.Message, error) {
@@ -103,6 +150,11 @@ func (g *Gateway) restFor(binding generated.Transcoding, resource string, reques
 	}
 	suffix := variables.ReplaceAllLiteralString(binding.Path, strings.Join(escaped, "/"))
 	route, path, matches := g.routeFor(binding, suffix)
+	if route == nil && g.hasRoute(binding) {
+		// The binding's pattern is wider than the route: Encrypt binds
+		// cryptoKeys/**, so it may name a version the REST route never takes.
+		return nil, "", status.Errorf(codes.Unimplemented, "No provider implements %s for %s", binding.RPC, resource)
+	}
 	if route == nil {
 		return nil, "", errUntranscodable
 	}
@@ -160,6 +212,16 @@ func (g *Gateway) routeFor(binding generated.Transcoding, rendered string) (*com
 		}
 	}
 	return nil, "", nil
+}
+
+// hasRoute reports whether the binding's REST method has a route on its verb.
+func (g *Gateway) hasRoute(binding generated.Transcoding) bool {
+	for i := range g.routes {
+		if g.routes[i].contract.Method == binding.REST && g.routes[i].contract.Verb == binding.Verb {
+			return true
+		}
+	}
+	return false
 }
 
 // requestFields decodes a request's protojson fields, keeping numbers exact.

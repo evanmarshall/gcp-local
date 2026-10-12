@@ -47,29 +47,30 @@ type Gateway struct {
 	resolve  Resolver
 	routes   []compiledRoute
 	rpcs     map[string]generated.RPC
-	// transcoded gRPC methods run through a REST route's provider method.
-	transcoded map[string]generated.Transcoding
+	// transcoded gRPC methods run through a REST route's provider method. A
+	// shared mixin RPC (IAMPolicy) has one binding per resource kind it
+	// serves; shared marks those RPCs.
+	transcoded map[string][]generated.Transcoding
+	shared     map[string]bool
 }
 
 func New(registry *Registry, resolve Resolver) *Gateway {
 	if registry == nil {
 		registry = NewRegistry()
 	}
-	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]generated.RPC{}, transcoded: map[string]generated.Transcoding{}}
+	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]generated.RPC{}, transcoded: map[string][]generated.Transcoding{}, shared: map[string]bool{}}
 	for _, contract := range contracts() {
 		g.routes = append(g.routes, compileRoute(contract))
 	}
 	for _, rpc := range generated.PubSubMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
-	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods} {
+	for _, table := range [][]generated.RPC{generated.IAMMethods, generated.SpannerMethods, generated.BigtableMethods, generated.SecretManagerMethods, generated.CloudTasksMethods, generated.CloudKMSMethods} {
 		for _, rpc := range table {
 			g.rpcs[rpc.Method] = rpc
 		}
 	}
-	for _, binding := range append(append([]generated.Transcoding(nil), generated.SecretManagerTranscoding...), generated.CloudTasksTranscoding...) {
-		g.transcoded[binding.RPC] = binding
-	}
+	g.addTranscoding()
 	for _, rpc := range generated.FirestoreMethods {
 		g.rpcs[rpc.Method] = rpc
 	}
@@ -77,6 +78,19 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 		g.rpcs[rpc.Method] = rpc
 	}
 	return g
+}
+
+// addTranscoding indexes every transcoded binding by RPC and marks the
+// shared IAMPolicy mixin RPCs, which pick a binding by resource.
+func (g *Gateway) addTranscoding() {
+	for _, rpc := range generated.IAMMethods {
+		g.shared[rpc.Method] = true
+	}
+	for _, table := range [][]generated.Transcoding{generated.SecretManagerTranscoding, generated.CloudTasksTranscoding, generated.CloudKMSTranscoding} {
+		for _, binding := range table {
+			g.transcoded[binding.RPC] = append(g.transcoded[binding.RPC], binding)
+		}
+	}
 }
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Local administrative paths are never service contracts, even when mounted alone.

@@ -32,7 +32,7 @@ Set each client's API endpoint to `http://127.0.0.1:4566` and keep the SDK's nor
 
 - The creator refuses an existing directory and accepts only a numeric loopback HTTP endpoint.
 - Access tokens last one hour. Set `token_lifetime_seconds` (1-3600) in `server.json` to test refresh.
-- Tokens are scoped to `cloud-platform` and the Storage SDK's default scopes; an enrollment's `scopes` can narrow that. IAM is checked separately.
+- Tokens are scoped to `cloud-platform`, the Storage SDK's default scopes, and `cloudkms` (the Go KMS client requests it beside `cloud-platform`); an enrollment's `scopes` can narrow that. IAM is checked separately.
 - A token exchange without `scope` gets the enrollment's scopes, as the metadata server does. Real STS acceptance of a scope-less exchange is not recorded.
 - Tokens die when the core restarts.
 - `GET /_local/identity` reports the caller's state, subject, project, and scopes. Unknown or expired tokens get 401.

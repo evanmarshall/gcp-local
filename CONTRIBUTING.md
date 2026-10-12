@@ -43,7 +43,7 @@ Run the checks for every area you change; CI runs all of them. "Linux" means CI 
 | `sh scripts/check_cloudsql.sh` | Cloud SQL against real PostgreSQL | Linux; non-root, or root with `.tools/postgres` traversable by `nobody` | `install_postgres.py` |
 | `sh scripts/check_vertexai.sh` | Vertex AI with the google-genai SDK | Linux | `requirements-services.txt` |
 | `sh scripts/check_logging.sh` | Cloud Logging with the Python SDK | Linux | `requirements-services.txt` |
-| `sh scripts/check_cloudkms.sh` | Cloud KMS asymmetric and MAC keys with the Python SDK | Linux | `requirements-services.txt` |
+| `sh scripts/check_cloudkms.sh` | Cloud KMS with the Python SDK over REST and gRPC, and the Go client over gRPC | Linux | `requirements-services.txt` |
 | `sh scripts/check_secretmanager.sh` | Secret Manager with the Python SDK over gRPC | Linux | `requirements-services.txt` |
 | `sh scripts/check_cloudtasks.sh` | Cloud Tasks with the Python SDK over gRPC, including dispatch | Linux | `requirements-services.txt` |
 | `sh scripts/check_clients.sh` | Go, Node.js, Python, gcloud, and rclone clients per service against `tests/clients/matrix.json` ([client matrix](docs/clients.md)) | Linux | Java 17, `install_emulator_jar.py pubsub` and `firestore`, `install_spanner.py`, `install_client_tools.py`, `npm ci` in `tests/clients/node`, `tests/clients/python/requirements.txt` |

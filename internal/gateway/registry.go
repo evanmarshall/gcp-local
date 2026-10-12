@@ -76,6 +76,7 @@ func NewRegistry() *Registry {
 	// contracts name the service for its untranscoded methods' gaps.
 	r.registerData("secretmanager", generated.SecretManagerMethods)
 	r.registerData("cloudtasks", generated.CloudTasksMethods)
+	r.registerData("cloudkms", generated.CloudKMSMethods)
 	return r
 }
 

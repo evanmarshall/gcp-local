@@ -19,10 +19,10 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
-// TestCloudKMSSDK runs the pinned google-cloud-kms SDK over REST with local
-// external-account ADC inside the loopback-only runner. The admin holds
-// roles/cloudkms.admin on the project; the app is granted per key by the
-// script; the peer holds nothing.
+// TestCloudKMSSDK runs the pinned google-cloud-kms SDK over REST and its
+// default gRPC transport with local external-account ADC inside the
+// loopback-only runner. The admin holds roles/cloudkms.admin on the project;
+// the app is granted per key by the script; the peer holds nothing.
 func TestCloudKMSSDK(t *testing.T) {
 	interfaces, err := net.Interfaces()
 	if err != nil || os.Getenv("GCP_LOCAL_ISOLATED") != "1" || len(interfaces) != 1 || interfaces[0].Name != "lo" {
@@ -92,7 +92,7 @@ func TestCloudKMSSDK(t *testing.T) {
 	}
 	run, cancelRun := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancelRun()
-	command := exec.CommandContext(run, python, "testdata/sdk.py", endpoint)
+	command := exec.CommandContext(run, python, "testdata/sdk.py", endpoint, listeners.GRPC.Addr().String())
 	command.Env = []string{"PATH=/usr/bin:/bin", "GOOGLE_APPLICATION_CREDENTIALS=" + adc("admin", secret+"-admin"),
 		"GCP_LOCAL_APP_ADC=" + adc("app", secret+"-app"), "GCP_LOCAL_DENIED_ADC=" + adc("peer", secret+"-peer"), "GCP_LOCAL_APP=" + app,
 		"GOOGLE_CLOUD_PROJECT=project-a", "CLOUDSDK_CONFIG=" + filepath.Join(directory, "empty-cloudsdk"), "GOOGLE_API_USE_CLIENT_CERTIFICATE=false",

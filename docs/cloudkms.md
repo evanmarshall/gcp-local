@@ -1,12 +1,33 @@
 # Cloud KMS
 
-Cloud KMS v1 over REST: key rings, crypto keys, versions, symmetric encrypt/decrypt, asymmetric sign and decrypt, and HMAC, with per-resource IAM. Recorded against GCP: symmetric keys (`cloudkms-symmetric-key-lifecycle`) and asymmetric sign and MAC keys (`cloudkms-asymmetric-mac-keys`, 2026-10-12).
+Cloud KMS v1 over REST and gRPC: key rings, crypto keys, versions, symmetric encrypt/decrypt, asymmetric sign and decrypt, and HMAC, with per-resource IAM. Recorded against GCP: symmetric keys (`cloudkms-symmetric-key-lifecycle`) and asymmetric sign and MAC keys (`cloudkms-asymmetric-mac-keys`, 2026-10-12).
 
 ## Use
 
-Select `-services ...,kms`. Routes are `/v1/projects/{project}/locations/{location}/keyRings/...` on port 4566. Key material is generated with `crypto/rand`, lives only in process memory, and does not survive a restart. Only public keys leave the process. This is a local stand-in, not a cryptographic boundary.
+Select `-services ...,kms`. REST routes are `/v1/projects/{project}/locations/{location}/keyRings/...` on port 4566; `google.cloud.kms.v1.KeyManagementService` is on the gRPC port 4567. Key material is generated with `crypto/rand`, lives only in process memory, and does not survive a restart. Only public keys leave the process. This is a local stand-in, not a cryptographic boundary.
 
 The REST SDKs send enums as numbers (`$alt=json;enum-encoding=int`); requests accept names or numbers, and responses return names.
+
+## Transport
+
+The client libraries' default gRPC transport works; REST still works. The gateway transcodes each RPC to its REST route by the method's `google.api.http` binding, so both transports run the same provider code, IAM checks, and errors. Key ring and crypto key IAM policies use `google.iam.v1.IAMPolicy` on the same port.
+
+Point the client at the gRPC endpoint with local channel credentials and local ADC:
+
+```python
+channel = secure_authorized_channel(credentials, request, "127.0.0.1:4567",
+                                    ssl_credentials=grpc.local_channel_credentials())
+client = kms.KeyManagementServiceClient(transport=KeyManagementServiceGrpcTransport(channel=channel))
+```
+
+```go
+client, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint("127.0.0.1:4567"),
+	option.WithGRPCDialOption(grpc.WithTransportCredentials(local.NewCredentials())))
+```
+
+- Tested clients: Python `google-cloud-kms` 3.18.0 (REST and gRPC) and Go `cloud.google.com/go/kms` 1.35.0 (gRPC). Node and Java are not tested.
+- RPCs without a REST method here (`RawEncrypt`, import jobs, `Decapsulate`, `GenerateRandomBytes`, deletes, retired resources), `Encrypt` with a version name, and `IAMPolicy.TestIamPermissions` return `UNIMPLEMENTED`. The location list is REST only.
+- The clients retry only `UNAVAILABLE` and `DEADLINE_EXCEEDED`, within a 60-second deadline; no KMS refusal uses either code.
 
 ## Methods
 
@@ -57,7 +78,7 @@ Refusals, modeled locally:
 
 ```sh
 sh scripts/check_rest_recordings.sh  # the symmetric recording
-sh scripts/check_cloudkms.sh         # google-cloud-kms over REST with local ADC: sign, OAEP decrypt, HMAC, refusals
+sh scripts/check_cloudkms.sh         # google-cloud-kms over REST and gRPC, and the Go client over gRPC, with local ADC
 ```
 
 `cloudkms-asymmetric-mac-keys` was recorded and revalidated against GCP on 2026-10-12 and matches locally (`sh scripts/check_rest_recordings.sh`): sign by digest and data, public key PEM and CRC32C, HMAC sign and verify, CRC32C and digest refusals, wrong-purpose and disabled-version `FAILED_PRECONDITION`, destroy and restore. `TestAccKMSKeyRingCryptoKey` passes ([Terraform](terraform-compatibility.md)).

@@ -187,10 +187,7 @@
       "client": "go",
       "package": "cloud.google.com/go/kms",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 59,
-      "gap": "no gRPC listener",
-      "match": "unknown service google.cloud.kms.v1.KeyManagementService"
+      "expect": "pass"
     },
     {
       "service": "cloudkms",
@@ -207,10 +204,7 @@
       "client": "python",
       "package": "google-cloud-kms",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 59,
-      "gap": "no gRPC listener",
-      "match": "unknown service google.cloud.kms.v1.KeyManagementService"
+      "expect": "pass"
     },
     {
       "service": "cloudkms",

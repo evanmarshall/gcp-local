@@ -1,4 +1,4 @@
-"""Drive google-cloud-kms over REST against the local provider with local ADC."""
+"""Drive google-cloud-kms over REST and its default gRPC transport with local ADC."""
 
 import hashlib
 import os
@@ -6,12 +6,17 @@ import sys
 
 import google.auth
 import google_crc32c
+import grpc
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding
 from google.api_core import exceptions
+from google.auth.transport.grpc import secure_authorized_channel
 from google.auth.transport.requests import Request
 from google.cloud import kms
+from google.cloud.kms_v1.services.key_management_service.transports.grpc import (
+    KeyManagementServiceGrpcTransport,
+)
 from google.iam.v1 import policy_pb2
 
 SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
@@ -24,25 +29,38 @@ def crc32c(data: bytes) -> int:
     return int(google_crc32c.value(data))
 
 
-def client_for(endpoint: str, filename: str | None = None) -> kms.KeyManagementServiceClient:
-    """Build a REST client from local ADC, with no ambient proxy."""
+def client_for(
+    endpoint: str, grpc_endpoint: str | None, filename: str | None = None
+) -> kms.KeyManagementServiceClient:
+    """Build a client from local ADC, with no ambient proxy: REST, or gRPC over a local channel."""
     session = requests.Session()
     session.trust_env = False
+    request = Request(session=session)
     if filename:
         credentials, _ = google.auth.load_credentials_from_file(filename, scopes=SCOPES)
     else:
-        credentials, _ = google.auth.default(scopes=SCOPES, request=Request(session=session))
+        credentials, _ = google.auth.default(scopes=SCOPES, request=request)
+    if grpc_endpoint is None:
+        return kms.KeyManagementServiceClient(
+            credentials=credentials, transport="rest", client_options={"api_endpoint": endpoint}
+        )
+    channel = secure_authorized_channel(
+        credentials, request, grpc_endpoint, ssl_credentials=grpc.local_channel_credentials()
+    )
     return kms.KeyManagementServiceClient(
-        credentials=credentials, transport="rest", client_options={"api_endpoint": endpoint}
+        transport=KeyManagementServiceGrpcTransport(channel=channel)
     )
 
 
 def refused(call, wire_status: str) -> None:
-    """Require one call to fail with the given google.rpc status name."""
+    """Require one call to fail with the given google.rpc status name on either transport."""
     try:
         call()
     except exceptions.GoogleAPICallError as error:
-        got = error.response.json()["error"]["status"]
+        if error.response is not None and hasattr(error.response, "json"):
+            got = error.response.json()["error"]["status"]
+        else:
+            got = error.grpc_status_code.name
         assert got == wire_status, (got, error)
     else:
         raise AssertionError("Expected " + wire_status)
@@ -155,19 +173,67 @@ def check_mac(admin, app, ring: str) -> None:
     assert restored.state == kms.CryptoKeyVersion.CryptoKeyVersionState.DISABLED, restored
 
 
-def main(endpoint: str) -> None:
-    """Run the asymmetric and MAC flows as the admin, app, and denied identities."""
-    admin = client_for(endpoint)
-    app = client_for(endpoint, os.environ["GCP_LOCAL_APP_ADC"])
-    denied = client_for(endpoint, os.environ["GCP_LOCAL_DENIED_ADC"])
-    ring = admin.create_key_ring(
-        parent=f"projects/{PROJECT}/locations/us-central1", key_ring_id="sdk", key_ring={}
-    ).name
-    check_sign(admin, app, denied, ring)
-    check_decrypt(admin, app, ring)
-    check_mac(admin, app, ring)
-    print("google-cloud-kms asymmetric and MAC flows passed")
+def check_symmetric(admin, app, denied, ring: str) -> None:
+    """Encrypt and decrypt with AAD, and refuse wrong AAD and an ungranted caller."""
+    key = admin.create_crypto_key(
+        parent=ring,
+        crypto_key_id="symmetric",
+        crypto_key={"purpose": kms.CryptoKey.CryptoKeyPurpose.ENCRYPT_DECRYPT},
+    )
+    assert key.primary.state == kms.CryptoKeyVersion.CryptoKeyVersionState.ENABLED, key
+    refused(
+        lambda: denied.encrypt(request={"name": key.name, "plaintext": MESSAGE}),
+        "PERMISSION_DENIED",
+    )
+    policy = admin.get_iam_policy(request={"resource": key.name})
+    policy.bindings.append(
+        policy_pb2.Binding(
+            role="roles/cloudkms.cryptoKeyEncrypterDecrypter", members=[os.environ["GCP_LOCAL_APP"]]
+        )
+    )
+    admin.set_iam_policy(request={"resource": key.name, "policy": policy})
+    sealed = app.encrypt(
+        request={
+            "name": key.name,
+            "plaintext": MESSAGE,
+            "additional_authenticated_data": b"aad",
+            "plaintext_crc32c": crc32c(MESSAGE),
+        }
+    )
+    assert sealed.verified_plaintext_crc32c and sealed.name == key.name + "/cryptoKeyVersions/1", (
+        sealed
+    )
+    opened = app.decrypt(
+        request={
+            "name": key.name,
+            "ciphertext": sealed.ciphertext,
+            "additional_authenticated_data": b"aad",
+        }
+    )
+    assert opened.plaintext == MESSAGE and opened.used_primary, opened
+    refused(
+        lambda: app.decrypt(request={"name": key.name, "ciphertext": sealed.ciphertext}),
+        "INVALID_ARGUMENT",
+    )
+
+
+def main(endpoint: str, grpc_endpoint: str) -> None:
+    """Run every flow as the admin, app, and denied identities on REST, then on gRPC."""
+    for label, target in (("rest", None), ("grpc", grpc_endpoint)):
+        admin = client_for(endpoint, target)
+        app = client_for(endpoint, target, os.environ["GCP_LOCAL_APP_ADC"])
+        denied = client_for(endpoint, target, os.environ["GCP_LOCAL_DENIED_ADC"])
+        ring = admin.create_key_ring(
+            parent=f"projects/{PROJECT}/locations/us-central1",
+            key_ring_id="sdk-" + label,
+            key_ring={},
+        ).name
+        check_symmetric(admin, app, denied, ring)
+        check_sign(admin, app, denied, ring)
+        check_decrypt(admin, app, ring)
+        check_mac(admin, app, ring)
+        print(f"google-cloud-kms flows passed over {label}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2])

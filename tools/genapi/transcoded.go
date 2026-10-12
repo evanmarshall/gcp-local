@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	"cloud.google.com/go/iam/apiv1/iampb"
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/proto"
@@ -24,6 +26,17 @@ type transcodedService struct {
 	bindings          string
 	rest              map[string]string // gRPC method name to REST route ID
 	routes            []route
+	mixins            []mixinBinding
+}
+
+// mixinBinding pairs a shared mixin RPC (google.iam.v1.IAMPolicy) with one of
+// this service's REST routes for the resources its path pattern names. The
+// gateway picks the binding whose pattern matches the request's resource; a
+// resource no binding names stays with the RPC's own owner.
+type mixinBinding struct {
+	method protoreflect.MethodDescriptor
+	rest   string
+	rule   *annotations.HttpRule
 }
 
 var secretManagerRPC = transcodedService{
@@ -33,7 +46,7 @@ var secretManagerRPC = transcodedService{
 	rest: map[string]string{
 		"ListSecrets": "secretmanager.secrets.list", "CreateSecret": "secretmanager.secrets.create",
 		"GetSecret": "secretmanager.secrets.get", "UpdateSecret": "secretmanager.secrets.update",
-		"DeleteSecret": "secretmanager.secrets.delete", "GetIamPolicy": "secretmanager.secrets.getIamPolicy",
+		"DeleteSecret": "secretmanager.secrets.delete", getIamPolicy: "secretmanager.secrets.getIamPolicy",
 		"SetIamPolicy": "secretmanager.secrets.setIamPolicy", "AddSecretVersion": "secretmanager.versions.add",
 		"ListSecretVersions": "secretmanager.versions.list", "GetSecretVersion": "secretmanager.versions.get",
 		"AccessSecretVersion": "secretmanager.versions.access", "DestroySecretVersion": "secretmanager.versions.destroy",
@@ -54,12 +67,57 @@ var cloudTasksRPC = transcodedService{
 		"CreateQueue": "cloudtasks.queues.create", "UpdateQueue": "cloudtasks.queues.update",
 		"DeleteQueue": "cloudtasks.queues.delete", "PurgeQueue": "cloudtasks.queues.purge",
 		"PauseQueue": "cloudtasks.queues.pause", "ResumeQueue": "cloudtasks.queues.resume",
-		"GetIamPolicy": cloudTasksGetIamPolicy, "SetIamPolicy": "cloudtasks.queues.setIamPolicy",
+		getIamPolicy: cloudTasksGetIamPolicy, "SetIamPolicy": "cloudtasks.queues.setIamPolicy",
 		"ListTasks": "cloudtasks.tasks.list", "GetTask": "cloudtasks.tasks.get",
 		"CreateTask": "cloudtasks.tasks.create", "DeleteTask": "cloudtasks.tasks.delete",
 		"RunTask": "cloudtasks.tasks.run",
 	},
 	routes: cloudTasksRows(),
+}
+
+// getIamPolicy names the IAM policy read method of every service.
+const getIamPolicy = "GetIamPolicy"
+
+// iamPolicy is the shared google.iam.v1.IAMPolicy mixin service.
+var iamPolicy = iampb.File_google_iam_v1_iam_policy_proto.Services().ByName("IAMPolicy")
+
+// kmsIAM binds one IAMPolicy method to a Cloud KMS route. KMS's service config
+// (google/cloud/kms/v1/cloudkms_v1.yaml) binds the mixin per resource kind
+// and GetIamPolicy to GET, unlike the mixin's own POST annotation.
+func kmsIAM(method, rest, path string) mixinBinding {
+	rule := &annotations.HttpRule{Pattern: &annotations.HttpRule_Post{Post: path}, Body: "*"}
+	if method == getIamPolicy {
+		rule = &annotations.HttpRule{Pattern: &annotations.HttpRule_Get{Get: path}}
+	}
+	return mixinBinding{iamPolicy.Methods().ByName(protoreflect.Name(method)), rest, rule}
+}
+
+// cloudKMSRPC is the KeyManagementService surface of the Cloud KMS REST
+// provider, plus the IAM policy mixin on key rings and crypto keys.
+var cloudKMSRPC = transcodedService{
+	service: kmspb.File_google_cloud_kms_v1_service_proto.Services().ByName("KeyManagementService"),
+	alias:   "kmspb", importPath: "cloud.google.com/go/kms/apiv1/kmspb",
+	variable: "CloudKMSMethods", bindings: "CloudKMSTranscoding",
+	rest: map[string]string{
+		"CreateKeyRing": "cloudkms.keyRings.create", "GetKeyRing": "cloudkms.keyRings.get", "ListKeyRings": "cloudkms.keyRings.list",
+		"CreateCryptoKey": "cloudkms.cryptoKeys.create", "GetCryptoKey": "cloudkms.cryptoKeys.get",
+		"ListCryptoKeys": "cloudkms.cryptoKeys.list", "UpdateCryptoKey": "cloudkms.cryptoKeys.update",
+		"UpdateCryptoKeyPrimaryVersion": "cloudkms.cryptoKeys.updatePrimaryVersion",
+		"Encrypt":                       "cloudkms.cryptoKeys.encrypt", "Decrypt": "cloudkms.cryptoKeys.decrypt",
+		"CreateCryptoKeyVersion": "cloudkms.cryptoKeyVersions.create", "GetCryptoKeyVersion": "cloudkms.cryptoKeyVersions.get",
+		"ListCryptoKeyVersions": "cloudkms.cryptoKeyVersions.list", "UpdateCryptoKeyVersion": "cloudkms.cryptoKeyVersions.patch",
+		"DestroyCryptoKeyVersion": "cloudkms.cryptoKeyVersions.destroy", "RestoreCryptoKeyVersion": "cloudkms.cryptoKeyVersions.restore",
+		"AsymmetricSign": "cloudkms.cryptoKeyVersions.asymmetricSign", "AsymmetricDecrypt": "cloudkms.cryptoKeyVersions.asymmetricDecrypt",
+		"GetPublicKey": "cloudkms.cryptoKeyVersions.getPublicKey", "MacSign": "cloudkms.cryptoKeyVersions.macSign",
+		"MacVerify": "cloudkms.cryptoKeyVersions.macVerify",
+	},
+	routes: cloudKMSRows(),
+	mixins: []mixinBinding{
+		kmsIAM(getIamPolicy, "cloudkms.keyRings.getIamPolicy", "/v1/{resource=projects/*/locations/*/keyRings/*}:getIamPolicy"),
+		kmsIAM("SetIamPolicy", "cloudkms.keyRings.setIamPolicy", "/v1/{resource=projects/*/locations/*/keyRings/*}:setIamPolicy"),
+		kmsIAM(getIamPolicy, "cloudkms.cryptoKeys.getIamPolicy", "/v1/{resource=projects/*/locations/*/keyRings/*/cryptoKeys/*}:getIamPolicy"),
+		kmsIAM("SetIamPolicy", "cloudkms.cryptoKeys.setIamPolicy", "/v1/{resource=projects/*/locations/*/keyRings/*/cryptoKeys/*}:setIamPolicy"),
+	},
 }
 
 // transcodedImports are the packages of message types outside the service's
@@ -105,6 +163,11 @@ func transcodedDispatch(d transcodedService, declare bool) []byte {
 	}
 	if paired != len(d.rest) {
 		panic("A paired method is missing from " + name)
+	}
+	for _, mixin := range d.mixins {
+		id := "/" + string(mixin.method.Parent().FullName()) + "/" + string(mixin.method.Name())
+		field, _ := bindingSelector(id, mixin.rule)
+		bindings.WriteString(bindingRow(d.routes, mixin.method, id, mixin.rest, mixin.rule, field))
 	}
 	descriptors.WriteString("}\n")
 	bindings.WriteString("}\n")

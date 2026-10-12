@@ -268,6 +268,11 @@ func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal("claimed unverified narrow scopes")
 	}
+	// Local STS mints cloudkms for the Go KMS client; alone it grants nothing.
+	read.Principal.Scopes = []string{"https://www.googleapis.com/auth/cloudkms"}
+	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "OAuth scope enforcement is unverified") {
+		t.Fatal("the cloudkms scope alone authorized a plan:", err)
+	}
 }
 func TestAnonymousPublicBindingsAndInvalidCredentials(t *testing.T) {
 	engine, _ := setup(t)

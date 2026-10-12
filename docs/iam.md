@@ -18,7 +18,7 @@ Each provider registers its plans with `Engine.Register` when it starts (Storage
 - Caller project and resource project are separate. A role in the caller's project doesn't grant access to a foreign resource.
 - Missing parents, cycles, conflicting ownership, and unverified target shapes fail closed.
 - Members: exact `user:` and `serviceAccount:`, `allUsers`, `allAuthenticatedUsers`. Absent credentials never become an administrator; unknown or expired tokens stay unauthenticated.
-- OAuth scopes: `cloud-platform` covers every plan. `devstorage.full_control` and `pubsub` cover plans whose permissions are all in that service. Other scopes are refused.
+- OAuth scopes: `cloud-platform` covers every plan. `devstorage.full_control` and `pubsub` cover plans whose permissions are all in that service. Other scopes, `cloudkms` included, are refused.
 - IAM conditions (CEL) see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers pass resource attributes through `iam.Target.Attributes`; only Storage and Cloud SQL do, so conditions elsewhere fail closed. Storage conditions are recorded (`storage-iam-conditions`).
 - Deny rules (deny overrides allow) and principal access boundary policies are modeled locally and not recorded. Recording deny policies needs `roles/iam.denyAdmin`, which is grantable only at an organization.
 - `MarkUnsupported` stores known advanced configuration as a fail-closed marker; a matching allow can't bypass it.

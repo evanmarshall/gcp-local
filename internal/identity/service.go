@@ -24,7 +24,10 @@ const Audience = "//gcp-local/identity"
 const AccessTokenType = "urn:ietf:params:oauth:token-type:access_token" //nolint:gosec // a public token-type URN, not a credential
 const CloudPlatform = "https://www.googleapis.com/auth/cloud-platform"
 
-var DefaultScopes = []string{CloudPlatform, "https://www.googleapis.com/auth/devstorage.full_control", "https://www.googleapis.com/auth/devstorage.read_write", "https://www.googleapis.com/auth/devstorage.read_only"}
+// DefaultScopes are the scopes an enrollment may request when it names none.
+// The Go Cloud KMS client requests cloudkms beside cloud-platform by default;
+// cloudkms alone authorizes no plan (see iam.scopeSupports).
+var DefaultScopes = []string{CloudPlatform, "https://www.googleapis.com/auth/devstorage.full_control", "https://www.googleapis.com/auth/devstorage.read_write", "https://www.googleapis.com/auth/devstorage.read_only", "https://www.googleapis.com/auth/cloudkms"}
 
 type Enrollment struct {
 	Subject      string   `json:"subject"`

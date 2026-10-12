@@ -42,6 +42,7 @@ Notes on counts:
 - IAM counts `signBlob` from IAM Service Account Credentials v1 with the 11 IAM v1 methods.
 - Secret Manager also serves 14 of its 15 methods over gRPC `google.cloud.secretmanager.v1`; locations list is REST only.
 - Cloud Tasks also serves 15 of its 16 methods over gRPC `google.cloud.tasks.v2`; locations list is REST only. REST is v2beta3.
+- Cloud KMS serves 25 of its 26 methods over gRPC as well; only the location list is REST only ([transport](cloudkms.md#transport)).
 
 ## Client compatibility
 
@@ -58,6 +59,10 @@ A recording proves only the requests it sends. This table lists the real clients
 | spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | `internal/providers/spanner/data_integration_test.go` |
 | bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 | gRPC | `internal/providers/bigtable/data_test.go` |
 | logging | Python `google-cloud-logging` 3.17.0 | REST and gRPC | `internal/providers/logging/testdata/sdk.py` |
+| cloudkms | Python `google-cloud-kms` 3.18.0 | REST and gRPC | `internal/providers/cloudkms/testdata/sdk.py` |
+| cloudkms | Go `cloud.google.com/go/kms` 1.35.0 | gRPC | `internal/providers/cloudkms/grpc_test.go` |
+| cloudkms | Go `cloud.google.com/go/kms` 1.35.0 | gRPC | `tests/clients/go` |
+| cloudkms | Python `google-cloud-kms` 3.18.0 | gRPC | `tests/clients/python` |
 | secretmanager | Python `google-cloud-secret-manager` 2.31.0 | gRPC | `internal/providers/secretmanager/testdata/sdk.py` |
 | secretmanager | Go `cloud.google.com/go/secretmanager` 1.22.0 | gRPC | `internal/providers/secretmanager/client_test.go` |
 | cloudtasks | Python `google-cloud-tasks` 2.26.0 (`tasks_v2`) | gRPC | `internal/providers/cloudtasks/testdata/sdk.py` |
@@ -94,9 +99,7 @@ These matrix pairs fail today. `sh scripts/check_clients.sh` fails if one starts
 | firestore | Node `@google-cloud/firestore` 9.3.1 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
 | secretmanager | Node `@google-cloud/secret-manager` 7.1.1 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
 | secretmanager | `gcloud` 588.0.0 | REST | STS refuses gcloud's client authentication | [#53](https://github.com/evanmarshall/gcp-local/issues/53) |
-| cloudkms | Go `cloud.google.com/go/kms` 1.35.0 | gRPC | no gRPC listener | [#59](https://github.com/evanmarshall/gcp-local/issues/59) |
 | cloudkms | Node `@google-cloud/kms` 6.2.1 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
-| cloudkms | Python `google-cloud-kms` 3.18.0 | gRPC | no gRPC listener | [#59](https://github.com/evanmarshall/gcp-local/issues/59) |
 | cloudkms | `gcloud` 588.0.0 | REST | STS refuses gcloud's client authentication | [#53](https://github.com/evanmarshall/gcp-local/issues/53) |
 | cloudtasks | Node `@google-cloud/tasks` 7.2.1 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
 | bigquery | Python `google-cloud-bigquery` 3.46.1 | REST | jobs.insert is not served | [#57](https://github.com/evanmarshall/gcp-local/issues/57) |

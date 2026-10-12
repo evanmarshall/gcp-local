@@ -79,6 +79,7 @@ func main() {
 	write("firestore_dispatch.go", firestoreDispatch(), *check)
 	write("secretmanager_dispatch.go", transcodedDispatch(secretManagerRPC, true), *check)
 	write("cloudtasks_dispatch.go", transcodedDispatch(cloudTasksRPC, false), *check)
+	write("cloudkms_dispatch.go", transcodedDispatch(cloudKMSRPC, false), *check)
 }
 
 // storageRoutes generates the Storage REST route table from the pinned
@@ -838,8 +839,13 @@ func secretManagerRows() []route {
 
 // cloudKMSRoutes generates the Cloud KMS v1 route table slice.
 func cloudKMSRoutes() []byte {
+	return routeTable("CloudKMSRoutes", "is the Cloud KMS v1 route table slice.", cloudKMSRows())
+}
+
+// cloudKMSRows lists the Cloud KMS v1 REST routes.
+func cloudKMSRows() []route {
 	const base = "/v1/projects/{project}/locations/{location}"
-	rows := []route{
+	return []route{
 		{"cloudkms.locations.list", http.MethodGet, base, false, false},
 		// The real create reads only the keyRingId query; the body is optional.
 		{"cloudkms.keyRings.create", http.MethodPost, base + "/keyRings", false, false},
@@ -869,7 +875,6 @@ func cloudKMSRoutes() []byte {
 		{"cloudkms.cryptoKeyVersions.macSign", http.MethodPost, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:macSign", true, false},
 		{"cloudkms.cryptoKeyVersions.macVerify", http.MethodPost, base + "/keyRings/{keyRing}/cryptoKeys/{cryptoKey}/cryptoKeyVersions/{version}:macVerify", true, false},
 	}
-	return routeTable("CloudKMSRoutes", "is the Cloud KMS v1 route table slice.", rows)
 }
 
 // cloudTasksRoutes generates the Cloud Tasks v2beta3 route table slice.

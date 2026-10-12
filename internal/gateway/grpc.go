@@ -10,6 +10,7 @@ import (
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
 	"cloud.google.com/go/iam/apiv1/iampb"
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -34,6 +35,7 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	loggingpb.RegisterLoggingServiceV2Server(server, &generated.LoggingServiceV2Server{Dispatch: g})
 	secretmanagerpb.RegisterSecretManagerServiceServer(server, &generated.SecretManagerServiceServer{Dispatch: g})
 	cloudtaskspb.RegisterCloudTasksServer(server, &generated.CloudTasksServer{Dispatch: g})
+	kmspb.RegisterKeyManagementServiceServer(server, &generated.KeyManagementServiceServer{Dispatch: g})
 	return server
 }
 func (g *Gateway) rpcCall(ctx context.Context, method string, request proto.Message) (Call, error) {
@@ -135,7 +137,11 @@ func resourceField(message proto.Message, path string) (string, error) {
 	return "", status.Error(codes.Internal, "Contract resource field is not a string")
 }
 func (g *Gateway) Unary(ctx context.Context, method string, request proto.Message) (proto.Message, error) {
-	if binding, ok := g.transcoded[method]; ok {
+	binding, ok, err := g.transcodingFor(method, request)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
 		return g.transcode(ctx, binding, request)
 	}
 	call, err := g.rpcCall(ctx, method, request)

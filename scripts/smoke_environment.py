@@ -611,7 +611,7 @@ def grpc_status(
 
 
 def verify_dataplane(directory: Path) -> None:
-    """Call Spanner, Bigtable, Secret Manager, and Cloud Tasks over gRPC, IAM enforced."""
+    """Call each gRPC data plane and transcoded service through the gateway, IAM enforced."""
     env, tokens = environment_tokens(directory)
     developer, ungranted = tokens["developer"], tokens[UNGRANTED]
     session = spanner_rows(env, developer, ungranted)
@@ -637,6 +637,11 @@ def verify_dataplane(directory: Path) -> None:
         ),
         (
             "/google.cloud.tasks.v2.CloudTasks/ListQueues",
+            field(1, b"projects/" + project + b"/locations/us-central1"),
+            False,
+        ),
+        (
+            "/google.cloud.kms.v1.KeyManagementService/ListKeyRings",
             field(1, b"projects/" + project + b"/locations/us-central1"),
             False,
         ),
