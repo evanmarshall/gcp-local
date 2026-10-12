@@ -60,7 +60,7 @@ func (p *Provider) check(body instanceBody) error {
 	case !instanceNamePattern.MatchString(body.Name):
 		return provider.Invalid("Invalid instance name.")
 	case p.releases[body.DatabaseVersion] == "":
-		return gap("databaseVersion %q (installed: %s)", body.DatabaseVersion, strings.Join(sortedKeys(p.releases), ", "))
+		return gap(fmt.Sprintf("databaseVersion %q (installed: %s)", body.DatabaseVersion, strings.Join(sortedKeys(p.releases), ", ")))
 	case body.MasterInstanceName != "" || len(body.ReplicaConfiguration) > 0 || len(body.FailoverReplica) > 0:
 		return gap("replicas")
 	case body.Settings == nil || !tierPattern.MatchString(body.Settings.Tier):
@@ -245,7 +245,7 @@ func decodePatch(raw json.RawMessage) (instancePatch, error) {
 func supportedKeys(values map[string]json.RawMessage, allowed map[string]bool, prefix string) error {
 	for _, key := range sortedKeys(values) {
 		if !allowed[key] {
-			return gap("instances.patch field %s%s", prefix, key)
+			return gap(fmt.Sprintf("instances.patch field %s%s", prefix, key))
 		}
 	}
 	return nil

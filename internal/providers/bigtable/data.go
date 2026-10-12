@@ -153,8 +153,7 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 		return state.Scope{}, status.Error(codes.InvalidArgument, "Malformed resource name")
 	}
 	scope := provider.ProjectScope(parts[1])
-	target, exists := p.dataTarget(scope, parts)
-	decision, err := p.engine.Authorize(call, target, nil)
+	target, exists, decision, err := p.authorizeDataTarget(call, scope, parts)
 	if decision.ID != "" {
 		_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-decision-id", decision.ID))
 	}
@@ -172,11 +171,23 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 	return scope, nil
 }
 
+// authorizeDataTarget authorizes call on the data target, resolving it again
+// once when a concurrent delete removed it after dataTarget read it.
+func (p *Provider) authorizeDataTarget(call gateway.Call, scope state.Scope, parts []string) (iam.Target, bool, iam.Decision, error) {
+	target, exists := p.dataTarget(scope, parts)
+	decision, err := p.engine.Authorize(call, target, nil)
+	if provider.Unverified(err) {
+		target, exists = p.dataTarget(scope, parts)
+		decision, err = p.engine.Authorize(call, target, nil)
+	}
+	return target, exists, decision, err //nolint:wrapcheck // the caller maps the IAM status
+}
+
 // dataTarget resolves the IAM target of a table or instance name split on
 // "/", and whether its instance exists, from provider state and the index.
 func (p *Provider) dataTarget(scope state.Scope, parts []string) (iam.Target, bool) {
 	project, instance := parts[1], parts[3]
-	if !uid.MatchString(instance) || p.instanceLocked(scope, instance) == nil {
+	if !uid.MatchString(instance) || p.withInstance(scope, instance, func(*scopeState, *instanceRecord) error { return nil }) != nil {
 		return iam.Target{Name: provider.ProjectResource(project)}, false
 	}
 	target := iam.Target{Name: instanceResource(project, instance)}
@@ -189,6 +200,4 @@ func (p *Provider) dataTarget(scope state.Scope, parts []string) (iam.Target, bo
 }
 
 // gap reports an unsupported request shape explicitly.
-func gap(feature string) error {
-	return status.Error(codes.Unimplemented, "gcp-local Bigtable coverage gap: "+feature)
-}
+var gap = provider.CoverageGap("Bigtable")

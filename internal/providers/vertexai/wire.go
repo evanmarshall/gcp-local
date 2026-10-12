@@ -1,13 +1,10 @@
 package vertexai
 
 import (
-	"github.com/evanmarshall/gcp-local/internal/providers/provider"
-
 	"encoding/json"
 	"strings"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
 // Wire shapes of the Vertex AI generative endpoints (camelCase JSON). Only the
@@ -223,9 +220,7 @@ func decodeBody(raw []byte, target any) error {
 }
 
 // gap reports a feature the local backends do not model.
-func gap(message string) error {
-	return status.Error(codes.Unimplemented, "Vertex AI coverage gap: "+message)
-}
+var gap = provider.CoverageGap("Vertex AI")
 
 // validate rejects malformed requests and unmodeled features before any
 // backend runs.

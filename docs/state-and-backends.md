@@ -18,6 +18,11 @@ The index exists for IAM ancestry and cross-service references. It never copies 
 - `state.Store` requires an explicit project and location and serializes mutations per scope. Each provider supplies its location validator.
 - Storage is global: a bucket's region is an attribute, not a namespace. The index enforces global bucket-name ownership across projects.
 - Store callbacks do short in-memory work, never retain mutable references, and never re-enter their store. Getters return copies.
+- A handler looks up, changes, and renders a record inside one `With` callback. Only rendered wire documents or copies leave it; no helper returns a pointer into the store. Wire documents clone record maps and slices.
+- A patch validates its whole mask and body before the callback and applies every field inside it, so a rejected patch changes nothing.
+- A metadata-only provider (no backend) updates its index entry inside the same callback as the record, and never drops an index error. Create rolls back if the index refuses it.
+- A request racing a delete gets `NOT_FOUND`, not the engine's "unverified target" refusal. A metadata-only provider checks the target's existence and calls `Authorize` inside one `With` callback (the engine never re-enters a store). A provider that publishes its index after a backend call resolves the target again when `provider.Unverified` reports that refusal, then authorizes once more.
+- Each provider's `concurrency_test.go` hammers create, get, update, and delete of one resource from parallel clients with `providertest.Hammer`; `-race` fails it when state escapes the lock.
 
 ## Backend lifecycle
 

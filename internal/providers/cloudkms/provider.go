@@ -58,7 +58,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine, index *state.Index) error {
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New:      provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
@@ -72,14 +72,6 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 	}
 	return nil
 }
-
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error { return nil }
-func (emptyBackend) Ready(context.Context) error { return nil }
-func (emptyBackend) Stop(context.Context) error  { return nil }
-func (emptyBackend) Reset(context.Context) error { return nil }
 
 // Reset clears the scope's key rings, keys, and version material.
 func (p *Provider) Reset(scope state.Scope) error {

@@ -85,7 +85,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New:      provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
@@ -104,14 +104,6 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	return p, nil
 }
-
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error { return nil }
-func (emptyBackend) Ready(context.Context) error { return nil }
-func (emptyBackend) Stop(context.Context) error  { return nil }
-func (emptyBackend) Reset(context.Context) error { return nil }
 
 // Reset clears the scope's secrets, versions, and payloads.
 func (p *Provider) Reset(scope state.Scope) error {
@@ -154,9 +146,7 @@ func newScopeState() scopeState { return scopeState{secrets: map[string]*secretR
 func (s *scopeState) reset() { s.secrets = map[string]*secretRecord{} }
 
 // gap reports an unimplemented slice boundary.
-func gap(message string) error {
-	return status.Error(codes.Unimplemented, "Secret Manager coverage gap: "+message)
-}
+var gap = provider.CoverageGap("Secret Manager")
 
 // numericProject matches a project number in a resource path.
 var numericProject = regexp.MustCompile(`^[0-9]+$`)
@@ -170,8 +160,9 @@ func (p *Provider) wireProject(project string) string {
 	return project
 }
 
-// resolve derives the scope and IAM target for one request and its record.
-func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, *secretRecord, error) {
+// resolve derives the scope and IAM target for one request, and the secret id
+// it addresses ("" for project-level methods).
+func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, string, error) {
 	project := request.Path["project"]
 	// Names GCP returns carry the project number; callers send them back.
 	if resource, ok := p.index.ProjectByNumber(project); ok && numericProject.MatchString(project) {
@@ -182,38 +173,59 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	target := iam.Target{Name: provider.ProjectResource(project)}
 	switch call.Method {
 	case methodSecretsCreate, methodSecretsList, methodLocationsList:
-		return scope, target, nil, nil
+		return scope, target, "", nil
 	default:
 		id := request.Path["secret"]
 		if !uidPattern.MatchString(id) {
-			return scope, target, nil, status.Errorf(codes.InvalidArgument, "Invalid secret name %q", id)
+			return scope, target, "", status.Errorf(codes.InvalidArgument, "Invalid secret name %q", id)
 		}
 		target.Name = secretResource(project, id)
-		var record *secretRecord
-		if err := p.scopes.With(scope, func(s *scopeState) error {
-			record = s.secrets[id]
-			return nil
-		}); err != nil {
-			return scope, target, nil, fmt.Errorf("open the secretmanager scope: %w", err)
-		}
-		if record == nil {
-			return scope, target, nil, provider.NotFound("secrets", id)
-		}
-		return scope, target, record, nil
+		return scope, target, id, nil
 	}
 }
 
-// handle is the gateway entry point for every Secret Manager method.
+// withSecret runs use on one secret under the scope lock, or reports it
+// missing. use must not retain the record or anything it points to.
+func (p *Provider) withSecret(scope state.Scope, id string, use func(*scopeState, *secretRecord) error) error {
+	var opened bool
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		opened = true
+		record := s.secrets[id]
+		if record == nil {
+			return provider.NotFound("secrets", id)
+		}
+		return use(s, record)
+	})
+	if err != nil && !opened {
+		return fmt.Errorf("open the secretmanager scope: %w", err)
+	}
+	return err //nolint:wrapcheck // the callback's own error
+}
+
+// handle is the gateway entry point for every Secret Manager method. An
+// addressed secret's existence check and authorization share one scope lock,
+// and delete removes the index entry under that lock, so a request racing a
+// delete sees NOT_FOUND rather than an unverified IAM target.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Secret Manager request")
 	}
-	scope, target, record, err := p.resolve(call, request)
+	scope, target, id, err := p.resolve(call, request)
 	if err != nil {
 		return nil, err
 	}
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	var decision iam.Decision
+	var authorizeErr error
+	authorize := func(*scopeState, *secretRecord) error {
+		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+		return nil
+	}
+	if id == "" {
+		_ = authorize(nil, nil)
+	} else if err := p.withSecret(scope, id, authorize); err != nil {
+		return nil, err
+	}
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
@@ -223,7 +235,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
-	response, err := p.execute(call, request, scope, record)
+	response, err := p.execute(call, request, scope)
 	if err != nil {
 		return nil, err
 	}

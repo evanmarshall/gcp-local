@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"strings"
 
@@ -28,10 +29,20 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.repositoriesList(request, scope)
 	case methodReposUpdate:
 		return p.repositoriesUpdate(request, scope)
-	case methodReposGetIam:
-		return p.getIam(target)
-	case methodReposSetIam:
-		return p.setIam(request, target)
+	case methodReposGetIam, methodReposSetIam:
+		// The policy is read or written under the repository's lock, so a
+		// racing delete cannot unregister it in between.
+		var response *gateway.RESTResponse
+		err := p.withRepository(scope, request.Path["repository"], func(*scopeState, *repositoryRecord) error {
+			var policyErr error
+			if call.Method == methodReposGetIam {
+				response, policyErr = p.getIam(target)
+			} else {
+				response, policyErr = p.setIam(request, target)
+			}
+			return policyErr
+		})
+		return response, err
 	default:
 		return p.repositoriesDelete(request, scope)
 	}
@@ -73,29 +84,29 @@ func (p *Provider) repositoriesCreate(request *gateway.RESTRequest, scope state.
 	}
 	location := request.Path["location"]
 	now := p.clock()
-	var created *repositoryRecord
+	var response map[string]any
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		if s.repositories[name] != nil {
 			return status.Errorf(codes.AlreadyExists, "Repository %s already exists", name)
 		}
-		created = &repositoryRecord{
+		if err := p.index.Put(serviceName, state.Resource{
+			Name: repositoryResource(scope.Project, name), Service: serviceName,
+			Kind: kindRepository, Parent: provider.ProjectResource(scope.Project), Scope: scope,
+		}); err != nil {
+			return fmt.Errorf("index the repository: %w", err)
+		}
+		record := &repositoryRecord{
 			Name: name, Location: location, Format: format, Mode: cmp.Or(body.Mode, "STANDARD_REPOSITORY"),
 			Description: body.Description, CleanupPolicyDryRun: body.CleanupPolicyDryRun,
 			Labels: body.Labels, CreatedAt: now, UpdatedAt: now,
 		}
-		s.repositories[name] = created
+		s.repositories[name] = record
+		response = repositoryWire(scope.Project, record, viewCreate)
 		return nil
 	})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // already a wire status
+		return nil, err //nolint:wrapcheck // a wire status or the wrapped index error
 	}
-	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: repositoryResource(scope.Project, name), Service: serviceName,
-		Kind: kindRepository, Parent: provider.ProjectResource(scope.Project), Scope: scope,
-	}); indexErr != nil {
-		return nil, fmt.Errorf("index the repository: %w", indexErr)
-	}
-	response := repositoryWire(scope.Project, created, viewCreate)
 	response["@type"] = repositoryType
 	return &gateway.RESTResponse{JSON: operationWire(scope.Project, location, response)}, nil
 }
@@ -106,6 +117,9 @@ const (
 	viewPatch         // patch response: times but no registry URI
 	viewGet           // get/list: every field
 )
+
+// fieldDescription is the update-mask path of the repository description.
+const fieldDescription = "description"
 
 // Operation and response type URLs of the Artifact Registry LRO envelope.
 const (
@@ -130,7 +144,7 @@ func operationWire(project, location string, response map[string]any) map[string
 // satisfiesPzi and scanning values are local stand-ins; the recording pins
 // only that the fields are present.
 func repositoryWire(project string, record *repositoryRecord, view int) map[string]any {
-	labels := record.Labels
+	labels := maps.Clone(record.Labels)
 	if labels == nil {
 		labels = map[string]string{}
 	}
@@ -161,19 +175,27 @@ func registryURI(project string, record *repositoryRecord) string {
 	return record.Location + "-" + strings.ToLower(record.Format) + ".pkg.dev/" + project + "/" + record.Name
 }
 
-// repositoryLocked reads one repository under the scope lock.
-func (p *Provider) repositoryLocked(scope state.Scope, repository string) *repositoryRecord {
-	var record *repositoryRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.repositories[repository]; return nil })
-	return record
+// withRepository runs use on one repository under the scope lock, or reports
+// it missing. use must not retain the record.
+func (p *Provider) withRepository(scope state.Scope, repository string, use func(*scopeState, *repositoryRecord) error) error {
+	return p.scopes.With(scope, func(s *scopeState) error { //nolint:wrapcheck // the callback's own errors
+		record := s.repositories[repository]
+		if record == nil {
+			return provider.NotFound(kindRepository, repository)
+		}
+		return use(s, record)
+	})
 }
 
 func (p *Provider) repositoriesGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record := p.repositoryLocked(scope, request.Path["repository"])
-	if record == nil {
-		return nil, provider.NotFound(kindRepository, request.Path["repository"])
+	var document map[string]any
+	if err := p.withRepository(scope, request.Path["repository"], func(_ *scopeState, record *repositoryRecord) error {
+		document = repositoryWire(scope.Project, record, viewGet)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	return &gateway.RESTResponse{JSON: repositoryWire(scope.Project, record, viewGet)}, nil
+	return &gateway.RESTResponse{JSON: document}, nil
 }
 
 // repositoriesList returns the location's repositories.
@@ -191,52 +213,72 @@ func (p *Provider) repositoriesList(request *gateway.RESTRequest, scope state.Sc
 	return &gateway.RESTResponse{JSON: map[string]any{"repositories": items}}, nil
 }
 
-// repositoriesUpdate replaces description and labels.
-func (p *Provider) repositoriesUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record := p.repositoryLocked(scope, request.Path["repository"])
-	if record == nil {
-		return nil, provider.NotFound(kindRepository, request.Path["repository"])
+// repositoryUpdate is a validated patch: the masked fields and their values.
+type repositoryUpdate struct {
+	Description string            `json:"description"`
+	Labels      map[string]string `json:"labels"`
+	fields      []string
+}
+
+// parseRepositoryUpdate validates the whole body and mask before any field
+// changes. Only masked fields change; without a mask GCP updates every field sent.
+func parseRepositoryUpdate(request *gateway.RESTRequest) (repositoryUpdate, error) {
+	var update repositoryUpdate
+	if json.Unmarshal(request.JSON, &update) != nil {
+		return update, status.Error(codes.InvalidArgument, "Invalid repository update")
 	}
-	var body struct {
-		Description string            `json:"description"`
-		Labels      map[string]string `json:"labels"`
-	}
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid repository update")
-	}
-	// Only masked fields change; without a mask GCP updates every field sent.
 	mask := request.Query.Get("updateMask")
 	if mask == "" {
 		mask = "description,labels"
 	}
 	for field := range strings.SplitSeq(mask, ",") {
 		switch strings.TrimSpace(field) {
-		case "description":
-			record.Description = body.Description
-		case "labels":
-			record.Labels = body.Labels
+		case fieldDescription, "labels":
+			update.fields = append(update.fields, strings.TrimSpace(field))
 		default:
-			return nil, status.Errorf(codes.InvalidArgument, "Unsupported update mask field %q", field)
+			return update, status.Errorf(codes.InvalidArgument, "Unsupported update mask field %q", field)
 		}
 	}
-	record.UpdatedAt = p.clock()
-	return &gateway.RESTResponse{JSON: repositoryWire(scope.Project, record, viewPatch)}, nil
+	return update, nil
 }
 
-// repositoriesDelete removes one repository.
+// repositoriesUpdate applies a validated patch all-or-nothing. A missing
+// repository is reported before an invalid patch, as before validation moved.
+func (p *Provider) repositoriesUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	update, invalid := parseRepositoryUpdate(request)
+	now := p.clock()
+	var document map[string]any
+	if err := p.withRepository(scope, request.Path["repository"], func(_ *scopeState, record *repositoryRecord) error {
+		if invalid != nil {
+			return invalid
+		}
+		for _, field := range update.fields {
+			if field == fieldDescription {
+				record.Description = update.Description
+			} else {
+				record.Labels = update.Labels
+			}
+		}
+		record.UpdatedAt = now
+		document = repositoryWire(scope.Project, record, viewPatch)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// repositoriesDelete removes one repository and its index entry together.
 func (p *Provider) repositoriesDelete(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	repository := request.Path["repository"]
-	if p.repositoryLocked(scope, repository) == nil {
-		return nil, provider.NotFound(kindRepository, repository)
-	}
-	var indexErr error
-	_ = p.scopes.With(scope, func(s *scopeState) error {
+	if err := p.withRepository(scope, repository, func(s *scopeState, _ *repositoryRecord) error {
+		if err := p.index.Remove(serviceName, scope, repositoryResource(scope.Project, repository)); err != nil {
+			return fmt.Errorf("unregister the repository: %w", err)
+		}
 		delete(s.repositories, repository)
-		indexErr = p.index.Remove(serviceName, scope, repositoryResource(scope.Project, repository))
 		return nil
-	})
-	if indexErr != nil {
-		return nil, fmt.Errorf("unregister the repository: %w", indexErr)
+	}); err != nil {
+		return nil, err
 	}
 	return &gateway.RESTResponse{JSON: operationWire(scope.Project, request.Path["location"], map[string]any{"@type": emptyType})}, nil
 }

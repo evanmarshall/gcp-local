@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -240,7 +241,6 @@ func httpVerb(method string) string {
 
 // fieldGet returns one collection-group field record.
 func (p *Provider) fieldGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	p.ensureDatabase(scope)
 	collection, field := request.Path["collectionId"], request.Path["fieldId"]
 	if !uid.MatchString(collection) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid collection id %q", collection)
@@ -248,18 +248,26 @@ func (p *Provider) fieldGet(request *gateway.RESTRequest, scope state.Scope) (*g
 	if !uid.MatchString(field) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid field id %q", field)
 	}
-	record := p.fieldLocked(scope, collection, field)
+	var document map[string]any
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		document = s.fields[collection+"/"+field].wire(projectField(scope.Project, collection, field))
+		return nil
+	})
+	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// wire renders a stored field, or an unconfigured one when record is nil:
+// real Firestore reports an unconfigured field with fully automatic index
+// settings rather than a 404. Call it under the scope lock.
+func (record *fieldRecord) wire(name string) map[string]any {
 	if record == nil {
-		// Real Firestore reports an unconfigured field with fully automatic
-		// index settings rather than a 404.
-		return &gateway.RESTResponse{JSON: fieldWire(projectField(scope.Project, collection, field), nil, nil, false)}, nil
+		return fieldWire(name, nil, nil, false)
 	}
-	return &gateway.RESTResponse{JSON: fieldWire(record.Name, record.TTLConfig, record.IndexConfig, record.Configured)}, nil
+	return fieldWire(record.Name, maps.Clone(record.TTLConfig), maps.Clone(record.IndexConfig), record.Configured)
 }
 
 // fieldUpdate patches one field's TTL or index configuration.
 func (p *Provider) fieldUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	p.ensureDatabase(scope)
 	collection, field := request.Path["collectionId"], request.Path["fieldId"]
 	if !uid.MatchString(collection) || !uid.MatchString(field) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid field path")
@@ -286,31 +294,22 @@ func (p *Provider) fieldUpdate(request *gateway.RESTRequest, scope state.Scope) 
 	if body.IndexConfig != nil {
 		index = map[string]any{"ancestorField": body.IndexConfig.AncestorField}
 	}
-	var record *fieldRecord
+	var document map[string]any
 	err := p.scopes.With(scope, func(s *scopeState) error {
-		record = s.fields[collection+"/"+field]
+		record := s.fields[collection+"/"+field]
 		if record == nil {
 			record = &fieldRecord{Name: projectField(scope.Project, collection, field), CreatedAt: now}
 			s.fields[collection+"/"+field] = record
 		}
 		record.TTLConfig, record.IndexConfig = ttl, index
 		record.Configured = true
+		document = record.wire(record.Name)
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store the field configuration: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{
-		"done":     true,
-		"response": fieldWire(record.Name, record.TTLConfig, record.IndexConfig, record.Configured),
-	}}, nil
-}
-
-// fieldLocked reads one field under the scope lock.
-func (p *Provider) fieldLocked(scope state.Scope, collection, field string) *fieldRecord {
-	var record *fieldRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error { record = s.fields[collection+"/"+field]; return nil })
-	return record
+	return &gateway.RESTResponse{JSON: map[string]any{"done": true, "response": document}}, nil
 }
 
 func projectField(project, collection, field string) string {

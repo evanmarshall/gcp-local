@@ -137,7 +137,7 @@ func decodeInstance(raw json.RawMessage) (instanceBody, error) {
 		case modeledFields[name], outputFields[name]:
 		case unmodeledFields[name]:
 			if !emptyJSON(value) {
-				return instanceBody{}, gap("Instance field %s is not modeled", name)
+				return instanceBody{}, gap(fmt.Sprintf("Instance field %s is not modeled", name))
 			}
 		default:
 			return instanceBody{}, invalid("Invalid JSON payload received. Unknown name %q: Cannot find field.", name)
@@ -228,7 +228,7 @@ func version(value string) (string, error) {
 	case value == "" || value == redisVersion72:
 		return redisVersion72, nil
 	case knownVersions[value]:
-		return "", gap("redisVersion %s; the pinned backend is Redis %s (REDIS_7_2)", value, ServerVersion)
+		return "", gap(fmt.Sprintf("redisVersion %s; the pinned backend is Redis %s (REDIS_7_2)", value, ServerVersion))
 	default:
 		return "", invalid("Invalid value for redisVersion: %q", value)
 	}
@@ -281,7 +281,7 @@ func choose(field, value, modeled, unmodeled string) (string, error) {
 	case value == "" || value == modeled || strings.HasSuffix(value, "_MODE_UNSPECIFIED"):
 		return modeled, nil
 	case value == unmodeled:
-		return "", gap("%s %s is not modeled", field, unmodeled)
+		return "", gap(fmt.Sprintf("%s %s is not modeled", field, unmodeled))
 	default:
 		return "", invalid("Invalid value for %s: %q", field, value)
 	}
@@ -311,7 +311,7 @@ func parseMask(mask string) ([]string, error) {
 		case updatable[path] != "":
 			paths = append(paths, updatable[path])
 		case unmodeledPaths[path]:
-			return nil, gap("update of %s is not modeled", path)
+			return nil, gap(fmt.Sprintf("update of %s is not modeled", path))
 		default:
 			return nil, invalid("Unsupported update mask path %q", path)
 		}

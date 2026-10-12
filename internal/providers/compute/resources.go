@@ -3,6 +3,7 @@ package compute
 import (
 	"encoding/base64"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,7 +56,7 @@ func (p *Provider) executeAnalysis(call gateway.Call, request *gateway.RESTReque
 
 // networkDocument renders the recorded network wire shape. Optional fields
 // appear only when set, as the recorded document omits them.
-func (p *Provider) networkDocument(project string, record *networkRecord, subnets []any, peerings []any) map[string]any {
+func networkDocument(project string, record *networkRecord, subnets []any, peerings []any) map[string]any {
 	id := idOf(record.Name, record.Generation)
 	document := map[string]any{
 		"id":                                    id,
@@ -89,23 +90,15 @@ func setText(document map[string]any, key, value string) {
 }
 
 // subnetworksOf lists the subnetwork self-links of one network. Networks live
-// in the project's global scope, so the lookup walks the single scope.
-func (p *Provider) subnetworksOf(project, network string) []any {
+// in the project's global scope, so the lookup walks the single scope. The
+// caller holds the scope lock.
+func (s *scopeState) subnetworksOf(project, network string) []any {
 	links := []any{}
-	scope := provider.ProjectScope(project)
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		names := make([]string, 0, len(s.subnetworks))
-		for name := range s.subnetworks {
-			names = append(names, name)
+	for _, name := range sortedKeys(s.subnetworks) {
+		if record := s.subnetworks[name]; record.Network == network {
+			links = append(links, regionalSelfLink(project, record.Region, "subnetworks", name))
 		}
-		sort.Strings(names)
-		for _, name := range names {
-			if record := s.subnetworks[name]; record.Network == network {
-				links = append(links, regionalSelfLink(project, record.Region, "subnetworks", name))
-			}
-		}
-		return nil
-	})
+	}
 	return links
 }
 
@@ -162,10 +155,11 @@ func firewallDocument(project string, record *firewallRecord) map[string]any {
 	return document
 }
 
-// setList sets one optional list field when it is non-empty.
+// setList sets one optional list field when it is non-empty. The document
+// gets a copy, so it never aliases a stored record.
 func setList[T any](document map[string]any, key string, values []T) {
 	if len(values) > 0 {
-		document[key] = values
+		document[key] = slices.Clone(values)
 	}
 }
 
@@ -292,12 +286,15 @@ func parseCidr(body map[string]any, key string) (string, error) {
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope, kind string) (*gateway.RESTResponse, error) {
 	name := scope.Project + "/" + kind + "/" + request.Path["operation"]
 	p.mu.RLock()
-	record := p.records[name]
+	var document map[string]any
+	if record := p.records[name]; record != nil {
+		document = operationDocument(scope.Project, record)
+	}
 	p.mu.RUnlock()
-	if record == nil {
+	if document == nil {
 		return nil, provider.NotFound("operations", request.Path["operation"])
 	}
-	return &gateway.RESTResponse{JSON: operationDocument(scope.Project, record)}, nil
+	return &gateway.RESTResponse{JSON: document}, nil
 }
 
 // operationsList returns the scope's operations collection.

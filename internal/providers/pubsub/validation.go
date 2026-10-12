@@ -17,9 +17,8 @@ import (
 
 var namePattern = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,61}[a-z0-9])/(topics|subscriptions|snapshots)/([A-Za-z][A-Za-z0-9\-_.~+%]{2,254})$`)
 
-func gap(message string) error {
-	return status.Error(codes.Unimplemented, "Pub/Sub coverage gap: "+message)
-}
+var gap = provider.CoverageGap("Pub/Sub")
+
 func canonical(name string) string { return "//pubsub.googleapis.com/" + name }
 
 func resourceName(name, kind string) (string, error) {

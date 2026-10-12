@@ -2,6 +2,7 @@ package compute
 
 import (
 	"encoding/json"
+	"maps"
 	"net"
 	"strconv"
 	"strings"
@@ -173,34 +174,41 @@ func (p *Provider) createConnectivity(request *gateway.RESTRequest, scope state.
 
 // rerunConnectivity re-analyzes one stored test against the current topology.
 func (p *Provider) rerunConnectivity(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record, err := p.storedTest(request, scope)
-	if err != nil {
+	id := request.Path["test"]
+	var spec flow
+	if err := p.withTest(scope, id, func(_ *scopeState, record *namedTest) error {
+		spec = record.Spec
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	result := p.analyze(record.Spec)
+	// The analysis takes the scope lock itself, so it runs between the read
+	// and the write; a test deleted meanwhile is reported missing.
+	result := p.analyze(spec)
 	if result.gap != "" {
 		return nil, gap(result.gap)
 	}
 	var document map[string]any
-	_ = p.scopes.With(scope, func(*scopeState) error {
+	if err := p.withTest(scope, id, func(_ *scopeState, record *namedTest) error {
 		record.Result, record.UpdatedAt = result, p.clock()
 		document = connectivityDocument(scope.Project, record)
 		return nil
-	})
-	return p.connectivityOperation(scope, "rerun", testName(scope.Project, record.Name), document)
+	}); err != nil {
+		return nil, err
+	}
+	return p.connectivityOperation(scope, "rerun", testName(scope.Project, id), document)
 }
 
-// storedTest reads one stored test or reports NOT_FOUND.
-func (p *Provider) storedTest(request *gateway.RESTRequest, scope state.Scope) (*namedTest, error) {
-	var record *namedTest
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		record = s.connectivity[request.Path["test"]]
-		return nil
+// withTest runs use on one stored test under the scope lock or reports
+// NOT_FOUND. use must not retain the record.
+func (p *Provider) withTest(scope state.Scope, id string, use func(*scopeState, *namedTest) error) error {
+	return p.scopes.With(scope, func(s *scopeState) error { //nolint:wrapcheck // the callback's wire statuses
+		record := s.connectivity[id]
+		if record == nil {
+			return status.Errorf(codes.NotFound, "Resource '%s' was not found", testName(scope.Project, id))
+		}
+		return use(s, record)
 	})
-	if record == nil {
-		return nil, status.Errorf(codes.NotFound, "Resource '%s' was not found", testName(scope.Project, request.Path["test"]))
-	}
-	return record, nil
 }
 
 // getConnectivity returns one stored test with its last analysis.
@@ -232,15 +240,14 @@ func (p *Provider) listConnectivity(scope state.Scope) (*gateway.RESTResponse, e
 
 // deleteConnectivity removes one stored test and reports the operation.
 func (p *Provider) deleteConnectivity(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record, err := p.storedTest(request, scope)
-	if err != nil {
+	id := request.Path["test"]
+	if err := p.withTest(scope, id, func(s *scopeState, _ *namedTest) error {
+		delete(s.connectivity, id)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		delete(s.connectivity, record.Name)
-		return nil
-	})
-	return p.connectivityOperation(scope, "delete", testName(scope.Project, record.Name),
+	return p.connectivityOperation(scope, "delete", testName(scope.Project, id),
 		map[string]any{"@type": "type.googleapis.com/google.protobuf.Empty"})
 }
 
@@ -262,8 +269,8 @@ func connectivityDocument(project string, record *namedTest) map[string]any {
 	}
 	document := map[string]any{
 		keyName:        testName(project, record.Name),
-		keySource:      record.Source,
-		keyDestination: record.Destination,
+		keySource:      maps.Clone(record.Source),
+		keyDestination: maps.Clone(record.Destination),
 		keyProtocol:    record.Protocol,
 		"createTime":   stampRFC3339(record.CreatedAt),
 		"updateTime":   verified,

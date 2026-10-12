@@ -47,12 +47,12 @@ func supported(message proto.Message) error {
 	}
 	switch {
 	case instance.GetEdition() > instancepb.Instance_STANDARD:
-		return gap("instance edition %s", instance.GetEdition())
+		return gap("instance edition " + instance.GetEdition().String())
 	case instance.GetInstanceType() > instancepb.Instance_PROVISIONED:
-		return gap("instance type %s", instance.GetInstanceType())
+		return gap("instance type " + instance.GetInstanceType().String())
 	case instance.GetDefaultBackupScheduleType() != instancepb.Instance_DEFAULT_BACKUP_SCHEDULE_TYPE_UNSPECIFIED &&
 		instance.GetDefaultBackupScheduleType() != instancepb.Instance_AUTOMATIC:
-		return gap("default backup schedule type %s", instance.GetDefaultBackupScheduleType())
+		return gap("default backup schedule type " + instance.GetDefaultBackupScheduleType().String())
 	case instance.GetAutoscalingConfig() != nil:
 		return gap("instance autoscaling")
 	}

@@ -80,25 +80,26 @@ func (p *Provider) keyRingsCreate(request *gateway.RESTRequest, scope state.Scop
 	if !uid.MatchString(resource.ring) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid key ring id %q", resource.ring)
 	}
-	var created *keyRingRecord
+	var document map[string]any
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		if s.keyRings[resource.ringID()] != nil {
 			return status.Errorf(codes.AlreadyExists, "KeyRing %s already exists.", resource.ringName())
 		}
-		created = &keyRingRecord{Name: resource.ring, CreatedAt: p.clock()}
-		s.keyRings[resource.ringID()] = created
+		if p.index.Put(serviceName, state.Resource{
+			Name: resource.ringResource(), Service: serviceName,
+			Kind: kindKeyRing, Parent: provider.ProjectResource(resource.project), Scope: scope,
+		}) != nil {
+			return gap("index the key ring")
+		}
+		record := &keyRingRecord{Name: resource.ring, CreatedAt: p.clock()}
+		s.keyRings[resource.ringID()] = record
+		document = keyRingDocument(resource, record)
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create the key ring: %w", err)
 	}
-	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: resource.ringResource(), Service: serviceName,
-		Kind: kindKeyRing, Parent: provider.ProjectResource(resource.project), Scope: scope,
-	}); indexErr != nil {
-		return nil, gap("index the key ring")
-	}
-	return respond(keyRingDocument(resource, created))
+	return respond(document)
 }
 
 // keyRingDocument renders the key ring wire shape.
@@ -158,6 +159,7 @@ func (p *Provider) cryptoKeysCreate(request *gateway.RESTRequest, scope state.Sc
 	if err != nil {
 		return nil, err
 	}
+	var document map[string]any
 	err = p.scopes.With(scope, func(s *scopeState) error {
 		if s.keyRings[resource.ringID()] == nil {
 			return notFound("KeyRing", resource.ringName())
@@ -165,19 +167,20 @@ func (p *Provider) cryptoKeysCreate(request *gateway.RESTRequest, scope state.Sc
 		if s.cryptoKeys[resource.keyID()] != nil {
 			return status.Errorf(codes.AlreadyExists, "CryptoKey %s already exists.", resource.keyName())
 		}
+		if p.index.Put(serviceName, state.Resource{
+			Name: resource.keyResource(), Service: serviceName,
+			Kind: kindCryptoKey, Parent: resource.ringResource(), Scope: scope,
+		}) != nil {
+			return gap("index the crypto key")
+		}
 		s.cryptoKeys[resource.keyID()] = record
+		document = cryptoKeyDocument(resource, record)
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create the crypto key: %w", err)
 	}
-	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: resource.keyResource(), Service: serviceName,
-		Kind: kindCryptoKey, Parent: resource.ringResource(), Scope: scope,
-	}); indexErr != nil {
-		return nil, gap("index the crypto key")
-	}
-	return respond(cryptoKeyDocument(resource, record))
+	return respond(document)
 }
 
 // newCryptoKey builds one key record and its initial version from a request.
@@ -249,7 +252,7 @@ func cryptoKeyDocument(resource ref, record *cryptoKeyRecord) map[string]any {
 		document["primary"] = versionDocument(resource, version)
 	}
 	if len(record.Labels) > 0 {
-		document["labels"] = record.Labels
+		document["labels"] = maps.Clone(record.Labels)
 	}
 	if record.Rotation != "" {
 		document["rotationPeriod"] = record.Rotation

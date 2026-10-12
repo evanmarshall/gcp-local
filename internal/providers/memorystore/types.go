@@ -14,6 +14,7 @@ import (
 	"regexp"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -123,9 +124,7 @@ func notFound(name string) error {
 }
 
 // gap reports an unsupported request shape explicitly.
-func gap(format string, args ...any) error {
-	return status.Error(codes.Unimplemented, "gcp-local Memorystore coverage gap: "+fmt.Sprintf(format, args...))
-}
+var gap = provider.CoverageGap("Memorystore")
 
 // ok wraps a JSON response body.
 func ok(body any) *gateway.RESTResponse {

@@ -103,6 +103,12 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, err
 	}
 	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	if provider.Unverified(authorizeErr) {
+		if scope, target, err = p.resolve(call, request); err != nil {
+			return nil, err
+		}
+		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+	}
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
@@ -164,8 +170,5 @@ func (p *Provider) existingInstance(scope state.Scope, instance string) error {
 	if !uid.MatchString(instance) {
 		return status.Errorf(codes.InvalidArgument, "Invalid instance id %q", instance)
 	}
-	if p.instanceLocked(scope, instance) == nil {
-		return provider.NotFound(kindInstance, instance)
-	}
-	return nil
+	return p.withInstance(scope, instance, func(*scopeState, *instanceRecord) error { return nil })
 }

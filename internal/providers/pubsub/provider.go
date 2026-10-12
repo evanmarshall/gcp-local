@@ -206,6 +206,10 @@ func (p *Provider) authorizeOn(call gateway.Call, name, kind, method string) err
 	related := call
 	related.Method, related.Resource = method, name
 	decision, err := p.iam.Authorize(related, iam.Target{Name: resource.Name}, nil)
+	if _, still := p.index.Get(resource.Name); provider.Unverified(err) && !still {
+		// A concurrent delete unindexed it between the lookup and Authorize.
+		return status.Error(codes.NotFound, strings.ToUpper(kind[:1])+kind[1:]+" does not exist")
+	}
 	_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-"+kind+"-decision-id", decision.ID))
 	if err != nil {
 		return fmt.Errorf("authorize %s for %s: %w", kind, call.Method, err)
@@ -237,21 +241,39 @@ func (p *Provider) authorizeCall(call gateway.Call) error {
 	if !found || project.Service != "resourcemanager" || project.Kind != "project" {
 		return gap("configure the resource project hierarchy")
 	}
-	target := iam.Target{Name: project.Name}
-	if !projectMethod(call.Method) {
-		if resource, found := p.index.Get(canonical(call.Resource)); found {
-			if resource.Service != serviceName || resource.Scope != scopeOf(call) || resource.Parent != project.Name {
-				return gap("resource ownership disagrees with the index")
-			}
-			target.Name = resource.Name
-		}
+	target, err := p.callTarget(call, project)
+	if err != nil {
+		return err
 	}
 	decision, err := p.iam.Authorize(call, target, nil)
+	if provider.Unverified(err) && target.Name != project.Name {
+		// A concurrent delete can unindex the resource between callTarget and
+		// Authorize; authorize against what the index holds now.
+		if target, err = p.callTarget(call, project); err != nil {
+			return err
+		}
+		decision, err = p.iam.Authorize(call, target, nil)
+	}
 	_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-decision-id", decision.ID))
 	if err != nil {
 		return fmt.Errorf("authorize %s: %w", call.Method, err)
 	}
 	return nil
+}
+
+// callTarget is the indexed resource a call names, or its project for
+// project-level methods and not-yet-indexed resources.
+func (p *Provider) callTarget(call gateway.Call, project state.Resource) (iam.Target, error) {
+	target := iam.Target{Name: project.Name}
+	if !projectMethod(call.Method) {
+		if resource, found := p.index.Get(canonical(call.Resource)); found {
+			if resource.Service != serviceName || resource.Scope != scopeOf(call) || resource.Parent != project.Name {
+				return target, gap("resource ownership disagrees with the index")
+			}
+			target.Name = resource.Name
+		}
+	}
+	return target, nil
 }
 
 // authorizeAttachment checks that a subscription may attach to its topic and,
@@ -493,7 +515,9 @@ func (p *Provider) commitMutation(session context.Context, call gateway.Call, re
 // resolveMutation re-reads an ambiguous mutation's resource to decide whether
 // the backend landed it before the error, and starts the push worker only then.
 func (p *Provider) resolveMutation(session context.Context, b driver, call gateway.Call, push *pb.PushConfig, creating bool, invokeErr error) error {
-	p.reconcile(session, b, call)
+	if indexErr := p.reconcile(session, b, call); indexErr != nil {
+		return errors.Join(invokeErr, indexErr)
+	}
 	if creating && push != nil && p.mutationLanded(call) {
 		if err := p.startPush(session, call, push); err != nil {
 			return err
@@ -559,7 +583,8 @@ func ambiguous(err error) bool {
 
 // Resolve uncertain control-plane outcomes under the same mutation gate. A
 // read failure retains the last confirmed index and blocks access until reset.
-func (p *Provider) reconcile(parent context.Context, b driver, call gateway.Call) {
+// It returns the index error of a confirmed outcome that could not be recorded.
+func (p *Provider) reconcile(parent context.Context, b driver, call gateway.Call) error {
 	// A cancelled request must not cancel reconciliation, and the Python JVM
 	// backend outlives it, so the deadline is derived rather than inherited.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
@@ -572,12 +597,11 @@ func (p *Provider) reconcile(parent context.Context, b driver, call gateway.Call
 	}
 	_, err := invoke(ctx, b, method, request)
 	if err == nil {
-		_ = p.publish(call)
-		return
+		return p.publish(call)
 	}
 	if status.Code(err) == codes.NotFound {
-		_ = p.forget(call)
-		return
+		return p.forget(call)
 	}
 	p.poisoned.Store(scopeOf(call), true)
+	return nil
 }

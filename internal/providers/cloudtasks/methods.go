@@ -126,18 +126,18 @@ func (p *Provider) createQueue(request *gateway.RESTRequest, scope state.Scope) 
 		if s.queues[record.Name] != nil {
 			return statusExists("Queue " + record.Name + " already exists")
 		}
+		if err := p.index.Put(serviceName, state.Resource{
+			Name: queueResource(scope.Project, record.Location, record.Name), Service: serviceName,
+			Kind: "queue", Parent: provider.ProjectResource(scope.Project), Scope: scope,
+		}); err != nil {
+			return fmt.Errorf("index the queue: %w", err)
+		}
 		s.queues[record.Name] = record
 		document = queueDocument(scope.Project, record)
 		return nil
 	})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // status errors carry the wire status
-	}
-	if err := p.index.Put(serviceName, state.Resource{
-		Name: queueResource(scope.Project, record.Location, record.Name), Service: serviceName,
-		Kind: "queue", Parent: provider.ProjectResource(scope.Project), Scope: scope,
-	}); err != nil {
-		return nil, fmt.Errorf("index the queue: %w", err)
+		return nil, err //nolint:wrapcheck // a wire status or the wrapped index error
 	}
 	return &gateway.RESTResponse{JSON: document}, nil
 }
@@ -221,24 +221,26 @@ func removeTasks(s *scopeState, queue string) []string {
 // empty body.
 func (p *Provider) deleteQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	id := request.Path["queue"]
+	name := queueResource(scope.Project, request.Path["location"], id)
 	var removed []string
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		if s.queues[id] == nil {
 			return provider.NotFound("queues", id)
+		}
+		if err := p.index.Remove(serviceName, scope, name); err != nil {
+			return fmt.Errorf("unindex the queue: %w", err)
 		}
 		delete(s.queues, id)
 		removed = removeTasks(s, id)
 		return nil
 	})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // status errors carry the wire status
+		return nil, err //nolint:wrapcheck // a wire status or the wrapped index error
 	}
 	for _, key := range removed {
 		p.stopWorker(scope, key)
 	}
-	name := queueResource(scope.Project, request.Path["location"], id)
 	p.engine.Forget(name)
-	_ = p.index.Remove(serviceName, scope, name)
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 

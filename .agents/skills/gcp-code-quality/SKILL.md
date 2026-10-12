@@ -31,7 +31,7 @@ Use `--update-baseline` only after a change removes findings. Baselines only shr
 ## Questions before adding structure
 
 - **Who calls it?** One caller: inline it. Sharing a signature isn't sharing an abstraction.
-- **Does another provider already have it?** Providers are written one at a time, so every helper looks single-caller. Before declaring a provider helper, search `internal/providers/*` for an identical one; reuse or move it to `internal/providers/provider` once two providers need it. `scripts/check_repo.py` fails on identical function bodies in two providers.
+- **Does another provider already have it?** Providers are written one at a time, so every helper looks single-caller. Before declaring a provider helper, search `internal/providers/*` for an identical one; reuse or move it to `internal/providers/provider` once two providers need it. `scripts/check_repo.py` fails on an identical function, method (receiver name ignored), or type in two providers; `DISTINCT_PER_PROVIDER` lists the deliberate exceptions with reasons.
 - **What does it hide?** It must hide a decision. A wrapper that forwards everything is deleted.
 - **Is it speculative?** Code for a second backend or transport waits until that backend exists. Shapes come from recordings.
 - **Who owns the state?** One owner per field. A copy, cache, or mirror needs a reason it can't be derived.

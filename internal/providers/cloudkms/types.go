@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -288,9 +289,7 @@ func notFound(kind, name string) error {
 }
 
 // gap reports an unimplemented slice boundary.
-func gap(message string) error {
-	return status.Error(codes.Unimplemented, "Cloud KMS coverage gap: "+message)
-}
+var gap = provider.CoverageGap("Cloud KMS")
 
 // ref addresses one KMS resource from the request path.
 type ref struct {

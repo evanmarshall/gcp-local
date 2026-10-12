@@ -62,9 +62,6 @@ func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (
 	if project := peerProject(spec.network); project != "" && project != scope.Project {
 		return nil, gap("cross-project network peering is not modeled")
 	}
-	if !p.networkExists(scope, peer) {
-		return nil, missingReference()
-	}
 	network := request.Path["network"]
 	peering := peeringRecord{
 		Name: spec.name, PeerNetwork: peer, ExchangeSubnetRoutes: spec.exchange,
@@ -72,17 +69,24 @@ func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (
 		ExportPublicIP: spec.exportPublic, ImportPublicIP: spec.importPublic, CreatedAt: p.clock(),
 	}
 	if err := p.scopes.With(scope, func(s *scopeState) error { return s.addPeering(network, peering) }); err != nil {
-		if errors.Is(err, errAlreadyExists) {
+		switch {
+		case errors.Is(err, errAlreadyExists):
 			return nil, conflict("peering", spec.name)
+		case errors.Is(err, errMissing):
+			return nil, provider.NotFound(kindNetwork, network)
+		default:
+			return nil, err //nolint:wrapcheck // addPeering returns wire statuses or sentinels
 		}
-		return nil, provider.NotFound(kindNetwork, network)
 	}
 	return p.newOperation(scope, "global", "", "addPeering", selfLink(scope.Project, "networks", network))
 }
 
 // addPeering stores one peering unless the network already has a peering
-// with that name or toward that peer.
+// with that name or toward that peer. A missing peer is reported first.
 func (s *scopeState) addPeering(network string, peering peeringRecord) error {
+	if s.networks[peering.PeerNetwork] == nil {
+		return missingReference()
+	}
 	record := s.networks[network]
 	if record == nil {
 		return errMissing
@@ -128,16 +132,14 @@ func (p *Provider) removePeering(request *gateway.RESTRequest, scope state.Scope
 	return p.newOperation(scope, "global", "", "removePeering", selfLink(scope.Project, "networks", network))
 }
 
-// renderNetwork renders one network with its subnetworks and peerings.
-func (p *Provider) renderNetwork(scope state.Scope, record *networkRecord) map[string]any {
-	var peerings []any
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for _, peering := range record.Peerings {
-			peerings = append(peerings, peeringDocument(scope.Project, peering, s.peeredBack(record.Name, peering.PeerNetwork)))
-		}
-		return nil
-	})
-	return p.networkDocument(scope.Project, record, p.subnetworksOf(scope.Project, record.Name), peerings)
+// renderNetwork renders one network with its subnetworks and peerings. The
+// caller holds the scope lock.
+func (s *scopeState) renderNetwork(project string, record *networkRecord) map[string]any {
+	peerings := make([]any, 0, len(record.Peerings))
+	for _, peering := range record.Peerings {
+		peerings = append(peerings, peeringDocument(project, peering, s.peeredBack(record.Name, peering.PeerNetwork)))
+	}
+	return networkDocument(project, record, s.subnetworksOf(project, record.Name), peerings)
 }
 
 // peeredBack reports whether the peer network has a peering toward network:

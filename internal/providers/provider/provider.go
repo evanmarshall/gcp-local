@@ -5,11 +5,13 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -37,6 +39,16 @@ func DeniedPermission(decision iam.Decision) string {
 // Denied renders the 403 body that names "The caller" rather than the principal.
 func Denied(decision iam.Decision, resource string) *gateway.RESTResponse {
 	return WireError(403, "PERMISSION_DENIED", fmt.Sprintf("The caller does not have %s access to %s.", DeniedPermission(decision), resource))
+}
+
+// Unverified reports an authorization refusal that is neither a denial nor an
+// authentication failure. The engine refuses a resource target missing from
+// the index this way, which is what a concurrent delete between a provider's
+// existence check and Authorize produces: the provider resolves the target
+// again (reporting NotFound if it is gone) and authorizes once more.
+func Unverified(err error) bool {
+	code := status.Code(err)
+	return err != nil && code != codes.PermissionDenied && code != codes.Unauthenticated
 }
 
 // RegisterPermissions binds each method to its single baseline permission.
@@ -117,4 +129,22 @@ func DecodeObject(body []byte) (map[string]any, error) {
 		return nil, status.Error(codes.InvalidArgument, "Invalid request body")
 	}
 	return value, nil
+}
+
+// NoBackend is the backend factory of a provider whose state is metadata only:
+// the manager still serializes mutations and runs AfterReset, but nothing starts.
+func NoBackend(state.Scope) (backend.Backend, error) { return metadataOnly{}, nil }
+
+type metadataOnly struct{}
+
+func (metadataOnly) Start(context.Context) error { return nil }
+func (metadataOnly) Ready(context.Context) error { return nil }
+func (metadataOnly) Stop(context.Context) error  { return nil }
+func (metadataOnly) Reset(context.Context) error { return nil }
+
+// CoverageGap returns the refusal of one service's unmodeled request shapes:
+// UNIMPLEMENTED with "<Service> coverage gap: <what>". Storage keeps its own
+// 400 variant (docs/storage.md).
+func CoverageGap(service string) func(what string) error {
+	return func(what string) error { return status.Error(codes.Unimplemented, service+" coverage gap: "+what) }
 }

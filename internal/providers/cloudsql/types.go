@@ -10,12 +10,10 @@ package cloudsql
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
 // serviceName owns the backend registration and index entries.
@@ -133,6 +131,4 @@ func notFound() *gateway.RESTResponse {
 }
 
 // gap reports an unsupported request shape explicitly.
-func gap(format string, args ...any) error {
-	return status.Error(codes.Unimplemented, "gcp-local Cloud SQL coverage gap: "+fmt.Sprintf(format, args...))
-}
+var gap = provider.CoverageGap("Cloud SQL")

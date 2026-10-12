@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -127,6 +128,14 @@ func (p *Provider) authorize(call gateway.Call, target iam.Target, features map[
 	}
 	code := status.Code(err)
 	if code == codes.Unimplemented {
+		// A concurrent delete can unindex the bucket between resolveTarget and
+		// this check; report it missing, as resolveTarget would now.
+		bucket := cmp.Or(target.Parent, target.Name)
+		if name, ok := strings.CutPrefix(bucket, BucketResource("")); ok && name != "" {
+			if _, found := p.index.Get(bucket); !found {
+				return notFound(name, ""), d.ID, nil
+			}
+		}
 		// An unsupported authorization decision fails closed, as a 4xx gap.
 		return nil, d.ID, gap(status.Convert(err).Message())
 	}
@@ -816,7 +825,9 @@ func (p *Provider) createFolder(r *gateway.RESTRequest, scope state.Scope, bucke
 	if json.Unmarshal(r.JSON, &body) != nil || body.Name == "" {
 		return nil, provider.Invalid("Expected a folder name")
 	}
-	if _, exists, _ := p.catalog.Folder(scope, bucket, body.Name); exists {
+	if _, exists, err := p.catalog.Folder(scope, bucket, body.Name); err != nil {
+		return nil, err
+	} else if exists {
 		return folderError(409, "Folder already exists"), nil
 	}
 	folder := Folder{Bucket: bucket, Name: body.Name}

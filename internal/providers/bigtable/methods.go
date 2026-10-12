@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	"cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -121,23 +122,25 @@ func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Sco
 	if err != nil {
 		return nil, err
 	}
+	var operation map[string]any
 	err = p.scopes.With(scope, func(s *scopeState) error {
 		if s.instances[record.Name] != nil {
 			return status.Errorf(codes.AlreadyExists, "Instance %s already exists", provider.InstanceName(scope.Project, record.Name))
 		}
+		if err := p.index.Put(serviceName, state.Resource{
+			Name: instanceResource(scope.Project, record.Name), Service: serviceName,
+			Kind: kindInstance, Parent: provider.ProjectResource(scope.Project), Scope: scope,
+		}); err != nil {
+			return fmt.Errorf("index the instance: %w", err)
+		}
 		s.instances[record.Name] = record
+		operation = p.createOperation(scope.Project, record)
 		return nil
 	})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // already a wire status
+		return nil, err //nolint:wrapcheck // a wire status or the wrapped index error
 	}
-	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: instanceResource(scope.Project, record.Name), Service: serviceName,
-		Kind: kindInstance, Parent: provider.ProjectResource(scope.Project), Scope: scope,
-	}); indexErr != nil {
-		return nil, fmt.Errorf("index the instance: %w", indexErr)
-	}
-	return &gateway.RESTResponse{JSON: p.createOperation(scope.Project, record)}, nil
+	return &gateway.RESTResponse{JSON: operation}, nil
 }
 
 // parseInstance decodes and validates one CreateInstance request.
@@ -220,7 +223,7 @@ func lastNamed(value string) string {
 
 // instanceSummary renders the instance fields of a create-operation response.
 func instanceSummary(project string, record *instanceRecord) map[string]any {
-	labels := record.Labels
+	labels := maps.Clone(record.Labels)
 	if labels == nil {
 		labels = map[string]string{}
 	}
@@ -260,25 +263,35 @@ func clusterWire(project, instance string, record *clusterRecord) map[string]any
 	}
 }
 
-// instanceLocked returns a copy of one instance read under the scope lock.
-func (p *Provider) instanceLocked(scope state.Scope, instance string) *instanceRecord {
-	var record *instanceRecord
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if stored := s.instances[instance]; stored != nil {
-			copied := *stored // Updates replace fields; a shallow copy is a stable read.
-			record = &copied
+// withInstance runs use on one instance under the scope lock, or reports it
+// missing. use must not retain the record.
+func (p *Provider) withInstance(scope state.Scope, instance string, use func(*scopeState, *instanceRecord) error) error {
+	return p.scopes.With(scope, func(s *scopeState) error { //nolint:wrapcheck // the callback's own errors
+		record := s.instances[instance]
+		if record == nil {
+			return provider.NotFound(kindInstance, instance)
 		}
-		return nil
+		return use(s, record)
 	})
-	return record
+}
+
+// instanceDocument renders one instance document under the scope lock.
+func (p *Provider) instanceDocument(scope state.Scope, instance string, render func(*instanceRecord) (map[string]any, error)) (*gateway.RESTResponse, error) {
+	var document map[string]any
+	if err := p.withInstance(scope, instance, func(_ *scopeState, record *instanceRecord) error {
+		var err error
+		document, err = render(record)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: document}, nil
 }
 
 func (p *Provider) instancesGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record := p.instanceLocked(scope, request.Path["instance"])
-	if record == nil {
-		return nil, provider.NotFound(kindInstance, request.Path["instance"])
-	}
-	return &gateway.RESTResponse{JSON: instanceWire(scope.Project, record)}, nil
+	return p.instanceDocument(scope, request.Path["instance"], func(record *instanceRecord) (map[string]any, error) {
+		return instanceWire(scope.Project, record), nil
+	})
 }
 
 // instancesList returns the project's instances.
@@ -302,21 +315,11 @@ func (p *Provider) instancesUpdate(request *gateway.RESTRequest, scope state.Sco
 	if json.Unmarshal(request.JSON, &body) != nil {
 		return nil, status.Error(codes.InvalidArgument, "Invalid instance update")
 	}
-	var wire map[string]any
-	err := p.scopes.With(scope, func(s *scopeState) error {
-		record := s.instances[request.Path["instance"]]
-		if record == nil {
-			return provider.NotFound(kindInstance, request.Path["instance"])
-		}
+	return p.instanceDocument(scope, request.Path["instance"], func(record *instanceRecord) (map[string]any, error) {
 		record.DisplayName = body.DisplayName
 		record.Labels = body.Labels
-		wire = instanceWire(scope.Project, record)
-		return nil
+		return instanceWire(scope.Project, record), nil
 	})
-	if err != nil {
-		return nil, err //nolint:wrapcheck // already a wire status
-	}
-	return &gateway.RESTResponse{JSON: wire}, nil
 }
 
 // forget unregisters a deleted resource and drops its IAM policy so a
@@ -335,22 +338,18 @@ func emptyResponse() *gateway.RESTResponse {
 }
 
 func (p *Provider) clustersList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record := p.instanceLocked(scope, request.Path["instance"])
-	if record == nil {
-		return nil, provider.NotFound(kindInstance, request.Path["instance"])
-	}
-	return &gateway.RESTResponse{JSON: map[string]any{"clusters": []any{clusterWire(scope.Project, record.Name, record.Cluster)}}}, nil
+	return p.instanceDocument(scope, request.Path["instance"], func(record *instanceRecord) (map[string]any, error) {
+		return map[string]any{"clusters": []any{clusterWire(scope.Project, record.Name, record.Cluster)}}, nil
+	})
 }
 
 func (p *Provider) clustersGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	record := p.instanceLocked(scope, request.Path["instance"])
-	if record == nil {
-		return nil, provider.NotFound(kindInstance, request.Path["instance"])
-	}
-	if record.Cluster.Name != request.Path["cluster"] {
-		return nil, provider.NotFound(kindCluster, request.Path["cluster"])
-	}
-	return &gateway.RESTResponse{JSON: clusterWire(scope.Project, record.Name, record.Cluster)}, nil
+	return p.instanceDocument(scope, request.Path["instance"], func(record *instanceRecord) (map[string]any, error) {
+		if record.Cluster.Name != request.Path["cluster"] {
+			return nil, provider.NotFound(kindCluster, request.Path["cluster"])
+		}
+		return clusterWire(scope.Project, record.Name, record.Cluster), nil
+	})
 }
 
 // getIam returns the stored policy of an instance or table.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -101,9 +102,7 @@ func regionLink(project, region string) string {
 }
 
 // gap reports an unimplemented slice boundary.
-func gap(message string) error {
-	return status.Error(codes.Unimplemented, "Compute coverage gap: "+message)
-}
+var gap = provider.CoverageGap("Compute")
 
 // wireError renders the Compute body, which carries an errors[] reason list and
 // no status field, unlike the shared Google API body.

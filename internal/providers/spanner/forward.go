@@ -159,7 +159,7 @@ func queryValue(field protoreflect.FieldDescriptor, key, value string) (protoref
 		}
 	default:
 	}
-	return protoreflect.Value{}, gap("query parameter %q", key)
+	return protoreflect.Value{}, gap("query parameter " + strconv.Quote(key))
 }
 
 // forward transcodes, invokes the emulator under the scope's mutation gate,
@@ -168,7 +168,7 @@ func queryValue(field protoreflect.FieldDescriptor, key, value string) (protoref
 func (p *Provider) forward(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	route, ok := rpcs[call.Method]
 	if !ok {
-		return nil, gap("method %s", call.Method)
+		return nil, gap("method " + call.Method)
 	}
 	message, err := route.build(request)
 	if err != nil {

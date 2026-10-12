@@ -139,10 +139,39 @@ def check_tooling_index(errors: list[str]) -> None:
 
 
 MAX_TRACKED_BYTES = 1_000_000
-GO_FUNCTION = re.compile(r"^func (\w+)\(([^)]*)\)([^{\n]*)\{\n(.*?)^\}", re.MULTILINE | re.DOTALL)
-# Functions whose text matches across providers but whose types are each
-# package's own, so they are not the same helper.
-DISTINCT_PER_PROVIDER = {"driverOf": "asserts the package's own driver interface"}
+# A function or method with a block or one-line body, and a type with a block
+# or one-line definition.
+GO_FUNCTION = re.compile(
+    r"^func (?:\((\w+ )?\*?(\w+)\) )?(\w+)\(([^)]*)\)([^{\n]*)\{(?:\n(.*?)^\}| ([^\n]*) \}$)",
+    re.MULTILINE | re.DOTALL,
+)
+GO_TYPE = re.compile(
+    r"^type (\w+) (?:((?:struct|interface) \{)\n(.*?)^\}|([^\n]*)$)", re.MULTILINE | re.DOTALL
+)
+# Declarations whose text matches across providers but which are each
+# package's own, with the reason. A key is a name ("Receiver.name" for
+# methods) or "package.name" to exempt one package's copy.
+DISTINCT_PER_PROVIDER = {
+    "driverOf": "asserts the package's own driver interface",
+    "driver": "the package's backend contract; driverOf asserts it",
+    "Provider": "each package's exported provider; equal fields, different methods",
+    "emulator": "wraps the package's own emulator Config",
+    "emulator.Ready": "probes the package's own emulator process",
+    "emulator.Reset": "restarts the package's own emulator",
+    "emulator.client": "returns the package's own emulator connection",
+    "fleet.Reset": "stops the package's own server fleet",
+    **{
+        f"{package}.{name}": "an in-flight rewrite owns this package; switch to provider.NoBackend"
+        for package in ("bigquery", "run")
+        for name in (
+            "emptyBackend",
+            "emptyBackend.Start",
+            "emptyBackend.Ready",
+            "emptyBackend.Stop",
+            "emptyBackend.Reset",
+        )
+    },
+}
 
 
 # Tracked top-level entries. Keep the root for project entry points; put
@@ -226,20 +255,45 @@ def check_tracked_files(errors: list[str], paths: list[Path]) -> None:
             errors.append(f"{label}: executable without a shebang")
 
 
+def go_declarations(source: str) -> list[tuple[str, str]]:
+    """Return (label, comparable text) for each Go function, method, and type.
+
+    A method's receiver variable becomes a placeholder, so the same body on
+    two packages' receivers compares equal.
+    """
+    found = []
+    for match in GO_FUNCTION.finditer(source):
+        receiver, receiver_type, name, params, results, block, line = match.groups()
+        body = block if block is not None else line
+        if receiver:
+            body = re.sub(rf"\b{receiver.strip()}\b", "RECEIVER", body)
+        label = f"{receiver_type}.{name}" if receiver_type else name
+        found.append((label, f"func {label}({params}){results}{{{body}"))
+    for match in GO_TYPE.finditer(source):
+        name, opener, block, line = match.groups()
+        found.append((name, f"type {name} {opener}{block}" if opener else f"type {name} {line}"))
+    return found
+
+
 def check_provider_duplicates(errors: list[str]) -> None:
-    """Fail when an identical function is declared in two providers."""
+    """Fail when an identical function, method, or type is declared in two providers."""
     seen: dict[str, set[str]] = {}
+    used: set[str] = set()
     for path in sorted((ROOT / "internal/providers").glob("*/*.go")):
         if path.parent.name == "provider" or path.name.endswith("_test.go"):
             continue
-        for match in GO_FUNCTION.finditer(path.read_text()):
-            name, params, results, body = match.groups()
-            if name in DISTINCT_PER_PROVIDER:
+        for label, text in go_declarations(path.read_text()):
+            exempt = {label, f"{path.parent.name}.{label}"} & DISTINCT_PER_PROVIDER.keys()
+            if exempt:
+                used |= exempt
                 continue
-            key = " ".join(f"{params}{results}{{{body}".split())
-            seen.setdefault(key, set()).add(f"{path.parent.name}.{name}")
+            seen.setdefault(" ".join(text.split()), set()).add(f"{path.parent.name}.{label}")
     errors.extend(
-        "identical function in several providers; move it to internal/providers/provider: "
+        f"scripts/check_repo.py: stale duplicate exemption {key}"
+        for key in sorted(DISTINCT_PER_PROVIDER.keys() - used)
+    )
+    errors.extend(
+        "identical declaration in several providers; move it to internal/providers/provider: "
         + ", ".join(sorted(names))
         for names in seen.values()
         if len({name.split(".")[0] for name in names}) > 1

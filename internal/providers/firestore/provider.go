@@ -124,6 +124,15 @@ func (p *Provider) authorize(call gateway.Call, project string, planNames []stri
 	return decision, nil
 }
 
+// projectScope validates a REST project and registers its default database.
+func (p *Provider) projectScope(project string) (state.Scope, error) {
+	scope := provider.ProjectScope(project)
+	if err := scope.Validate(); err != nil {
+		return scope, status.Errorf(codes.InvalidArgument, "Invalid project %q", project)
+	}
+	return scope, p.ensureDatabase(scope)
+}
+
 // handle is the gateway entry point for every Firestore REST method.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
@@ -131,11 +140,10 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, status.Error(codes.Internal, "Invalid Firestore request")
 	}
 	project := request.Path["project"]
-	scope := provider.ProjectScope(project)
-	if err := scope.Validate(); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid project %q", project)
+	scope, err := p.projectScope(project)
+	if err != nil {
+		return nil, err
 	}
-	p.ensureDatabase(scope)
 	operation, err := restOperationFor(call.Method, request)
 	if err != nil {
 		return nil, err
@@ -172,17 +180,18 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 
 // ensureDatabase registers the project's default database resource once, so
 // document authorization anchors on it. The call is idempotent per project.
-func (p *Provider) ensureDatabase(scope state.Scope) {
+func (p *Provider) ensureDatabase(scope state.Scope) error {
 	name := databaseResource(scope.Project)
 	if _, ok := p.index.Get(name); ok {
-		return
+		return nil
 	}
 	if err := p.index.Put(serviceName, state.Resource{
 		Name: name, Service: serviceName,
 		Kind: "database", Parent: provider.ProjectResource(scope.Project), Scope: scope,
 	}); err != nil {
-		return
+		return fmt.Errorf("index the default database: %w", err)
 	}
+	return nil
 }
 
 // streamed wraps a response to a streamed REST method in a JSON array, as

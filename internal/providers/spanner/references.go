@@ -127,24 +127,30 @@ func exists(ctx context.Context, b driver, m mutation) (bool, error) {
 	}
 }
 
-// publish adds or removes the confirmed references and forgets the policies
-// of deleted resources.
+// publish adds or removes the confirmed references, with the database
+// creation times, under one scope lock, and forgets the policies of deleted
+// resources.
 func (p *Provider) publish(m mutation, present bool) error {
-	if present {
-		if m.kind == kindDatabase && m.create {
-			now := p.clock()
-			_ = p.created.With(m.scope, func(times *createdDatabases) error { (*times)[m.name] = now; return nil })
+	now := p.clock()
+	return p.created.With(m.scope, func(times *createdDatabases) error { //nolint:wrapcheck // wrapped by settle
+		if present {
+			if err := p.index.Put(serviceName, state.Resource{
+				Name: fullName(m.name), Service: serviceName, Kind: m.kind, Parent: m.parent, Scope: m.scope,
+			}); err != nil {
+				return err //nolint:wrapcheck // wrapped by settle
+			}
+			if m.kind == kindDatabase && m.create {
+				(*times)[m.name] = now
+			}
+			return nil
 		}
-		return p.index.Put(serviceName, state.Resource{ //nolint:wrapcheck // wrapped by settle
-			Name: fullName(m.name), Service: serviceName, Kind: m.kind, Parent: m.parent, Scope: m.scope,
-		})
-	}
-	for _, name := range append(m.children, m.name) {
-		if err := p.index.Remove(serviceName, m.scope, fullName(name)); err != nil {
-			return err //nolint:wrapcheck // wrapped by settle
+		for _, name := range append(m.children, m.name) {
+			if err := p.index.Remove(serviceName, m.scope, fullName(name)); err != nil {
+				return err //nolint:wrapcheck // wrapped by settle
+			}
+			p.engine.Forget(fullName(name))
+			delete(*times, name)
 		}
-		p.engine.Forget(fullName(name))
-		_ = p.created.With(m.scope, func(times *createdDatabases) error { delete(*times, name); return nil })
-	}
-	return nil
+		return nil
+	})
 }

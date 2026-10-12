@@ -51,7 +51,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine, index *state.Index) error {
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New:      provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
@@ -65,14 +65,6 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 	}
 	return nil
 }
-
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error { return nil }
-func (emptyBackend) Ready(context.Context) error { return nil }
-func (emptyBackend) Stop(context.Context) error  { return nil }
-func (emptyBackend) Reset(context.Context) error { return nil }
 
 // Reset clears the scope's repositories.
 func (p *Provider) Reset(scope state.Scope) error {
@@ -95,7 +87,20 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	// An addressed repository's existence check and authorization share one
+	// scope lock, and delete removes the index entry under that lock, so a
+	// request racing a delete sees NOT_FOUND rather than an unverified target.
+	var decision iam.Decision
+	var authorizeErr error
+	authorize := func(*scopeState, *repositoryRecord) error {
+		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+		return nil
+	}
+	if target.Name == provider.ProjectResource(scope.Project) {
+		_ = authorize(nil, nil)
+	} else if err := p.withRepository(scope, request.Path["repository"], authorize); err != nil {
+		return nil, err
+	}
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
@@ -128,9 +133,6 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	case methodReposGet, methodReposUpdate, methodReposDelete, methodReposGetIam, methodReposSetIam:
 		if !uid.MatchString(repository) {
 			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid repository id %q", repository)
-		}
-		if p.repositoryLocked(scope, repository) == nil {
-			return scope, target, provider.NotFound(kindRepository, repository)
 		}
 		target.Name = repositoryResource(project, repository)
 		return scope, target, nil

@@ -92,7 +92,9 @@ func (p *Provider) planned(call gateway.Call, request proto.Message) (backend.Ke
 	if err != nil {
 		return backend.Key{}, err
 	}
-	p.ensureDatabase(scope)
+	if err := p.ensureDatabase(scope); err != nil {
+		return backend.Key{}, err
+	}
 	if _, err := p.authorize(call, call.Project, plans); err != nil {
 		return backend.Key{}, err
 	}

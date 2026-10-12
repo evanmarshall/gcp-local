@@ -188,7 +188,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodOperationList:
 		return p.operations(ctx, request, scope)
 	default:
-		return nil, gap("method %s", call.Method)
+		return nil, gap("method " + call.Method)
 	}
 }
 

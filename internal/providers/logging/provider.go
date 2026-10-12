@@ -31,6 +31,9 @@ import (
 // serviceName is the provider and backend registry name.
 const serviceName = "logging"
 
+// gap reports an unimplemented slice boundary.
+var gap = provider.CoverageGap("Logging")
+
 // Method identifiers: REST discovery IDs and gRPC full method names.
 const (
 	restWrite      = "logging.entries.write"
@@ -88,7 +91,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	p := &Provider{index: index, engine: engine, scopes: state.NewStore(newScopeState, state.GlobalScope), clock: time.Now}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New:      provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
@@ -109,14 +112,6 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	return p, nil
 }
-
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error { return nil }
-func (emptyBackend) Ready(context.Context) error { return nil }
-func (emptyBackend) Stop(context.Context) error  { return nil }
-func (emptyBackend) Reset(context.Context) error { return nil }
 
 // Reset clears one project's entries.
 func (p *Provider) Reset(scope state.Scope) error {
@@ -188,7 +183,7 @@ func restMessage(call gateway.Call, request *gateway.RESTRequest) (proto.Message
 	case restLogsDelete:
 		return &loggingpb.DeleteLogRequest{LogName: "projects/" + request.Path["project"] + "/logs/" + escapeLogID(request.Path["log"])}, nil
 	default:
-		return nil, status.Error(codes.Unimplemented, "Logging coverage gap: this method is not implemented")
+		return nil, gap("this method is not implemented")
 	}
 }
 
@@ -237,7 +232,7 @@ func (p *Provider) project(name string) (string, error) {
 	id, ok := strings.CutPrefix(name, "projects/")
 	if !ok || strings.Contains(id, "/") {
 		if strings.HasPrefix(name, "organizations/") || strings.HasPrefix(name, "folders/") || strings.HasPrefix(name, "billingAccounts/") {
-			return "", status.Error(codes.Unimplemented, "Logging coverage gap: only project resource names are supported")
+			return "", gap("only project resource names are supported")
 		}
 		return "", status.Errorf(codes.InvalidArgument, "Invalid resource name %q", name)
 	}

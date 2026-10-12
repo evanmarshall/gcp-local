@@ -9,11 +9,8 @@ package spanner
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // serviceName owns the Spanner backend registration and index entries.
@@ -93,6 +90,4 @@ func fullName(name string) string {
 }
 
 // gap reports an unsupported request shape explicitly.
-func gap(format string, args ...any) error {
-	return status.Error(codes.Unimplemented, "gcp-local Spanner coverage gap: "+fmt.Sprintf(format, args...))
-}
+var gap = provider.CoverageGap("Spanner")

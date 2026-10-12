@@ -149,8 +149,8 @@ func (t tableAdmin) remove(ctx context.Context) (*gateway.RESTResponse, error) {
 // table is removed.
 func (t tableAdmin) deleteInstance(ctx context.Context) (*gateway.RESTResponse, error) {
 	instance := t.request.Path["instance"]
-	if t.provider.instanceLocked(t.scope, instance) == nil {
-		return nil, provider.NotFound(kindInstance, instance)
+	if err := t.provider.existingInstance(t.scope, instance); err != nil {
+		return nil, err
 	}
 	listing, err := t.admin.ListTables(ctx, &adminpb.ListTablesRequest{Parent: t.instance()})
 	if err != nil {
@@ -174,14 +174,21 @@ func (t tableAdmin) deleteInstance(ctx context.Context) (*gateway.RESTResponse, 
 			return nil, forgetErr
 		}
 	}
-	_ = t.provider.scopes.With(t.scope, func(s *scopeState) error {
-		delete(s.instances, instance)
-		return nil
-	})
-	if err := t.provider.forget(t.scope, instanceResource(t.scope.Project, instance)); err != nil {
+	if err := t.provider.removeInstance(t.scope, instance); err != nil {
 		return nil, err
 	}
 	return emptyResponse(), nil
+}
+
+// removeInstance drops the record and its index entry together, as on create.
+func (p *Provider) removeInstance(scope state.Scope, instance string) error {
+	return p.withInstance(scope, instance, func(s *scopeState, _ *instanceRecord) error {
+		if err := p.forget(scope, instanceResource(scope.Project, instance)); err != nil {
+			return err
+		}
+		delete(s.instances, instance)
+		return nil
+	})
 }
 
 // decodeBody parses a REST JSON body into its admin request message. Unknown

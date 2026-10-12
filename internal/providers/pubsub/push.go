@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -198,7 +199,7 @@ func (p *Provider) decorateSubscription(subscription *pb.Subscription) {
 func (p *Provider) storedLabels(name string, fallback map[string]string) map[string]string {
 	if labels, ok := p.labels.Load(canonical(name)); ok {
 		if stored, ok := labels.(map[string]string); ok {
-			return stored
+			return maps.Clone(stored)
 		}
 	}
 	return fallback

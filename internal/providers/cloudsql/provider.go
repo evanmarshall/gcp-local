@@ -151,6 +151,11 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	target := p.target(project, p.addressed(call.Method, request, project))
 	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	if provider.Unverified(authorizeErr) {
+		// A concurrent delete can unindex the instance after target chose it.
+		target = p.target(project, p.addressed(call.Method, request, project))
+		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+	}
 	if authorizeErr != nil {
 		return refusal(call.Method, authorizeErr)
 	}

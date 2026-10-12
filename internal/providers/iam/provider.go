@@ -52,7 +52,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine, index *state.Index) error {
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New:      provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
@@ -67,14 +67,6 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 	return nil
 }
 
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error { return nil }
-func (emptyBackend) Ready(context.Context) error { return nil }
-func (emptyBackend) Stop(context.Context) error  { return nil }
-func (emptyBackend) Reset(context.Context) error { return nil }
-
 // Reset clears the scope's accounts.
 func (p *Provider) Reset(scope state.Scope) error {
 	if err := p.scopes.With(scope, func(s *scopeState) error {
@@ -86,17 +78,23 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// handle is the gateway entry point for every IAM method.
+// handle is the gateway entry point for every IAM method. An addressed
+// account's existence check and authorization share one scope lock, and
+// delete removes the index entry under that lock, so a request racing a
+// delete sees NOT_FOUND rather than an unverified IAM target.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid IAM request")
 	}
-	scope, target, err := p.resolve(call, request)
+	scope, target, account, err := p.resolve(call, request)
 	if err != nil {
 		return nil, err
 	}
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	decision, authorizeErr, err := p.authorize(call, scope, target, account)
+	if err != nil {
+		return nil, err
+	}
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {
@@ -117,9 +115,32 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
-// resolve derives the scope and IAM target. Account methods authorize against
-// the account; key and list/create methods inherit via the account or project.
-func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
+// authorize evaluates call on target. For an addressed account it checks
+// existence and authorizes under one scope lock; a missing account is err.
+func (p *Provider) authorize(call gateway.Call, scope state.Scope, target iam.Target, account string) (iam.Decision, error, error) {
+	if account == "" {
+		decision, authorizeErr := p.engine.Authorize(call, target, nil)
+		return decision, authorizeErr, nil //nolint:wrapcheck // the caller maps the IAM status
+	}
+	var decision iam.Decision
+	var authorizeErr error
+	var exists bool
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		if exists = p.accountExists(s, call.Method, scope, account); exists {
+			decision, authorizeErr = p.engine.Authorize(call, target, nil)
+		}
+		return nil
+	})
+	if !exists {
+		return decision, nil, provider.NotFound(kindAccount, account)
+	}
+	return decision, authorizeErr, nil //nolint:wrapcheck // the caller maps the IAM status
+}
+
+// resolve derives the scope and IAM target, and the account id a method
+// addresses ("" for create and list). Account methods authorize against the
+// account; key and list/create methods inherit via the account or project.
+func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, string, error) {
 	project := request.Path["project"]
 	if call.Method == methodSignBlob && project == "-" {
 		// IAM Credentials names accounts as projects/-/serviceAccounts/EMAIL;
@@ -133,26 +154,24 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	account := strings.TrimSuffix(request.Path["serviceAccount"], "@"+project+".iam.gserviceaccount.com")
 	request.Path["serviceAccount"] = account
 	if call.Method == methodAccountsCreate || call.Method == methodAccountsList {
-		return scope, target, nil
+		return scope, target, "", nil
 	}
 	// Every other method, including the key methods, acts on one existing account.
 	if !uid.MatchString(account) {
-		return scope, target, status.Errorf(codes.InvalidArgument, "Invalid service account id %q", account)
-	}
-	if !p.accountExists(call.Method, scope, account) {
-		return scope, target, provider.NotFound(kindAccount, account)
+		return scope, target, "", status.Errorf(codes.InvalidArgument, "Invalid service account id %q", account)
 	}
 	target.Name = accountResource(project, accountEmail(project, account))
-	return scope, target, nil
+	return scope, target, account, nil
 }
 
-// accountExists reports whether a method's account exists. signBlob also signs
-// for accounts declared in the IAM configuration, which only the index holds;
-// the account methods manage only accounts this provider created.
-func (p *Provider) accountExists(method string, scope state.Scope, account string) bool {
+// accountExists reports whether a method's account exists; it runs under the
+// scope lock. signBlob also signs for accounts declared in the IAM
+// configuration, which only the index holds; the account methods manage only
+// accounts this provider created.
+func (p *Provider) accountExists(s *scopeState, method string, scope state.Scope, account string) bool {
 	if method == methodSignBlob {
 		resource, found := p.index.Get(accountResource(scope.Project, accountEmail(scope.Project, account)))
 		return found && resource.Kind == kindAccount && resource.Scope == scope
 	}
-	return p.accountLocked(scope, account) != nil
+	return s.accounts[account] != nil
 }

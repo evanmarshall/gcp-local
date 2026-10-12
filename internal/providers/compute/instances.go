@@ -3,6 +3,7 @@ package compute
 import (
 	"encoding/binary"
 	"errors"
+	"maps"
 	"net"
 	"net/url"
 	"regexp"
@@ -30,6 +31,7 @@ var (
 	errWrongRegion  = errors.New("the subnetwork is not in the instance's region")
 	errAddressTaken = errors.New("the requested internal address is unavailable")
 	errExhausted    = errors.New("the subnetwork has no free internal address")
+	errIndex        = errors.New("the index refused the instance")
 )
 
 func (p *Provider) executeInstances(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
@@ -127,14 +129,18 @@ func (p *Provider) createInstance(request *gateway.RESTRequest, scope state.Scop
 		MachineType: machineType, CreatedAt: p.clock(),
 	}
 	record.Labels, _ = body["labels"].(map[string]any)
-	if err := p.scopes.With(scope, func(s *scopeState) error { return s.addInstance(record, nic) }); err != nil {
+	if err := p.scopes.With(scope, func(s *scopeState) error {
+		return s.addInstance(record, nic, func() error {
+			if err := p.index.Put(serviceName, state.Resource{
+				Name: instanceName(scope.Project, zone, record.Name), Service: serviceName, Kind: kindInstance,
+				Parent: provider.ProjectResource(scope.Project), Scope: scope,
+			}); err != nil {
+				return errIndex
+			}
+			return nil
+		})
+	}); err != nil {
 		return nil, instanceError(err, record.Name)
-	}
-	if indexErr := p.index.Put(serviceName, state.Resource{
-		Name: instanceName(scope.Project, zone, record.Name), Service: serviceName, Kind: kindInstance,
-		Parent: provider.ProjectResource(scope.Project), Scope: scope,
-	}); indexErr != nil {
-		return nil, gap("index the instance")
 	}
 	return p.newOperation(scope, "zone", zone, "insert", instanceLink(scope.Project, zone, record.Name))
 }
@@ -144,6 +150,8 @@ func instanceError(err error, name string) error {
 	switch {
 	case errors.Is(err, errAlreadyExists):
 		return conflict(kindInstance, name)
+	case errors.Is(err, errIndex):
+		return gap("index the instance")
 	case errors.Is(err, errMissing):
 		return status.Error(codes.InvalidArgument, "The referenced network or subnetwork does not exist")
 	default:
@@ -163,7 +171,8 @@ func instanceLink(project, zone, name string) string {
 }
 
 // addInstance places one instance on its subnetwork under the scope lock.
-func (s *scopeState) addInstance(record *instanceRecord, nic instanceInterface) error {
+// publish indexes it; the record is stored only when that succeeds.
+func (s *scopeState) addInstance(record *instanceRecord, nic instanceInterface, publish func() error) error {
 	key := instanceKey(record.Zone, record.Name)
 	if s.instances[key] != nil {
 		return errAlreadyExists
@@ -177,6 +186,9 @@ func (s *scopeState) addInstance(record *instanceRecord, nic instanceInterface) 
 	}
 	address, err := s.allocateIP(subnet, nic.address)
 	if err != nil {
+		return err
+	}
+	if err := publish(); err != nil {
 		return err
 	}
 	record.Network, record.Subnetwork, record.IP = subnet.Network, subnet.Name, address
@@ -282,16 +294,21 @@ func (p *Provider) listInstances(request *gateway.RESTRequest, scope state.Scope
 func (p *Provider) deleteInstance(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	zone, name := request.Path["zone"], request.Path["instance"]
 	found := false
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if found = s.instances[instanceKey(zone, name)] != nil; found {
-			delete(s.instances, instanceKey(zone, name))
+	if err := p.scopes.With(scope, func(s *scopeState) error {
+		if found = s.instances[instanceKey(zone, name)] != nil; !found {
+			return nil
 		}
+		if err := p.unindex(scope, instanceName(scope.Project, zone, name)); err != nil {
+			return err
+		}
+		delete(s.instances, instanceKey(zone, name))
 		return nil
-	})
+	}); err != nil {
+		return nil, err //nolint:wrapcheck // unindex already wraps
+	}
 	if !found {
 		return nil, provider.NotFound(kindInstance, name)
 	}
-	_ = p.index.Remove(serviceName, scope, instanceName(scope.Project, zone, name))
 	return p.newOperation(scope, "zone", zone, "delete", instanceLink(scope.Project, zone, name))
 }
 
@@ -324,7 +341,7 @@ func instanceDocument(project string, record *instanceRecord) map[string]any {
 	}
 	setText(document, keyDescription, record.Description)
 	if len(record.Labels) > 0 {
-		document["labels"] = record.Labels
+		document["labels"] = maps.Clone(record.Labels)
 	}
 	return document
 }

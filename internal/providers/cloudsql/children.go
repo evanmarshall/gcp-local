@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -177,7 +178,7 @@ func (p *Provider) insertUser(call gateway.Call, request *gateway.RESTRequest, p
 		return nil, provider.Invalid("Invalid user.")
 	}
 	if body.Type != "" && body.Type != "BUILT_IN" {
-		return nil, gap("user type %s (IAM database authentication)", body.Type)
+		return nil, gap(fmt.Sprintf("user type %s (IAM database authentication)", body.Type))
 	}
 	password := "NULL"
 	if body.Password != "" {

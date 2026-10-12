@@ -98,6 +98,12 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	target := p.target(request.Path)
 	decision, authorizeErr := p.engine.Authorize(call, target, nil)
+	if provider.Unverified(authorizeErr) {
+		// A concurrent delete removed the indexed target after target()
+		// chose it; authorize against the nearest surviving ancestor.
+		target = p.target(request.Path)
+		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+	}
 	if authorizeErr != nil {
 		code := status.Code(authorizeErr)
 		if code != codes.PermissionDenied && code != codes.Unauthenticated {

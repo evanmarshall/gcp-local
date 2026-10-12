@@ -112,7 +112,7 @@ func New(_ context.Context, config DeliveryConfig, registry *gateway.Registry, m
 	}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New:      provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
@@ -143,14 +143,6 @@ func dispatchClient() *http.Client {
 	}
 	return client
 }
-
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error { return nil }
-func (emptyBackend) Ready(context.Context) error { return nil }
-func (emptyBackend) Stop(context.Context) error  { return nil }
-func (emptyBackend) Reset(context.Context) error { return nil }
 
 // Reset stops every queue worker, then clears the scope's state.
 func (p *Provider) Reset(scope state.Scope) error {
