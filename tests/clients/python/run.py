@@ -12,6 +12,7 @@ import sys
 import time
 
 import google.auth
+import google.auth.credentials
 import grpc
 import requests
 from google.api_core import exceptions
@@ -39,7 +40,6 @@ PROJECT = os.environ["GOOGLE_CLOUD_PROJECT"]
 HTTP = os.environ["GCP_LOCAL_HTTP"]
 GRPC = os.environ["GCP_LOCAL_GRPC"]
 GRPC_TLS = os.environ["GCP_LOCAL_GRPC_TLS"]
-SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 PAYLOAD = b"hello from python"
 REVISION_IMAGE = "client-matrix/revision:1"
 
@@ -47,27 +47,28 @@ REVISION_IMAGE = "client-matrix/revision:1"
 def credentials(*, denied=False):
     """Load local ADC (the granted identity) or the ungranted identity's ADC file.
 
-    Both request cloud-platform: the local token service refuses most client
-    libraries' other default scopes (#52).
+    Unscoped, as plain ADC loads: each client applies its default scopes.
     """
     if denied:
-        loaded, _ = google.auth.load_credentials_from_file(
-            os.environ["GCP_LOCAL_DENIED_ADC"], scopes=SCOPES
-        )
+        loaded, _ = google.auth.load_credentials_from_file(os.environ["GCP_LOCAL_DENIED_ADC"])
         return loaded
-    return google.auth.default(scopes=SCOPES)[0]
+    return google.auth.default()[0]
 
 
-def channel(*, denied=False):
+def channel(transport, *, denied=False):
     """Open a plaintext loopback gRPC channel that still carries ADC.
 
     `local_channel_credentials` lets gRPC attach call credentials without TLS.
-    Only generated clients take a channel; handwritten wrappers do not.
+    Only generated clients take a channel; handwritten wrappers do not. The
+    channel's credentials get the transport's default scopes, as the client
+    would apply.
     """
     session = requests.Session()
     session.trust_env = False
     return secure_authorized_channel(
-        credentials(denied=denied),
+        google.auth.credentials.with_scopes_if_required(
+            credentials(denied=denied), None, default_scopes=transport.AUTH_SCOPES
+        ),
         Request(session=session),
         GRPC,
         ssl_credentials=grpc.local_channel_credentials(),
@@ -76,9 +77,8 @@ def channel(*, denied=False):
 
 def generated(client_class, *, denied=False):
     """Build a generated (GAPIC) client on the gRPC gateway."""
-    return client_class(
-        transport=client_class.get_transport_class("grpc")(channel=channel(denied=denied))
-    )
+    transport = client_class.get_transport_class("grpc")
+    return client_class(transport=transport(channel=channel(transport, denied=denied)))
 
 
 def expect_denied(step, call):
@@ -138,12 +138,8 @@ def run_bigquery():
 
 
 def run_pubsub():
-    publisher = pubsub_v1.PublisherClient(
-        transport=pubsub_v1.PublisherClient.get_transport_class("grpc")(channel=channel())
-    )
-    subscriber = pubsub_v1.SubscriberClient(
-        transport=pubsub_v1.SubscriberClient.get_transport_class("grpc")(channel=channel())
-    )
+    publisher = generated(pubsub_v1.PublisherClient)
+    subscriber = generated(pubsub_v1.SubscriberClient)
     topic = publisher.topic_path(PROJECT, "python-matrix")
     subscription = subscriber.subscription_path(PROJECT, "python-matrix")
     publisher.create_topic(name=topic)
@@ -165,11 +161,7 @@ def run_pubsub():
     assert received == [PAYLOAD], f"receive: got {received}"
     listed = [t.name for t in publisher.list_topics(project=f"projects/{PROJECT}")]
     assert topic in listed, "list topics"
-    other = pubsub_v1.PublisherClient(
-        transport=pubsub_v1.PublisherClient.get_transport_class("grpc")(
-            channel=channel(denied=True)
-        )
-    )
+    other = generated(pubsub_v1.PublisherClient, denied=True)
     expect_denied("ungranted publish", lambda: other.publish(topic, b"no").result(timeout=30))
     subscriber.delete_subscription(subscription=subscription)
     publisher.delete_topic(topic=topic)

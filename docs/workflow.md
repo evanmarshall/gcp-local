@@ -40,7 +40,7 @@ The developer identity has only project-level Storage Admin, Pub/Sub Admin, Clou
 
 ## Terraform authentication
 
-Use the `GCP_LOCAL_TERRAFORM_CREDENTIALS` file from `env` (`terraform-adc.json`). It is the local external-account ADC with `"universe_domain": "gcp-local.invalid"` added, which the provider requires when its `universe_domain` is overridden. The local token issuer grants only `cloud-platform`, so set `scopes`.
+Use the `GCP_LOCAL_TERRAFORM_CREDENTIALS` file from `env` (`terraform-adc.json`). It is the local external-account ADC with `"universe_domain": "gcp-local.invalid"` added, which the provider requires when its `universe_domain` is overridden. The verified configuration sets `scopes` to `cloud-platform`.
 
 ```hcl
 provider "google" {

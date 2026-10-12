@@ -14,7 +14,7 @@ import (
 // runStorage uses the JSON API client: bucket and object create, read, list, delete.
 func runStorage(ctx context.Context, e *env) error {
 	endpoint := option.WithEndpoint(e.http + "/storage/v1/")
-	client, err := storage.NewClient(ctx, endpoint, option.WithAuthCredentials(e.owner))
+	client, err := storage.NewClient(ctx, endpoint)
 	if err != nil {
 		return step("new client", err)
 	}
@@ -50,7 +50,7 @@ func runStorage(ctx context.Context, e *env) error {
 	if err != nil || attrs.Name != "hello.txt" {
 		return fmt.Errorf("list objects: got %v, %v", attrs, err)
 	}
-	denied, err := storage.NewClient(ctx, endpoint, option.WithAuthCredentials(e.denied))
+	denied, err := storage.NewClient(ctx, endpoint, e.deniedFile())
 	if err != nil {
 		return step("new ungranted client", err)
 	}
@@ -73,7 +73,7 @@ type person struct {
 // runBigQuery creates a dataset and table, streams rows, queries, lists, and deletes.
 func runBigQuery(ctx context.Context, e *env) error {
 	endpoint := option.WithEndpoint(e.http + "/bigquery/v2/")
-	client, err := bigquery.NewClient(ctx, e.project, endpoint, option.WithAuthCredentials(e.owner))
+	client, err := bigquery.NewClient(ctx, e.project, endpoint)
 	if err != nil {
 		return step("new client", err)
 	}
@@ -107,7 +107,7 @@ func runBigQuery(ctx context.Context, e *env) error {
 	if err != nil || listed.TableID != "people" {
 		return fmt.Errorf("list tables: got %v, %v", listed, err)
 	}
-	denied, err := bigquery.NewClient(ctx, e.project, endpoint, option.WithAuthCredentials(e.denied))
+	denied, err := bigquery.NewClient(ctx, e.project, endpoint, e.deniedFile())
 	if err != nil {
 		return step("new ungranted client", err)
 	}

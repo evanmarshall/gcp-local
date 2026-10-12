@@ -73,9 +73,9 @@
       "package": "gcloud",
       "transport": "JSON REST",
       "expect": "xfail",
-      "issue": 53,
-      "gap": "STS refuses gcloud's client authentication",
-      "match": "Use a form-encoded local subject-token exchange"
+      "issue": 65,
+      "gap": "bucket create refuses the enableObjectRetention query option",
+      "match": "unsupported query option enableObjectRetention"
     },
     {
       "service": "storage",
@@ -120,9 +120,9 @@
       "package": "gcloud",
       "transport": "REST",
       "expect": "xfail",
-      "issue": 53,
-      "gap": "STS refuses gcloud's client authentication; REST publish and pull are not served",
-      "match": "Use a form-encoded local subject-token exchange"
+      "issue": 66,
+      "gap": "REST publish and pull are not served",
+      "match": "No provider implements this REST API method"
     },
     {
       "service": "firestore",
@@ -171,10 +171,7 @@
       "client": "gcloud",
       "package": "gcloud",
       "transport": "REST",
-      "expect": "xfail",
-      "issue": 53,
-      "gap": "STS refuses gcloud's client authentication",
-      "match": "Use a form-encoded local subject-token exchange"
+      "expect": "pass"
     },
     {
       "service": "cloudkms",
@@ -202,10 +199,7 @@
       "client": "gcloud",
       "package": "gcloud",
       "transport": "REST",
-      "expect": "xfail",
-      "issue": 53,
-      "gap": "STS refuses gcloud's client authentication",
-      "match": "Use a form-encoded local subject-token exchange"
+      "expect": "pass"
     },
     {
       "service": "cloudtasks",

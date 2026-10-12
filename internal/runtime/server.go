@@ -69,7 +69,7 @@ func (s *Server) adminSubroutes(w http.ResponseWriter, r *http.Request) bool {
 		s.serveRun(w, r)
 	case strings.HasPrefix(r.URL.Path, "/_local/networking/"):
 		s.serveAnalyzer(w, r)
-	case r.URL.Path == "/v1/token" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs":
+	case r.URL.Path == "/v1/token" || r.URL.Path == "/v1/introspect" || r.URL.Path == "/_local/identity" || r.URL.Path == "/_local/identity/certs":
 		s.serveIdentity(w, r)
 	default:
 		return false

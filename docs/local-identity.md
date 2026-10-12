@@ -32,10 +32,39 @@ Set each client's API endpoint to `http://127.0.0.1:4566` and keep the SDK's nor
 
 - The creator refuses an existing directory and accepts only a numeric loopback HTTP endpoint.
 - Access tokens last one hour. Set `token_lifetime_seconds` (1-3600) in `server.json` to test refresh.
-- Tokens are scoped to `cloud-platform`, the Storage SDK's default scopes, and `cloudkms` (the Go KMS client requests it beside `cloud-platform`); an enrollment's `scopes` can narrow that. IAM is checked separately.
-- A token exchange without `scope` gets the enrollment's scopes, as the metadata server does. Real STS acceptance of a scope-less exchange is not recorded.
+- Tokens carry the requested [OAuth scopes](#oauth-scopes). An exchange without `scope` gets `cloud-platform`, or the enrollment's `scopes` when it lists them, as the metadata server does. Real STS acceptance of a scope-less exchange is not recorded.
+- The exchange accepts OAuth client authentication: one `Authorization: Basic` header (gcloud sends its client ID this way) or `client_id` and optional `client_secret` form fields, never both. The values grant nothing; the subject token alone picks the principal. Any other `Authorization` header is 401 `invalid_client`.
+- `POST /v1/introspect` answers RFC 7662 introspection with client authentication. gcloud calls it to name the account: `username` is the enrolled subject's email. ADC files written by gcp-local set `token_info_url` to it. Real STS introspection is not recorded.
 - Tokens die when the core restarts.
 - `GET /_local/identity` reports the caller's state, subject, project, and scopes. Unknown or expired tokens get 401.
+
+## OAuth scopes
+
+The token service issues only scopes from an allowlist taken from [Google's OAuth 2.0 scope reference](https://developers.google.com/identity/protocols/oauth2/scopes): `cloud-platform` and scopes narrower than it, plus identity scopes that grant no API call. An exchange or metadata token request naming any other scope is refused with `invalid_scope` and the scope's name. An enrollment's `scopes` must come from the list and restrict its tokens to those scopes.
+
+IAM checks the token's scopes before policy, as GCP does: when no scope covers every permission the method's plan resolves to, the call is 403 `PERMISSION_DENIED`, "Request had insufficient authentication scopes.", reason `ACCESS_TOKEN_SCOPE_INSUFFICIENT`. Coverage is modeled from the scopes each API's discovery document accepts and is not recorded.
+
+| Scope (`https://www.googleapis.com/auth/` unless shown) | Covers |
+| --- | --- |
+| `cloud-platform` | Everything |
+| `cloud-platform.read-only` | `get` and `list` permissions of every service |
+| `devstorage.full_control` | Storage |
+| `devstorage.read_write` | Storage except `*.update`, IAM policy, and HMAC keys (storage v1 discovery: those take `full_control`) |
+| `devstorage.read_only` | Storage `get` and `list` |
+| `pubsub`, `datastore`, `cloudkms`, `iam`, `bigquery`, `compute`, `logging.admin`, `sqlservice.admin` (`cloudsql.*`), `appengine.admin` | That service's permissions |
+| `bigquery.readonly`, `compute.readonly`, `logging.read` | That service's `get` and `list` |
+| `bigquery.insertdata` | `bigquery.tables.updateData` |
+| `logging.write` | `logging.logEntries.create` |
+| `spanner.admin` | Spanner except the data API |
+| `spanner.data` | Spanner sessions and database reads, writes, queries, and transactions |
+| `bigtable.admin`, `cloud-bigtable.admin` | Bigtable except row reads and mutations |
+| `bigtable.admin.table`, `cloud-bigtable.admin.table` | Bigtable tables and backups, except row reads and mutations |
+| `bigtable.admin.cluster`, `bigtable.admin.instance`, `cloud-bigtable.admin.cluster` | Bigtable instances, clusters, and app profiles |
+| `bigtable.data`, `cloud-bigtable.data` | Bigtable row reads, sample keys, and mutations |
+| `bigtable.data.readonly`, `cloud-bigtable.data.readonly` | Bigtable row reads and sample keys |
+| `openid`, `email`, `userinfo.email`, `userinfo.profile`, `sqlservice.login` | Nothing (identity and Cloud SQL database login) |
+
+The read-only scopes are approximated by permission verb, so a read the API accepts under them but whose permission is not `get` or `list` (a BigQuery query, for example) is refused. Secret Manager, Cloud Tasks, Cloud Run, Artifact Registry, Memorystore, Vertex AI, and Resource Manager accept only `cloud-platform` (and, for reads, `cloud-platform.read-only`).
 
 ## Workload metadata
 
@@ -65,8 +94,9 @@ The Python auth library needs both metadata variables. The server returns the pr
 | google-auth 2.56.2, metadata ADC | Account binding, expiry, automatic refresh |
 | google-cloud-storage 3.10.1, either flow | Authenticated calls before and after refresh |
 | Terraform google provider 8.5.0 | Only through the [workflow](workflow.md#terraform-authentication), with `terraform-adc.json` and the `cloud-platform` scope |
+| gcloud 588.0.0, `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE` | Exchange with Basic client authentication and gcloud's default scopes, introspection |
 
-Go and Node.js clients are verified per service in the [client matrix](clients.md). Java is not verified.
+Go, Node.js, Python, and gcloud clients are verified per service in the [client matrix](clients.md), with each library's default scopes on REST. Java is not verified.
 
 ## Limits
 

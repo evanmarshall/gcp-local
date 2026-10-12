@@ -175,10 +175,7 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 		decision.Outcome = outcome
 		decision.Reason = reason
 		e.remember(decision)
-		if code == codes.OK {
-			return decision, nil
-		}
-		return decision, status.Error(code, reason)
+		return decision, refusal(code, reason)
 	}
 	if err := call.Context.Err(); err != nil {
 		return finish(outcomeCancelled, "Request context ended", status.FromContextError(err).Code())
@@ -187,10 +184,7 @@ func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]
 	if !ok {
 		return finish(outcomeUnsupported, "No permission plan is registered for this method", codes.Unimplemented)
 	}
-	if outcome, reason, code, refused := principalRefusal(decision.Principal, rule); refused {
-		return finish(outcome, reason, code)
-	}
-	permissions, outcome, reason, code, refused := e.plannedPermissions(rule, features, complete)
+	permissions, outcome, reason, code, refused := e.callerPermissions(decision.Principal, rule, features, complete)
 	if refused {
 		return finish(outcome, reason, code)
 	}
@@ -239,9 +233,37 @@ func newDecision(call gateway.Call, complete bool) (Decision, error) {
 	return Decision{ID: hex.EncodeToString(raw), TraceID: call.TraceID, Method: call.Method, Principal: principal, Complete: complete, Checks: []Check{}}, nil
 }
 
+// callerPermissions gates the caller's credential, resolves the plan's
+// permissions, and checks the token's OAuth scopes against them. GCP refuses
+// a token without an accepted scope before consulting IAM.
+func (e *Engine) callerPermissions(principal gateway.Principal, rule Rule, features map[string]bool, complete bool) ([]string, string, string, codes.Code, bool) {
+	if outcome, reason, code, refused := principalRefusal(principal); refused {
+		return nil, outcome, reason, code, true
+	}
+	permissions, outcome, reason, code, refused := e.plannedPermissions(rule, features, complete)
+	if refused {
+		return nil, outcome, reason, code, true
+	}
+	if principal.State == gateway.Authenticated && !scopesCover(principal.Scopes, permissions) {
+		return nil, outcomeDeny, scopeInsufficientMessage, codes.PermissionDenied, true
+	}
+	return permissions, "", "", codes.OK, false
+}
+
+// refusal is the wire error for a refused decision; nil when code is OK.
+func refusal(code codes.Code, reason string) error {
+	switch {
+	case code == codes.OK:
+		return nil
+	case reason == scopeInsufficientMessage:
+		return scopeInsufficient()
+	}
+	return status.Error(code, reason)
+}
+
 // principalRefusal applies the credential-state gate that precedes any policy
-// read, including the unverified OAuth scope rule.
-func principalRefusal(principal gateway.Principal, rule Rule) (string, string, codes.Code, bool) {
+// read. OAuth scopes are checked once the planned permissions are resolved.
+func principalRefusal(principal gateway.Principal) (string, string, codes.Code, bool) {
 	state := principal.State
 	if state == gateway.Unknown || state == gateway.Expired {
 		return outcomeUnauthenticated, "Unknown or expired credential", codes.Unauthenticated, true
@@ -255,48 +277,7 @@ func principalRefusal(principal gateway.Principal, rule Rule) (string, string, c
 	if principal.Subject == "" {
 		return outcomeUnauthenticated, "Authenticated caller has no named principal", codes.Unauthenticated, true
 	}
-	if !scopeSupports(principal.Scopes, rule) {
-		return outcomeUnsupported, "OAuth scope enforcement is unverified for this scope set", codes.Unimplemented, true
-	}
 	return "", "", codes.OK, false
-}
-
-// scopeSupports accepts cloud-platform, or a service scope whose every planned
-// permission belongs to that service.
-func scopeSupports(scopes []string, rule Rule) bool {
-	for _, scope := range scopes {
-		if scope == "https://www.googleapis.com/auth/cloud-platform" {
-			return true
-		}
-		service := ""
-		switch scope {
-		case "https://www.googleapis.com/auth/devstorage.full_control":
-			service = "storage."
-		case "https://www.googleapis.com/auth/pubsub":
-			service = "pubsub."
-		}
-		if service != "" && ruleServes(rule, service) {
-			return true
-		}
-	}
-	return false
-}
-
-// ruleServes reports whether every permission the plan can grant belongs to one service prefix.
-func ruleServes(rule Rule, service string) bool {
-	for _, permission := range rule.Baseline {
-		if !strings.HasPrefix(permission, service) {
-			return false
-		}
-	}
-	for _, permissions := range rule.When {
-		for _, permission := range permissions {
-			if !strings.HasPrefix(permission, service) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // plannedPermissions resolves the baseline plus the state-dependent additions.

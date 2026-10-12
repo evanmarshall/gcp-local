@@ -17,6 +17,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -263,15 +264,58 @@ func TestUnsupportedPoliciesAndMethodsCannotBecomeAllows(t *testing.T) {
 	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
 		t.Fatal(err)
 	}
-	read.Method = testObjectGet
-	read.Principal.Scopes = []string{"https://www.googleapis.com/auth/devstorage.read_only"}
-	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented {
-		t.Fatal("claimed unverified narrow scopes")
+}
+
+// A token's scopes limit the methods it can call before IAM is consulted, as
+// in GCP: a scope the method does not accept is 403
+// ACCESS_TOKEN_SCOPE_INSUFFICIENT even when IAM would allow the call.
+func TestOAuthScopesLimitPlansBeforeIAM(t *testing.T) {
+	engine, _ := setup(t)
+	const auth = "https://www.googleapis.com/auth/"
+	insert := map[string]bool{"object_exists": false}
+	for _, tc := range []struct {
+		scopes   []string
+		method   string
+		features map[string]bool
+		allowed  bool
+	}{
+		{[]string{auth + "devstorage.read_only"}, testObjectGet, nil, true},
+		{[]string{auth + "devstorage.read_only"}, "storage.objects.insert", insert, false},
+		{[]string{auth + "devstorage.read_write"}, "storage.objects.insert", insert, true},
+		// storage v1 discovery: objects.patch accepts full_control, not read_write.
+		{[]string{auth + "devstorage.read_write"}, "storage.objects.patch", nil, false},
+		{[]string{auth + "devstorage.full_control"}, "storage.objects.patch", nil, true},
+		{[]string{auth + "cloud-platform.read-only"}, testObjectGet, nil, true},
+		{[]string{auth + "cloud-platform.read-only"}, "storage.objects.insert", insert, false},
+		{[]string{auth + "cloudkms", auth + "pubsub"}, testObjectGet, nil, false},
+		{[]string{"openid", auth + "userinfo.email"}, testObjectGet, nil, false},
+		{[]string{auth + "not-a-scope"}, testObjectGet, nil, false},
+		{nil, testObjectGet, nil, false},
+		{[]string{auth + "cloudkms", testCloudPlatformScope}, "storage.objects.insert", insert, true},
+	} {
+		request := call(tc.method, allowed, testProject)
+		request.Principal.Scopes = tc.scopes
+		decision, err := engine.Authorize(request, object(), tc.features)
+		if tc.allowed {
+			if err != nil {
+				t.Fatalf("%v %s: %v", tc.scopes, tc.method, err)
+			}
+			continue
+		}
+		requireScopeInsufficient(t, decision, err)
 	}
-	// Local STS mints cloudkms for the Go KMS client; alone it grants nothing.
-	read.Principal.Scopes = []string{"https://www.googleapis.com/auth/cloudkms"}
-	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "OAuth scope enforcement is unverified") {
-		t.Fatal("the cloudkms scope alone authorized a plan:", err)
+}
+
+// requireScopeInsufficient requires GCP's insufficient-scope refusal, recorded
+// as a denial before any policy check.
+func requireScopeInsufficient(t *testing.T, decision iam.Decision, err error) {
+	t.Helper()
+	s := status.Convert(err)
+	if s.Code() != codes.PermissionDenied || s.Message() != "Request had insufficient authentication scopes." || decision.Outcome != "deny" || len(decision.Checks) != 0 {
+		t.Fatalf("%v %+v", err, decision)
+	}
+	if info, ok := s.Details()[0].(*errdetails.ErrorInfo); !ok || info.GetReason() != "ACCESS_TOKEN_SCOPE_INSUFFICIENT" || info.GetDomain() != "googleapis.com" {
+		t.Fatalf("details %v", s.Details())
 	}
 }
 func TestAnonymousPublicBindingsAndInvalidCredentials(t *testing.T) {

@@ -40,7 +40,7 @@ channel = secure_authorized_channel(
 gapic = LoggingServiceV2Client(transport=LoggingServiceV2GrpcTransport(channel=channel))
 ```
 
-Scope credentials to `cloud-platform`. The client's default Logging scopes are not issued by the local token service.
+The example scopes credentials to `cloud-platform`. The client's default Logging scopes are also [issued](local-identity.md#oauth-scopes).
 
 ## Methods
 

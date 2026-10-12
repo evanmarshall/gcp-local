@@ -308,9 +308,13 @@ func (p *Provider) sealingMaterial(scope state.Scope, resource ref, sealed []byt
 	return number, material, primary, nil
 }
 
-// decodePayload decodes one base64 payload field within the size bound.
+// decodePayload decodes one base64 payload field within the size bound. Proto3
+// JSON accepts standard or URL-safe base64; gcloud (apitools) sends URL-safe.
 func decodePayload(text, field string, required bool) ([]byte, error) {
 	data, err := base64.StdEncoding.DecodeString(text)
+	if err != nil {
+		data, err = base64.URLEncoding.DecodeString(text)
+	}
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid base64 in %s", field)
 	}

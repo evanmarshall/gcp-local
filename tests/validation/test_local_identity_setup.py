@@ -36,6 +36,7 @@ def test_private_local_bundle_and_no_overwrite(tmp_path):
     assert subject == config["principals"][0]["subject_token"]
     assert subject not in result.stdout and subject not in result.stderr
     assert adc["token_url"] == "http://127.0.0.1:4566/v1/token"
+    assert adc["token_info_url"] == "http://127.0.0.1:4566/v1/introspect"
     assert adc["credential_source"]["file"] == str(destination / "subject.txt")
     assert stat.S_IMODE(destination.stat().st_mode) == 0o700
     before = {path.name: path.read_bytes() for path in destination.iterdir()}

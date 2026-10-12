@@ -215,6 +215,8 @@ def write_identity(
         "audience": "//gcp-local/identity",
         "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
         "token_url": endpoint.rstrip("/") + "/v1/token",
+        # gcloud introspects the token to name its account.
+        "token_info_url": endpoint.rstrip("/") + "/v1/introspect",
         "credential_source": {"file": str(recorded / "subject.txt")},
     }
     # The google Terraform provider refuses a universe_domain override unless

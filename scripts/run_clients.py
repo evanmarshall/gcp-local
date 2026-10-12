@@ -64,6 +64,7 @@ def write_identity(directory: Path) -> dict[str, Path]:
                 "audience": "//gcp-local/identity",
                 "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
                 "token_url": HTTP + "/v1/token",
+                "token_info_url": HTTP + "/v1/introspect",
                 "credential_source": {"file": str(subject)},
             },
         )

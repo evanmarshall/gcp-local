@@ -134,7 +134,7 @@ func TestResourceGrantAndOAuthScopeIsolation(t *testing.T) {
 	request := &pb.PublishRequest{Topic: testTopic, Messages: []*pb.PubsubMessage{{Data: []byte("explicit cross-project grant")}}}
 	c.Principal.Scopes = []string{"https://www.googleapis.com/auth/devstorage.full_control"}
 	_, err = registry.Invoke(c, request)
-	if status.Code(err) != codes.Unimplemented || b.calls != 0 {
+	if status.Code(err) != codes.PermissionDenied || b.calls != 0 {
 		t.Fatal("Storage OAuth scope permitted Pub/Sub", err)
 	}
 	c.Principal.Scopes = []string{"https://www.googleapis.com/auth/pubsub"}

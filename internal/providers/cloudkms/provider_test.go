@@ -266,6 +266,33 @@ func TestRecordedEncryptDecryptShapes(t *testing.T) {
 	h.fails(h.decrypt(ciphertext, "other"), "wrong-aad", 400, "INVALID_ARGUMENT")
 }
 
+// Proto3 JSON accepts URL-safe base64, which gcloud (apitools) sends; other
+// text is still refused by field name.
+func TestDecryptAcceptsURLSafeBase64(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	h.grant()
+	sealed := h.ok(h.encrypt(testAllowed), "encrypted")
+	ciphertext, _ := sealed["ciphertext"].(string)
+	raw, err := base64.StdEncoding.DecodeString(ciphertext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := h.ok(h.decrypt(base64.URLEncoding.EncodeToString(raw), testAad), "url-safe")
+	if opened["plaintext"] != b64(testPlaintext) {
+		t.Fatalf("decrypted = %v", opened)
+	}
+	// 0xfb 0xff encodes as "+/8=" in standard and "-_8=" in URL-safe base64.
+	if data, err := decodePayload("-_8=", "ciphertext", true); err != nil || !bytes.Equal(data, []byte{0xfb, 0xff}) {
+		t.Fatalf("url-safe payload = %v, %v", data, err)
+	}
+	refused := h.decrypt("not base64!", testAad)
+	h.fails(refused, "invalid base64", 400, "INVALID_ARGUMENT")
+	if !strings.Contains(refused.Body.String(), "Invalid base64 in ciphertext") {
+		t.Fatalf("invalid base64 message: %s", refused.Body.String())
+	}
+}
+
 func TestRecordedVersionRotationLifecycle(t *testing.T) {
 	h := newHarness(t)
 	h.key()

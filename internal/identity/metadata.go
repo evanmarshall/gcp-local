@@ -118,7 +118,7 @@ func (m *metadataResponder) token(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unsupported metadata token scope or capacity", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"access_token": value, "expires_in": lifetime, "token_type": "Bearer"})
+	writeJSON(w, 200, map[string]any{fieldAccessToken: value, "expires_in": lifetime, "token_type": tokenTypeBearer})
 }
 
 func parseMetadataQuery(r *http.Request) (string, error) {

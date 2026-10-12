@@ -21,11 +21,13 @@ import {grpc} from 'google-gax';
 const project = process.env.GOOGLE_CLOUD_PROJECT;
 const http = process.env.GCP_LOCAL_HTTP;
 const scopes = ['https://www.googleapis.com/auth/cloud-platform'];
+const deniedADC = process.env.GCP_LOCAL_DENIED_ADC;
 // The granted identity is plain ADC; the ungranted one is a second ADC file.
-// Both request cloud-platform: the local token service refuses most client
-// libraries' other default scopes (#52).
+// gRPC clients get these credentials through sslCreds, which bypasses their
+// own credential loading, so they request cloud-platform; so does
+// @googleapis/iam, which has no default scopes.
 const owner = new GoogleAuth({scopes});
-const denied = new GoogleAuth({scopes, keyFilename: process.env.GCP_LOCAL_DENIED_ADC});
+const denied = new GoogleAuth({scopes, keyFilename: deniedADC});
 
 const authClients = new Map([[owner, await owner.getClient()], [denied, await denied.getClient()]]);
 
@@ -52,8 +54,12 @@ function grpcOptions(auth) {
 // googleapis.com as an anonymous plaintext emulator unless emulatorMode is false.
 const pubsubOptions = auth => ({...grpcOptions(auth), apiEndpoint: process.env.GCP_LOCAL_GRPC_TLS, emulatorMode: false});
 
-// JSON API clients skip authentication on a custom endpoint unless told not to.
-const restOptions = auth => ({projectId: project, apiEndpoint: http, useAuthWithCustomEndpoint: true, authClient: authClients.get(auth)});
+// JSON API clients skip authentication on a custom endpoint unless told not
+// to. They load ADC themselves, with their default scopes.
+const restOptions = auth => ({
+  projectId: project, apiEndpoint: http, useAuthWithCustomEndpoint: true,
+  ...(auth === denied ? {keyFilename: deniedADC} : {}),
+});
 
 async function expectDenied(step, call) {
   try {

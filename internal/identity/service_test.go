@@ -2,7 +2,9 @@ package identity
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -47,9 +49,18 @@ func form() url.Values {
 }
 func exchange(t *testing.T, s *Service, values url.Values) (int, map[string]any) {
 	t.Helper()
+	return post(t, s, "/v1/token", values)
+}
+
+// post sends a form-encoded STS request with optional Authorization headers.
+func post(t *testing.T, s *Service, path string, values url.Values, authorization ...string) (int, map[string]any) {
+	t.Helper()
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/token", strings.NewReader(values.Encode()))
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, path, strings.NewReader(values.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, header := range authorization {
+		request.Header.Add("Authorization", header)
+	}
 	s.ServeHTTP(recorder, request)
 	var body map[string]any
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
@@ -83,7 +94,7 @@ func requireAppPrincipal(t *testing.T, s *Service, token string) gateway.Princip
 }
 
 // Client libraries using default scopes omit scope; the token gets the
-// principal's configured scopes, as the metadata server does.
+// principal's configured scopes, or cloud-platform, as the metadata server does.
 func TestExchangeWithoutScopeUsesPrincipalScopes(t *testing.T) {
 	s, _ := service(t)
 	values := form()
@@ -92,9 +103,162 @@ func TestExchangeWithoutScopeUsesPrincipalScopes(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("scope-less exchange = %d %v", code, body)
 	}
+	requireAppPrincipal(t, s, accessToken(t, body))
+}
+
+// requireScopes resolves an exchange's token and requires exactly scopes.
+func requireScopes(t *testing.T, s *Service, code int, body map[string]any, scopes ...string) {
+	t.Helper()
+	if code != http.StatusOK {
+		t.Fatalf("exchange = %d %v", code, body)
+	}
 	p, err := s.Resolve(context.Background(), accessToken(t, body))
-	if err != nil || p.State != gateway.Authenticated || p.Subject != appSubject || !slices.Contains(p.Scopes, CloudPlatform) {
-		t.Fatalf("%+v %v", p, err)
+	slices.Sort(scopes)
+	if err != nil || p.State != gateway.Authenticated || p.Subject != appSubject || !slices.Equal(p.Scopes, scopes) {
+		t.Fatalf("%+v %v, want scopes %v", p, err, scopes)
+	}
+}
+
+// requireOAuthError requires an OAuth error response with this code, error,
+// and description.
+func requireOAuthError(t *testing.T, code int, body map[string]any, wantCode int, name, description string) {
+	t.Helper()
+	if code != wantCode || body["error"] != name || body["error_description"] != description {
+		t.Fatalf("got %d %v, want %d %s %q", code, body, wantCode, name, description)
+	}
+}
+
+// Client libraries request their own default scopes; any allowlisted Google
+// OAuth scope is issued, including gcloud's identity and service scopes (#52).
+func TestExchangeIssuesAllowlistedScopes(t *testing.T) {
+	s, _ := service(t)
+	const auth = "https://www.googleapis.com/auth/"
+	for _, scopes := range [][]string{
+		{auth + "pubsub"},
+		{auth + "bigquery", CloudPlatform},
+		{auth + "spanner.data", auth + "spanner.admin", auth + "datastore", auth + "logging.write", auth + "cloud-platform.read-only", auth + "devstorage.read_write"},
+		{"openid", auth + "userinfo.email", CloudPlatform, auth + "appengine.admin", auth + "sqlservice.login", auth + "compute"},
+	} {
+		values := form()
+		values.Set("scope", strings.Join(scopes, " "))
+		code, body := exchange(t, s, values)
+		requireScopes(t, s, code, body, scopes...)
+	}
+}
+
+// An unknown scope is refused by name; an enrollment's own scopes restrict
+// what its tokens may carry.
+func TestExchangeRefusesUnknownAndUnenrolledScopes(t *testing.T) {
+	s, _ := service(t)
+	values := form()
+	values.Set("scope", CloudPlatform+" https://www.googleapis.com/auth/unsupported")
+	code, body := exchange(t, s, values)
+	requireOAuthError(t, code, body, 400, "invalid_scope", `unsupported requested scope "https://www.googleapis.com/auth/unsupported": gcp-local issues only the Google OAuth scopes listed in docs/local-identity.md`)
+
+	readOnly := "https://www.googleapis.com/auth/devstorage.read_only"
+	restricted, err := New(Config{Principals: []Enrollment{{Subject: appSubject, Project: testProjectName, SubjectToken: subjectSecret, Scopes: []string{readOnly}}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body = exchange(t, restricted, form())
+	requireOAuthError(t, code, body, 400, "invalid_scope", `scope is not enrolled for this principal "`+CloudPlatform+`"`)
+	values = form()
+	values.Del("scope")
+	code, body = exchange(t, restricted, values)
+	requireScopes(t, restricted, code, body, readOnly)
+
+	_, err = New(Config{Principals: []Enrollment{{Subject: appSubject, Project: testProjectName, SubjectToken: subjectSecret, Scopes: []string{"https://www.googleapis.com/auth/unsupported"}}}}, nil)
+	if !errors.Is(err, errConfiguredScope) {
+		t.Fatalf("configured unknown scope: %v", err)
+	}
+}
+
+// gcloud sends its OAuth client as a Basic header (#53). Client
+// authentication names the client only: the subject token picks the principal.
+func TestExchangeAcceptsAndIgnoresClientAuthentication(t *testing.T) {
+	s, _ := service(t)
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("32555940559.apps.googleusercontent.com:not-a-secret"))
+	code, body := post(t, s, "/v1/token", form(), basic)
+	requireScopes(t, s, code, body, CloudPlatform)
+	values := form()
+	values.Set("client_id", "local-client")
+	values.Set("client_secret", "not-a-secret")
+	code, body = exchange(t, s, values)
+	requireScopes(t, s, code, body, CloudPlatform)
+
+	values = form()
+	values.Set("subject_token", "secret-not-enrolled-but-client-authenticated")
+	code, body = post(t, s, "/v1/token", values, basic)
+	requireOAuthError(t, code, body, 400, "invalid_grant", "Unknown local subject credential")
+
+	const refusal = "Send OAuth client authentication as one Basic authorization header or as client_id and client_secret form fields"
+	withID := form()
+	withID.Set("client_id", "local-client")
+	secretOnly := form()
+	secretOnly.Set("client_secret", "not-a-secret")
+	for _, tc := range []struct {
+		values  url.Values
+		headers []string
+	}{
+		{form(), []string{"Bearer " + subjectSecret}},
+		{form(), []string{basic, basic}},
+		{form(), []string{"Basic not-base64!"}},
+		{form(), []string{"Basic " + base64.StdEncoding.EncodeToString([]byte(":secret"))}},
+		{withID, []string{basic}},
+		{secretOnly, nil},
+	} {
+		code, body := post(t, s, "/v1/token", tc.values, tc.headers...)
+		requireOAuthError(t, code, body, 401, "invalid_client", refusal)
+	}
+}
+
+// gcloud introspects its token, with client authentication, to name the
+// account of a non-impersonated external account.
+func TestIntrospectionNamesTheTokenPrincipal(t *testing.T) {
+	s, clock := service(t)
+	_, body := exchange(t, s, form())
+	token := accessToken(t, body)
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("client:secret"))
+	query := url.Values{"token": {token}, "token_type_hint": {AccessTokenType}}
+	code, body := post(t, s, "/v1/introspect", query, basic)
+	if code != 200 || body["active"] != true || body["username"] != "app@synthetic.iam.gserviceaccount.com" || body["scope"] != CloudPlatform {
+		t.Fatalf("introspection = %d %v", code, body)
+	}
+	requireInactive(t, s, "unknown")
+	requireInactive(t, s, subjectSecret)
+	clock.Store(600)
+	requireInactive(t, s, token)
+}
+
+// requireInactive requires introspection to report token inactive and nothing else.
+func requireInactive(t *testing.T, s *Service, token string) {
+	t.Helper()
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("client:secret"))
+	if code, body := post(t, s, "/v1/introspect", url.Values{"token": {token}}, basic); code != 200 || len(body) != 1 || body["active"] != false {
+		t.Fatalf("%s: %d %v", token, code, body)
+	}
+}
+
+// Introspection without client authentication or with unsupported fields is
+// refused.
+func TestIntrospectionRefusals(t *testing.T) {
+	s, _ := service(t)
+	_, body := exchange(t, s, form())
+	token := accessToken(t, body)
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("client:secret"))
+	code, body := post(t, s, "/v1/introspect", url.Values{"token": {token}})
+	requireOAuthError(t, code, body, 401, "invalid_client", "Token introspection requires OAuth client authentication")
+	for _, tc := range []struct {
+		values      url.Values
+		code        int
+		name, about string
+	}{
+		{url.Values{"token": {token}, "extra": {"x"}}, 400, "invalid_request", "Unsupported or repeated introspection parameter"},
+		{url.Values{"token": {token}, "token_type_hint": {"refresh_token"}}, 400, "unsupported_token_type", "Only access tokens can be introspected"},
+		{url.Values{"token_type_hint": {"access_token"}}, 400, "invalid_request", "Missing introspection token"},
+	} {
+		code, body := post(t, s, "/v1/introspect", tc.values, basic)
+		requireOAuthError(t, code, body, tc.code, tc.name, tc.about)
 	}
 }
 
@@ -139,7 +303,7 @@ func TestResolveWithoutIssuedTokenHasNoSubject(t *testing.T) {
 }
 func TestExchangeRejectsUnknownCredentialsAndUnsupportedFeatures(t *testing.T) {
 	s, _ := service(t)
-	for _, tc := range []struct{ field, value string }{{"subject_token", "secret-not-enrolled"}, {"audience", "//iam.googleapis.com/real"}, {"grant_type", "password"}, {"subject_token_type", "urn:ietf:params:oauth:token-type:jwt"}, {"scope", "https://www.googleapis.com/auth/unsupported"}, {"options", `{"userProject":"another-project"}`}} {
+	for _, tc := range []struct{ field, value string }{{"subject_token", "secret-not-enrolled"}, {"audience", "//iam.googleapis.com/real"}, {"grant_type", "password"}, {"subject_token_type", "urn:ietf:params:oauth:token-type:jwt"}, {"options", `{"userProject":"another-project"}`}} {
 		values := form()
 		values.Set(tc.field, tc.value)
 		code, body := exchange(t, s, values)
@@ -212,6 +376,13 @@ func TestMetadataIsBoundToOnePrincipal(t *testing.T) {
 		if response.Code == 200 {
 			requireMetadataSubject(t, s, response)
 		}
+	}
+	token := "/computeMetadata/v1/instance/service-accounts/default/token?scopes="
+	if response := serveMetadata(handler, token+"https://www.googleapis.com/auth/pubsub,openid", true); response.Code != 200 {
+		t.Fatalf("allowlisted metadata scopes: %d %s", response.Code, response.Body.String())
+	}
+	if response := serveMetadata(handler, token+"https://www.googleapis.com/auth/unsupported", true); response.Code != 400 || response.Body.String() != "Unsupported metadata token scope or capacity\n" {
+		t.Fatalf("unknown metadata scope: %d %s", response.Code, response.Body.String())
 	}
 	response := httptest.NewRecorder()
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)

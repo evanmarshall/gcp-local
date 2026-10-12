@@ -11,12 +11,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -24,11 +25,10 @@ const Audience = "//gcp-local/identity"
 const AccessTokenType = "urn:ietf:params:oauth:token-type:access_token" //nolint:gosec // a public token-type URN, not a credential
 const CloudPlatform = "https://www.googleapis.com/auth/cloud-platform"
 
-// DefaultScopes are the scopes an enrollment may request when it names none.
-// The Go Cloud KMS client requests cloudkms beside cloud-platform by default;
-// cloudkms alone authorizes no plan (see iam.scopeSupports).
-var DefaultScopes = []string{CloudPlatform, "https://www.googleapis.com/auth/devstorage.full_control", "https://www.googleapis.com/auth/devstorage.read_write", "https://www.googleapis.com/auth/devstorage.read_only", "https://www.googleapis.com/auth/cloudkms"}
-
+// Enrollment configures one principal. Scopes, when set, are the only scopes
+// its tokens may carry and the ones a scope-less request gets. Unset, a token
+// may carry any scope in the iam scope allowlist and a scope-less request gets
+// cloud-platform.
 type Enrollment struct {
 	Subject      string   `json:"subject"`
 	Project      string   `json:"project"`
@@ -41,7 +41,10 @@ type Config struct {
 }
 type principal struct {
 	subject, project string
-	scopes           []string
+	// scopes are issued to a request that names none. A restricted principal
+	// may request only these.
+	scopes     []string
+	restricted bool
 }
 type token struct {
 	principal principal
@@ -63,6 +66,7 @@ var (
 	errDuplicateEnrolled = errors.New("duplicate enrolled principal")
 	errConfiguredScope   = errors.New("invalid configured oauth scope")
 	errRequestedScope    = errors.New("unsupported requested scope")
+	errScopeNotEnrolled  = errors.New("scope is not enrolled for this principal")
 	errScopeRequired     = errors.New("at least one oauth scope is required")
 	errIssueToken        = errors.New("unable to issue token")
 	errTokenCapacity     = errors.New("local token capacity reached")
@@ -138,16 +142,16 @@ func (s *Service) enroll(entry Enrollment) error {
 	if _, ok := s.principals[entry.Subject]; ok {
 		return errDuplicateEnrolled
 	}
-	scopes := entry.Scopes
-	if len(scopes) == 0 {
-		scopes = DefaultScopes
+	scopes := []string{CloudPlatform}
+	if len(entry.Scopes) > 0 {
+		scopes = entry.Scopes
 	}
 	for _, scope := range scopes {
-		if !strings.HasPrefix(scope, "https://www.googleapis.com/auth/") || strings.ContainsAny(scope, " \r\n\t") {
+		if !iam.KnownScope(scope) {
 			return errConfiguredScope
 		}
 	}
-	p := principal{entry.Subject, entry.Project, append([]string(nil), scopes...)}
+	p := principal{entry.Subject, entry.Project, append([]string(nil), scopes...), len(entry.Scopes) > 0}
 	s.subjects[hash] = p
 	s.principals[p.subject] = p
 	return nil
@@ -187,26 +191,31 @@ func (s *Service) Resolve(ctx context.Context, accessToken string) (gateway.Prin
 	}
 	return gateway.Principal{State: gateway.Authenticated, Subject: entry.principal.subject, Project: entry.principal.project, Scopes: append([]string(nil), entry.scopes...)}, nil
 }
-func (s *Service) mint(p principal, requested []string) (string, int, error) {
-	allowed := map[string]bool{}
-	for _, scope := range p.scopes {
-		allowed[scope] = true
-	}
-	selected := map[string]bool{}
+
+// grantedScopes returns the sorted, de-duplicated requested scopes, refusing
+// one outside the allowlist or, for a restricted principal, its enrollment.
+func grantedScopes(p principal, requested []string) ([]string, error) {
 	for _, scope := range requested {
-		if !allowed[scope] {
-			return "", 0, errRequestedScope
+		if !iam.KnownScope(scope) {
+			return nil, fmt.Errorf("%w %.128q: gcp-local issues only the Google OAuth scopes listed in docs/local-identity.md", errRequestedScope, scope)
 		}
-		selected[scope] = true
+		if p.restricted && !slices.Contains(p.scopes, scope) {
+			return nil, fmt.Errorf("%w %.128q", errScopeNotEnrolled, scope)
+		}
 	}
-	if len(selected) == 0 {
-		return "", 0, errScopeRequired
+	if len(requested) == 0 {
+		return nil, errScopeRequired
 	}
-	scopes := make([]string, 0, len(selected))
-	for scope := range selected {
-		scopes = append(scopes, scope)
+	scopes := slices.Clone(requested)
+	slices.Sort(scopes)
+	return slices.Compact(scopes), nil
+}
+
+func (s *Service) mint(p principal, requested []string) (string, int, error) {
+	scopes, err := grantedScopes(p, requested)
+	if err != nil {
+		return "", 0, err
 	}
-	sort.Strings(scopes)
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", 0, errIssueToken

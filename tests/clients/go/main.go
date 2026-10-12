@@ -78,9 +78,10 @@ func loadEnv() (*env, error) {
 		return nil, errors.New("set GOOGLE_CLOUD_PROJECT, GCP_LOCAL_HTTP, and GCP_LOCAL_GRPC")
 	}
 	var err error
-	// The granted identity is plain ADC (GOOGLE_APPLICATION_CREDENTIALS). Both
-	// request cloud-platform: the local token service refuses most client
-	// libraries' other default scopes (#52).
+	// The granted identity is plain ADC (GOOGLE_APPLICATION_CREDENTIALS). REST
+	// clients load it themselves with their default scopes. gRPC clients take
+	// a prebuilt connection (grpcOption), which bypasses their credential
+	// loading, so these credentials pick cloud-platform.
 	if e.owner, err = credentials.DetectDefault(&credentials.DetectOptions{Scopes: []string{cloudPlatform}}); err != nil {
 		return nil, fmt.Errorf("load ADC: %w", err)
 	}
@@ -88,6 +89,12 @@ func loadEnv() (*env, error) {
 		return nil, fmt.Errorf("load the ungranted ADC: %w", err)
 	}
 	return e, nil
+}
+
+// deniedFile loads the ungranted identity the way plain ADC loads: the client
+// applies its own default scopes.
+func (e *env) deniedFile() option.ClientOption {
+	return option.WithAuthCredentialsFile(option.ExternalAccount, os.Getenv("GCP_LOCAL_DENIED_ADC"))
 }
 
 // bearer attaches a local ADC token to each gRPC call. The gateway is
