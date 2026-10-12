@@ -25,6 +25,9 @@ type ProcessConfig struct {
 	Probe       func(context.Context) error
 	// Reset removes only assets owned by this scoped instance, after Stop.
 	ResetAssets func(context.Context) error
+	// Credential optionally runs the child as another user, for backends such
+	// as PostgreSQL that refuse to run as root. Nil keeps the caller's user.
+	Credential *syscall.Credential
 }
 
 var (
@@ -69,7 +72,7 @@ func (p *Process) Start(ctx context.Context) error {
 	command := exec.Command(p.config.Command[0], p.config.Command[1:]...) //nolint:gosec,noctx // lifetime is the manager's, not the caller's
 	command.Dir = p.config.Directory
 	command.Env = p.config.Environment
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Credential: p.config.Credential}
 	// No stdout/stderr pipes: the child cannot leak credentials into diagnostics
 	// or keep Wait blocked through a descendant holding an inherited pipe open.
 	if err := command.Start(); err != nil {

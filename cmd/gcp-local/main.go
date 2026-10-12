@@ -13,6 +13,7 @@ import (
 
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
 	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
 	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
+	cloudsqlprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudsql"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
@@ -110,6 +112,7 @@ type serveOptions struct {
 	firestoreJava, firestoreJAR        string
 	spannerEmulator, spannerLibraries  string
 	redisServer                        string
+	cloudsql                           cloudSQLOptions
 	metadataPrincipal                  string
 	showVersion                        bool
 }
@@ -131,6 +134,9 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.spannerEmulator, "spanner-emulator", "", "absolute checksum-pinned Spanner emulator_main binary (Linux only)")
 	flags.StringVar(&options.spannerLibraries, "spanner-libraries", "", "absolute directory holding the emulator's pinned libstdc++.so.6")
 	flags.StringVar(&options.redisServer, "redis-server", "", "absolute redis-server built by scripts/install_redis.py (Memorystore)")
+	flags.StringVar(&options.cloudsql.postgres, "cloudsql-postgres", "", "absolute root of the checksum-pinned PostgreSQL installs (Linux only)")
+	flags.StringVar(&options.cloudsql.runAs, "cloudsql-run-as", "", "uid:gid the PostgreSQL servers run as; required when gcp-local runs as root")
+	flags.Var(connectorList{&options.cloudsql.connectors}, "cloudsql-connector", "project:region:instance,principal,loopback-address; repeatable")
 	flags.StringVar(&options.identityPath, "identity-config", "", "owner-only local identity configuration file")
 	flags.StringVar(&options.runSocket, "run-docker-socket", "", "Docker engine socket for Cloud Run containers; empty refuses launch")
 	flags.Var(processMap{&options.runProcess}, "run-process", "dockerless revision launch: image=command; repeatable; commands run as local processes")
@@ -285,7 +291,7 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	// Providers in front of an official or pinned backend binary take the
 	// backend paths from the serve options.
 	for _, assemble := range []func(context.Context, serveOptions, map[string]bool, *gateway.Registry, *core.Server, *state.Index, *iam.Engine) error{
-		assembleFirestore, assembleSpanner, assembleMemorystore,
+		assembleFirestore, assembleSpanner, assembleMemorystore, assembleCloudSQLService,
 	} {
 		if err := assemble(ctx, options, selected, registry, server, index, engine); err != nil {
 			return err
@@ -587,5 +593,61 @@ func (m processMap) Set(value string) error {
 		*m.target = map[string]string{}
 	}
 	(*m.target)[image] = command
+	return nil
+}
+
+// cloudSQLOptions carries the Cloud SQL backend and connector flags.
+type cloudSQLOptions struct {
+	postgres, runAs string
+	connectors      []string
+}
+
+// errCloudSQLFlags rejects malformed Cloud SQL flag values.
+var errCloudSQLFlags = errors.New("cloudsql-run-as expects uid:gid and cloudsql-connector expects connection,principal,address")
+
+// connectorList collects repeatable connector specifications.
+type connectorList struct{ target *[]string }
+
+func (c connectorList) String() string { return "" }
+
+func (c connectorList) Set(value string) error {
+	*c.target = append(*c.target, value)
+	return nil
+}
+
+// assembleCloudSQLService adapts assembleCloudSQL to the backend assembly loop.
+func assembleCloudSQLService(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	return assembleCloudSQL(ctx, options.cloudsql, selected, registry, server, index, engine)
+}
+
+// assembleCloudSQL registers the Cloud SQL provider and opens its connectors.
+func assembleCloudSQL(ctx context.Context, options cloudSQLOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	if !selected["cloudsql"] {
+		return nil
+	}
+	config := cloudsqlprovider.Config{Root: options.postgres}
+	if options.runAs != "" {
+		uid, gid, found := strings.Cut(options.runAs, ":")
+		user, userErr := strconv.ParseUint(uid, 10, 32)
+		group, groupErr := strconv.ParseUint(gid, 10, 32)
+		if !found || userErr != nil || groupErr != nil {
+			return errCloudSQLFlags
+		}
+		config.RunAs = &syscall.Credential{Uid: uint32(user), Gid: uint32(group)}
+	}
+	provider, err := cloudsqlprovider.New(ctx, registry, server.Backends, index, engine, config)
+	if err != nil {
+		return fmt.Errorf("register the Cloud SQL provider: %w", err)
+	}
+	for _, value := range options.connectors {
+		parts := strings.SplitN(value, ",", 3)
+		if len(parts) != 3 {
+			return errCloudSQLFlags
+		}
+		spec := cloudsqlprovider.ConnectorSpec{ConnectionName: parts[0], Principal: parts[1], Address: parts[2]}
+		if _, err := provider.OpenConnector(ctx, spec); err != nil {
+			return fmt.Errorf("open the Cloud SQL connector for %s: %w", parts[0], err)
+		}
+	}
 	return nil
 }

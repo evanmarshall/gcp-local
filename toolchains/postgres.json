@@ -1,0 +1,72 @@
+{
+  "name": "PostgreSQL server binaries for the Cloud SQL backend",
+  "distribution": "zonky embedded-postgres-binaries: self-contained PostgreSQL builds (bin/initdb, bin/pg_ctl, bin/postgres, bundled lib/ and share/) published to Maven Central; binaries are downloaded, not vendored",
+  "project": "https://github.com/zonkyio/embedded-postgres-binaries",
+  "license": "PostgreSQL License for the server; the bundled ICU, OpenSSL, libxml2, liblzma, and zlib libraries keep their own licenses inside the archive",
+  "retrieved_at": "2026-10-11",
+  "runtime_libraries": "Built against glibc; the archive bundles its other shared libraries under lib/. PostgreSQL refuses to run as root, so a root caller must configure an unprivileged uid/gid.",
+  "versions": {
+    "POSTGRES_16": {
+      "version": "16.15.0",
+      "platforms": {
+        "linux/arm64": {
+          "url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-arm64v8/16.15.0/embedded-postgres-binaries-linux-arm64v8-16.15.0.jar",
+          "size": 13744494,
+          "sha256": "f846a9989d686b7977d6eca9bc9d8b2b69e3f70c7eb60e032197d9c574a6136c",
+          "maven_sha1": "da5979f7ef7ce62a944403588cdd12beb922c19e",
+          "archive": "postgres-linux-arm_64.txz",
+          "archive_size": 13739912,
+          "archive_sha256": "e66afbea65a143aa6cda8d5a56c2aea9985d1d9649dfb29ba487363844fd1f81",
+          "binaries": {
+            "bin/initdb": "d370000e13da111995726b463ffb64b4ebfc8713c10e5214d2a95f771d78db8d",
+            "bin/postgres": "a3fc636a0a25fef762baa67ffd3f8f05b526ba2cd14236555523c368eeaeb0f3"
+          }
+        },
+        "linux/amd64": {
+          "url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/16.15.0/embedded-postgres-binaries-linux-amd64-16.15.0.jar",
+          "size": 14737226,
+          "sha256": "653abc065c682b85d3da50168fb95dc524bd85426cdec9ce3695a550ef431df2",
+          "maven_sha1": "f2f03e89deb63c0dbac75450bb713ca37c1e82b1",
+          "archive": "postgres-linux-x86_64.txz",
+          "archive_size": 14732344,
+          "archive_sha256": "bda67fe32e23b049c25db4b98132d154a4fa824c44e1bd8fd01b0236f4676c24",
+          "binaries": {
+            "bin/initdb": "b49dde31f6b284e39369dc4c8e4f55e83296da9721a05773a539deaccbb2e982",
+            "bin/postgres": "ea144a02d075d44f28ef2247ec42f8817b45bc89da6e5b5e54313270982b61f6"
+          }
+        }
+      }
+    },
+    "POSTGRES_15": {
+      "version": "15.19.0",
+      "platforms": {
+        "linux/arm64": {
+          "url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-arm64v8/15.19.0/embedded-postgres-binaries-linux-arm64v8-15.19.0.jar",
+          "size": 13686798,
+          "sha256": "95baf4bd4af31b91b3050118df59388ed0064756b556b850669e0300aa7b9911",
+          "maven_sha1": "b488907811e51fefa08ed91e7703b7a9a939bfc9",
+          "archive": "postgres-linux-arm_64.txz",
+          "archive_size": 13682236,
+          "archive_sha256": "1459772dc64a36546dcd5a5b2a1e771fc79e7346ed0575afdef39fcea346aeb9",
+          "binaries": {
+            "bin/initdb": "d9e3af7ba8cbda3c201e9963861b39a2c4dedded5996eeefb5ee3d7c48939690",
+            "bin/postgres": "bea46c1a96f495267a3bedbae03b2d3a1825f28fdbf184b78cd2016f7567d8e7"
+          }
+        },
+        "linux/amd64": {
+          "url": "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/15.19.0/embedded-postgres-binaries-linux-amd64-15.19.0.jar",
+          "size": 14629992,
+          "sha256": "95f0b66fe72d4ca66c815773c44cb1196ea38552463e89a35f18114b3ed1565f",
+          "maven_sha1": "9a29b881961610d2a60370fe472a83c9f57df888",
+          "archive": "postgres-linux-x86_64.txz",
+          "archive_size": 14625140,
+          "archive_sha256": "335beb3873692297bfa7712f09ef706114c28896e85ee83098f3aafaaa70b24a",
+          "binaries": {
+            "bin/initdb": "b446b26a90fd3599d03efa401529073e5cf7a352af6e8d2b960598489e966ff7",
+            "bin/postgres": "f7480af9888937ad8f4c4c9be62d61e84cb7062a907e016f81226229aa66e77d"
+          }
+        }
+      }
+    }
+  }
+}

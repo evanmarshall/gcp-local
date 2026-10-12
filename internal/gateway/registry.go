@@ -92,6 +92,7 @@ func (r *Registry) registerRoutes() {
 		{generated.ResourceManagerRoutes, "resourcemanager"},
 		{generated.IAMRoutes, "iam"},
 		{generated.CloudTasksRoutes, "cloudtasks"},
+		{generated.CloudSQLRoutes, "cloudsql"},
 		{generated.PubSubRestRoutes, servicePubsub},
 		{generated.RedisRoutes, "redis"},
 	}

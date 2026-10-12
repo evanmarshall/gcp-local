@@ -1,0 +1,9 @@
+{
+  "source": "https://raw.githubusercontent.com/googleapis/discovery-artifact-manager/216801337c83bb5a81d5e31ec2e62850910c8fd5/discoveries/sqladmin.v1beta4.json",
+  "revision": "20260908",
+  "retrieved_at": "2026-10-11",
+  "sha256": "b6e96d436578e5f0346775e2fa42f550daa9a528a1a211f8349023bd2c01b45a",
+  "license": "Apache-2.0",
+  "scope": "Cloud SQL Admin v1beta4 REST route descriptors for an allowlisted method slice; no claim of provider support",
+  "commit": "216801337c83bb5a81d5e31ec2e62850910c8fd5"
+}

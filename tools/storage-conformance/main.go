@@ -9,6 +9,7 @@ import (
 	"sync"
 	"fmt"
 	"context"
+	"errors"
 	"encoding/json"
 	"flag"
 	"log"
@@ -17,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -27,6 +29,7 @@ import (
 	bigqueryprovider "github.com/evanmarshall/gcp-local/internal/providers/bigquery"
 	bigtableprovider "github.com/evanmarshall/gcp-local/internal/providers/bigtable"
 	"github.com/evanmarshall/gcp-local/internal/providers/cloudkms"
+	cloudsqlprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudsql"
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/cloudtasks"
 	computeprovider "github.com/evanmarshall/gcp-local/internal/providers/compute"
 	firestoreprovider "github.com/evanmarshall/gcp-local/internal/providers/firestore"
@@ -161,6 +164,9 @@ func main() {
 	must(err)
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
 	must(err)
+	if root := os.Getenv("GCP_LOCAL_POSTGRES_ROOT"); root != "" {
+		must(addCloudSQL(root, registry, server, index, engine))
+	}
 	if *trace || *fault {
 		handler := server.HTTP.Handler
 		server.HTTP.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +241,37 @@ func (r *servingRuntime) Stop(ctx context.Context, container string) error {
 	}
 	if err := server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("stop the revision server: %w", err)
+	}
+	return nil
+}
+
+// addCloudSQL registers the Cloud SQL provider only when its PostgreSQL
+// install is supplied, granting the fixture principal roles/cloudsql.admin on
+// both projects. Registration fails until the roles/cloudsql.* snapshots are
+// recorded, so the default fixture never selects it.
+func addCloudSQL(root string, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+	config := cloudsqlprovider.Config{Root: root}
+	if uid := os.Getenv("GCP_LOCAL_POSTGRES_UID"); uid != "" {
+		user, userErr := strconv.ParseUint(uid, 10, 32)
+		group, groupErr := strconv.ParseUint(os.Getenv("GCP_LOCAL_POSTGRES_GID"), 10, 32)
+		if userErr != nil || groupErr != nil {
+			return fmt.Errorf("parse the PostgreSQL uid/gid: %w", errors.Join(userErr, groupErr))
+		}
+		config.RunAs = &syscall.Credential{Uid: uint32(user), Gid: uint32(group)}
+	}
+	if _, err := cloudsqlprovider.New(context.Background(), registry, server.Backends, index, engine, config); err != nil {
+		return fmt.Errorf("register the Cloud SQL provider: %w", err)
+	}
+	for _, project := range []string{"gcp-local-test", "synthetic-peer"} {
+		name := "//cloudresourcemanager.googleapis.com/projects/" + project
+		policy, err := engine.GetPolicy(name)
+		if err != nil {
+			return fmt.Errorf("read the fixture policy: %w", err)
+		}
+		policy.Bindings = append(policy.Bindings, iam.Binding{Role: "roles/cloudsql.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}})
+		if _, err := engine.SetPolicy(name, policy); err != nil {
+			return fmt.Errorf("grant the fixture Cloud SQL role: %w", err)
+		}
 	}
 	return nil
 }

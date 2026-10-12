@@ -31,6 +31,7 @@ gcp-local is a LocalStack-style GCP emulator. The Go runtime has shared REST/gRP
 - For Firestore, install Java 17 and `scripts/install_firestore.py` in the task guest, then run `sh scripts/check_firestore.sh`. The official emulator owns documents; the provider authorizes first and owns field configuration. See [Firestore](docs/firestore.md).
 - For Spanner, run `python3 scripts/install_spanner.py` in the Linux task guest, then `sh scripts/check_spanner.sh`. The official emulator is Linux-only; see [Spanner](docs/spanner.md).
 - For Memorystore, run `python3 scripts/install_redis.py` in the Linux task guest, then `sh scripts/check_redis.sh`. Its IAM plans need recorded `roles/redis.*` snapshots; see [Memorystore](docs/memorystore.md).
+- For Cloud SQL, run `python3 scripts/install_postgres.py` in the Linux task guest, then `sh scripts/check_cloudsql.sh`. It needs the `roles/cloudsql.*` snapshots and skips until they are recorded; see [Cloud SQL](docs/cloudsql.md).
 - Run `sh scripts/check_terraform.sh` inside moo/Linux for the pinned acceptance slice after installing `scripts/install_terraform.py`. It includes a negative control and never executes Terraform against GCP.
 - For packaged setup changes, run `.venv-tools/bin/python scripts/smoke_environment.py` with Docker and pinned SDK dependencies. Read [the quickstart](docs/quickstart.md); reset/down apply only to the selected private environment directory.
 - Update the relevant coverage notes when adding behavior. Run the checks appropriate to the change and report what was actually verified.
