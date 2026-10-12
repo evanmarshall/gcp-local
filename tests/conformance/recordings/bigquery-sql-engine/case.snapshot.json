@@ -1,0 +1,861 @@
+{
+  "bigquery-sql-engine": {
+    "recorded-date": "12-10-2026, 08:32:37",
+    "recorded-content": {
+      "create-table": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "queryId",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [],
+        "schema": {
+          "fields": [
+            {
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "name": "active",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "statementType": "CREATE_TABLE",
+        "totalRows": null
+      },
+      "insert": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "dmlStats",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "numDmlAffectedRows",
+          "queryId",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": "3",
+        "rows": [],
+        "schema": {
+          "fields": [
+            {
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "name": "active",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "statementType": "INSERT",
+        "totalRows": null
+      },
+      "create-table-as-select": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "queryId",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [],
+        "schema": {
+          "fields": [
+            {
+              "name": "person",
+              "type": "INTEGER"
+            },
+            {
+              "name": "total",
+              "type": "FLOAT"
+            }
+          ]
+        },
+        "statementType": "CREATE_TABLE_AS_SELECT",
+        "totalRows": null
+      },
+      "create-updates": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "queryId",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [],
+        "schema": {
+          "fields": [
+            {
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "CREATE_TABLE_AS_SELECT",
+        "totalRows": null
+      },
+      "ddl-table": {
+        "fields": [
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "type"
+        ],
+        "http_status": 200,
+        "schema": {
+          "fields": [
+            {
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "name": "active",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "type": "TABLE"
+      },
+      "join-aggregate": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "ada",
+            "2",
+            "15.0"
+          ],
+          [
+            "linus",
+            "1",
+            "7.0"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "n",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "total",
+              "type": "FLOAT"
+            }
+          ]
+        },
+        "statementType": "SELECT",
+        "totalRows": "2"
+      },
+      "cte-subquery-functions": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "ADA",
+            "3"
+          ],
+          [
+            "LINUS",
+            "5"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "upper_name",
+              "type": "STRING"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "len",
+              "type": "INTEGER"
+            }
+          ]
+        },
+        "statementType": "SELECT",
+        "totalRows": "2"
+      },
+      "named-parameters": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "linus"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "SELECT",
+        "totalRows": "1"
+      },
+      "positional-parameters": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "ada"
+          ],
+          [
+            "grace"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "SELECT",
+        "totalRows": "2"
+      },
+      "default-dataset": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "3"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "n",
+              "type": "INTEGER"
+            }
+          ]
+        },
+        "statementType": "SELECT",
+        "totalRows": "1"
+      },
+      "script": {
+        "fields": [
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "grace"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "SCRIPT",
+        "totalRows": "1"
+      },
+      "update": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "dmlStats",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "numDmlAffectedRows",
+          "queryId",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": "1",
+        "rows": [],
+        "schema": {
+          "fields": [
+            {
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "name": "active",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "statementType": "UPDATE",
+        "totalRows": null
+      },
+      "delete": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "dmlStats",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "numDmlAffectedRows",
+          "queryId",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": "1",
+        "rows": [],
+        "schema": {
+          "fields": [
+            {
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "name": "active",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "statementType": "DELETE",
+        "totalRows": null
+      },
+      "merge": {
+        "http_status": 200,
+        "statementType": "MERGE"
+      },
+      "rows-after-dml": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "1",
+            "ada!",
+            "true"
+          ],
+          [
+            "2",
+            "grace",
+            "true"
+          ],
+          [
+            "4",
+            "ken",
+            "false"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "id",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "active",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "statementType": "SELECT",
+        "totalRows": "3"
+      },
+      "create-view": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "queryId",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [],
+        "schema": {
+          "fields": [
+            {
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "CREATE_VIEW",
+        "totalRows": null
+      },
+      "query-view": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "ada!"
+          ],
+          [
+            "grace"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "SELECT",
+        "totalRows": "2"
+      },
+      "tabledata": {
+        "http_status": 200,
+        "rows": [
+          [
+            "1",
+            "ada!",
+            "true"
+          ],
+          [
+            "2",
+            "grace",
+            "true"
+          ],
+          [
+            "4",
+            "ken",
+            "false"
+          ]
+        ]
+      },
+      "reader-granted": {
+        "http_status": 200
+      },
+      "reader-reads-its-table": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "ada!"
+          ],
+          [
+            "grace"
+          ],
+          [
+            "ken"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "SELECT",
+        "totalRows": "3"
+      },
+      "reader-denied-second-table": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "reader-denied-dml": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-identity-query": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "missing-table": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "unknown-column": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "drop-view": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "queryId",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [],
+        "schema": null,
+        "statementType": "DROP_VIEW",
+        "totalRows": null
+      },
+      "drop-table": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "queryId",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "numDmlAffectedRows": null,
+        "rows": [],
+        "schema": null,
+        "statementType": "DROP_TABLE",
+        "totalRows": null
+      },
+      "dropped-table": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "dataset_absent": true
+      }
+    }
+  }
+}

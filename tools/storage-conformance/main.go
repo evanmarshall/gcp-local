@@ -52,6 +52,7 @@ import (
 )
 
 func main() {
+	bigqueryprovider.RequireUTC()
 	trace := flag.Bool("trace", false, "Log request methods, paths, query parameter names (never values), and status codes")
 	fault := flag.Bool("fault-rpo", false, "Inject incorrect bucket RPO to verify acceptance-test failures")
 	flag.Parse()

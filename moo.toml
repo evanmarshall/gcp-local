@@ -7,7 +7,7 @@ lockfiles = ["requirements-tools.txt", "requirements-cloud.txt", "requirements-s
 
 [resources]
 cpus = 2
-memory = "4GiB"
+memory = "8GiB"
 
 [network]
 # Development HTTP forwarding; run the core with -listen 0.0.0.0:8080.

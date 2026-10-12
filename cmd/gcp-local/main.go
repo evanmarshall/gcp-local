@@ -506,6 +506,7 @@ func bindListeners(ctx context.Context, options serveOptions, server *core.Serve
 }
 
 func main() {
+	bigqueryprovider.RequireUTC()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	stop()

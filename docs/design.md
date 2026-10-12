@@ -47,9 +47,9 @@ Each service is a package under `internal/providers/`. A provider implements GCP
 | Backend kind | Examples | Who owns the data |
 | --- | --- | --- |
 | Official emulator, child process | Pub/Sub, Firestore, Spanner | Emulator owns messages and documents; provider owns what the emulator lacks (push config, field config) |
-| Embedded emulator code | Storage (fake-gcs-server), Bigtable (bttest) | Backend owns object or row bytes |
+| Embedded emulator code | Storage (fake-gcs-server), Bigtable (bttest), BigQuery (googlesqlite) | Backend owns object, row, or table bytes; BigQuery's provider owns datasets and table metadata |
 | Real server per instance | Cloud SQL (PostgreSQL, MySQL), Memorystore (Redis) | Server owns the database; provider owns instance metadata |
-| In-process model | Secret Manager, KMS, BigQuery, Cloud Tasks, Compute, and others | Provider |
+| In-process model | Secret Manager, KMS, Cloud Tasks, Compute, and others | Provider |
 
 Rules:
 

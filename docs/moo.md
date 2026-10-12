@@ -10,6 +10,7 @@ sh scripts/setup_moo.sh
 
 - Reuses an installed moo if `moo doctor` passes. Otherwise downloads the upstream v0.3.1 installer, checks its SHA-256, and installs it. Needs Homebrew. An unhealthy install fails instead of being replaced.
 - Provisions a `base` machine with Python 3.11, Git, a C compiler, iproute2, the pinned Go toolchain, and `requirements-tools.txt` plus `requirements-sdk.txt`. No GCP credentials or services. The provisioner runs the tooling tests before saving.
+- Machines get 2 CPUs and 8 GiB (`moo.toml`): compiling the BigQuery engine's GoogleSQL package peaks at 5.7 GiB, or 4.2 GiB with `GOGC=25`. The guest disk is 7.8 GB and one core build caches about 1.6 GB; if it fills, put the cache in memory with `GOCACHE=/dev/shm/go-build GOGC=25`. Machines made before this keep 2 GiB and can't build the core.
 - Rerunning setup reprovisions the named machine. To change the recipe, provision a new name (`sh scripts/setup_moo.sh base-v2`); existing machines keep their image.
 - Reviewed upstream source: [6ca60ff](https://github.com/heyito/moo/tree/6ca60ffd23564c740c39d8f21d612bbe6cb63ae9). `moo doctor` doesn't attest the installed binary's version.
 

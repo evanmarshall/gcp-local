@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -15,12 +16,14 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// Provider owns the BigQuery control plane and row storage.
+// Provider owns datasets, table metadata, and jobs; each project's engine
+// owns its tables' columns and rows.
 type Provider struct {
-	index  *state.Index
-	engine *iam.Engine
-	scopes *state.Store[scopeState]
-	clock  func() time.Time
+	manager *backend.Manager
+	index   *state.Index
+	engine  *iam.Engine
+	scopes  *state.Store[scopeState]
+	clock   func() time.Time
 }
 
 // New registers the BigQuery provider.
@@ -35,7 +38,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 		return nil, fmt.Errorf("bigquery related permissions: %w", err)
 	}
 	p := &Provider{
-		index: index, engine: engine,
+		manager: manager, index: index, engine: engine,
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
@@ -50,11 +53,15 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	return p, nil
 }
 
-// registerBackend attaches the in-memory BigQuery backend and its reset hook.
+// registerBackend attaches one GoogleSQL engine per project. Reset stops the
+// engine, discarding its tables, before clearing datasets, jobs, policies,
+// and index entries for that project.
 func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine, index *state.Index) error {
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
-		New:      func(state.Scope) (backend.Backend, error) { return emptyBackend{}, nil },
+		New: func(scope state.Scope) (backend.Backend, error) {
+			return &engineBackend{project: scope.Project}, nil
+		},
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
 				return err
@@ -69,15 +76,7 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 	return nil
 }
 
-// emptyBackend satisfies the backend contract for an in-memory provider.
-type emptyBackend struct{}
-
-func (emptyBackend) Start(context.Context) error { return nil }
-func (emptyBackend) Ready(context.Context) error { return nil }
-func (emptyBackend) Stop(context.Context) error  { return nil }
-func (emptyBackend) Reset(context.Context) error { return nil }
-
-// Reset clears the scope's datasets, tables, and rows.
+// Reset clears the scope's datasets, table metadata, and jobs.
 func (p *Provider) Reset(scope state.Scope) error {
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		s.reset()
@@ -100,29 +99,63 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	authorized := call
 	authorized.Method = p.ownJobCheck(call, request, scope)
-	if _, indexed := p.index.Get(target.Name); !indexed {
-		// A deleted or absent dataset still reads 404 through the project
-		// anchor: the project's policies govern resources that do not exist.
-		// An indexed target never falls back, so an engine refusal such as an
-		// unsupported policy stays closed.
-		target = iam.Target{Name: provider.ProjectResource(scope.Project)}
-	}
-	decision, authorizeErr := p.engine.Authorize(authorized, target, nil)
+	decision, resource, authorizeErr := p.authorizeAt(authorized, target.Name, scope.Project)
 	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
+		if provider.Unverified(authorizeErr) {
 			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
 		}
-		return provider.Denied(decision, target.Name), nil
+		return provider.Denied(decision, resource), nil
 	}
-	call.Resource = target.Name
+	call.Resource = resource
 	call.Location = scope.Location
-	response, err := p.execute(call, request, scope, target)
+	response, err := p.execute(call, request, scope)
 	if err != nil {
 		return nil, err
 	}
 	stampDecision(response, decision.ID)
 	return response, nil
+}
+
+// authorizeAt authorizes one call against a resource. A resource missing
+// from the index (absent, or deleted while the request ran) authorizes at its
+// parent instead, table then dataset then project, so absence reads 404
+// through the policies that govern it. An indexed resource never falls back:
+// an engine refusal such as an unsupported policy stays closed. A resource
+// deleted and recreated during the check is checked again, a bounded number
+// of times.
+func (p *Provider) authorizeAt(call gateway.Call, resource, project string) (iam.Decision, string, error) {
+	_, wasIndexed := p.index.Get(resource)
+	for attempt := 0; ; attempt++ {
+		decision, err := p.engine.Authorize(call, iam.Target{Name: resource}, nil)
+		_, indexed := p.index.Get(resource)
+		parent := parentResource(resource, project)
+		switch {
+		case !provider.Unverified(err) || attempt >= maxAuthorizeAttempts:
+			return decision, resource, err //nolint:wrapcheck // callers wrap or render the refusal
+		case indexed && wasIndexed:
+			// Indexed throughout: the engine's own refusal.
+			return decision, resource, err //nolint:wrapcheck // callers wrap or render the refusal
+		case indexed:
+			// Recreated during the check: check it again.
+			wasIndexed = true
+		case parent != resource:
+			resource = parent
+			_, wasIndexed = p.index.Get(resource)
+		default:
+			return decision, resource, err //nolint:wrapcheck // callers wrap or render the refusal
+		}
+	}
+}
+
+// maxAuthorizeAttempts bounds re-checks of a resource racing a delete.
+const maxAuthorizeAttempts = 4
+
+// parentResource names a table's dataset, or a dataset's project.
+func parentResource(resource, project string) string {
+	if dataset, _, isTable := strings.Cut(resource, "/tables/"); isTable {
+		return dataset
+	}
+	return provider.ProjectResource(project)
 }
 
 // stampDecision names the call's IAM decision on its response, unless a

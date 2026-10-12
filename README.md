@@ -61,7 +61,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Cloud Logging](docs/logging.md) | gcp-local | Write, filter, and delete log entries over REST and gRPC |
 | [Vertex AI](docs/vertexai.md) | Deterministic stub or Ollama | Generate, stream, count tokens, embed; answers are not from Gemini |
 | [Firestore](docs/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners |
-| [BigQuery](docs/bigquery.md) | gcp-local | Streaming inserts, simple SELECT |
+| [BigQuery](docs/bigquery.md) | GoogleSQL engine | GoogleSQL queries, DML, DDL, parameters, streaming inserts |
 | [Cloud SQL for PostgreSQL and MySQL](docs/cloudsql.md) | Real PostgreSQL or MySQL | PostgreSQL and MySQL clients on `127.0.0.1` with a user password |
 | [Memorystore for Redis](docs/memorystore.md) | Real Redis | Redis clients on the reported port, with AUTH |
 | [Cloud Run](docs/cloudrun.md) | Local processes or Docker | Your own images with `--cloud-run-docker`; ID-token invocation; admin API over REST and gRPC |

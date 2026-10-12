@@ -160,17 +160,6 @@ DISTINCT_PER_PROVIDER = {
     "emulator.Reset": "restarts the package's own emulator",
     "emulator.client": "returns the package's own emulator connection",
     "fleet.Reset": "stops the package's own server fleet",
-    **{
-        f"{package}.{name}": "an in-flight rewrite owns this package; switch to provider.NoBackend"
-        for package in ("bigquery",)
-        for name in (
-            "emptyBackend",
-            "emptyBackend.Start",
-            "emptyBackend.Ready",
-            "emptyBackend.Stop",
-            "emptyBackend.Reset",
-        )
-    },
 }
 
 
