@@ -79,6 +79,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | storage | Node `@google-cloud/storage` 8.4.0 | JSON REST | `tests/clients/node` |
 | storage | Python `google-cloud-storage` 3.10.1 | JSON REST | `tests/clients/python` |
 | pubsub | Go `cloud.google.com/go/pubsub/v2` 2.7.0 | gRPC | `tests/clients/go` |
+| pubsub | Node `@google-cloud/pubsub` 6.2.0 | gRPC | `tests/clients/node` |
 | pubsub | Python `google-cloud-pubsub` 2.42.0 | gRPC | `tests/clients/python` |
 | firestore | Go `cloud.google.com/go/firestore` 1.22.0 | gRPC | `tests/clients/go` |
 | firestore | Python `google-cloud-firestore` 2.34.1 | gRPC | `tests/clients/python` |
@@ -108,7 +109,6 @@ These matrix pairs fail today. `sh scripts/check_clients.sh` fails if one starts
 | --- | --- | --- | --- | --- |
 | storage | `gcloud` 588.0.0 | JSON REST | bucket create refuses the enableObjectRetention query option | [#65](https://github.com/evanmarshall/gcp-local/issues/65) |
 | storage | `rclone` 1.75.2 | JSON REST | bucket create without publicAccessPrevention and softDeletePolicy (the GCP defaults) is refused | [#64](https://github.com/evanmarshall/gcp-local/issues/64) |
-| pubsub | Node `@google-cloud/pubsub` 6.2.0 | gRPC | StreamingPull refuses protocol_version | [#55](https://github.com/evanmarshall/gcp-local/issues/55) |
 | pubsub | `gcloud` 588.0.0 | REST | REST publish and pull are not served | [#66](https://github.com/evanmarshall/gcp-local/issues/66) |
 | spanner | Go `cloud.google.com/go/spanner` 1.95.1 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |
 | spanner | Node `@google-cloud/spanner` 9.0.0 | gRPC | no admin gRPC listener | [#61](https://github.com/evanmarshall/gcp-local/issues/61) |

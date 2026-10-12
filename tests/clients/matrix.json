@@ -99,10 +99,7 @@
       "client": "node",
       "package": "@google-cloud/pubsub",
       "transport": "gRPC",
-      "expect": "xfail",
-      "issue": 55,
-      "gap": "StreamingPull refuses protocol_version",
-      "match": "field protocol_version"
+      "expect": "pass"
     },
     {
       "service": "pubsub",
