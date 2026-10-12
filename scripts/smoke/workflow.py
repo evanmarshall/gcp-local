@@ -277,7 +277,7 @@ def install_tools() -> tuple[Path, str]:
     """Build the core and install the pinned Pub/Sub jar and Terraform."""
     for installer in (["scripts/install/go.py"], ["scripts/install/emulator_jar.py", "pubsub"],
                       ["scripts/install/terraform.py"]):
-        subprocess.run([sys.executable, str(REPO / "scripts" / installer[0]), *installer[1:]],
+        subprocess.run([sys.executable, str(REPO / installer[0]), *installer[1:]],
                        check=True, capture_output=True, text=True)
     binary = REPO / "bin" / "gcp-local"
     subprocess.run(
