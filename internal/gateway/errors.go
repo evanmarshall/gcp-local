@@ -19,8 +19,11 @@ func normalizeError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return status.FromContextError(err).Err()
 	}
-	if _, ok := status.FromError(err); ok {
-		return err
+	// A provider may wrap a status for its own context; clients get the
+	// innermost status, not the internal wrapping text.
+	var wrapped interface{ GRPCStatus() *status.Status }
+	if errors.As(err, &wrapped) {
+		return wrapped.GRPCStatus().Err()
 	}
 	// Unexpected backend failures can contain credentials or resource payloads.
 	return status.Error(codes.Internal, "Internal provider error")
