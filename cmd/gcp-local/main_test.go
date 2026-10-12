@@ -43,3 +43,17 @@ func TestBindFailureIsReported(t *testing.T) {
 		t.Fatalf("code %d", code)
 	}
 }
+
+func TestRunBaseURLNamesWildcardListenersByLoopback(t *testing.T) {
+	for listen, want := range map[string]string{
+		"0.0.0.0:4566":   "http://127.0.0.1:4566",
+		":14566":         "http://127.0.0.1:14566",
+		"[::]:4566":      "http://127.0.0.1:4566",
+		"127.0.0.1:9298": "http://127.0.0.1:9298",
+		"[::1]:9298":     "http://[::1]:9298",
+	} {
+		if got := runBaseURL(listen); got != want {
+			t.Fatalf("%s: got %s, want %s", listen, got, want)
+		}
+	}
+}

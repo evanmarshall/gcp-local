@@ -269,7 +269,14 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 			return fmt.Errorf("register the Storage provider: %w", err)
 		}
 	}
-	if err := assemblePubSub(options, selected, registry, server, index, engine, identities); err != nil {
+	tokens, err := assembleIDTokens(selected, index, engine, identities)
+	if err != nil {
+		return err
+	}
+	if err := assemblePubSub(options, selected, registry, server, index, engine, tokens); err != nil {
+		return err
+	}
+	if err := assembleCloudTasks(ctx, selected, registry, server, index, engine, tokens); err != nil {
 		return err
 	}
 	if err := assembleFirestore(ctx, options, selected, registry, server, index, engine); err != nil {
@@ -284,7 +291,6 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	}{
 		{"compute", assembleCompute},
 		{"secretmanager", assembleSecretManager},
-		{"cloudtasks", assembleCloudTasks},
 		{"cloudkms", assembleCloudKMS},
 		{"bigquery", assembleBigQuery},
 		{"bigtable", assembleBigtable},
@@ -299,16 +305,29 @@ func assembleServices(ctx context.Context, options serveOptions, selected map[st
 	return assembleRun(ctx, options, selected, registry, server, index, engine, identities)
 }
 
-// assemblePubSub registers the Pub/Sub provider and its ID-token key.
-func assemblePubSub(options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service) error {
-	if !selected["pubsub"] {
-		return nil
+// assembleIDTokens builds the one local ID-token key set that Pub/Sub push and
+// Cloud Tasks mint with and Cloud Run invocation verifies. The minting method
+// registers a single permission plan, so the key set is shared, not per
+// provider.
+func assembleIDTokens(selected map[string]bool, index *state.Index, engine *iam.Engine, identities *identity.Service) (*identity.IDTokens, error) {
+	if !selected["pubsub"] && !selected["cloudtasks"] {
+		return nil, nil //nolint:nilnil // no minting provider selected
 	}
 	tokens, err := identity.NewIDTokens(engine, index)
 	if err != nil {
-		return fmt.Errorf("mint the ID-token keys: %w", err)
+		return nil, fmt.Errorf("mint the ID-token keys: %w", err)
 	}
-	identities.IDTokens = tokens
+	if identities != nil {
+		identities.IDTokens = tokens
+	}
+	return tokens, nil
+}
+
+// assemblePubSub registers the Pub/Sub provider with the shared ID-token keys.
+func assemblePubSub(options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, tokens *identity.IDTokens) error {
+	if !selected["pubsub"] {
+		return nil
+	}
 	config := pubsub.Config{Java: options.pubsubJava, JAR: options.pubsubJAR, IDTokens: tokens}
 	if _, err := pubsub.New(registry, server.Backends, index, engine, config); err != nil {
 		return fmt.Errorf("register the Pub/Sub provider: %w", err)
@@ -341,13 +360,9 @@ func assembleSecretManager(ctx context.Context, selected map[string]bool, regist
 }
 
 // assembleCloudTasks registers the Cloud Tasks provider and its dispatcher.
-func assembleCloudTasks(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine) error {
+func assembleCloudTasks(ctx context.Context, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, tokens *identity.IDTokens) error {
 	if !selected["cloudtasks"] {
 		return nil
-	}
-	tokens, err := identity.NewIDTokens(engine, index)
-	if err != nil {
-		return fmt.Errorf("mint the cloudtasks ID-token keys: %w", err)
 	}
 	if _, err := cloudtasksprovider.New(ctx, cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine); err != nil {
 		return fmt.Errorf("register the Cloud Tasks provider: %w", err)
@@ -462,7 +477,7 @@ func assembleRun(ctx context.Context, options serveOptions, selected map[string]
 		}
 		runtime = runprovider.NewProcessRuntime(commands)
 	}
-	config := runprovider.Config{BaseURL: "http://" + options.listen}
+	config := runprovider.Config{BaseURL: runBaseURL(options.listen)}
 	if identities != nil {
 		// Workload identity: each revision's configured service account gets
 		// its own metadata handler bound on the container-reachable bridge
@@ -478,6 +493,22 @@ func assembleRun(ctx context.Context, options serveOptions, selected map[string]
 	}
 	server.Run = provider.Invocation()
 	return nil
+}
+
+// runBaseURL returns the base of local service URIs for the HTTP listener.
+// A wildcard listener (the packaged container binds 0.0.0.0) is named by its
+// loopback address: the push agent and revision processes dial service URIs
+// from the core's own network namespace, and the packaged environment
+// publishes the same port on host loopback.
+func runBaseURL(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "http://" + listen
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 // bindListeners binds HTTP, gRPC, and optionally the metadata listener. Any
