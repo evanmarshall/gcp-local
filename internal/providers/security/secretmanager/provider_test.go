@@ -331,3 +331,42 @@ func checkRecordedAccess(t *testing.T, h *harness, secret string) {
 		t.Fatalf("destroyed access = %d %s", destroyed.Code, destroyed.Body.String())
 	}
 }
+
+// TestVersionsOrderNumerically pins numeric version order past nine
+// versions: list is newest-first and latest is the highest enabled number.
+func TestVersionsOrderNumerically(t *testing.T) {
+	h := newHarness(t)
+	h.create(replicationAuto())
+	for range 11 {
+		h.addVersion(t, "payload")
+	}
+	secret := "/v1/projects/" + testProject + "/secrets/" + testSecret
+	recorder := h.invoke(http.MethodGet, secret+"/versions/latest", nil, "actor")
+	if recorder.Code != 200 || !strings.HasSuffix(decodeName(t, recorder), "/versions/11") {
+		t.Fatalf("latest = %d %s", recorder.Code, recorder.Body.String())
+	}
+	var listing struct {
+		Versions []struct {
+			Name string `json:"name"`
+		} `json:"versions"`
+	}
+	if err := json.Unmarshal(h.invoke(http.MethodGet, secret+"/versions", nil, "actor").Body.Bytes(), &listing); err != nil {
+		t.Fatalf("decode listing: %v", err)
+	}
+	if len(listing.Versions) != 11 || !strings.HasSuffix(listing.Versions[0].Name, "/versions/11") ||
+		!strings.HasSuffix(listing.Versions[1].Name, "/versions/10") || !strings.HasSuffix(listing.Versions[10].Name, "/versions/1") {
+		t.Fatalf("versions are not newest-first: %v", listing.Versions)
+	}
+}
+
+// decodeName reads the name field of one response body.
+func decodeName(t *testing.T, recorder *httptest.ResponseRecorder) string {
+	t.Helper()
+	var document struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &document); err != nil {
+		t.Fatalf("decode name: %v", err)
+	}
+	return document.Name
+}

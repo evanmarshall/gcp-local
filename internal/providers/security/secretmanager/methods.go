@@ -1,11 +1,13 @@
 package secretmanager
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -159,18 +161,20 @@ func versionOf(record *secretRecord, id string) *versionRecord {
 	return nil
 }
 
-// sortedVersions returns the secret's versions newest-first.
+// sortedVersions returns the secret's versions newest-first. Version ids are
+// decimal integers assigned in order, so they compare as numbers, not text.
 func sortedVersions(record *secretRecord) []*versionRecord {
-	numbers := make([]string, 0, len(record.Versions))
-	for number := range record.Versions {
-		numbers = append(numbers, number)
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(numbers)))
-	ordered := make([]*versionRecord, 0, len(numbers))
-	for _, number := range numbers {
-		ordered = append(ordered, record.Versions[number])
-	}
+	ordered := slices.Collect(maps.Values(record.Versions))
+	slices.SortFunc(ordered, func(a, b *versionRecord) int {
+		return cmp.Compare(versionNumber(b.Number), versionNumber(a.Number))
+	})
 	return ordered
+}
+
+// versionNumber parses a stored version id; nextVersion assigns only integers.
+func versionNumber(id string) int {
+	number, _ := strconv.Atoi(id)
+	return number
 }
 
 // create stores one secret.
@@ -359,9 +363,7 @@ func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scop
 func nextVersion(record *secretRecord) string {
 	highest := 0
 	for number := range record.Versions {
-		if parsed, err := strconv.Atoi(number); err == nil && parsed > highest {
-			highest = parsed
-		}
+		highest = max(highest, versionNumber(number))
 	}
 	return strconv.Itoa(highest + 1)
 }
