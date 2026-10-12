@@ -1,0 +1,61 @@
+{
+  "storage-resumable-signed-url": {
+    "recorded-date": "12-10-2026, 05:38:03",
+    "recorded-content": {
+      "initiate": {
+        "has_session_uri": true,
+        "status": 200
+      },
+      "first-chunk": {
+        "range": "bytes=0-262143",
+        "status": 308
+      },
+      "status-query": {
+        "range": "bytes=0-262143",
+        "status": 308
+      },
+      "final-chunk": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "md5Hash": "9Pr2wgoVVYIl9dKc8Tyj9A==",
+        "metageneration": "<metageneration-1>",
+        "name": "resumable.bin",
+        "size": "524288",
+        "status": 200
+      },
+      "cancel": {
+        "status": 499
+      },
+      "after-cancel": {
+        "status": 499
+      },
+      "signed-put": {
+        "has_generation": true,
+        "status": 200
+      },
+      "signed-get": {
+        "body_matches": true,
+        "content_type": "text/plain",
+        "status": 200
+      },
+      "tampered": {
+        "code": "SignatureDoesNotMatch",
+        "status": 403
+      },
+      "expired": {
+        "code": "ExpiredToken",
+        "status": 400
+      },
+      "wrong-method": {
+        "code": "SignatureDoesNotMatch",
+        "status": 403
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

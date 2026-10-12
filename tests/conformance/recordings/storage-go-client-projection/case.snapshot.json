@@ -1,0 +1,65 @@
+{
+  "storage-go-client-projection": {
+    "recorded-date": "12-10-2026, 05:36:37",
+    "recorded-content": {
+      "bucket-get": {
+        "has_acl": false,
+        "has_default_object_acl": false,
+        "has_owner": false,
+        "status": 200
+      },
+      "bucket-list": {
+        "count": 1,
+        "has_acl": false,
+        "has_default_object_acl": false,
+        "has_owner": false,
+        "has_unreachable": false,
+        "status": 200
+      },
+      "bucket-patch": {
+        "has_acl": false,
+        "has_default_object_acl": false,
+        "has_owner": false,
+        "label": "projection-full",
+        "status": 200
+      },
+      "object-get": {
+        "bucket": "<bucket>",
+        "contentType": "application/octet-stream",
+        "etag": "<etag-1>",
+        "generation": "<generation-1>",
+        "has_acl": false,
+        "has_default_object_acl": false,
+        "has_owner": false,
+        "md5Hash": "rRUT6/m5QjSDdArnevEXzg==",
+        "metageneration": "<metageneration-1>",
+        "name": "go-object.txt",
+        "size": "17",
+        "status": 200
+      },
+      "object-list": {
+        "has_acl": false,
+        "has_default_object_acl": false,
+        "has_owner": false,
+        "names": [
+          "go-object.txt"
+        ],
+        "status": 200
+      },
+      "object-patch": {
+        "content_type": "text/plain",
+        "status": 200
+      },
+      "unknown-option": {
+        "status": 200
+      },
+      "invalid-projection": {
+        "status": 400
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

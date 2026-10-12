@@ -1,0 +1,49 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-12T05:36:37.229122+00:00",
+  "scenario": {
+    "id": "storage-go-client-projection",
+    "service": "storage",
+    "transport": "rest-json-v1",
+    "revision": "716548cd2859a00a52109cc24fd9cd048c6ad52b09d84b23b489cf74a0ab64ba",
+    "versions": {
+      "sdk": "cloud.google.com/go/storage/1.65.0 request shapes",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "7ed50db6c04fdfbafbe10dd99e08635382ed2f9dffb5a84e8a591af5c5b2a7b7",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/storage.py": "18b25751e765c562713bf2ead41e42b9d3ead111af62a2b67f771eb670ef70be",
+      "gcp_validation/normalization.py": "0ef80b778393fc23ccaad1544e6ac2d08c634571f303e10677b466060a874a54",
+      "gcp_validation/sandbox.py": "82bb1e5f2edaa98c63b0f2679df8ec57cce97d4426a776a3d1c5ad893ffbec78",
+      "gcp_validation/federation.py": "7397c09b089388b86b872dd1acbcc7774524bbca57bef1b98a71e1b20ae0e701",
+      "gcp_validation/storage_clients.py": "389800cd83f0ffb1232d1c4e930b48185231a87f543aea286e55a809c3c0badc",
+      "tests/conformance/conftest.py": "9da3bff9d53aedf7b3ebc72a5436d4a67e93bcab9a57817d0c0fad4e1d47e9ce"
+    },
+    "scope": {
+      "services": [
+        "storage"
+      ],
+      "region": "us-central1",
+      "max_buckets": 1,
+      "max_objects": 10,
+      "max_object_bytes": 1048576,
+      "cleanup_required": true,
+      "identities": [
+        "allowed",
+        "denied",
+        "fixture",
+        "peer"
+      ]
+    }
+  }
+}
