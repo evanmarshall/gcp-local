@@ -110,6 +110,9 @@ jobs:
       - name: Provision and run the Pub/Sub push to Cloud Run worker to Storage workflow with Terraform
         run: |
           GCP_LOCAL_JAVA=$(readlink -f "$(command -v java)") python scripts/smoke_workflow.py
+      - name: Show the core log, including revision output
+        if: failure()
+        run: tail -n 200 /tmp/gcp-local-core-*.log
 
   cloudrun-acceptance:
     runs-on: ubuntu-latest
