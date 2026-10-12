@@ -92,7 +92,7 @@ These matrix pairs fail today. `sh scripts/check_clients.sh` fails if one starts
 | Service | Client | Transport | Fails because | Issue |
 | --- | --- | --- | --- | --- |
 | storage | `gcloud` 588.0.0 | JSON REST | STS refuses gcloud's client authentication | [#53](https://github.com/evanmarshall/gcp-local/issues/53) |
-| storage | `rclone` 1.75.2 | JSON REST | bucket create with bucketPolicyOnly is refused | [#51](https://github.com/evanmarshall/gcp-local/issues/51) |
+| storage | `rclone` 1.75.2 | JSON REST | bucket create with bucketPolicyOnly is refused | [#64](https://github.com/evanmarshall/gcp-local/issues/64) |
 | pubsub | Go `cloud.google.com/go/pubsub/v2` 2.7.0 | gRPC | StreamingPull refuses protocol_version | [#55](https://github.com/evanmarshall/gcp-local/issues/55) |
 | pubsub | Node `@google-cloud/pubsub` 6.2.0 | gRPC | grpc-js sends no call credentials over plaintext gRPC | [#54](https://github.com/evanmarshall/gcp-local/issues/54) |
 | pubsub | `gcloud` 588.0.0 | REST | STS refuses gcloud's client authentication; REST publish and pull are not served | [#53](https://github.com/evanmarshall/gcp-local/issues/53) |

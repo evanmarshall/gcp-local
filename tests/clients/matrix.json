@@ -83,7 +83,7 @@
       "package": "rclone",
       "transport": "JSON REST",
       "expect": "xfail",
-      "issue": 51,
+      "issue": 64,
       "gap": "bucket create with bucketPolicyOnly is refused",
       "match": "bucketPolicyOnly"
     },
