@@ -100,9 +100,10 @@ func main() {
 	_, iamErr := iampb.NewIAMPolicyClient(connection).GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: topic})
 	check(status.Code(iamErr) == codes.Unimplemented, "unexpected upstream IAM behavior")
 	delivery := probeDelivery(ctx, publisher, subscriber)
+	schemas := probeSchemas(ctx, connection, publisher, subscriber)
 	// Retain one owned topic/subscription for the external restart check.
 	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"kind": "backend-only", "create_publish_pull_ack": true,
-		"streaming": true, "half_close": true, "cancellation": true, "iam": "not-enforced", "delivery": delivery, "cloud_fidelity": "unverified", "moo_forwarded": *forwarded})
+		"streaming": true, "half_close": true, "cancellation": true, "iam": "not-enforced", "delivery": delivery, "schemas": schemas, "cloud_fidelity": "unverified", "moo_forwarded": *forwarded})
 }
 
 func must(err error) {

@@ -1,6 +1,6 @@
 # Pub/Sub
 
-Topics, subscriptions, publish, pull, StreamingPull, authenticated local push, ordering, filters, dead-letter topics, retry backoff, exactly-once delivery, snapshots, and seek, with IAM enforced before the call reaches Google's official emulator. Three scenarios are recorded against GCP ([verification](#verification)); everything else is tested locally. Each project gets its own emulator JVM, started on first use.
+Topics, subscriptions, publish, pull, StreamingPull, authenticated local push, ordering, filters, dead-letter topics, retry backoff, exactly-once delivery, snapshots, seek, and Avro and Protocol Buffer schemas with publish-time validation, with IAM enforced before the call reaches Google's official emulator. Four scenarios are recorded against GCP ([verification](#verification)); everything else is tested locally. Each project gets its own emulator JVM, started on first use.
 
 ## Use
 
@@ -36,7 +36,7 @@ channel = secure_authorized_channel(
 publisher = pubsub_v1.PublisherClient(transport=PublisherGrpcTransport(channel=channel))
 ```
 
-Use `SubscriberGrpcTransport(channel=channel)` for subscribers. `local_channel_credentials` does not encrypt and works only on loopback. [`sdk.py`](../internal/providers/pubsub/testdata/sdk.py) is the tested example.
+Use `SubscriberGrpcTransport(channel=channel)` for subscribers and `SchemaServiceGrpcTransport(channel=channel)` for `SchemaServiceClient`. `local_channel_credentials` does not encrypt and works only on loopback. [`sdk.py`](../internal/providers/pubsub/testdata/sdk.py) is the tested example.
 
 ## Methods
 
@@ -44,8 +44,9 @@ Use `SubscriberGrpcTransport(channel=channel)` for subscribers. `local_channel_c
 | --- | --- | --- |
 | Publisher (gRPC) | `CreateTopic`, `GetTopic`, `ListTopics`, `DeleteTopic`, `Publish` | Labels at create; 1 MiB per publish request |
 | Subscriber (gRPC) | `CreateSubscription`, `GetSubscription`, `ListSubscriptions`, `DeleteSubscription`, `Pull`, `Acknowledge`, `ModifyAckDeadline`, `StreamingPull`, `Seek`, `CreateSnapshot`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot` | Same-project only; delivery settings below are fixed at create; `ModifyAckDeadline=0` redelivers. StreamingPull `protocol_version` 0 or 1 (the Go client sends 1) on the first request only; with 1 the emulator answers keepalive requests. Other versions return `UNIMPLEMENTED` |
-| IAMPolicy (gRPC) | `GetIamPolicy`, `SetIamPolicy` | Topics and subscriptions; version-1 policies with etag checks |
-| REST | Topic and subscription `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy`; `topics.publish`, `subscriptions.pull`, `subscriptions.acknowledge`, `subscriptions.modifyAckDeadline` | The data-plane methods run the gRPC twins' validation, permissions, and delivery features, and answer in the REST reference's JSON (base64 `data`, `messageIds`, `receivedMessages` with `ackId`, `message`, and `deliveryAttempt`). A body may repeat the path's topic or subscription; a different one returns 400. No REST StreamingPull, snapshots, or seek. Unknown body fields return 400; known unsupported fields return 501 |
+| SchemaService (gRPC) | `CreateSchema`, `GetSchema`, `ListSchemas`, `ListSchemaRevisions`, `CommitSchema`, `RollbackSchema`, `DeleteSchemaRevision`, `DeleteSchema`, `ValidateSchema`, `ValidateMessage` | [Schemas](#schemas) |
+| IAMPolicy (gRPC) | `GetIamPolicy`, `SetIamPolicy` | Topics, subscriptions, and schemas; version-1 policies with etag checks |
+| REST | Topic and subscription `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy`; `topics.publish`, `subscriptions.pull`, `subscriptions.acknowledge`, `subscriptions.modifyAckDeadline`; every `projects.schemas` method | The data-plane methods run the gRPC twins' validation, permissions, and delivery features, and answer in the REST reference's JSON (base64 `data`, `messageIds`, `receivedMessages` with `ackId`, `message`, and `deliveryAttempt`). A body may repeat the path's topic or subscription; a different one returns 400. No REST StreamingPull, snapshots, or seek. Unknown body fields return 400; known unsupported fields return 501 |
 | Push | Authenticated HTTP push to a numeric loopback URL | Modeled locally, not recorded |
 
 ## Delivery features
@@ -84,6 +85,17 @@ On `//iam.googleapis.com/projects/project-a/serviceAccounts/push-worker@project-
 - At most 32 push subscriptions per project, one outstanding message per subscription.
 - Pull or StreamingPull on a push subscription fails.
 
+## Schemas
+
+Avro schemas live in the emulator; Protocol Buffer schemas live in the provider, because the emulator answers every Protocol Buffer request with `UNIMPLEMENTED`. Both behave the same to clients and are recorded (`pubsub-schemas`, 2026-10-12). Field rules follow the [`schema.proto` reference](https://cloud.google.com/pubsub/docs/reference/rpc/google.pubsub.v1#schemaservice) and the [schema guide](https://cloud.google.com/pubsub/docs/schemas).
+
+- A topic's `schema_settings` names a schema, `JSON` or `BINARY` encoding, and an optional `first_revision_id`/`last_revision_id` range. Publishing validates each message against the newest revision in the range and adds the `googclient_schemaname`, `googclient_schemaencoding`, and `googclient_schemarevisionid` attributes. A message that matches no revision fails the whole request with `INVALID_ARGUMENT`.
+- Protocol Buffer definitions: proto2 or proto3, exactly one top-level message, no imports, at most 300 KB. JSON messages use Google's JSON mapping and reject unknown fields; BINARY messages use the wire format.
+- At most 20 revisions per schema. `CommitSchema` requires `schema.name`, as GCP does, and checks the new revision against the latest one: a field type change, a renamed record or tag, a newly repeated or required field, or (Avro) a field without a default added or removed returns `FAILED_PRECONDITION`. Changing the schema type does too.
+- Revisions list newest first as `SCHEMA@REVISION`; list views omit definitions unless `view` is `FULL`. `DeleteSchemaRevision` takes `SCHEMA@REVISION` and returns the deleted revision named by project number.
+- Deleting a schema leaves its topics with `_deleted-schema_` settings; publishing to them returns `NOT_FOUND`.
+- Gaps return `UNIMPLEMENTED`: the deprecated `revision_id` of `DeleteSchemaRevision`, compatibility checks GCP's recorded rules don't decide (nested Avro types, Protocol Buffer enum or message field changes, required fields made optional, repeated fields made singular, added or removed required fields), cross-project schemas. `RollbackSchema` doesn't check compatibility (not recorded).
+
 ## IAM
 
 Permissions follow [Google's access-control table](https://docs.cloud.google.com/pubsub/docs/access-control); role definitions for Admin, Publisher, Subscriber, and Viewer were pinned 2026-10-05.
@@ -93,6 +105,7 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 - `CreateSnapshot` needs `pubsub.snapshots.create` on the project and `pubsub.subscriptions.consume` on the source. `Seek` needs `pubsub.subscriptions.consume`, plus `pubsub.snapshots.seek` on the snapshot when seeking to one. `GetSnapshot` uses `pubsub.snapshots.get`, which the access-control table omits; the Viewer role carries it.
 - Push creation needs `iam.serviceAccounts.actAs`; each delivery needs the service agent's `iam.serviceAccounts.getOpenIdToken`. Without it messages stay pending.
 - An open stream rechecks access before each delivery and ack, so revoking stops delivery.
+- Schema rows follow the access-control table: `pubsub.schemas.create`, `list`, and `validate` (both `ValidateSchema` and `ValidateMessage`) on the project; `get`, `listRevisions`, `commit`, `rollback`, and `delete` (also for `DeleteSchemaRevision`) on the schema. Creating a topic with `schema_settings` also needs `pubsub.schemas.attach` on the schema.
 
 ## Verification
 
@@ -101,8 +114,9 @@ Permissions follow [Google's access-control table](https://docs.cloud.google.com
 | `pubsub-pull-authorization` | 2026-10-09 | Topic-scoped Publisher and subscription-scoped Subscriber grants, denied publish and pull, message identity, ack, cleanup |
 | `pubsub-delivery-features` | 2026-10-12 | Delivery settings echoed at create, denied pull, key order before and after a nack, filtered delivery, an invalid filter, a repeated exactly-once ack, dead-letter attempts and forwarding with and without the service agent's grants, cleanup |
 | `pubsub-rest-data-plane` | 2026-10-12 | REST publish, pull, nack (`modifyAckDeadline` 0), redelivery, and acknowledge in the shapes gcloud 588.0.0 sends; denied publish, pull, and acknowledge; a topic-scoped publisher that cannot pull; an out-of-range deadline; an empty pull; a pull without `maxMessages`; a publish body that repeats the topic; cleanup |
+| `pubsub-schemas` | 2026-10-12 | Avro and Protocol Buffer schemas: create, commit (including refused commits), revision listing and views, rollback, revision deletion, `ValidateSchema` and `ValidateMessage`, topics with schema settings, valid and invalid publishes and their attributes, schema-scoped Viewer and denied callers, deleted schemas, cleanup |
 
-`check_pubsub.sh` compares the first two locally; `check_rest_recordings.sh` compares `pubsub-rest-data-plane` (`tests/conformance/pubsubrest`, live scope service `pubsub-rest`). Re-recording `pubsub-delivery-features` (`tests/conformance/pubsub_delivery`) needs its own approved scope (`python3 scripts/plan_pubsub.py --scenario delivery ...`).
+`check_pubsub.sh` compares `pubsub-pull-authorization`, `pubsub-delivery-features`, and `pubsub-schemas` locally; `check_rest_recordings.sh` compares `pubsub-rest-data-plane` (`tests/conformance/pubsubrest`, live scope service `pubsub-rest`). Re-recording `pubsub-delivery-features` (`tests/conformance/pubsub_delivery`) or `pubsub-schemas` (`tests/conformance/pubsub_schemas`) needs its own approved scope (`python3 scripts/plan_pubsub.py --scenario delivery|schemas ...`). Pass `--rootdir . -c pytest.ini` when `--gcp-profile` points outside the checkout.
 
 Run in Linux or moo after installing Java 17, the emulator JAR, and `requirements-services.txt`:
 
@@ -129,10 +143,11 @@ A run creates one topic and one subscription and makes at most ten publish attem
 - Not recorded: StreamingPull, push, retry backoff, snapshots, and seek. IAM policy calls are recorded only as the REST grants in `pubsub-rest-data-plane`.
 - GCP accepted a publish sent right after its topic was deleted (2026-10-12); locally it returns 404.
 - Dead-letter attempts counted before the service agent's grants exist restart at 1 once both grants are held.
-- No schemas (`SchemaService`, topic `schema_settings`), KMS, topic retention, subscription expiration TTL, BigQuery or Cloud Storage export subscriptions, `UpdateTopic`, `UpdateSubscription`, `UpdateSnapshot`, `ModifyPushConfig`, `DetachSubscription`, or `ListTopicSnapshots`/`ListTopicSubscriptions`. Subscriptions never expire.
+- No KMS, topic retention, subscription expiration TTL, BigQuery or Cloud Storage export subscriptions, `UpdateTopic`, `UpdateSubscription`, `UpdateSnapshot`, `ModifyPushConfig`, `DetachSubscription`, or `ListTopicSnapshots`/`ListTopicSubscriptions`. Subscriptions never expire.
 - Exactly-once: an ack after the deadline expires still succeeds (GCP rejects it), and acks sent on a stream get no `acknowledge_confirmation`. The Python client acks over unary calls and is unaffected.
 - Retry backoff applies to nacks only; ordered redelivery after a nack waits at least 1 second.
 - The dead-letter grants are re-checked at delivery decisions; an ack-deadline expiry between them uses the last checked state.
+- `UpdateTopic` is not served, so schema settings are fixed at create.
 - No snapshot IAM policies, cross-project dead-letter topics, or cross-project snapshots.
 - No `testIamPermissions`, conditional policies, cross-project subscriptions, or anonymous, remote, or HTTPS push.
 - Messages are in memory; restart loses them.

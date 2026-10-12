@@ -160,11 +160,7 @@ func secondsString(value *durationpb.Duration) string {
 func restWire(_ string, response proto.Message) map[string]any {
 	switch protoMessage := response.(type) {
 	case *pb.Topic:
-		wire := map[string]any{
-			keyWireName: wireRestName(protoMessage.GetName()),
-			"labels":    protoMessage.GetLabels(),
-		}
-		return wire
+		return topicWire(protoMessage)
 	case *pb.Subscription:
 		wire := map[string]any{
 			keyWireName:          wireRestName(protoMessage.GetName()),
@@ -195,6 +191,17 @@ func restWire(_ string, response proto.Message) map[string]any {
 	default:
 		return map[string]any{}
 	}
+}
+
+// topicWire renders a topic, with its schema settings when it has them.
+func topicWire(topic *pb.Topic) map[string]any {
+	wire := map[string]any{keyWireName: wireRestName(topic.GetName()), "labels": topic.GetLabels()}
+	if settings := topic.GetSchemaSettings(); settings != nil {
+		if encoded, err := protojson.Marshal(settings); err == nil {
+			wire["schemaSettings"] = json.RawMessage(encoded)
+		}
+	}
+	return wire
 }
 
 // deliveryWire adds the delivery settings a subscription carries, in the JSON

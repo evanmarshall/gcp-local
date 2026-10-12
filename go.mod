@@ -17,6 +17,7 @@ require (
 	cloud.google.com/go/secretmanager v1.22.0
 	cloud.google.com/go/spanner v1.95.1
 	cloud.google.com/go/storage v1.65.0
+	github.com/bufbuild/protocompile v0.14.1
 	github.com/fsouza/fake-gcs-server v1.56.1
 	github.com/google/cel-go v0.26.1
 	google.golang.org/api v0.293.0

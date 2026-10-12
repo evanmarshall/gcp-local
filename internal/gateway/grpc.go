@@ -34,6 +34,7 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(2 << 20))
 	pb.RegisterPublisherServer(server, &generated.PublisherServer{Dispatch: g})
 	pb.RegisterSubscriberServer(server, &generated.SubscriberServer{Dispatch: g})
+	pb.RegisterSchemaServiceServer(server, &generated.SchemaServiceServer{Dispatch: g})
 	iampb.RegisterIAMPolicyServer(server, &generated.IAMPolicyServer{Dispatch: g})
 	spannerpb.RegisterSpannerServer(server, &generated.SpannerServer{Dispatch: g})
 	bigtablepb.RegisterBigtableServer(server, &generated.BigtableServer{Dispatch: g})

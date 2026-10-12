@@ -15,7 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-var namePattern = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,61}[a-z0-9])/(topics|subscriptions|snapshots)/([A-Za-z][A-Za-z0-9\-_.~+%]{2,254})$`)
+var namePattern = regexp.MustCompile(`^projects/([a-z][a-z0-9-]{4,61}[a-z0-9])/(topics|subscriptions|snapshots|schemas)/([A-Za-z][A-Za-z0-9\-_.~+%]{2,254})$`)
 
 var gap = provider.CoverageGap("Pub/Sub")
 
@@ -53,7 +53,10 @@ func fields(message proto.Message, allowed ...string) error {
 func validate(request proto.Message) error {
 	switch r := request.(type) {
 	case *pb.Topic:
-		return fields(r, "name", "labels")
+		if err := fields(r, "name", "labels", "schema_settings"); err != nil {
+			return err
+		}
+		return validateSchemaSettings(r.GetSchemaSettings())
 	case *pb.Subscription:
 		return validateSubscription(r)
 	case *pb.PublishRequest:

@@ -319,6 +319,29 @@ func TestPythonSDKDeliveryFeatures(t *testing.T) {
 	}
 }
 
+// TestPythonSDKSchemas drives SchemaServiceClient and schema-bound topics
+// through google-cloud-pubsub with local ADC.
+func TestPythonSDKSchemas(t *testing.T) {
+	f := running(t)
+	python := os.Getenv("GCP_LOCAL_TEST_PYTHON")
+	if python == "" {
+		t.Fatal("Explicit pinned Python environment is required")
+	}
+	directory := t.TempDir()
+	command := exec.CommandContext(f.owner, python, "testdata/sdk_schemas.py", f.endpoint)
+	command.Env = sdkEnvironment(directory, localADC(t, f, directory, "owner", subjectSecret))
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Python Pub/Sub schema SDK: %v\n%s", err, output)
+	}
+	t.Log(string(output))
+	listed, err := pb.NewSchemaServiceClient(f.connection).ListSchemas(f.owner, &pb.ListSchemasRequest{Parent: "projects/project-a"})
+	must(t, err)
+	if len(listed.GetSchemas()) != 0 {
+		t.Fatalf("SDK left schemas behind: %v", listed.GetSchemas())
+	}
+}
+
 func TestPolicyRPCRevocationStopsDelivery(t *testing.T) {
 	f := running(t)
 	pub, sub, policies := pb.NewPublisherClient(f.connection), pb.NewSubscriberClient(f.connection), iampb.NewIAMPolicyClient(f.connection)

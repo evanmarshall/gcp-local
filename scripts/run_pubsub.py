@@ -52,7 +52,7 @@ def main() -> int:
             source.update(path.read_bytes())
     for path in sorted((root / "internal/providers/pubsub/testdata").glob("*.py")):
         source.update(path.read_bytes())
-    for name in ("pubsub.py", "pubsub_scope.py", "pubsub_delivery.py"):
+    for name in ("pubsub.py", "pubsub_scope.py", "pubsub_delivery.py", "pubsub_schemas.py"):
         source.update((root / "gcp_validation" / name).read_bytes())
     versions = subprocess.check_output(
         [

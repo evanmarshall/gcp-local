@@ -10,6 +10,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from gcp_validation.pubsub_delivery import DELIVERY_LIMITS, delivery_scope
+from gcp_validation.pubsub_schemas import SCHEMA_LIMITS, schema_scope
 from gcp_validation.pubsub_scope import LIMITS, private_json
 from gcp_validation.sandbox import Sandbox
 
@@ -97,6 +98,21 @@ def plan(profile: Sandbox, setup_account: str, scenario: str = "pull") -> dict[s
             "The scenario grants the Pub/Sub service agent roles only on resources it owns",
             "Review and promote sanitized recordings only after successful cleanup",
         ]
+    if scenario == "schemas":
+        result["scope"] = schema_scope(profile.project, profile.project_number, approved=False)
+        result["resource_grants"] = {
+            "Protocol Buffer schema": {"role": "roles/pubsub.viewer", "identity": "allowed"},
+            "each schema topic": {"role": "roles/pubsub.publisher", "identity": "allowed"},
+        }
+        result["execution"] = [
+            "One record run followed by one revalidation run, serially",
+            f"At most {SCHEMA_LIMITS['max_schemas']} schemas, {SCHEMA_LIMITS['max_topics']} "
+            f"topics, {SCHEMA_LIMITS['max_subscriptions']} subscriptions, and "
+            f"{SCHEMA_LIMITS['max_messages']} 1 KiB publish attempts per run",
+            f"At most {SCHEMA_LIMITS['max_run_seconds']} seconds of scenario work, "
+            "then bounded cleanup",
+            "Review and promote sanitized recordings only after successful cleanup",
+        ]
     return result
 
 
@@ -107,9 +123,10 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--setup-account", required=True)
     parser.add_argument(
         "--scenario",
-        choices=["pull", "delivery"],
+        choices=["pull", "delivery", "schemas"],
         default="pull",
-        help="pull: pubsub-pull-authorization; delivery: pubsub-delivery-features",
+        help="pull: pubsub-pull-authorization; delivery: pubsub-delivery-features; "
+        "schemas: pubsub-schemas",
     )
     parser.add_argument(
         "--scope-output",

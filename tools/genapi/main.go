@@ -68,6 +68,7 @@ func main() {
 	write("firestore_routes.go", firestoreRoutes(), *check)
 	write("bigquery_routes.go", bigqueryRoutes(), *check)
 	write("pubsub_rest_routes.go", pubsubRestRoutes(), *check)
+	write("pubsub_schema_rest_routes.go", pubsubSchemaRestRoutes(), *check)
 	write("spanner_routes.go", spannerRoutes(), *check)
 	write("bigtable_routes.go", bigtableRoutes(), *check)
 	write("artifactregistry_routes.go", artifactRegistryRoutes(), *check)
@@ -236,9 +237,14 @@ type GRPCDispatch interface {
 `)
 	var descriptors bytes.Buffer
 	descriptors.WriteString("var PubSubMethods = []RPC{\n")
-	services := pb.File_google_pubsub_v1_pubsub_proto.Services()
-	for i := range services.Len() {
-		service := services.Get(i)
+	// SchemaService lives in schema.proto beside the Publisher and Subscriber.
+	var services []protoreflect.ServiceDescriptor
+	for _, file := range []protoreflect.FileDescriptor{pb.File_google_pubsub_v1_pubsub_proto, pb.File_google_pubsub_v1_schema_proto} {
+		for i := range file.Services().Len() {
+			services = append(services, file.Services().Get(i))
+		}
+	}
+	for _, service := range services {
 		name := string(service.Name())
 		fmt.Fprintf(&out, "type %sServer struct { pb.Unimplemented%sServer; Dispatch PubSubDispatch }\n", name, name)
 		for j := range service.Methods().Len() {
@@ -856,6 +862,30 @@ func pubsubRestRoutes() []byte {
 		{"pubsub.http.subscriptions.modifyAckDeadline", http.MethodPost, subs + "/{subscription}:modifyAckDeadline", true, false},
 	}
 	return routeTable("PubSubRestRoutes", "is the Pub/Sub JSON REST route table slice.", rows)
+}
+
+// pubsubSchemaRestRoutes generates the Pub/Sub schema REST routes, named by
+// their pubsub v1 discovery method IDs (projects.schemas.*).
+func pubsubSchemaRestRoutes() []byte {
+	const (
+		schemas = "/v1/projects/{project}/schemas"
+		schema  = schemas + "/{schema}"
+	)
+	rows := []route{
+		{"pubsub.projects.schemas.create", http.MethodPost, schemas, true, false},
+		{"pubsub.projects.schemas.list", http.MethodGet, schemas, false, false},
+		{"pubsub.projects.schemas.validate", http.MethodPost, schemas + ":validate", true, false},
+		{"pubsub.projects.schemas.validateMessage", http.MethodPost, schemas + ":validateMessage", true, false},
+		{"pubsub.projects.schemas.get", http.MethodGet, schema, false, false},
+		{"pubsub.projects.schemas.delete", http.MethodDelete, schema, false, false},
+		{"pubsub.projects.schemas.listRevisions", http.MethodGet, schema + ":listRevisions", false, false},
+		{"pubsub.projects.schemas.commit", http.MethodPost, schema + ":commit", true, false},
+		{"pubsub.projects.schemas.rollback", http.MethodPost, schema + ":rollback", true, false},
+		{"pubsub.projects.schemas.deleteRevision", http.MethodDelete, schema + ":deleteRevision", false, false},
+		{"pubsub.projects.schemas.getIamPolicy", http.MethodGet, schema + ":getIamPolicy", false, false},
+		{"pubsub.projects.schemas.setIamPolicy", http.MethodPost, schema + ":setIamPolicy", true, false},
+	}
+	return routeTable("PubSubSchemaRestRoutes", "is the Pub/Sub schema REST route table slice.", rows)
 }
 
 // firestoreRoutes generates the Firestore v1 document route table slice.

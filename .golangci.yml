@@ -63,6 +63,7 @@ linters:
         - stdlib
         - generic
         - proto.Message
+        - protoreflect.MessageDescriptor
         - grpc.ClientConnInterface
         - grpc.ClientStream
         - backend.Backend

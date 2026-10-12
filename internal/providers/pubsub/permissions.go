@@ -2,6 +2,11 @@ package pubsub
 
 const publisher = "/google.pubsub.v1.Publisher/"
 const subscriber = "/google.pubsub.v1.Subscriber/"
+const schemaService = "/google.pubsub.v1.SchemaService/"
+
+// schemaAttach is checked on the schema a created topic names; the Admin and
+// Editor roles carry pubsub.schemas.attach (access-control table).
+const schemaAttach = "pubsub.schemas.attachTarget"
 const attach = "pubsub.attachSubscription"
 
 // CreateSnapshot also needs consume on the source subscription, and Seek to a
@@ -18,6 +23,8 @@ const (
 	permTopicsSetIam        = "pubsub.topics.setIamPolicy"
 	permSubscriptionsGetIam = "pubsub.subscriptions.getIamPolicy"
 	permSubscriptionsSetIam = "pubsub.subscriptions.setIamPolicy"
+	permSchemasGetIam       = "pubsub.schemas.getIamPolicy"
+	permSchemasSetIam       = "pubsub.schemas.setIamPolicy"
 )
 
 // Permission targets follow Google's documented access-control table. Live
@@ -53,8 +60,24 @@ var permissions = map[string]string{
 	permSubscriptionsGetIam:    permSubscriptionsGetIam,
 	permSubscriptionsSetIam:    permSubscriptionsSetIam,
 	"pubsub.push.actAs":        "iam.serviceAccounts.actAs",
-	policyRPC + "GetIamPolicy": permTopicsGetIam,
-	policyRPC + "SetIamPolicy": permTopicsSetIam,
+	// Schema rows of the access-control table. DeleteSchemaRevision needs
+	// pubsub.schemas.delete; ValidateMessage needs pubsub.schemas.validate on
+	// the project even when it names a schema.
+	schemaService + "CreateSchema":         "pubsub.schemas.create",
+	schemaService + "GetSchema":            "pubsub.schemas.get",
+	schemaService + "ListSchemas":          "pubsub.schemas.list",
+	schemaService + "ListSchemaRevisions":  "pubsub.schemas.listRevisions",
+	schemaService + "CommitSchema":         "pubsub.schemas.commit",
+	schemaService + "RollbackSchema":       "pubsub.schemas.rollback",
+	schemaService + "DeleteSchemaRevision": "pubsub.schemas.delete",
+	schemaService + "DeleteSchema":         "pubsub.schemas.delete",
+	schemaService + "ValidateSchema":       "pubsub.schemas.validate",
+	schemaService + "ValidateMessage":      "pubsub.schemas.validate",
+	schemaAttach:                           "pubsub.schemas.attach",
+	permSchemasGetIam:                      permSchemasGetIam,
+	permSchemasSetIam:                      permSchemasSetIam,
+	policyRPC + "GetIamPolicy":             permTopicsGetIam,
+	policyRPC + "SetIamPolicy":             permTopicsSetIam,
 }
 
 // permissionSubscriptionsConsume is the single permission that governs every

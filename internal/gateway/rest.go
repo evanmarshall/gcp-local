@@ -136,6 +136,7 @@ func contracts() []generated.Route {
 	routes = append(routes, generated.CloudTasksRoutes...)
 	routes = append(routes, generated.CloudSQLRoutes...)
 	routes = append(routes, generated.PubSubRestRoutes...)
+	routes = append(routes, generated.PubSubSchemaRestRoutes...)
 	routes = append(routes, generated.RedisRoutes...)
 	routes = append(routes, generated.VertexAIRoutes...)
 	routes = append(routes, generated.LoggingRoutes...)

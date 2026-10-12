@@ -1,0 +1,381 @@
+{
+  "pubsub-schemas": {
+    "recorded-date": "12-10-2026, 07:45:07",
+    "recorded-content": {
+      "created-schemas": {
+        "avro": {
+          "definition": "v1",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:avro>",
+          "revision": "<revision:1>",
+          "revision_id_length": 8,
+          "type": "AVRO"
+        },
+        "proto": {
+          "definition": "v1",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:proto>",
+          "revision": "<revision:2>",
+          "revision_id_length": 8,
+          "type": "PROTOCOL_BUFFER"
+        }
+      },
+      "avro-revisions": {
+        "after_delete": [
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:avro>@<revision:5>"
+          },
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:avro>@<revision:4>"
+          },
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:avro>@<revision:1>"
+          }
+        ],
+        "commit_incompatible_field_type": "FAILED_PRECONDITION",
+        "commit_other_schema_type": "FAILED_PRECONDITION",
+        "commit_without_schema_name": "INVALID_ARGUMENT",
+        "committed": {
+          "definition": "v2",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:avro>@<revision:3>",
+          "revision": "<revision:3>",
+          "revision_id_length": 8,
+          "type": "AVRO"
+        },
+        "deleted_revision": {
+          "definition": "empty",
+          "has_revision_create_time": true,
+          "name": "<project-number>/<schema:avro>@<revision:3>",
+          "revision": "<revision:3>",
+          "revision_id_length": 8,
+          "type": "AVRO"
+        },
+        "get_deleted_revision": "NOT_FOUND",
+        "get_first_basic": {
+          "definition": "empty",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:avro>@<revision:1>",
+          "revision": "<revision:1>",
+          "revision_id_length": 8,
+          "type": "AVRO"
+        },
+        "get_latest": {
+          "definition": "v2",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:avro>",
+          "revision": "<revision:4>",
+          "revision_id_length": 8,
+          "type": "AVRO"
+        },
+        "list_default": [
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:avro>@<revision:4>"
+          },
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:avro>@<revision:3>"
+          },
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:avro>@<revision:1>"
+          }
+        ],
+        "list_full": [
+          {
+            "definition": "v2",
+            "name": "<project>/<schema:avro>@<revision:4>"
+          },
+          {
+            "definition": "v2",
+            "name": "<project>/<schema:avro>@<revision:3>"
+          },
+          {
+            "definition": "v1",
+            "name": "<project>/<schema:avro>@<revision:1>"
+          }
+        ],
+        "repeated_commit": "<project>/<schema:avro>@<revision:4>",
+        "rolled_back": {
+          "definition": "v1",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:avro>@<revision:5>",
+          "revision": "<revision:5>",
+          "revision_id_length": 8,
+          "type": "AVRO"
+        }
+      },
+      "proto-revisions": {
+        "after_delete": [
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:proto>@<revision:8>"
+          },
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:proto>@<revision:7>"
+          },
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:proto>@<revision:2>"
+          }
+        ],
+        "commit_incompatible_field_type": "FAILED_PRECONDITION",
+        "commit_other_schema_type": "FAILED_PRECONDITION",
+        "commit_without_schema_name": "INVALID_ARGUMENT",
+        "committed": {
+          "definition": "v2",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:proto>@<revision:6>",
+          "revision": "<revision:6>",
+          "revision_id_length": 8,
+          "type": "PROTOCOL_BUFFER"
+        },
+        "deleted_revision": {
+          "definition": "empty",
+          "has_revision_create_time": true,
+          "name": "<project-number>/<schema:proto>@<revision:6>",
+          "revision": "<revision:6>",
+          "revision_id_length": 8,
+          "type": "PROTOCOL_BUFFER"
+        },
+        "get_deleted_revision": "NOT_FOUND",
+        "get_first_basic": {
+          "definition": "empty",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:proto>@<revision:2>",
+          "revision": "<revision:2>",
+          "revision_id_length": 8,
+          "type": "PROTOCOL_BUFFER"
+        },
+        "get_latest": {
+          "definition": "v2",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:proto>",
+          "revision": "<revision:7>",
+          "revision_id_length": 8,
+          "type": "PROTOCOL_BUFFER"
+        },
+        "list_default": [
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:proto>@<revision:7>"
+          },
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:proto>@<revision:6>"
+          },
+          {
+            "definition": "empty",
+            "name": "<project>/<schema:proto>@<revision:2>"
+          }
+        ],
+        "list_full": [
+          {
+            "definition": "v2",
+            "name": "<project>/<schema:proto>@<revision:7>"
+          },
+          {
+            "definition": "v2",
+            "name": "<project>/<schema:proto>@<revision:6>"
+          },
+          {
+            "definition": "v1",
+            "name": "<project>/<schema:proto>@<revision:2>"
+          }
+        ],
+        "repeated_commit": "<project>/<schema:proto>@<revision:7>",
+        "rolled_back": {
+          "definition": "v1",
+          "has_revision_create_time": true,
+          "name": "<project>/<schema:proto>@<revision:8>",
+          "revision": "<revision:8>",
+          "revision_id_length": 8,
+          "type": "PROTOCOL_BUFFER"
+        }
+      },
+      "list-schemas": {
+        "BASIC": [
+          [
+            "<project>/<schema:avro>",
+            "AVRO",
+            "empty",
+            true
+          ],
+          [
+            "<project>/<schema:proto>",
+            "PROTOCOL_BUFFER",
+            "empty",
+            true
+          ]
+        ],
+        "FULL": [
+          [
+            "<project>/<schema:avro>",
+            "AVRO",
+            "v1",
+            true
+          ],
+          [
+            "<project>/<schema:proto>",
+            "PROTOCOL_BUFFER",
+            "v1",
+            true
+          ]
+        ],
+        "default": [
+          [
+            "<project>/<schema:avro>",
+            "AVRO",
+            "empty",
+            true
+          ],
+          [
+            "<project>/<schema:proto>",
+            "PROTOCOL_BUFFER",
+            "empty",
+            true
+          ]
+        ]
+      },
+      "validate-schema": {
+        "avro_unparsable": "INVALID_ARGUMENT",
+        "avro_valid": "OK",
+        "proto_import": "INVALID_ARGUMENT",
+        "proto_two_messages": "INVALID_ARGUMENT",
+        "proto_unparsable": "INVALID_ARGUMENT",
+        "proto_valid": "OK"
+      },
+      "validate-message": {
+        "avro_inline_missing_field": "INVALID_ARGUMENT",
+        "avro_inline_valid": "OK",
+        "avro_named_valid": "OK",
+        "avro_no_encoding": "INVALID_ARGUMENT",
+        "proto_binary_garbage": "INVALID_ARGUMENT",
+        "proto_binary_valid": "OK",
+        "proto_json_unknown_field": "INVALID_ARGUMENT",
+        "proto_json_valid": "OK",
+        "proto_json_wrong_type": "INVALID_ARGUMENT"
+      },
+      "topics": {
+        "avro-json": {
+          "encoding": "JSON",
+          "first_revision_id": "<revision:1>",
+          "last_revision_id": "<revision:1>",
+          "schema_matches": true
+        },
+        "missing_schema": "NOT_FOUND",
+        "proto-binary": {
+          "encoding": "BINARY",
+          "first_revision_id": "",
+          "last_revision_id": "",
+          "schema_matches": true
+        },
+        "proto-json": {
+          "encoding": "JSON",
+          "first_revision_id": "<revision:2>",
+          "last_revision_id": "<revision:2>",
+          "schema_matches": true
+        }
+      },
+      "schema-authorization": {
+        "allowed": {
+          "commit_with_viewer": "PERMISSION_DENIED",
+          "get_granted_schema": "OK",
+          "get_other_schema": "PERMISSION_DENIED"
+        },
+        "denied": {
+          "create": "PERMISSION_DENIED",
+          "get": "PERMISSION_DENIED",
+          "publish": "PERMISSION_DENIED",
+          "validate_message": "PERMISSION_DENIED"
+        }
+      },
+      "publish": {
+        "avro_missing_field": "INVALID_ARGUMENT",
+        "avro_newer_revision_field": "OK",
+        "avro_valid": "OK",
+        "proto_binary_garbage": "INVALID_ARGUMENT",
+        "proto_binary_valid": "OK",
+        "proto_json_newer_revision_field": "INVALID_ARGUMENT",
+        "proto_json_valid": "OK",
+        "proto_json_wrong_type": "INVALID_ARGUMENT"
+      },
+      "delivered": {
+        "avro-json": [
+          {
+            "attribute_names": [
+              "googclient_schemaencoding",
+              "googclient_schemaname",
+              "googclient_schemarevisionid"
+            ],
+            "data_length": 23,
+            "schemaencoding": "JSON",
+            "schemaname": "<schema:avro>",
+            "schemarevisionid": "<revision:1>"
+          },
+          {
+            "attribute_names": [
+              "googclient_schemaencoding",
+              "googclient_schemaname",
+              "googclient_schemarevisionid"
+            ],
+            "data_length": 48,
+            "schemaencoding": "JSON",
+            "schemaname": "<schema:avro>",
+            "schemarevisionid": "<revision:1>"
+          }
+        ],
+        "proto-binary": [
+          {
+            "attribute_names": [
+              "googclient_schemaencoding",
+              "googclient_schemaname",
+              "googclient_schemarevisionid"
+            ],
+            "data_length": 5,
+            "schemaencoding": "BINARY",
+            "schemaname": "<schema:proto>",
+            "schemarevisionid": "<revision:8>"
+          }
+        ],
+        "proto-json": [
+          {
+            "attribute_names": [
+              "googclient_schemaencoding",
+              "googclient_schemaname",
+              "googclient_schemarevisionid"
+            ],
+            "data_length": 23,
+            "schemaencoding": "JSON",
+            "schemaname": "<schema:proto>",
+            "schemarevisionid": "<revision:2>"
+          }
+        ]
+      },
+      "deleted-schemas": {
+        "avro": {
+          "encoding": "JSON",
+          "first_revision_id": "_deleted-schema-revision_",
+          "last_revision_id": "_deleted-schema-revision_",
+          "publish": "NOT_FOUND",
+          "schema": "_deleted-schema_"
+        },
+        "proto": {
+          "encoding": "JSON",
+          "first_revision_id": "_deleted-schema-revision_",
+          "last_revision_id": "_deleted-schema-revision_",
+          "publish": "NOT_FOUND",
+          "schema": "_deleted-schema_"
+        }
+      },
+      "cleanup": {
+        "owned_resources_absent": true
+      }
+    }
+  }
+}

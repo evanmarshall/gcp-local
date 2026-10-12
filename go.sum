@@ -27,10 +27,10 @@ cloud.google.com/go/monitoring v1.29.0 h1:AHhDsFaSax1/4k+qlIDX/SDGe6hggnfXJ9dkgD
 cloud.google.com/go/monitoring v1.29.0/go.mod h1:72NOVjJXHY/HBfoLT0+qlCZBT059+9VXLeAnL2PeeVM=
 cloud.google.com/go/pubsub/v2 v2.7.0 h1:MFrBTZZa6PDWZzCi4NJRsHKMm2w0a4oAaYNqwjgbQTE=
 cloud.google.com/go/pubsub/v2 v2.7.0/go.mod h1:JaFvWNVRk3Knoil/4M1ECeLOaI9D8drbmJWypQlK5aM=
-cloud.google.com/go/secretmanager v1.22.0 h1:c9nPLiK4IZeT/zDyLjvNaBw1BHNkp0Ysybj1FfFIAPQ=
-cloud.google.com/go/secretmanager v1.22.0/go.mod h1:aDN9cW5x6Y8QVj32snakZv96vYyW7Nf1P+eqZGH8408=
 cloud.google.com/go/run v1.23.0 h1:JvTkOn+8h+QicGzBPWjgSrwpTcs2b6zJkusfEnmvkGo=
 cloud.google.com/go/run v1.23.0/go.mod h1:ZCGrir3QdVgAJsVChr2nlQTfaknro8nwpEZwJDRHHhI=
+cloud.google.com/go/secretmanager v1.22.0 h1:c9nPLiK4IZeT/zDyLjvNaBw1BHNkp0Ysybj1FfFIAPQ=
+cloud.google.com/go/secretmanager v1.22.0/go.mod h1:aDN9cW5x6Y8QVj32snakZv96vYyW7Nf1P+eqZGH8408=
 cloud.google.com/go/spanner v1.95.1 h1:9HYr+AAeAOubn0NZAYv34dFHQ3NbIUcWHZmgJvufPzk=
 cloud.google.com/go/spanner v1.95.1/go.mod h1:Z2+83J5oVDmd1n5ntVMmjEuiNoXOpAyNeG7y1tuEHk0=
 cloud.google.com/go/storage v1.65.0 h1:McbFt5j+hTNx+dkFuzq7teakIKcpqGp/cJZRxMyfvAc=
@@ -50,6 +50,8 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapp
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.57.0/go.mod h1:YqwkQPrWSC7+byyc1VlKbWLBF5JsW5IoL6xUkemYSXk=
 github.com/antlr4-go/antlr/v4 v4.13.0 h1:lxCg3LAv+EUK6t1i0y1V6/SLeUi0eKEKdhQAlS8TVTI=
 github.com/antlr4-go/antlr/v4 v4.13.0/go.mod h1:pfChB/xh/Unjila75QW7+VU4TSnWnnk9UTnmpPaOR2g=
+github.com/bufbuild/protocompile v0.14.1 h1:iA73zAf/fyljNjQKwYzUHD6AD4R8KMasmwa/FBatYVw=
+github.com/bufbuild/protocompile v0.14.1/go.mod h1:ppVdAIhbr2H8asPk6k4pY7t9zB1OU5DoEw9xY/FUi1c=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=

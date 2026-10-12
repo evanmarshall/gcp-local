@@ -306,6 +306,122 @@ func (s *SubscriberServer) Seek(ctx context.Context, request *pb.SeekRequest) (*
 	return response, nil
 }
 
+type SchemaServiceServer struct {
+	pb.UnimplementedSchemaServiceServer
+	Dispatch PubSubDispatch
+}
+
+func (s *SchemaServiceServer) CreateSchema(ctx context.Context, request *pb.CreateSchemaRequest) (*pb.Schema, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/CreateSchema", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.Schema)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) GetSchema(ctx context.Context, request *pb.GetSchemaRequest) (*pb.Schema, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/GetSchema", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.Schema)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) ListSchemas(ctx context.Context, request *pb.ListSchemasRequest) (*pb.ListSchemasResponse, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/ListSchemas", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.ListSchemasResponse)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) ListSchemaRevisions(ctx context.Context, request *pb.ListSchemaRevisionsRequest) (*pb.ListSchemaRevisionsResponse, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/ListSchemaRevisions", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.ListSchemaRevisionsResponse)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) CommitSchema(ctx context.Context, request *pb.CommitSchemaRequest) (*pb.Schema, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/CommitSchema", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.Schema)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) RollbackSchema(ctx context.Context, request *pb.RollbackSchemaRequest) (*pb.Schema, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/RollbackSchema", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.Schema)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) DeleteSchemaRevision(ctx context.Context, request *pb.DeleteSchemaRevisionRequest) (*pb.Schema, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/DeleteSchemaRevision", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.Schema)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) DeleteSchema(ctx context.Context, request *pb.DeleteSchemaRequest) (*emptypb.Empty, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/DeleteSchema", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*emptypb.Empty)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) ValidateSchema(ctx context.Context, request *pb.ValidateSchemaRequest) (*pb.ValidateSchemaResponse, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/ValidateSchema", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.ValidateSchemaResponse)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+func (s *SchemaServiceServer) ValidateMessage(ctx context.Context, request *pb.ValidateMessageRequest) (*pb.ValidateMessageResponse, error) {
+	result, err := s.Dispatch.Unary(ctx, "/google.pubsub.v1.SchemaService/ValidateMessage", request)
+	if err != nil {
+		return nil, err
+	}
+	response, ok := result.(*pb.ValidateMessageResponse)
+	if !ok || response == nil {
+		return nil, status.Error(codes.Internal, "Provider returned an invalid response type")
+	}
+	return response, nil
+}
+
 var PubSubMethods = []RPC{
 	{"/google.pubsub.v1.Publisher/CreateTopic", "name", "projects/*/topics/*", false, func() proto.Message { return &pb.Topic{} }, func() proto.Message { return &pb.Topic{} }},
 	{"/google.pubsub.v1.Publisher/UpdateTopic", "topic.name", "projects/*/topics/*", false, func() proto.Message { return &pb.UpdateTopicRequest{} }, func() proto.Message { return &pb.Topic{} }},
@@ -332,4 +448,14 @@ var PubSubMethods = []RPC{
 	{"/google.pubsub.v1.Subscriber/UpdateSnapshot", "snapshot.name", "projects/*/snapshots/*", false, func() proto.Message { return &pb.UpdateSnapshotRequest{} }, func() proto.Message { return &pb.Snapshot{} }},
 	{"/google.pubsub.v1.Subscriber/DeleteSnapshot", "snapshot", "projects/*/snapshots/*", false, func() proto.Message { return &pb.DeleteSnapshotRequest{} }, func() proto.Message { return &emptypb.Empty{} }},
 	{"/google.pubsub.v1.Subscriber/Seek", "subscription", "projects/*/subscriptions/*", false, func() proto.Message { return &pb.SeekRequest{} }, func() proto.Message { return &pb.SeekResponse{} }},
+	{"/google.pubsub.v1.SchemaService/CreateSchema", "parent", "projects/*", false, func() proto.Message { return &pb.CreateSchemaRequest{} }, func() proto.Message { return &pb.Schema{} }},
+	{"/google.pubsub.v1.SchemaService/GetSchema", "name", "projects/*/schemas/*", false, func() proto.Message { return &pb.GetSchemaRequest{} }, func() proto.Message { return &pb.Schema{} }},
+	{"/google.pubsub.v1.SchemaService/ListSchemas", "parent", "projects/*", false, func() proto.Message { return &pb.ListSchemasRequest{} }, func() proto.Message { return &pb.ListSchemasResponse{} }},
+	{"/google.pubsub.v1.SchemaService/ListSchemaRevisions", "name", "projects/*/schemas/*", false, func() proto.Message { return &pb.ListSchemaRevisionsRequest{} }, func() proto.Message { return &pb.ListSchemaRevisionsResponse{} }},
+	{"/google.pubsub.v1.SchemaService/CommitSchema", "name", "projects/*/schemas/*", false, func() proto.Message { return &pb.CommitSchemaRequest{} }, func() proto.Message { return &pb.Schema{} }},
+	{"/google.pubsub.v1.SchemaService/RollbackSchema", "name", "projects/*/schemas/*", false, func() proto.Message { return &pb.RollbackSchemaRequest{} }, func() proto.Message { return &pb.Schema{} }},
+	{"/google.pubsub.v1.SchemaService/DeleteSchemaRevision", "name", "projects/*/schemas/*", false, func() proto.Message { return &pb.DeleteSchemaRevisionRequest{} }, func() proto.Message { return &pb.Schema{} }},
+	{"/google.pubsub.v1.SchemaService/DeleteSchema", "name", "projects/*/schemas/*", false, func() proto.Message { return &pb.DeleteSchemaRequest{} }, func() proto.Message { return &emptypb.Empty{} }},
+	{"/google.pubsub.v1.SchemaService/ValidateSchema", "parent", "projects/*", false, func() proto.Message { return &pb.ValidateSchemaRequest{} }, func() proto.Message { return &pb.ValidateSchemaResponse{} }},
+	{"/google.pubsub.v1.SchemaService/ValidateMessage", "parent", "projects/*", false, func() proto.Message { return &pb.ValidateMessageRequest{} }, func() proto.Message { return &pb.ValidateMessageResponse{} }},
 }

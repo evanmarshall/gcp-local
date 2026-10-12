@@ -164,6 +164,12 @@ func (p *Provider) resetPush(scope state.Scope) error {
 // holds only while the service agent's grants allow forwarding.
 func (p *Provider) restorePush(response proto.Message) {
 	switch response := response.(type) {
+	case *pb.Topic:
+		p.decorateTopic(response)
+	case *pb.ListTopicsResponse:
+		for _, topic := range response.GetTopics() {
+			p.decorateTopic(topic)
+		}
 	case *pb.Subscription:
 		p.decorateSubscription(response)
 	case *pb.ListSubscriptionsResponse:

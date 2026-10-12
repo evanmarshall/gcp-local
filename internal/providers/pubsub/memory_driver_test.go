@@ -50,6 +50,7 @@ type memoryPubSub struct {
 	outstanding   map[string]*pb.PubsubMessage
 	acked         []string
 	snapshots     map[string]*pb.Snapshot
+	schemas       map[string]*pb.Schema // Avro schemas, unvalidated
 	modacks       []*pb.ModifyAckDeadlineRequest
 	updates       []*pb.UpdateSubscriptionRequest
 	nextID        int
@@ -151,6 +152,9 @@ func (m *memoryPubSub) apply(method string, in proto.Message) (proto.Message, er
 		return result, err
 	}
 	if result, handled, err := m.applySnapshot(in); handled {
+		return result, err
+	}
+	if result, handled, err := m.applySchema(in); handled {
 		return result, err
 	}
 	return nil, status.Error(codes.Unimplemented, "memory backend does not serve "+method)

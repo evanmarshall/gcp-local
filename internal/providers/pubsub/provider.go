@@ -40,6 +40,10 @@ type Provider struct {
 	labels   sync.Map // canonical subscription or snapshot -> provider-owned labels map
 	// canonical subscription -> provider-owned delivery policy (delivery.go)
 	deliveries sync.Map
+	// canonical schema -> provider-owned Protocol Buffer schema (schema_proto.go)
+	schemas sync.Map
+	// canonical topic -> its binding to a provider-owned schema
+	topicSchemas sync.Map
 }
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, config Config) (*Provider, error) {
@@ -77,7 +81,7 @@ func (p *Provider) afterReset(scope state.Scope) error {
 		return err
 	}
 	prefix := canonical("projects/" + scope.Project + "/")
-	for _, owned := range []*sync.Map{&p.labels, &p.deliveries} {
+	for _, owned := range []*sync.Map{&p.labels, &p.deliveries, &p.schemas, &p.topicSchemas} {
 		owned.Range(func(key, _ any) bool {
 			if name, ok := key.(string); ok && strings.HasPrefix(name, prefix) {
 				owned.Delete(key)
@@ -97,7 +101,11 @@ func (p *Provider) registerMethods(registry *gateway.Registry) error {
 		if !unaryMethod(method) {
 			continue
 		}
-		if err := registry.Register(method, p.handle); err != nil {
+		handler := p.handle
+		if strings.HasPrefix(method, schemaService) {
+			handler = p.handleSchema
+		}
+		if err := registry.Register(method, handler); err != nil {
 			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}
@@ -107,6 +115,9 @@ func (p *Provider) registerMethods(registry *gateway.Registry) error {
 		}
 	}
 	if err := p.registerRestPermissions(); err != nil {
+		return err
+	}
+	if err := p.registerRestSchemas(registry); err != nil {
 		return err
 	}
 	return p.registerPolicyAndStream(registry)
@@ -141,7 +152,8 @@ func keyOf(call gateway.Call) backend.Key {
 func projectMethod(method string) bool {
 	switch method {
 	case publisher + "CreateTopic", subscriber + "CreateSubscription", subscriber + "CreateSnapshot",
-		publisher + "ListTopics", subscriber + "ListSubscriptions", subscriber + "ListSnapshots":
+		publisher + "ListTopics", subscriber + "ListSubscriptions", subscriber + "ListSnapshots",
+		schemaService + "CreateSchema", schemaService + "ListSchemas", schemaService + "ValidateSchema", schemaService + "ValidateMessage":
 		return true
 	}
 	return false
@@ -166,10 +178,15 @@ func (p *Provider) authorize(call gateway.Call, request proto.Message) error {
 }
 
 // authorizeRelated checks the second resource a request names: the topic a
-// subscription attaches to, a snapshot's source subscription, or a seek's
-// snapshot (access-control table).
+// subscription attaches to, a snapshot's source subscription, a seek's
+// snapshot (access-control table), or the schema a created topic attaches.
 func (p *Provider) authorizeRelated(call gateway.Call, request proto.Message) error {
 	switch r := request.(type) {
+	case *pb.Topic:
+		if r.GetSchemaSettings() == nil {
+			return nil
+		}
+		return p.authorizeOn(call, r.GetSchemaSettings().GetSchema(), "schema", schemaAttach)
 	case *pb.Subscription:
 		if err := p.authorizeAttachment(call, r); err != nil {
 			return err
@@ -344,7 +361,7 @@ func (p *Provider) execute(call gateway.Call, request proto.Message, active back
 	if err != nil {
 		return nil, err
 	}
-	forwarded, err = withoutDeadLetter(forwarded)
+	forwarded, err = p.providerFields(forwarded)
 	if err != nil {
 		return nil, err
 	}
@@ -403,6 +420,23 @@ func (p *Provider) afterDelivery(call gateway.Call, request, response proto.Mess
 		p.track(r.GetSubscription(), pulled.GetReceivedMessages())
 	}
 	return nil
+}
+
+// providerFields applies the provider-owned parts of a request before it is
+// forwarded: the dead-letter policy and Protocol Buffer schema settings are
+// withheld, and a publish to a Protocol Buffer topic is validated.
+func (p *Provider) providerFields(request proto.Message) (proto.Message, error) {
+	forwarded, err := withoutDeadLetter(request)
+	if err != nil {
+		return nil, err
+	}
+	if forwarded, err = p.withoutProtoSchema(forwarded); err != nil {
+		return nil, err
+	}
+	if publish, ok := forwarded.(*pb.PublishRequest); ok {
+		return p.validateSchemaPublish(publish)
+	}
+	return forwarded, nil
 }
 
 // withoutDeadLetter strips the dead-letter policy from a forwarded create; the
@@ -477,7 +511,7 @@ func (p *Provider) settleMutation(session context.Context, b driver, call gatewa
 	if !ambiguous(invokeErr) {
 		return invokeErr
 	}
-	return p.resolveMutation(session, b, call, push, creating, invokeErr)
+	return p.resolveMutation(session, b, call, request, push, creating, invokeErr)
 }
 
 // commitMutation mirrors a successful create or delete into the provider index,
@@ -504,6 +538,8 @@ func (p *Provider) commitMutation(session context.Context, call gateway.Call, re
 		}
 	case *pb.CreateSnapshotRequest:
 		labels = r.GetLabels() // The emulator drops snapshot labels.
+	case *pb.Topic:
+		p.storeTopicSchema(r)
 	}
 	if len(labels) > 0 {
 		p.labels.Store(canonical(call.Resource), labels)
@@ -513,10 +549,14 @@ func (p *Provider) commitMutation(session context.Context, call gateway.Call, re
 }
 
 // resolveMutation re-reads an ambiguous mutation's resource to decide whether
-// the backend landed it before the error, and starts the push worker only then.
-func (p *Provider) resolveMutation(session context.Context, b driver, call gateway.Call, push *pb.PushConfig, creating bool, invokeErr error) error {
+// the backend landed it before the error, and only then binds a created topic
+// to its provider-owned schema or starts a created subscription's push worker.
+func (p *Provider) resolveMutation(session context.Context, b driver, call gateway.Call, request proto.Message, push *pb.PushConfig, creating bool, invokeErr error) error {
 	if indexErr := p.reconcile(session, b, call); indexErr != nil {
 		return errors.Join(invokeErr, indexErr)
+	}
+	if topic, ok := request.(*pb.Topic); ok && creating && p.mutationLanded(call) {
+		p.storeTopicSchema(topic)
 	}
 	if creating && push != nil && p.mutationLanded(call) {
 		if err := p.startPush(session, call, push); err != nil {
@@ -552,10 +592,13 @@ func invoke(ctx context.Context, b driver, method string, request proto.Message)
 }
 func (p *Provider) publish(call gateway.Call) error {
 	kind := "topic"
-	if strings.Contains(call.Resource, "/subscriptions/") {
+	switch {
+	case strings.Contains(call.Resource, "/subscriptions/"):
 		kind = "subscription"
-	} else if strings.Contains(call.Resource, "/snapshots/") {
+	case strings.Contains(call.Resource, "/snapshots/"):
 		kind = "snapshot"
+	case strings.Contains(call.Resource, "/schemas/"):
+		kind = "schema"
 	}
 	if err := p.index.Put(serviceName, state.Resource{Name: canonical(call.Resource), Service: serviceName, Kind: kind, Parent: provider.ProjectResource(call.Project), Scope: scopeOf(call)}); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
@@ -566,6 +609,7 @@ func (p *Provider) publish(call gateway.Call) error {
 func (p *Provider) forget(call gateway.Call) error {
 	p.labels.Delete(canonical(call.Resource))
 	p.deliveries.Delete(canonical(call.Resource))
+	p.topicSchemas.Delete(canonical(call.Resource))
 	if err := p.stopPush(canonical(call.Resource)); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return err
@@ -590,10 +634,13 @@ func (p *Provider) reconcile(parent context.Context, b driver, call gateway.Call
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 2*time.Second)
 	defer cancel()
 	method, request := publisher+"GetTopic", proto.Message(&pb.GetTopicRequest{Topic: call.Resource})
-	if strings.Contains(call.Resource, "/subscriptions/") {
+	switch {
+	case strings.Contains(call.Resource, "/subscriptions/"):
 		method, request = subscriber+"GetSubscription", &pb.GetSubscriptionRequest{Subscription: call.Resource}
-	} else if strings.Contains(call.Resource, "/snapshots/") {
+	case strings.Contains(call.Resource, "/snapshots/"):
 		method, request = subscriber+"GetSnapshot", &pb.GetSnapshotRequest{Snapshot: call.Resource}
+	case strings.Contains(call.Resource, "/schemas/"):
+		method, request = schemaService+"GetSchema", &pb.GetSchemaRequest{Name: call.Resource}
 	}
 	_, err := invoke(ctx, b, method, request)
 	if err == nil {

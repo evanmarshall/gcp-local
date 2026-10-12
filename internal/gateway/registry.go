@@ -109,6 +109,7 @@ func (r *Registry) registerRoutes() {
 		{generated.CloudTasksRoutes, "cloudtasks"},
 		{generated.CloudSQLRoutes, "cloudsql"},
 		{generated.PubSubRestRoutes, servicePubsub},
+		{generated.PubSubSchemaRestRoutes, servicePubsub},
 		{generated.RedisRoutes, "redis"},
 		{generated.VertexAIRoutes, "vertexai"},
 		{generated.LoggingRoutes, "logging"},
