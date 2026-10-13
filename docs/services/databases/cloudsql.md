@@ -1,6 +1,6 @@
 # Cloud SQL for PostgreSQL and MySQL
 
-Cloud SQL Admin v1beta4 over REST at `/sql/v1beta4/projects/{project}/...`. Each instance is a real server: PostgreSQL 16 or 15, or MySQL 8.4 or 8.0. Databases, users, and backups are real objects in it. Connect with a password on a published port, which enforces the instance's TLS mode and authorized networks, or through an IAM-checked connector. The admin scenarios are recorded against GCP; backups, TLS, networks, availability, and flags were observed in live runs but are not recorded yet ([Verification](#verification)). The connection paths are tested locally only. Linux only.
+Cloud SQL Admin v1beta4 over REST at `/sql/v1beta4/projects/{project}/...`. Each instance is a real server: PostgreSQL 16 or 15, or MySQL 8.4 or 8.0. Databases, users, and backups are real objects in it. Connect with a password on a published port, which enforces the instance's TLS mode and authorized networks, or through an IAM-checked connector. Five scenarios are recorded against GCP ([Verification](#verification)); the connection paths are tested locally only. Linux only.
 
 v1beta4 is served instead of v1 because v1 shares `/v1/projects/...` paths with Spanner. The pinned Terraform provider and gcloud use v1beta4.
 
@@ -51,8 +51,8 @@ mysql -h 127.0.0.1 -P 4569 -u root -p --ssl-mode=VERIFY_CA --ssl-ca=server-ca.pe
 ```
 
 - The server certificate names `127.0.0.1` and `localhost`, so `sslmode=verify-full` works locally. GCP's names `project:instance` only.
-- Server certificates use ECDSA P-256 keys; client certificates use RSA 2048 in PKCS #1, as GCP returns (observed live). A deleted `sslCerts` entry stops working on the next connection.
-- `requireSsl` alone sets `sslMode` to `TRUSTED_CLIENT_CERTIFICATE_REQUIRED` (`true`) or back from it (`false`); `sslMode` wins when both are given.
+- Server certificates use ECDSA P-256 keys; client certificates use RSA 2048 in PKCS #1, as GCP returns (recorded). A deleted `sslCerts` entry stops working on the next connection.
+- `requireSsl` alone sets `sslMode` to `TRUSTED_CLIENT_CERTIFICATE_REQUIRED` (`true`) or `ALLOW_UNENCRYPTED_AND_ENCRYPTED` (`false`), as recorded. Both given must agree (`true` only with `TRUSTED_CLIENT_CERTIFICATE_REQUIRED`), or the patch returns GCP's 400.
 - PostgreSQL 17's direct TLS (`sslnegotiation=direct`) is not accepted. The connector still declines TLS, as the Auth Proxy's local socket does.
 
 ### Authorized networks
@@ -61,6 +61,7 @@ mysql -h 127.0.0.1 -P 4569 -u root -p --ssl-mode=VERIFY_CA --ssl-ca=server-ca.pe
 
 - Host connections come from `127.0.0.1` when gcp-local runs on the host. In the packaged container they come from the Docker network's gateway (often `172.17.0.1` or `192.168.65.1`): authorize that address, or `0.0.0.0/0`.
 - An empty list admits every source. GCP admits no direct public-IP connection then; the local published port stays usable.
+- A replacement list returns new entries first, in request order, then the entries kept from before (recorded).
 - Entries are IPv4 CIDR ranges with no host bits set, or one address. Expired entries (`expirationTime`) admit nothing. The connector ignores the list, as the Auth Proxy does.
 
 ### Connector
@@ -78,10 +79,10 @@ Each new connection checks `cloudsql.instances.connect` for the bound principal,
 
 | Resource | Methods | Notes |
 | --- | --- | --- |
-| Instances | `insert`, `get`, `list`, `patch`, `update`, `delete`, `restoreBackup` | `POSTGRES_16`, `POSTGRES_15`, `MYSQL_8_4`, or `MYSQL_8_0`; `settings.tier` required (400 `Missing parameter: Tier.`, checked first). `patch` merges the fields it names; `databaseFlags` and `authorizedNetworks` replace the whole list (observed live). `update` (PUT) also clears the labels, flags, and networks it omits (not recorded). Region, version, and edition can only be restated. Stale `settingsVersion` returns 412. Protected delete returns 400. `list` takes `maxResults` (default 500, at most 1,000) and opaque `pageToken`, ordered by name, and has no `kind` |
+| Instances | `insert`, `get`, `list`, `patch`, `update`, `delete`, `restoreBackup` | `POSTGRES_16`, `POSTGRES_15`, `MYSQL_8_4`, or `MYSQL_8_0`; `settings.tier` required (400 `Missing parameter: Tier.`, checked first). `patch` merges the fields it names; `databaseFlags` and `authorizedNetworks` replace the whole list (recorded). `update` (PUT) also clears the labels, flags, and networks it omits (not recorded). Region, version, and edition can only be restated. Stale `settingsVersion` returns 412. Protected delete returns 400. `list` takes `maxResults` (default 500, at most 1,000) and opaque `pageToken`, ordered by name, and has no `kind` |
 | Backup runs | `insert`, `get`, `list`, `delete` | See [Backups](#backups) |
-| SSL certs | `insert`, `get`, `list`, `delete` | Client certificates for `TRUSTED_CLIENT_CERTIFICATE_REQUIRED`; `insert` returns the private key once. A duplicate `commonName` returns 400 `Invalid request: Common name already exists: NAME.`, a missing fingerprint 404 `sslCertificateDoesNotExist` (observed live). Operations are `UPDATE` |
-| Connect | `connectSettings` | `serverCaCert`, addresses, version, region, `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` (observed live) |
+| SSL certs | `insert`, `get`, `list`, `delete` | Client certificates for `TRUSTED_CLIENT_CERTIFICATE_REQUIRED`; `insert` returns the private key once. A duplicate `commonName` returns 400 `Invalid request: Common name already exists: NAME.`, a missing fingerprint 404 `sslCertificateDoesNotExist` (recorded). Operations are `UPDATE` |
+| Connect | `connectSettings` | `serverCaCert`, addresses, version, region, `serverCaMode` `GOOGLE_MANAGED_INTERNAL_CA` (recorded) |
 | Databases | `insert`, `get`, `list`, `delete` | Optional `charset` and `collation`. MySQL defaults to `utf8mb4` and `utf8mb4_0900_ai_ci`; unknown or mismatched names return 400. MySQL lists the system schemas; deleting one returns 400. A duplicate MySQL database returns 400, as recorded |
 | Users | `insert`, `list`, `delete` | `BUILT_IN` only. MySQL users have a `host` (default `%`) and `delete` takes `host`; users get the `cloudsqlsuperuser` role. A user without a password can't log in |
 | Operations | `get`, `list`, `cancel` | `list` filters by `instance`, newest first, with `maxResults` and `pageToken`; 1,000 kept per project. `cancel` refuses every served operation type with GCP's 400 (recorded for `CREATE`); `cancel` needs `cloudsql.instances.update` (`roles/cloudsql.viewer` is denied, recorded; the exact permission is inferred) |
@@ -90,14 +91,14 @@ Operations report `PENDING` for 500 ms after the work ends, then `DONE`, as GCP 
 
 ### Backups
 
-`settings.backupConfiguration` is stored and returned as requested, with GCP's defaults (observed live): disabled, 7 retained backups, 7 days of logs, and a start time gcp-local assigns. PostgreSQL point-in-time recovery also reports `replicationLogArchivingEnabled` and `transactionalLogStorageState: CLOUD_STORAGE` (observed live).
+`settings.backupConfiguration` is stored and returned as requested, with GCP's defaults (recorded): disabled, 7 retained backups, 7 days of logs, and a start time gcp-local assigns. PostgreSQL point-in-time recovery also reports `replicationLogArchivingEnabled` and `transactionalLogStorageState: CLOUD_STORAGE` (recorded).
 
 | Call | Local behavior |
 | --- | --- |
 | `backupRuns.insert` | An online physical backup into the instance's private directory: PostgreSQL's base backup (`pg_backup_start`, the data directory, the WAL it needs) or a MySQL clone. Sessions continue. `BACKUP_VOLUME` operation with `backupContext` |
 | Automated backups | With `enabled: true`, one `AUTOMATED` run at `startTime` (UTC) each day; the oldest beyond `retainedBackups` are deleted |
 | `backupRuns.list`, `get` | Newest first, `ON_DEMAND` or `AUTOMATED`, `status: SUCCESSFUL`, `backupKind: SNAPSHOT` |
-| `backupRuns.delete` | Deletes the files; `get` then reports the run `DELETED` (observed live: a deleted run stays readable). `DELETE_BACKUP` operation |
+| `backupRuns.delete` | Deletes the files; `get` then reports the run `DELETED` (recorded: a deleted run stays readable, and `list` omits it). `DELETE_BACKUP` operation |
 | `instances.restoreBackup` | Stops the target, replaces its whole data directory (databases and users) with the backup of the same or another instance in the project, and starts it. Open sessions end. `RESTORE_VOLUME` operation |
 
 - A restore needs the same `databaseVersion`. Another project's backup, `backup` and `backupdrBackup` names, and `restoreInstanceSettings` are gaps.
@@ -106,11 +107,11 @@ Operations report `PENDING` for 500 ms after the work ends, then `DONE`, as GCP 
 
 ### High availability
 
-`availabilityType: REGIONAL` is stored and returned, with `secondaryGceZone` and `failoverReplica` as GCP reports them (observed live); shared-core tiers are accepted, as GCP accepted one. One local server serves the instance and there is no standby, so `instances.failover` returns 501.
+`availabilityType: REGIONAL` is stored and returned, with `secondaryGceZone` and `failoverReplica` as GCP reports them (recorded); shared-core tiers are accepted, as GCP accepted one. One local server serves the instance and there is no standby, so `instances.failover` returns 501.
 
 ### Database flags
 
-`settings.databaseFlags` is stored and passed to the server at startup; changing it restarts the server, ending open sessions. `patch` and `update` replace the whole list (observed live).
+`settings.databaseFlags` is stored and passed to the server at startup; changing it restarts the server, ending open sessions. `patch` and `update` replace the whole list (recorded).
 
 | Engine | Modeled flags |
 | --- | --- |
@@ -135,10 +136,11 @@ Errors use the v1beta4 shape: `errors[]` with `domain` `global` and a `reason` (
 | --- | --- | --- |
 | `cloudsql-postgres-instance-admin` | 2026-10-13 | Operation envelopes (`PENDING` first), instance and database fields, deletion protection, default `postgres` database and user, denied read and database create with their messages and reasons, 409 duplicate, an unknown field dropped (400 for the missing tier), `maxResults` paging, an invalid page token, a negative `maxResults`, operations newest first across pages, cancel of a finished and of a malformed operation, a `roles/cloudsql.viewer` grant conditioned on `resource.name`, `resource.type`, and `resource.service` (allowed on the instance and its operation; denied on cancel, another name, and list), 404 after delete |
 | `cloudsql-mysql-instance-admin` | 2026-10-13 | `MYSQL_8_0` instance fields (no `OUTGOING` address), the four system schemas and `root@%`, denied read and database create, a database with `utf8mb4_unicode_ci` and one with the defaults, 400 duplicate database, user fields and a user with host `%`, 404 after delete |
+| `cloudsql-postgres-backups` | 2026-10-13 | `backupConfiguration` round trip with point-in-time recovery, location, and retention, and the defaults of an instance without one; refused start time, binary logging on PostgreSQL, log retention days, and PITR without backups; a patch that merges one field; an on-demand run's operation, list, and read; a missing run; restore in place and into a second instance; restore of a missing run and without a context; deletion, the `DELETED` run, and its absence from `list` |
+| `cloudsql-mysql-backups-flags` | 2026-10-13 | `MYSQL_8_0` with backups, binary logging, and three flags; binary logging without backups refused; an unknown flag (404) and two bad values (400); a flags patch that replaces the list; an on-demand run, restore in place, deletion |
+| `cloudsql-postgres-connectivity` | 2026-10-13 | `REGIONAL` on `db-custom-1-3840` with `ENCRYPTED_ONLY`, an authorized network, and two flags; the edition/tier, enum, and network refusals; unknown, out-of-range, non-numeric, and duplicate flags; a conflicting `sslMode`/`requireSsl` pair; `connectSettings`; `requireSsl` alone in both directions; `TRUSTED_CLIENT_CERTIFICATE_REQUIRED`; the order of replaced networks; `sslCerts` insert, list, read, duplicate, and delete |
 
-Three more scenarios exist and ran against GCP on 2026-10-13, but their candidates were made with an earlier scenario revision and are not promoted, so they are not recorded: `cloudsql-postgres-backups` (backup configuration round trip, an on-demand run, restore in place and into a second instance, deletion), `cloudsql-mysql-backups-flags` (binary logging, flags, their validation errors, a run restored in place), and `cloudsql-postgres-connectivity` (`REGIONAL`, `sslMode` and `requireSsl`, `sslCerts`, `connectSettings`, authorized networks, flag errors). The behavior the code cites as "observed live" comes from those runs.
-
-Service-managed fields such as `gceZone`, `serverCaCert`'s certificate, `serviceAccountEmailAddress`, the disk and replication settings, and MySQL users' `etag`, `iamStatus`, and `passwordPolicy` have stand-in values; only their presence is observed.
+Service-managed fields such as `gceZone`, `serverCaCert`'s certificate, `serviceAccountEmailAddress`, the disk and replication settings, and MySQL users' `etag`, `iamStatus`, and `passwordPolicy` have stand-in values; only their presence is recorded.
 
 ```sh
 sh scripts/check/recordings.sh       # the recordings
