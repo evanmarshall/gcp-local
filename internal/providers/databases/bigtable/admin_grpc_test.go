@@ -118,7 +118,7 @@ func TestAdminGapsOverGRPC(t *testing.T) {
 	refused(t, "view policy", err, codes.Unimplemented,
 		"No provider implements /google.bigtable.admin.v2.BigtableInstanceAdmin/GetIamPolicy for projects/*/instances/*/materializedViews/* resources")
 	// Operations are served only under a Bigtable instance or table name.
-	_, err = longrunningpb.NewOperationsClient(conn).GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: "operations/x"})
+	_, err = longrunningpb.NewOperationsClient(conn).GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: "operations/projects/p/elsewhere/1"})
 	refused(t, "GetOperation", err, codes.Unimplemented, "No provider implements /google.longrunning.Operations/GetOperation")
 }
 
