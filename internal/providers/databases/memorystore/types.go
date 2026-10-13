@@ -108,8 +108,16 @@ func validScope(scope state.Scope) error {
 var errRegion = errors.New("memorystore locations are regions")
 
 func instanceName(scope state.Scope, instance string) string {
-	return "projects/" + scope.Project + "/locations/" + scope.Location + "/instances/" + instance
+	return locationName(scope) + "/instances/" + instance
 }
+
+// locationName is the relative name of a region.
+func locationName(scope state.Scope) string {
+	return "projects/" + scope.Project + "/locations/" + scope.Location
+}
+
+// redisService is the resource.service IAM Conditions see.
+const redisService = "redis.googleapis.com"
 
 // fullName prefixes a canonical Memorystore name for the shared index.
 func fullName(name string) string {
@@ -121,9 +129,10 @@ func invalid(format string, args ...any) error {
 	return status.Errorf(codes.InvalidArgument, format, args...)
 }
 
-// notFound uses Memorystore's full-name text, not the shared kind/name form.
+// notFound uses Memorystore's full-name text, not the shared kind/name form,
+// with a ResourceInfo naming the instance (recorded).
 func notFound(name string) error {
-	return status.Errorf(codes.NotFound, "Resource '%s' was not found", name)
+	return provider.ResourceInfo(codes.NotFound, "Resource '"+name+"' was not found", name)
 }
 
 // gap reports an unsupported request shape explicitly.

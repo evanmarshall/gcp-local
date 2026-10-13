@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -51,7 +50,8 @@ func principal(token string) string {
 type harness struct {
 	t        *testing.T
 	gate     *gateway.Gateway
-	auth     *fakeAuthorizer
+	engine   *iam.Engine
+	registry *gateway.Registry
 	index    *state.Index
 	manager  *backend.Manager
 	provider *Provider
@@ -61,14 +61,13 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{t: t, index: state.NewIndex(), auth: newFakeAuthorizer(), fakes: map[state.Scope]*fakeDriver{}}
-	h.auth.grant(testProject, principal(adminToken), adminPermissions)
-	h.auth.grant(testProject, principal(viewerToken), viewerPermissions)
-	h.auth.grant(peerProject, principal(peerToken), adminPermissions)
+	h := &harness{t: t, index: state.NewIndex(), fakes: map[state.Scope]*fakeDriver{}}
+	h.engine = newEngine(t, h.index)
 	h.manager = backend.NewManager(time.Second, time.Second)
 	registry := gateway.NewRegistry()
+	h.registry = registry
 	var err error
-	h.provider, err = newProvider(registry, h.manager, h.index, h.auth, 0, func(scope state.Scope) (backend.Backend, error) {
+	h.provider, err = newProvider(registry, h.manager, h.index, h.engine, 0, func(scope state.Scope) (backend.Backend, error) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		fake := newFakeDriver()
@@ -331,7 +330,8 @@ func TestScopeIsolationAndReset(t *testing.T) {
 func TestFailedPublicationStopsTheNewServer(t *testing.T) {
 	h := newHarness(t)
 	name := fullName(instanceName(state.Scope{Project: testProject, Location: testRegion}, testInstance))
-	must(t, h.index.Put("other", state.Resource{Name: name, Service: "other", Kind: "instance", Scope: state.Scope{Project: testProject, Location: testRegion}}))
+	must(t, h.index.Put("other", state.Resource{Name: name, Service: "other", Kind: "instance",
+		Parent: provider.ProjectResource(testProject), Scope: state.Scope{Project: testProject, Location: testRegion}}))
 	recorder := h.create(adminToken, testProject, testRegion, testInstance, basic(nil))
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
@@ -380,34 +380,6 @@ func TestListPagination(t *testing.T) {
 	}
 }
 
-// TestProductionPlansNeedRecordedRoles documents the provenance dependency:
-// the real IAM engine accepts the Memorystore permission plans only once the
-// roles/redis.* snapshots are recorded from GCP into internal/iam/roles. Until
-// then the production provider must refuse to register rather than run
-// without authorization.
-func TestProductionPlansNeedRecordedRoles(t *testing.T) {
-	index := state.NewIndex()
-	engine, err := iam.New(index)
-	must(t, err)
-	must(t, index.Put("resourcemanager", state.Resource{Name: provider.ProjectResource(testProject), Service: "resourcemanager",
-		Kind: "project", Number: "1", Scope: state.Scope{Project: testProject, Location: state.Global}}))
-	_, roleErr := engine.SetPolicy(provider.ProjectResource(testProject), iam.Policy{Bindings: []iam.Binding{
-		{Role: "roles/redis.admin", Members: []string{principal(adminToken)}}}})
-	manager := backend.NewManager(time.Second, time.Second)
-	t.Cleanup(func() { must(t, manager.Shutdown(context.Background())) })
-	_, err = newProvider(gateway.NewRegistry(), manager, index, engine, 0, func(state.Scope) (backend.Backend, error) {
-		return newFakeDriver(), nil
-	})
-	if roleErr != nil {
-		t.Logf("roles/redis.* snapshots are not recorded yet (%v); the provider must fail closed", roleErr)
-		if !errors.Is(err, errRolesUnrecorded) {
-			t.Fatalf("registration without recorded roles = %v", err)
-		}
-		return
-	}
-	must(t, err)
-}
-
 // TestOperationsReportProgress covers the shared operation store: a create's
 // operation is not done until the latency passes, cancel of finished work
 // lets it complete, and delete forgets it.
@@ -432,4 +404,82 @@ func TestOperationsReportProgress(t *testing.T) {
 	h.expect(h.invoke(adminToken, http.MethodDelete, path, nil), http.StatusOK)
 	h.expect(h.invoke(adminToken, http.MethodGet, path, nil), http.StatusNotFound)
 	h.expect(h.invoke(adminToken, http.MethodPost, path+":cancel", nil), http.StatusNotFound)
+}
+
+// TestAuthorizedNetworkMustExist covers the recorded refusal of a network the
+// Compute provider doesn't hold, and the gap when Compute isn't served.
+func TestAuthorizedNetworkMustExist(t *testing.T) {
+	h := newHarness(t)
+	network := "projects/demo-redis/global/networks/cache-net"
+	h.expect(h.create(adminToken, testProject, testRegion, "no-compute", basic(map[string]any{"authorizedNetwork": network})), http.StatusNotImplemented)
+	must(t, h.registry.Register("compute.networks.get", func(gateway.Call, any) (any, error) { return &gateway.RESTResponse{}, nil }))
+	refused := h.expect(h.create(adminToken, testProject, testRegion, "missing-net", basic(map[string]any{"authorizedNetwork": network})), http.StatusBadRequest)
+	failure := object(t, refused["error"])
+	details, _ := failure["details"].([]any)
+	if failure["message"] != "com.google.apps.framework.request.StatusException: <eye3 title='INVALID_ARGUMENT'/> generic::INVALID_ARGUMENT: Invalid authorized network 'cache-net'." ||
+		len(details) != 1 || object(t, details[0])["fieldViolations"] == nil {
+		t.Fatalf("missing network = %v", refused)
+	}
+	must(t, h.index.Put("compute", state.Resource{Name: "//compute.googleapis.com/projects/demo-redis/global/network/cache-net", Service: "compute", Kind: "network",
+		Parent: provider.ProjectResource(testProject), Scope: provider.ProjectScope(testProject)}))
+	created := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{"authorizedNetwork": network})), http.StatusOK)
+	if object(t, created["response"])["authorizedNetwork"] != network {
+		t.Fatalf("created = %v", created)
+	}
+	// An omitted network is the project's default, unchecked.
+	h.expect(h.create(adminToken, testProject, testRegion, "default-net", basic(nil)), http.StatusOK)
+	missing := h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"/absent", nil), http.StatusNotFound)
+	if details, _ := object(t, missing["error"])["details"].([]any); len(details) != 1 ||
+		object(t, details[0])["resourceName"] != "projects/demo-redis/locations/us-central1/instances/absent" {
+		t.Fatalf("not found = %v", missing)
+	}
+}
+
+// TestConditionsSeeTheAddressedResource grants roles/redis.viewer through a
+// project binding conditioned on resource.service and resource.name, which
+// GCP evaluates for the addressed instance even when it doesn't exist, and for
+// list on the location (probed). resource.type is "" on GCP and absent here,
+// so a condition reading it grants nothing.
+func TestConditionsSeeTheAddressedResource(t *testing.T) {
+	h := newHarness(t)
+	for _, id := range []string{testInstance, "cache-2"} {
+		h.expect(h.create(adminToken, testProject, testRegion, id, basic(nil)), http.StatusOK)
+	}
+	location := "projects/demo-redis/locations/us-central1"
+	current, err := h.engine.GetPolicy(provider.ProjectResource(testProject))
+	must(t, err)
+	current.Version = 3
+	current.Bindings = append(current.Bindings,
+		iam.Binding{Role: "roles/redis.viewer", Members: []string{principal("reader")},
+			Condition: []byte(`{"title":"named","expression":"resource.service == 'redis.googleapis.com' && resource.name in ['` +
+				location + `/instances/cache-1', '` + location + `/instances/absent', '` + location + `']"}`)},
+		iam.Binding{Role: "roles/redis.viewer", Members: []string{principal("typed")},
+			Condition: []byte(`{"title":"typed","expression":"resource.type == 'redis.googleapis.com/Instance'"}`)})
+	_, err = h.engine.SetPolicy(provider.ProjectResource(testProject), current)
+	must(t, err)
+	h.expect(h.invoke("reader", http.MethodGet, testInstances+"/"+testInstance, nil), http.StatusOK)
+	h.expect(h.invoke("reader", http.MethodGet, testInstances+"/cache-2", nil), http.StatusForbidden)
+	h.expect(h.invoke("reader", http.MethodGet, testInstances+"/absent", nil), http.StatusNotFound)
+	h.expect(h.invoke("reader", http.MethodGet, testInstances, nil), http.StatusOK)
+	denied := h.expect(h.invoke("typed", http.MethodGet, testInstances, nil), http.StatusForbidden)
+	if object(t, denied["error"])["message"] != "Permission 'redis.instances.list' denied on '"+location+"/instances'" {
+		t.Fatalf("list denial = %v", denied)
+	}
+	h.expect(h.invoke("typed", http.MethodGet, testInstances+"/"+testInstance, nil), http.StatusForbidden)
+}
+
+// TestCancelOfAFinishedOperationIsRefused follows the recorded refusal.
+func TestCancelOfAFinishedOperationIsRefused(t *testing.T) {
+	h := newHarness(t)
+	created := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(nil)), http.StatusOK)
+	name, _ := created["name"].(string)
+	refused := h.expect(h.invoke(adminToken, http.MethodPost, "/v1/"+name+":cancel", nil), http.StatusBadRequest)
+	failure := object(t, refused["error"])
+	details, _ := failure["details"].([]any)
+	if failure["status"] != "FAILED_PRECONDITION" || failure["message"] != "Invalid resource state '"+name+"': operation already completed" ||
+		len(details) != 1 || object(t, details[0])["@type"] != "type.googleapis.com/google.rpc.PreconditionFailure" {
+		t.Fatalf("cancel = %v", refused)
+	}
+	h.expect(h.invoke(adminToken, http.MethodDelete, "/v1/"+name, nil), http.StatusOK)
+	h.expect(h.invoke(adminToken, http.MethodGet, "/v1/"+name, nil), http.StatusNotFound)
 }

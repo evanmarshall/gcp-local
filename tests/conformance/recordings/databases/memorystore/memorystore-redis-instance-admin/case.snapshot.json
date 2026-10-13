@@ -1,6 +1,6 @@
 {
   "memorystore-redis-instance-admin": {
-    "recorded-date": "12-10-2026, 23:12:42",
+    "recorded-date": "13-10-2026, 02:47:26",
     "recorded-content": {
       "instance-operation": {
         "done": true,
@@ -266,6 +266,59 @@
         "http_status": 409,
         "status": "ALREADY_EXISTS"
       },
+      "missing-network": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value: projects/<project>/global/networks/<instance>-gone",
+                "field": "instance.authorized_network"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "com.google.apps.framework.request.StatusException: <eye3 title='INVALID_ARGUMENT'/> generic::INVALID_ARGUMENT: Invalid authorized network '<instance>-gone'.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "operation-cancel": {
+        "code": 400,
+        "details": [
+          {
+            "type": "type.googleapis.com/google.rpc.PreconditionFailure"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid resource state 'projects/<project>/locations/us-central1/operations/<operation>': operation already completed",
+        "status": "FAILED_PRECONDITION"
+      },
+      "operation-delete": {
+        "fields": [],
+        "http_status": 200
+      },
+      "operation-after-delete": {
+        "done": null,
+        "http_status": 404
+      },
+      "condition-read": {
+        "http_status": 200
+      },
+      "condition-other-instance": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission 'redis.instances.get' denied on 'projects/<project>/locations/us-central1/instances/<instance>-n'",
+        "status": "PERMISSION_DENIED"
+      },
+      "condition-list": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission 'redis.instances.list' denied on 'projects/<project>/locations/us-central1/instances'",
+        "status": "PERMISSION_DENIED"
+      },
       "delete-operation": {
         "done": true,
         "error": null,
@@ -285,7 +338,13 @@
       },
       "instance-absent": {
         "code": 404,
+        "details": [
+          {
+            "type": "type.googleapis.com/google.rpc.ResourceInfo"
+          }
+        ],
         "http_status": 404,
+        "message": "Resource 'projects/<project>/locations/us-central1/instances/<instance>' was not found",
         "status": "NOT_FOUND"
       },
       "cleanup": {

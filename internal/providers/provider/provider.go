@@ -80,6 +80,19 @@ func ErrorInfo(code codes.Code, message, reason, domain string, metadata map[str
 	return withDetail(status.New(code, message), &errdetails.ErrorInfo{Reason: reason, Domain: domain, Metadata: metadata})
 }
 
+// ResourceInfo returns a status error carrying a google.rpc.ResourceInfo
+// that names resource, as Memorystore's NOT_FOUND does.
+func ResourceInfo(code codes.Code, message, resource string) error {
+	return withDetail(status.New(code, message), &errdetails.ResourceInfo{ResourceName: resource})
+}
+
+// PreconditionFailure rejects a request with FAILED_PRECONDITION and message,
+// carrying an empty google.rpc.PreconditionFailure, as Memorystore's cancel of
+// a finished operation does; its violations are not recorded.
+func PreconditionFailure(message string) error {
+	return withDetail(status.New(codes.FailedPrecondition, message), &errdetails.PreconditionFailure{})
+}
+
 // FieldViolation rejects a request with INVALID_ARGUMENT whose message is
 // description, carrying a google.rpc.BadRequest that names field, as GCP's
 // JSON transcoder does. field is the request's proto path ("job.retry_config"),

@@ -2,7 +2,9 @@
 
 A Basic Tier instance bills while it exists, so the scenario creates one 1 GB REDIS_7_2
 instance in us-central1, records the control plane (never the AUTH string or private
-address), and deletes it.
+address), and deletes it. It also grants the ``allowed`` caller ``roles/redis.viewer`` on
+that one instance through a conditional project binding (Memorystore has no instance
+policy) and removes the binding afterwards.
 """
 
 import argparse
@@ -17,9 +19,11 @@ from gcp_validation.evidence import Inconclusive, SnapshotCase, now
 from gcp_validation.live_rest import LiveScope, Observations, OwnedRun, Response, RestClient
 from gcp_validation.sandbox import Sandbox
 from gcp_validation.services.compute.networking import COMPUTE, ComputeClient
+from gcp_validation.services.databases.projectgrant import ConditionalGrant
 
 SERVICE = 'redis'
-LIMITS = {'max_instances': 1, 'max_memory_gb': 1, 'max_run_seconds': 2400}
+LIMITS = {'max_instances': 1, 'max_memory_gb': 1, 'max_conditional_grants': 1,
+          'max_run_seconds': 3000}
 LIVE_ENDPOINT = 'https://redis.googleapis.com'
 REGION = 'us-central1'
 POLL_SECONDS = 15
@@ -50,6 +54,13 @@ class InstanceFixture(OwnedRun):
         self.network = self.instance + '-net'
         self.compute = ComputeClient(client.target, COMPUTE, sandbox=client.sandbox, scope=client.scope)
         self.network_path = f'/compute/v1/projects/{self.project}/global/networks/{self.network}'
+        # A name that is never created: its create is refused before any instance exists.
+        self.unowned = self.instance + '-n'
+        name = f'projects/{self.project}/locations/{REGION}/instances/{self.instance}'
+        # Memorystore reports resource.type as "" (probed), so the condition reads
+        # only resource.service and resource.name.
+        self.grant = ConditionalGrant(self, 'roles/redis.viewer', (
+            f"resource.service == 'redis.googleapis.com' && resource.name == '{name}'"))
 
     def compute_wait(self, response: Response) -> Response:
         """Poll one compute operation until DONE."""
@@ -67,17 +78,18 @@ class InstanceFixture(OwnedRun):
         return self.client.request(actor, method, f'{self.base}/{self.instance}{suffix}',
                                    body=body, query=query, timeout=self.remaining())
 
-    def create_instance(self) -> Response:
+    def create_instance(self, instance: str = '', network: str = '') -> Response:
         """Request the bounded instance; the response is a long-running operation."""
+        network = f'projects/{self.project}/global/networks/{network or self.network}'
         body = {'tier': 'BASIC', 'memorySizeGb': LIMITS['max_memory_gb'],
                 'redisVersion': 'REDIS_7_2', 'authEnabled': True,
                 'transitEncryptionMode': 'DISABLED', 'displayName': 'gcp-local conformance',
-                'labels': self.labels,
-                'authorizedNetwork': f'projects/{self.project}/global/networks/{self.network}',
+                'labels': self.labels, 'authorizedNetwork': network,
                 # GCP picks a zone when none is given, which made revalidation diverge.
                 'locationId': 'us-central1-a'}
         return self.client.request('fixture', 'POST', self.base, body=body,
-                                   query={'instanceId': self.instance}, timeout=self.remaining())
+                                   query={'instanceId': instance or self.instance},
+                                   timeout=self.remaining())
 
     def operation_path(self, name: str) -> str:
         """Address an operation by project ID whatever project form its name uses."""
@@ -97,11 +109,11 @@ class InstanceFixture(OwnedRun):
             operation = response.json()
         return response
 
-    def wait_absent(self) -> Response:
+    def wait_absent(self, instance: str = '') -> Response:
         """Wait for the asynchronous deletion to make the read return 404."""
         while True:
-            current = self.client.request('fixture', 'GET', f'{self.base}/{self.instance}',
-                                          timeout=self.remaining())
+            path = f'{self.base}/{instance or self.instance}'
+            current = self.client.request('fixture', 'GET', path, timeout=self.remaining())
             if current.status == 404:
                 return current
             if current.status != 200:
@@ -135,13 +147,15 @@ class InstanceFixture(OwnedRun):
         self.acquire()
         try:
             self.client.verify_project()
-            path = f'{self.base}/{self.instance}'
-            current = self.client.request('fixture', 'GET', path)
-            if current.status == 200:
-                self.delete_owned(path, current.json())
-            elif current.status != 404:
-                raise ValueError(f'Owned instance read returned HTTP {current.status}')
-            self.wait_absent()
+            self.grant.remove()
+            for instance in (self.instance, self.unowned):
+                path = f'{self.base}/{instance}'
+                current = self.client.request('fixture', 'GET', path)
+                if current.status == 200:
+                    self.delete_owned(path, current.json())
+                elif current.status != 404:
+                    raise ValueError(f'Owned instance read returned HTTP {current.status}')
+                self.wait_absent(instance)
             self.delete_network()
             self.manifest.update(cleanup='passed', finished_at=now())
             self.save()
@@ -207,7 +221,9 @@ def observe_instance(fixture: InstanceFixture, observe: Observations,
 def run_scenario(fixture: InstanceFixture, snapshot: SnapshotCase, created: Response) -> None:
     """Record the same selected observations in local, recording, and revalidation runs."""
     client = fixture.client
+    operation_id = created.json().get('name', '').rsplit('/', 1)[-1]
     observe = Observations({
+        operation_id: '<operation>',
         fixture.instance: '<instance>', fixture.manifest['run_id']: '<run>',
         fixture.project: '<project>', client.number: '<project-number>',
         **{email: '<' + actor + '>' for actor, email in client.emails.items()}})
@@ -235,8 +251,48 @@ def run_scenario(fixture: InstanceFixture, snapshot: SnapshotCase, created: Resp
     snapshot.match('missing-update-mask',
                    observe.error(fixture.call('PATCH', body={'displayName': 'x'})))
     snapshot.match('duplicate-instance', observe.error(fixture.create_instance()))
+    snapshot.match('missing-network', detailed(observe, fixture.create_instance(
+        fixture.unowned, fixture.instance + '-gone')))
+    run_operations(fixture, snapshot, observe, created.json()['name'])
+    run_condition(fixture, snapshot, observe)
     snapshot.match('delete-operation', operation(fixture.finish(fixture.call('DELETE'))))
-    snapshot.match('instance-absent', observe.error(fixture.wait_absent()))
+    snapshot.match('instance-absent', detailed(observe, fixture.wait_absent()))
+
+
+def outcome(observe: Observations, response: Response) -> dict:
+    """Select an error with its details, or a success's status and fields."""
+    if response.status >= 400:
+        return detailed(observe, response)
+    return {'http_status': response.status, 'fields': sorted(response.json())}
+
+
+def run_operations(fixture: InstanceFixture, snapshot: SnapshotCase, observe: Observations,
+                   name: str) -> None:
+    """Cancel, then delete, the finished create operation, and read it afterwards."""
+    path = fixture.operation_path(name)
+    client = fixture.client
+    snapshot.match('operation-cancel', outcome(observe, client.request(
+        'fixture', 'POST', path + ':cancel', timeout=fixture.remaining())))
+    snapshot.match('operation-delete', outcome(observe, client.request(
+        'fixture', 'DELETE', path, timeout=fixture.remaining())))
+    after = client.request('fixture', 'GET', path, timeout=fixture.remaining())
+    snapshot.match('operation-after-delete', {'http_status': after.status,
+                                              'done': after.json().get('done')})
+
+
+def run_condition(fixture: InstanceFixture, snapshot: SnapshotCase,
+                  observe: Observations) -> None:
+    """Grant roles/redis.viewer on the owned instance only, by resource.service and name."""
+    client = fixture.client
+    fixture.grant.add()
+    allowed = fixture.grant.wait(lambda: fixture.call('GET', actor='allowed'))
+    snapshot.match('condition-read', {'http_status': allowed.status})
+    other = client.request('allowed', 'GET', f'{fixture.base}/{fixture.unowned}',
+                           timeout=fixture.remaining())
+    snapshot.match('condition-other-instance', outcome(observe, other))
+    listing = client.request('allowed', 'GET', fixture.base, timeout=fixture.remaining())
+    snapshot.match('condition-list', outcome(observe, listing))
+    fixture.grant.remove()
 
 
 def main(argv: list[str] | None = None) -> None:

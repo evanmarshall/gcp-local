@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -26,6 +28,11 @@ func (p *Provider) create(ctx context.Context, request *gateway.RESTRequest, sco
 	record, err := newInstance(scope, request.Query.Get("instanceId"), body)
 	if err != nil {
 		return nil, err
+	}
+	if body.AuthorizedNetwork != "" {
+		if err := p.networkExists(record.Network); err != nil {
+			return nil, err
+		}
 	}
 	if record.AuthEnabled {
 		if record.AuthString, err = newAuthString(); err != nil {
@@ -64,6 +71,24 @@ func (p *Provider) launch(ctx context.Context, scope state.Scope, current driver
 	return instanceResponse(record.wire(scope)), nil
 }
 
+// networkExists refuses an authorized network the Compute provider doesn't
+// hold, with GCP's error (recorded, memorystore-redis-instance-admin). An
+// omitted network is the project's default network, which isn't checked.
+// Without the Compute service nothing can be checked, so a named network is
+// a gap rather than accepted unverified.
+func (p *Provider) networkExists(network string) error {
+	if !slices.Contains(p.registry.Providers(), "compute") {
+		return gap("authorizedNetwork needs the compute service to check the network; add compute to -services")
+	}
+	// The Compute provider indexes a network as
+	// //compute.googleapis.com/projects/P/global/network/N.
+	if _, found := p.index.Get("//compute.googleapis.com/" + strings.Replace(network, "/global/networks/", "/global/network/", 1)); found {
+		return nil
+	}
+	return provider.BadRequest("com.google.apps.framework.request.StatusException: <eye3 title='INVALID_ARGUMENT'/> generic::INVALID_ARGUMENT: "+
+		"Invalid authorized network '"+provider.LastSegment(network)+"'.", "instance.authorized_network", "Invalid value: "+network)
+}
+
 // paging is the list methods' page sizes and recorded refusals
 // (memorystore-redis-instance-admin records instances.list).
 var paging = provider.Paging{Default: maxPageSize, Max: maxPageSize,
@@ -87,24 +112,19 @@ func (p *Provider) operate(scope state.Scope, target, verb string, work func() (
 	return p.operation(scope, id)
 }
 
-// publish stores a new instance, then its index reference.
+// publish stores a new instance and its index reference under the scope
+// lock authorization holds, so a racing request never sees one without the
+// other.
 func (p *Provider) publish(scope state.Scope, record instance) error {
 	name := instanceName(scope, record.ID)
-	if err := p.catalog.With(scope, func(value *catalog) error {
+	return p.catalog.With(scope, func(value *catalog) error { //nolint:wrapcheck // the store returns scope validation or the wrapped index error
+		if err := p.index.Put(serviceName, state.Resource{Name: fullName(name), Service: serviceName, Kind: "instance",
+			Parent: provider.ProjectResource(scope.Project), Scope: scope}); err != nil {
+			return fmt.Errorf("index the instance: %w", err)
+		}
 		value.instances[record.ID] = record.clone()
 		return nil
-	}); err != nil {
-		return fmt.Errorf("store the instance: %w", err)
-	}
-	if err := p.index.Put(serviceName, state.Resource{Name: fullName(name), Service: serviceName, Kind: "instance",
-		Parent: provider.ProjectResource(scope.Project), Scope: scope}); err != nil {
-		_ = p.catalog.With(scope, func(value *catalog) error {
-			delete(value.instances, record.ID)
-			return nil
-		})
-		return fmt.Errorf("index the instance: %w", err)
-	}
-	return nil
+	})
 }
 
 // lookup copies one instance record.
@@ -226,16 +246,13 @@ func (p *Provider) remove(ctx context.Context, id string, scope state.Scope) (*g
 			if err := current.remove(ctx, id); err != nil {
 				return fmt.Errorf("stop the Redis server: %w", err)
 			}
-			if err := p.catalog.With(scope, func(value *catalog) error {
+			return p.catalog.With(scope, func(value *catalog) error {
 				delete(value.instances, id)
+				if err := p.index.Remove(serviceName, scope, fullName(name)); err != nil {
+					return fmt.Errorf("unindex the instance: %w", err)
+				}
 				return nil
-			}); err != nil {
-				return fmt.Errorf("remove the instance: %w", err)
-			}
-			if err := p.index.Remove(serviceName, scope, fullName(name)); err != nil {
-				return fmt.Errorf("unindex the instance: %w", err)
-			}
-			return nil
+			})
 		})
 		return map[string]any{"@type": emptyType}, err
 	})
@@ -248,6 +265,19 @@ func (p *Provider) operation(scope state.Scope, id string) (*gateway.RESTRespons
 		return nil, err
 	}
 	return ok(body), nil
+}
+
+// cancel refuses a finished operation as GCP does (recorded,
+// memorystore-redis-instance-admin) and otherwise requests cancellation.
+func (p *Provider) cancel(scope state.Scope, id string) (*gateway.RESTResponse, error) {
+	current, err := p.operations.Get(scope, id)
+	if err != nil {
+		return nil, err
+	}
+	if current["done"] == true {
+		return nil, provider.PreconditionFailure("Invalid resource state '" + provider.OperationName(scope, id) + "': operation already completed")
+	}
+	return empty(p.operations.Cancel(scope, id))
 }
 
 // listOperations renders one page of the scope's operations in creation order.

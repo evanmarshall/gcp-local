@@ -12,6 +12,7 @@ from gcp_validation.services.databases.memorystore import run_scenario
     contract_files=(
         'gcp_validation/errors.py',
         'gcp_validation/services/databases/memorystore.py',
+        'gcp_validation/services/databases/projectgrant.py',
         'gcp_validation/services/compute/networking.py',
         'gcp_validation/live_paths.py',
         'gcp_validation/live_rest.py',

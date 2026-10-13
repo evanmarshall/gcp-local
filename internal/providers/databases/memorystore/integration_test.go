@@ -22,8 +22,7 @@ import (
 // TestRealRedisLifecycle drives the pinned redis-server through the provider:
 // a denied call starts nothing, AUTH is enforced on the protocol endpoint,
 // documented blocked commands answer NOPERM, resize and delete reach the
-// process, and reset stops only the selected scope's servers. Authorization
-// uses the test authorizer because the roles/redis.* snapshots are unrecorded.
+// process, and reset stops only the selected scope's servers.
 func TestRealRedisLifecycle(t *testing.T) {
 	h := realHarness(t, nil)
 	h.expect(h.create(peerToken, testProject, testRegion, testInstance, basic(nil)), http.StatusForbidden)
@@ -98,13 +97,12 @@ func realHarness(t *testing.T, pool *dataplane.Pool) *harness {
 	}
 	config := Config{Server: os.Getenv("GCP_LOCAL_REDIS_SERVER"), Publish: pool}
 	must(t, config.validate(context.Background()))
-	h := &harness{t: t, index: state.NewIndex(), auth: newFakeAuthorizer(), fakes: map[state.Scope]*fakeDriver{}}
-	h.auth.grant(testProject, principal(adminToken), adminPermissions)
-	h.auth.grant(peerProject, principal(peerToken), adminPermissions)
+	h := &harness{t: t, index: state.NewIndex(), fakes: map[state.Scope]*fakeDriver{}}
+	h.engine = newEngine(t, h.index)
 	h.manager = backend.NewManager(30*time.Second, 10*time.Second)
 	t.Cleanup(func() { must(t, h.manager.Shutdown(context.Background())) })
 	registry := gateway.NewRegistry()
-	h.provider, err = newProvider(registry, h.manager, h.index, h.auth, 0, func(state.Scope) (backend.Backend, error) {
+	h.provider, err = newProvider(registry, h.manager, h.index, h.engine, 0, func(state.Scope) (backend.Backend, error) {
 		return newFleet(config), nil
 	})
 	must(t, err)
