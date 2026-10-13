@@ -16,7 +16,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 from gcp_validation.errors import detailed
 from gcp_validation.evidence import Inconclusive
 from gcp_validation.live_rest import Observations, Response
-from gcp_validation.services.run import ServicesFixture, revision_id
+from gcp_validation.services.run import ServicesFixture
 from gcp_validation.services.storage.client import NoRedirects
 
 CREDENTIALS_ENDPOINT = "https://iamcredentials.googleapis.com"
@@ -319,9 +319,14 @@ def observe_scaling(run: TrafficRun, created: dict) -> None:
         },
     )
     listed = run.fixture.call("GET", run.path + "/revisions").json().get("revisions", [])
+    names = [item.get("name", "").rsplit("/", 1)[-1] for item in listed]
+    # GCP suffixes revision names (-00003-abc); gcp-local doesn't.
     run.match(
         "revisions",
-        [run.observe.text(revision_id(item.get("name", ""))) for item in listed],
+        {
+            "aliases": [run.observe.text(name) for name in names],
+            "numbers": [re.sub(r"^.*-(\d{5})(-[a-z0-9]{3})?$", r"\1", name) for name in names],
+        },
     )
 
 
