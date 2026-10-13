@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -32,14 +35,39 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	if refused != nil || err != nil {
 		return refused, err
 	}
-	if refused, err := applyBucketPatch(metadata, patch); refused != nil || err != nil {
-		return refused, err
+	previous := maps.Clone(metadata)
+	if err := applyBucketPatch(metadata, patch, name, p.now()); err != nil {
+		return nil, err
 	}
 	// The backend change comes last: every catalog field is validated by now.
 	if refused, err := patchVersioning(ctx, b, name, patch["versioning"], current); refused != nil || err != nil {
 		return refused, err
 	}
-	return p.storeBucketPatch(scope, name, metadata, current)
+	return p.storeBucketPatch(scope, name, previous, metadata, current)
+}
+
+// lockRetention serves buckets.lockRetentionPolicy: it locks the bucket's
+// unlocked retention policy, irreversibly. ifMetagenerationMatch is required
+// and checked first (recorded: storage-bucket-lock "lock-without-precondition",
+// "lock-stale-precondition", "lock-again").
+func (p *Provider) lockRetention(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, name string) (*gateway.RESTResponse, error) {
+	if !r.Query.Has(queryIfMetaMatch) {
+		return wireError(400, "required", "Required parameter: "+queryIfMetaMatch), nil
+	}
+	current, refused, err := p.currentBucket(ctx, b, r, scope, name)
+	if refused != nil || err != nil {
+		return refused, err
+	}
+	metadata, refused, err := p.catalogMetadata(scope, name)
+	if refused != nil || err != nil {
+		return refused, err
+	}
+	policy, _ := metadata["retentionPolicy"].(map[string]any)
+	if locked, _ := policy["isLocked"].(bool); policy == nil || locked {
+		return wireError(400, "invalid", "Bucket '"+name+"' does not have an unlocked retention policy."), nil
+	}
+	policy["isLocked"] = true
+	return p.storeBucketPatch(scope, name, metadata, metadata, current)
 }
 
 // catalogMetadata returns a copy of a bucket's provider-owned metadata.
@@ -57,8 +85,14 @@ func (p *Provider) catalogMetadata(scope state.Scope, name string) (map[string]a
 }
 
 // storeBucketPatch advances the metageneration of patched metadata, stores it,
-// and renders the patched bucket.
-func (p *Provider) storeBucketPatch(scope state.Scope, name string, metadata, current map[string]any) (*gateway.RESTResponse, error) {
+// and renders the patched bucket from current, the bucket before the patch,
+// dropping the fields the patch removed from previous.
+func (p *Provider) storeBucketPatch(scope state.Scope, name string, previous, metadata, current map[string]any) (*gateway.RESTResponse, error) {
+	for key := range previous {
+		if _, kept := metadata[key]; !kept {
+			delete(current, key)
+		}
+	}
 	nextMetageneration(metadata, current, name)
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
@@ -71,17 +105,65 @@ func (p *Provider) storeBucketPatch(scope state.Scope, name string, metadata, cu
 	return &gateway.RESTResponse{Status: 200, JSON: current}, nil
 }
 
-// applyBucketPatch applies the patched fields to the bucket's metadata.
-func applyBucketPatch(metadata map[string]any, patch map[string]json.RawMessage) (*gateway.RESTResponse, error) {
-	if raw, ok := patch["labels"]; ok {
-		if err := patchLabels(metadata, raw); err != nil {
-			return nil, err
+// applyBucketPatch applies the patched catalog-owned fields to a copy of the
+// bucket's metadata, so a refused field leaves the stored metadata unchanged.
+func applyBucketPatch(metadata map[string]any, patch map[string]json.RawMessage, name string, now time.Time) error {
+	for _, field := range []struct {
+		key   string
+		apply func(json.RawMessage) error
+	}{
+		{"labels", func(raw json.RawMessage) error { return patchLabels(metadata, raw) }},
+		{"softDeletePolicy", func(raw json.RawMessage) error { return patchSoftDelete(metadata, raw, now) }},
+		{"retentionPolicy", func(raw json.RawMessage) error { return patchRetentionPolicy(metadata, raw, name, now) }},
+		{keyDefaultHold, func(raw json.RawMessage) error { return patchDefaultHold(metadata, raw) }},
+	} {
+		if raw, ok := patch[field.key]; ok {
+			if err := field.apply(raw); err != nil {
+				return err
+			}
 		}
 	}
-	if raw, ok := patch["softDeletePolicy"]; ok {
-		return patchSoftDelete(metadata, raw)
+	return nil
+}
+
+// patchRetentionPolicy sets, changes, or removes the bucket retention policy.
+// A locked policy can't be removed or shortened (recorded:
+// storage-bucket-lock "locked-remove", "locked-reduce"); an unchanged or
+// longer one keeps its lock and effective time.
+func patchRetentionPolicy(metadata map[string]any, raw json.RawMessage, name string, now time.Time) error {
+	current, _ := metadata["retentionPolicy"].(map[string]any)
+	locked, _ := current["isLocked"].(bool)
+	if string(bytes.TrimSpace(raw)) == jsonNull {
+		if locked {
+			return &bucketconfig.RefusalError{Status: 403, Reason: "retentionPolicyNotMet", Message: "Bucket '" + name + "' has a locked Retention Policy which cannot be removed."}
+		}
+		delete(metadata, "retentionPolicy")
+		return nil
 	}
-	return nil, nil //nolint:nilnil // a nil response with a nil error means the patch applied
+	period, err := bucketconfig.ParseRetentionPeriod(raw)
+	if err != nil {
+		return err //nolint:wrapcheck // GCP's refusal, rendered as is
+	}
+	if !locked {
+		metadata["retentionPolicy"] = retentionPolicy(period, storageTime(now), false)
+		return nil
+	}
+	previous, _ := strconv.ParseInt(fmt.Sprint(current["retentionPeriod"]), 10, 64)
+	if period < previous {
+		return &bucketconfig.RefusalError{Status: 403, Reason: "forbidden", Message: "Cannot reduce retention duration of a locked Retention Policy for bucket '" + name + "'."}
+	}
+	current["retentionPeriod"] = strconv.FormatInt(period, 10)
+	return nil
+}
+
+// patchDefaultHold sets the default event-based hold new objects take.
+func patchDefaultHold(metadata map[string]any, raw json.RawMessage) error {
+	var hold *bool
+	if json.Unmarshal(raw, &hold) != nil || hold == nil {
+		return gap(keyDefaultHold + " values other than true and false")
+	}
+	metadata[keyDefaultHold] = *hold
+	return nil
 }
 
 // currentBucket reads the bucket a patch applies to, merged with its catalog
@@ -118,7 +200,7 @@ func decodeBucketPatch(body []byte) (map[string]json.RawMessage, error) {
 }
 
 // patchedBucketFields are the bucket fields a patch may change.
-var patchedBucketFields = []string{"labels", "softDeletePolicy", "versioning"}
+var patchedBucketFields = []string{"labels", "softDeletePolicy", "versioning", "retentionPolicy", keyDefaultHold}
 
 // patchVersioning turns versioning on or off in the backend, which keeps the
 // noncurrent generations, when the patch names it (raw is nil otherwise).
@@ -154,21 +236,21 @@ func patchVersioning(ctx context.Context, b *memoryBackend, name string, raw jso
 // and applies to objects deleted from then on; already soft-deleted objects
 // keep their hard-delete time (storage/docs/soft-delete). A disabled policy
 // reports only its zero duration (recorded: storage-gcloud-bucket-defaults).
-func patchSoftDelete(metadata map[string]any, raw json.RawMessage) (*gateway.RESTResponse, error) {
+func patchSoftDelete(metadata map[string]any, raw json.RawMessage, now time.Time) error {
 	var policy struct {
 		Seconds json.Number `json:"retentionDurationSeconds"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&policy) != nil || policy.Seconds == "" {
-		return nil, gap("softDeletePolicy updates set retentionDurationSeconds only")
+		return gap("softDeletePolicy updates set retentionDurationSeconds only")
 	}
-	seconds, refused := softDeleteRetention(policy.Seconds)
-	if refused != nil {
-		return refused, nil
+	seconds, err := softDeleteRetention(policy.Seconds)
+	if err != nil {
+		return err
 	}
-	metadata["softDeletePolicy"] = softDeletePolicy(seconds, storageTime(time.Now()))
-	return nil, nil //nolint:nilnil // a nil response with a nil error means the patch applied
+	metadata["softDeletePolicy"] = softDeletePolicy(seconds, storageTime(now))
+	return nil
 }
 
 // patchLabels applies a labels patch: a null value removes that label and a

@@ -18,6 +18,7 @@ import (
 	storageapi "github.com/evanmarshall/gcp-local/api/generated/storage"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -53,14 +54,15 @@ const (
 
 // queryOptions lists the documented query parameters each method may carry.
 var queryOptions = map[string][]string{
-	MethodBucketsInsert:       {queryProject},
+	MethodBucketsInsert:       {queryProject, queryObjectRetention},
 	MethodBucketsList:         {queryProject, queryPrefix, queryMaxResults, queryPageToken, queryPartialSuccess},
 	MethodBucketsGetIamPolicy: {"optionsRequestedPolicyVersion"},
 	MethodBucketsPatch:        {queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodBucketsLock:         {queryIfMetaMatch},
 	MethodObjectsInsert:       {queryUploadType, keyName, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsGet:          {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch, querySoftDeleted},
 	MethodObjectsDelete:       {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsPatch:        {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
+	MethodObjectsPatch:        {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch, queryOverrideRetention},
 	// Rewrite preconditions apply to the destination. maxBytesRewrittenPerCall
 	// is accepted and not enforced: every rewrite here finishes in one call.
 	MethodObjectsRewrite: {"sourceGeneration", "maxBytesRewrittenPerCall", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
@@ -79,7 +81,6 @@ var queryOptions = map[string][]string{
 // (buckets/insert: true permanently enables object retention, which is not
 // modeled). copySourceAcl copies ACLs, which uniform buckets do not have.
 var defaultOnlyOptions = map[string]map[string]string{
-	MethodBucketsInsert:  {"enableObjectRetention": valueFalse},
 	MethodObjectsList:    {"matchGlob": "", "includeTrailingDelimiter": valueFalse},
 	MethodObjectsRestore: {"copySourceAcl": valueFalse},
 }
@@ -186,7 +187,7 @@ func validateOptionValues(query url.Values) error {
 	if projection := query.Get("projection"); projection != "" && projection != "noAcl" && projection != "full" {
 		return gap("projection " + projection)
 	}
-	for _, key := range []string{queryVersions, querySoftDeleted, queryFoldersAsPrefixes, queryPartialSuccess} {
+	for _, key := range []string{queryVersions, querySoftDeleted, queryFoldersAsPrefixes, queryPartialSuccess, queryOverrideRetention, queryObjectRetention} {
 		if _, err := booleanOption(query, key); err != nil {
 			return err
 		}
@@ -516,8 +517,9 @@ type bucketRequest struct {
 	Versioning struct {
 		Enabled bool `json:"enabled"`
 	} `json:"versioning"`
-	Hold      bool `json:"defaultEventBasedHold"`
-	Lifecycle *struct {
+	Hold            bool            `json:"defaultEventBasedHold"`
+	RetentionPolicy json.RawMessage `json:"retentionPolicy,omitempty"`
+	Lifecycle       *struct {
 		Rule []json.RawMessage `json:"rule"`
 	} `json:"lifecycle,omitempty"`
 }
@@ -538,9 +540,9 @@ const (
 )
 
 func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	request, refused, err := decodeBucketRequest(r.JSON)
-	if refused != nil || err != nil {
-		return refused, err
+	request, err := decodeBucketRequest(r.JSON)
+	if err != nil {
+		return nil, err
 	}
 	if _, exists := p.index.Get(BucketResource(request.Name)); exists {
 		return bucketNameOwned(), nil
@@ -557,7 +559,8 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := p.createdBucketMetadata(scope, request, payload, body)
+	objectRetention, _ := booleanOption(r.Query, queryObjectRetention)
+	metadata, err := p.createdBucketMetadata(scope, request, payload, body, objectRetention)
 	if err != nil {
 		return nil, err
 	}
@@ -574,48 +577,63 @@ func bucketNameOwned() *gateway.RESTResponse {
 
 // decodeBucketRequest reads a bucket create body and refuses every
 // configuration this emulator does not model, then normalizes the rest.
-func decodeBucketRequest(body []byte) (bucketRequest, *gateway.RESTResponse, error) {
+func decodeBucketRequest(body []byte) (bucketRequest, error) {
 	var request bucketRequest
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
-			return request, nil, gap("unsupported bucket field " + field)
+			return request, gap("unsupported bucket field " + field)
 		}
-		return request, nil, gap("unsupported bucket configuration")
+		return request, gap("unsupported bucket configuration")
 	}
-	if err := uniformAccess(&request); err != nil {
-		return request, nil, err
+	for _, check := range []func(*bucketRequest) error{uniformAccess, unsupportedBucketPolicy, bucketRetention, bucketPlacement} {
+		if err := check(&request); err != nil {
+			return request, err
+		}
 	}
-	if err := unsupportedBucketPolicy(&request); err != nil {
-		return request, nil, err
-	}
+	return request, nil
+}
+
+// bucketRetention fills in the default soft-delete policy and checks both
+// retention settings.
+func bucketRetention(request *bucketRequest) error {
 	if request.SoftDelete.Seconds == "" {
 		request.SoftDelete.Seconds = json.Number(strconv.Itoa(defaultRetention))
 	}
-	if _, refused := softDeleteRetention(request.SoftDelete.Seconds); refused != nil {
-		return request, refused, nil
+	if _, err := softDeleteRetention(request.SoftDelete.Seconds); err != nil {
+		return err
 	}
+	if raw := request.RetentionPolicy; len(raw) > 0 && string(raw) != jsonNull {
+		if _, err := bucketconfig.ParseRetentionPeriod(raw); err != nil {
+			return err //nolint:wrapcheck // GCP's refusal, rendered as is
+		}
+	}
+	return nil
+}
+
+// bucketPlacement checks the storage class and the explicit location.
+func bucketPlacement(request *bucketRequest) error {
 	if request.StorageClass == "" {
 		request.StorageClass = storageClassStandard
 	}
 	if request.StorageClass != storageClassStandard {
-		return request, nil, gap("only STANDARD storage class")
+		return gap("only STANDARD storage class")
 	}
 	if request.Location == "" {
-		return request, nil, status.Error(codes.InvalidArgument, "Explicit bucket location is required")
+		return status.Error(codes.InvalidArgument, "Explicit bucket location is required")
 	}
 	request.Location = strings.ToUpper(request.Location)
-	return request, nil, nil
+	return nil
 }
 
 // softDeleteRetention parses a soft-delete retention duration and refuses one
 // outside GCP's bounds with its recorded error (storage-gcloud-bucket-defaults
 // "soft-delete-below-minimum").
-func softDeleteRetention(value json.Number) (int64, *gateway.RESTResponse) {
+func softDeleteRetention(value json.Number) (int64, error) {
 	seconds, err := strconv.ParseInt(string(value), 10, 64)
 	if err != nil || (seconds != 0 && (seconds < minRetention || seconds > maxRetention)) {
-		return 0, wireError(400, "invalid", "Soft delete policy must have a retention duration between 7 days and 90 days.")
+		return 0, &bucketconfig.RefusalError{Status: 400, Reason: "invalid", Message: "Soft delete policy must have a retention duration between 7 days and 90 days."}
 	}
 	return seconds, nil
 }
@@ -653,9 +671,6 @@ func unsupportedBucketPolicy(request *bucketRequest) error {
 	}
 	if err := publicAccessPrevention(request); err != nil {
 		return err
-	}
-	if request.Hold {
-		return gap("explicitly disable default holds")
 	}
 	if request.SoftDelete.EffectiveTime != nil {
 		return gap("soft-delete effective time is server-owned")
@@ -697,7 +712,7 @@ func storageTime(t time.Time) string {
 
 // createdBucketMetadata derives the provider-owned metadata of a new bucket
 // from the request body forwarded to the backend and the backend's reply.
-func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketRequest, payload []byte, created map[string]any) (string, error) {
+func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketRequest, payload []byte, created map[string]any, objectRetention bool) (string, error) {
 	metadata := map[string]any{}
 	_ = json.Unmarshal(payload, &metadata)
 	seconds, _ := softDeleteRetention(request.SoftDelete.Seconds)
@@ -713,6 +728,7 @@ func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketReques
 	}
 	// The backend owns versioning: it keeps the noncurrent generations.
 	delete(metadata, "versioning")
+	createdProtection(metadata, request, timeCreated, objectRetention)
 	project, _ := p.index.Get(provider.ProjectResource(scope.Project))
 	metadata["projectNumber"] = project.Number
 	metadata["metageneration"] = "1"
@@ -726,6 +742,34 @@ func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketReques
 		return "", status.Error(codes.Internal, "Unable to encode the bucket metadata")
 	}
 	return string(encoded), nil
+}
+
+// createdProtection renders a new bucket's retention configuration: a
+// retention policy takes effect at creation, a default event-based hold
+// appears only when on (recorded: storage-retention-holds "policy-set"), and
+// enableObjectRetention=true reports object retention as Enabled (recorded:
+// storage-object-retention "bucket-object-retention").
+func createdProtection(metadata map[string]any, request bucketRequest, timeCreated string, objectRetention bool) {
+	delete(metadata, "retentionPolicy")
+	if period, err := bucketconfig.ParseRetentionPeriod(request.RetentionPolicy); err == nil {
+		metadata["retentionPolicy"] = retentionPolicy(period, timeCreated, false)
+	}
+	if !request.Hold {
+		delete(metadata, keyDefaultHold)
+	}
+	if objectRetention {
+		metadata["objectRetention"] = map[string]any{"mode": "Enabled"}
+	}
+}
+
+// retentionPolicy renders a bucket retention policy; isLocked appears only
+// once locked (recorded: storage-bucket-lock "policy-set", "locked").
+func retentionPolicy(period int64, effective string, locked bool) map[string]any {
+	policy := map[string]any{"retentionPeriod": strconv.FormatInt(period, 10), "effectiveTime": effective}
+	if locked {
+		policy["isLocked"] = true
+	}
+	return policy
 }
 
 // rollBackBucket handles a lost publication race: a competing project claimed
@@ -747,6 +791,8 @@ func (p *Provider) bucketMetadata(scope state.Scope, value map[string]any) {
 	if err != nil || !found {
 		return
 	}
+	// The catalog owns the default hold; the backend reports its own copy.
+	delete(value, keyDefaultHold)
 	var metadata map[string]any
 	_ = json.Unmarshal([]byte(bucket.Metadata), &metadata)
 	maps.Copy(value, metadata)

@@ -21,6 +21,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage/xmlapi"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
@@ -28,34 +29,40 @@ import (
 )
 
 // patchedObjectFields are the object fields a patch may set: the ones the Go
-// client's ObjectHandle.Update sends for ordinary metadata
-// (storage/docs/json_api/v1/objects/patch). Every other writable field (acl,
-// customTime, holds, retention, contexts, storageClass) is a gap.
+// client's ObjectHandle.Update sends for ordinary metadata, holds, and object
+// retention (storage/docs/json_api/v1/objects/patch). Every other writable
+// field (acl, customTime, contexts, storageClass) is a gap.
 var patchedObjectFields = map[string]bool{
 	keyContentType: true, keyCacheControl: true, keyDisposition: true,
 	"contentEncoding": true, keyLanguage: true, keyMetadata: true,
+	keyTemporaryHold: true, keyEventBasedHold: true, keyRetention: true,
 }
 
 // objectPatch is one decoded objects.patch body. strings holds the string
 // fields to set; metadata is the custom metadata change, where a nil value
-// removes that key, and clearMetadata removes every key first.
+// removes that key, and clearMetadata removes every key first. holds maps a
+// hold field to its new value; retention is the new object retention when
+// setRetention is set, nil to remove it.
 type objectPatch struct {
 	strings       map[string]string
 	metadata      map[string]*string
 	setMetadata   bool
 	clearMetadata bool
+	holds         map[string]bool
+	setRetention  bool
+	retention     *bucketconfig.Retention
 }
 
 // decodeObjectPatch reads an objects.patch body and refuses each field and
 // value the emulator does not apply.
-func decodeObjectPatch(body []byte, target map[string]string) (objectPatch, error) {
+func decodeObjectPatch(body []byte, target map[string]string, now time.Time) (objectPatch, error) {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(body, &fields) != nil || fields == nil {
 		return objectPatch{}, provider.Invalid("Expected an object patch")
 	}
-	patch := &objectPatch{strings: map[string]string{}}
+	patch := &objectPatch{strings: map[string]string{}, holds: map[string]bool{}}
 	for key, raw := range fields {
-		if err := patch.decodeField(key, raw, target); err != nil {
+		if err := patch.decodeField(key, raw, target, now); err != nil {
 			return objectPatch{}, err
 		}
 	}
@@ -63,7 +70,7 @@ func decodeObjectPatch(body []byte, target map[string]string) (objectPatch, erro
 }
 
 // decodeField records one patch field.
-func (patch *objectPatch) decodeField(key string, raw json.RawMessage, target map[string]string) error {
+func (patch *objectPatch) decodeField(key string, raw json.RawMessage, target map[string]string, now time.Time) error {
 	// The Go client sends the bucket in every patch body. The bucket and
 	// name identify the target and must agree with the path.
 	if identity, ok := target[key]; ok {
@@ -73,28 +80,69 @@ func (patch *objectPatch) decodeField(key string, raw json.RawMessage, target ma
 		}
 		return nil
 	}
-	if !patchedObjectFields[key] {
+	switch {
+	case !patchedObjectFields[key]:
 		return gap("unsupported object patch field " + key)
-	}
-	if key == keyMetadata {
+	case key == keyMetadata:
 		// null clears every key, and a null value removes one key.
 		if json.Unmarshal(raw, &patch.metadata) != nil {
 			return provider.Invalid("metadata values must be strings or null")
 		}
 		patch.setMetadata, patch.clearMetadata = true, patch.metadata == nil
 		return nil
+	case key == keyRetention || key == keyTemporaryHold || key == keyEventBasedHold:
+		return patch.decodeProtection(key, raw, now)
 	}
+	return patch.decodeString(key, raw)
+}
+
+// decodeString records one string field. The backend keeps a field it is
+// sent empty, so clearing one (null, which the Go client sends for "") is not
+// applied here.
+func (patch *objectPatch) decodeString(key string, raw json.RawMessage) error {
 	var value *string
 	if json.Unmarshal(raw, &value) != nil {
 		return provider.Invalid(key + " must be a string")
 	}
-	// The backend keeps a field it is sent empty, so clearing one (null,
-	// which the Go client sends for "") is not applied here.
 	if value == nil || *value == "" {
 		return gap("clearing object field " + key)
 	}
 	patch.strings[key] = *value
 	return nil
+}
+
+// decodeProtection records a hold or object retention field.
+func (patch *objectPatch) decodeProtection(key string, raw json.RawMessage, now time.Time) error {
+	if key == keyRetention {
+		retention, err := bucketconfig.ParseRetention(raw, now)
+		patch.setRetention, patch.retention = true, retention
+		return err //nolint:wrapcheck // GCP's refusal, rendered as is
+	}
+	var hold *bool
+	if json.Unmarshal(raw, &hold) != nil || hold == nil {
+		return gap(key + " values other than true and false")
+	}
+	patch.holds[key] = *hold
+	return nil
+}
+
+// apply records the patch's provider-owned fields in a generation's overlay
+// at now. Releasing an event-based hold starts a bucket retention period.
+func (patch *objectPatch) apply(overlay *objectOverlay, now time.Time) {
+	for key, value := range patch.holds {
+		held := value
+		if key == keyTemporaryHold {
+			overlay.temporaryHold = &held
+			continue
+		}
+		if !held && overlay.eventBasedHold != nil && *overlay.eventBasedHold {
+			overlay.released = now
+		}
+		overlay.eventBasedHold = &held
+	}
+	if patch.setRetention {
+		overlay.retention = patch.retention
+	}
 }
 
 // mergedMetadata applies the patch to an object's current custom metadata.
@@ -119,29 +167,63 @@ func (patch *objectPatch) mergedMetadata(current map[string]any) map[string]stri
 
 // patchObject updates one object's metadata in place. It runs after complete
 // authorization: preconditions and the generation are checked against the
-// object read under the backend gate, the backend writes, and only then does
-// the metageneration advance.
-func patchObject(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
-	patch, err := decodeObjectPatch(req.rest.JSON, map[string]string{keyBucket: req.bucket, keyName: req.object})
+// object read under the backend gate, the backend writes, and only then do
+// the provider-owned fields, the metageneration, and updated change.
+func (p *Provider) patchObject(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
+	// Storage reports updated in milliseconds; rounding up keeps an update at
+	// or after the object's creation.
+	now := p.now().UTC()
+	if rounded := now.Truncate(time.Millisecond); rounded.Before(now) {
+		now = rounded.Add(time.Millisecond)
+	}
+	patch, err := decodeObjectPatch(req.rest.JSON, map[string]string{keyBucket: req.bucket, keyName: req.object}, now)
 	if err != nil {
 		return nil, err
 	}
-	current, refused, err := currentObject(ctx, b, req.bucket, req.object, req.rest.Query.Get(keyGeneration))
+	current, refused, err := patchTarget(ctx, b, req)
 	if refused != nil || err != nil {
 		return refused, err
 	}
-	if response, err := preconditions(req.rest, current, MethodObjectsPatch); response != nil || err != nil {
-		return response, err
-	}
-	if _, noncurrent := current["timeDeleted"]; noncurrent {
-		return nil, gap("patching a noncurrent object generation")
-	}
 	generation, _ := current[keyGeneration].(string)
+	if err := p.changeRetention(b, req, patch, generation); err != nil {
+		return nil, err
+	}
 	if response, err := writeObjectPatch(ctx, b, req, patch, current); response != nil || err != nil {
 		return response, err
 	}
-	b.advanceMetageneration(req.bucket, req.object, generation)
+	b.updateOverlay(req.bucket, req.object, generation, now, func(overlay *objectOverlay) { patch.apply(overlay, now) })
 	return b.forward(ctx, http.MethodGet, objectPath(req.bucket, req.object), nil, nil, nil)
+}
+
+// patchTarget reads the generation a patch names, or the live one, and checks
+// the patch's preconditions against it. Patching a noncurrent generation is
+// a gap.
+func patchTarget(ctx context.Context, b *memoryBackend, req request) (map[string]any, *gateway.RESTResponse, error) {
+	current, refused, err := currentObject(ctx, b, req.bucket, req.object, req.rest.Query.Get(keyGeneration))
+	if refused != nil || err != nil {
+		return nil, refused, err
+	}
+	if response, err := preconditions(req.rest, current, MethodObjectsPatch); response != nil || err != nil {
+		return nil, response, err
+	}
+	if _, noncurrent := current["timeDeleted"]; noncurrent {
+		return nil, nil, gap("patching a noncurrent object generation")
+	}
+	return current, nil, nil
+}
+
+// changeRetention checks a patch's object retention change against the
+// generation's current retention. Setting one needs a bucket created with
+// object retention; removing one an object lacks changes nothing.
+func (p *Provider) changeRetention(b *memoryBackend, req request, patch objectPatch, generation string) error {
+	if !patch.setRetention {
+		return nil
+	}
+	if patch.retention != nil && !p.bucketSettings(req.scope, req.bucket).objectRetention {
+		return gap("object retention in a bucket created without enableObjectRetention")
+	}
+	override, _ := booleanOption(req.rest.Query, queryOverrideRetention)
+	return bucketconfig.ChangeRetention(b.overlay(req.bucket, req.object, generation).retention, patch.retention, override) //nolint:wrapcheck // GCP's refusal, rendered as is
 }
 
 // writeObjectPatch sends a patch to the backend. Upstream's PATCH sets the
@@ -284,22 +366,33 @@ func (p *Provider) serveRewrite(ctx context.Context, b *memoryBackend, req rewri
 	if refused != nil || err != nil {
 		return refused, err
 	}
+	id, current, refused, err := p.authorizeDestination(ctx, b, req)
+	if refused != nil || err != nil {
+		return refused, err
+	}
+	if response, err := p.replaceable(b, req.scope, req.bucket, req.rest, current); response != nil || err != nil {
+		return response, err
+	}
+	response, err := p.copyRetaining(ctx, b, req, source)
+	if err == nil {
+		p.created(b, req.scope, req.bucket, createdObject(response))
+		p.decorate(b, req.scope, req.bucket, response)
+	}
+	finishResponse(response, id, req.rest.Host)
+	return response, err
+}
+
+// authorizeDestination authorizes the destination write with the insert plan
+// and returns the decision ID and the destination object it replaces.
+func (p *Provider) authorizeDestination(ctx context.Context, b *memoryBackend, req rewriteRequest) (string, map[string]any, *gateway.RESTResponse, error) {
 	write := req.call
 	write.Method, write.Resource = MethodObjectsInsert, req.destination.Name
 	features, current, err := p.objectFeatures(ctx, b, write, req.bucket, req.object)
 	if err != nil {
-		return nil, err
+		return "", nil, nil, err
 	}
 	denied, id, err := p.authorize(write, req.destination, features, true)
-	if denied != nil || err != nil {
-		return denied, err
-	}
-	if response, err := preconditions(req.rest, current, MethodObjectsInsert); response != nil || err != nil {
-		return response, err
-	}
-	response, err := p.copyRetaining(ctx, b, req, source)
-	finishResponse(response, id, req.rest.Host)
-	return response, err
+	return id, current, denied, err
 }
 
 // copyRetaining copies the source over the destination, soft-deleting the
@@ -367,7 +460,7 @@ func copyObject(ctx context.Context, b *memoryBackend, req rewriteRequest, sourc
 	}
 	size := strconv.Itoa(len(data))
 	return &gateway.RESTResponse{JSON: map[string]any{
-		keyKind: "storage#rewriteResponse", "totalBytesRewritten": size, "objectSize": size, "done": true, "resource": stored.JSON}}, nil
+		keyKind: "storage#rewriteResponse", "totalBytesRewritten": size, "objectSize": size, "done": true, keyResource: stored.JSON}}, nil
 }
 
 // copiedMetadata selects the copiedFields of an object resource as upload
@@ -546,23 +639,6 @@ func xmlUpload(r *gateway.RESTRequest, name string) (*uploadRequest, *gateway.RE
 	return upload, nil, err
 }
 
-// executeXML reads an object's media, or writes one and answers with the XML
-// API's empty body and object headers.
-func executeXML(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
-	if req.call.Method != MethodObjectsInsert {
-		return xmlGet(ctx, b, req)
-	}
-	response, err := insertObject(ctx, b, req, current)
-	if err != nil || response.Status != http.StatusOK {
-		return response, err
-	}
-	object, err := jsonObject(response.JSON)
-	if err != nil {
-		return nil, err
-	}
-	return xmlapi.Stored(object), nil
-}
-
 // xmlGet reads an object's media with the response-header overrides applied.
 func xmlGet(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
 	generation := req.rest.Query.Get(keyGeneration)
@@ -660,12 +736,24 @@ func (c *Catalog) softDeletedObject(scope state.Scope, bucket, name, generation 
 	return softObject{}, false
 }
 
-// bucketSettings reads the provider-owned soft-delete retention and public
-// access prevention of one bucket.
-func (p *Provider) bucketSettings(scope state.Scope, bucket string) (int64, string) {
+// bucketPolicy is the provider-owned configuration of one bucket that
+// object requests consult.
+type bucketPolicy struct {
+	// softDelete is the soft-delete retention in seconds; 0 disables it.
+	softDelete int64
+	public     string
+	// retention is the retention policy's period in seconds; 0 when the bucket
+	// has none.
+	retention       int64
+	defaultHold     bool
+	objectRetention bool
+}
+
+// bucketSettings reads one bucket's provider-owned policy.
+func (p *Provider) bucketSettings(scope state.Scope, bucket string) bucketPolicy {
 	stored, found, err := p.catalog.Bucket(scope, bucket)
 	if err != nil || !found {
-		return 0, ""
+		return bucketPolicy{}
 	}
 	var metadata struct {
 		SoftDelete struct {
@@ -674,10 +762,129 @@ func (p *Provider) bucketSettings(scope state.Scope, bucket string) (int64, stri
 		IAM struct {
 			Public string `json:"publicAccessPrevention"`
 		} `json:"iamConfiguration"`
+		Retention *struct {
+			Period json.Number `json:"retentionPeriod"`
+		} `json:"retentionPolicy"`
+		DefaultHold     bool `json:"defaultEventBasedHold"`
+		ObjectRetention *struct {
+			Mode string `json:"mode"`
+		} `json:"objectRetention"`
 	}
 	_ = json.Unmarshal([]byte(stored.Metadata), &metadata)
-	seconds, _ := strconv.ParseInt(string(metadata.SoftDelete.Seconds), 10, 64)
-	return seconds, metadata.IAM.Public
+	policy := bucketPolicy{public: metadata.IAM.Public, defaultHold: metadata.DefaultHold, objectRetention: metadata.ObjectRetention != nil}
+	policy.softDelete, _ = strconv.ParseInt(string(metadata.SoftDelete.Seconds), 10, 64)
+	if metadata.Retention != nil {
+		policy.retention, _ = strconv.ParseInt(string(metadata.Retention.Period), 10, 64)
+	}
+	return policy
+}
+
+// retentionExpiry is when a bucket retention policy stops protecting an
+// object generation: the period after its creation, or after its
+// event-based hold was released; none while that hold is on (recorded:
+// storage-retention-holds "retained-upload", "event-hold-with-policy").
+func retentionExpiry(policy bucketPolicy, overlay objectOverlay, object map[string]any) (time.Time, bool) {
+	if policy.retention == 0 || isSet(overlay.eventBasedHold) {
+		return time.Time{}, false
+	}
+	start := overlay.released
+	if start.IsZero() {
+		created, _ := object["timeCreated"].(string)
+		parsed, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return time.Time{}, false
+		}
+		start = parsed
+	}
+	return start.Add(time.Duration(policy.retention) * time.Second), true
+}
+
+// isSet reports whether an optional hold is on.
+func isSet(hold *bool) bool { return hold != nil && *hold }
+
+// decorate adds retentionExpirationTime to each object a successful
+// response carries when the bucket has a retention policy.
+func (p *Provider) decorate(b *memoryBackend, scope state.Scope, bucket string, response *gateway.RESTResponse) {
+	document, ok := response.JSON.(map[string]any)
+	if !ok || response.Status >= http.StatusMultipleChoices {
+		return
+	}
+	policy := p.bucketSettings(scope, bucket)
+	if policy.retention == 0 {
+		return
+	}
+	for _, object := range objectDocuments(document) {
+		name, _ := object[keyName].(string)
+		generation, _ := object[keyGeneration].(string)
+		if expiry, ok := retentionExpiry(policy, b.overlay(bucket, name, generation), object); ok {
+			object["retentionExpirationTime"] = expiry.UTC().Format(time.RFC3339Nano)
+		}
+	}
+}
+
+// objectDocuments returns the object documents a response carries: itself,
+// a listing's items, or a rewrite's resource.
+func objectDocuments(document map[string]any) []map[string]any {
+	if document[keyKind] == kindObjectDocument {
+		return []map[string]any{document}
+	}
+	var found []map[string]any
+	for _, key := range []string{"items", keyResource} {
+		for _, nested := range nestedDocuments(document[key]) {
+			if nested[keyKind] == kindObjectDocument {
+				found = append(found, nested)
+			}
+		}
+	}
+	return found
+}
+
+// refuseRemoval returns GCP's refusal for deleting, replacing, or making
+// noncurrent the object generation current (nil for none): a hold, a bucket
+// retention policy, or the object's own retention protects it.
+func (p *Provider) refuseRemoval(b *memoryBackend, scope state.Scope, bucket string, current map[string]any) error {
+	if current == nil {
+		return nil
+	}
+	name, _ := current[keyName].(string)
+	generation, _ := current[keyGeneration].(string)
+	overlay := b.overlay(bucket, name, generation)
+	protection := bucketconfig.Protection{TemporaryHold: isSet(overlay.temporaryHold), EventBasedHold: isSet(overlay.eventBasedHold)}
+	if expiry, ok := retentionExpiry(p.bucketSettings(scope, bucket), overlay, current); ok {
+		protection.Until = expiry
+	}
+	if overlay.retention != nil && overlay.retention.Until.After(protection.Until) {
+		protection.Until = overlay.retention.Until
+	}
+	if refusal := protection.Refuse(bucket, name, p.now()); refusal != nil {
+		return refusal
+	}
+	return nil
+}
+
+// created applies the bucket's default event-based hold to a generation an
+// upload, rewrite, or restore has just created, and to its document.
+func (p *Provider) created(b *memoryBackend, scope state.Scope, bucket string, object map[string]any) {
+	if object == nil || !p.bucketSettings(scope, bucket).defaultHold {
+		return
+	}
+	name, _ := object[keyName].(string)
+	generation, _ := object[keyGeneration].(string)
+	held := true
+	b.setOverlay(bucket, name, generation, func(overlay *objectOverlay) { overlay.eventBasedHold = &held })
+	object[keyEventBasedHold] = true
+}
+
+// createdObject is the object document a successful write response carries.
+func createdObject(response *gateway.RESTResponse) map[string]any {
+	document, ok := response.JSON.(map[string]any)
+	if !ok || response.Status >= http.StatusMultipleChoices {
+		return nil
+	}
+	if resource, ok := document[keyResource].(map[string]any); ok {
+		return resource
+	}
+	return document
 }
 
 // retainRemoved snapshots the generation a mutation may remove (the named
@@ -689,7 +896,7 @@ func (p *Provider) bucketSettings(scope state.Scope, bucket string) (int64, stri
 // policy, a generation that stays, or an object that did not exist.
 func (p *Provider) retainRemoved(ctx context.Context, b *memoryBackend, scope state.Scope, bucket, name, generation string, permanent bool) (func(*gateway.RESTResponse) error, error) {
 	skip := func(*gateway.RESTResponse) error { return nil }
-	retention, _ := p.bucketSettings(scope, bucket)
+	retention := p.bucketSettings(scope, bucket).softDelete
 	if retention == 0 || !permanent {
 		return skip, nil
 	}
@@ -892,7 +1099,7 @@ func (p *Provider) listSoftDeleted(req request) (*gateway.RESTResponse, error) {
 	if refused != nil || err != nil {
 		return refused, err
 	}
-	if retention, _ := p.bucketSettings(req.scope, req.bucket); retention == 0 {
+	if p.bucketSettings(req.scope, req.bucket).softDelete == 0 {
 		return wireError(400, "invalid", "Soft delete policy is required to list soft-deleted versions"), nil
 	}
 	prefix := req.rest.Query.Get(queryPrefix)
@@ -975,21 +1182,17 @@ func (p *Provider) softDeletedGeneration(req request, missing *gateway.RESTRespo
 // keeps the soft-deleted copy (recorded: storage-bucket-defaults "restore",
 // "soft-deleted-after-restore").
 func (p *Provider) restoreObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
-	if retention, _ := p.bucketSettings(req.scope, req.bucket); retention == 0 {
+	if p.bucketSettings(req.scope, req.bucket).softDelete == 0 {
 		return nil, gap("restore in a bucket without a soft-delete policy")
 	}
 	object, refused := p.softDeletedGeneration(req, wireError(400, "required", "Required parameter: generation"))
 	if refused != nil {
 		return refused, nil
 	}
-	if response, err := preconditions(req.rest, current, req.call.Method); response != nil || err != nil {
+	if response, err := p.replaceable(b, req.scope, req.bucket, req.rest, current); response != nil || err != nil {
 		return response, err
 	}
-	versioned, err := b.versioned(ctx, req.bucket)
-	if err != nil {
-		return nil, err
-	}
-	keep, err := p.retainRemoved(ctx, b, req.scope, req.bucket, req.object, "", !versioned)
+	keep, err := p.retainWrite(ctx, b, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1005,5 +1208,9 @@ func (p *Provider) restoreObject(ctx context.Context, b *memoryBackend, req requ
 	if err != nil {
 		return nil, err
 	}
-	return stored, keep(stored)
+	if err := keep(stored); err != nil {
+		return nil, err
+	}
+	p.created(b, req.scope, req.bucket, createdObject(stored))
+	return stored, nil
 }

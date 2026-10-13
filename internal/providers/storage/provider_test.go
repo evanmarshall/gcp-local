@@ -44,7 +44,10 @@ type fixture struct {
 	t *testing.T
 }
 
-func setup(t *testing.T) *fixture {
+func setup(t *testing.T) *fixture { return setupWithClock(t, nil) }
+
+// setupWithClock builds the fixture with a manual clock; nil is wall time.
+func setupWithClock(t *testing.T, now func() time.Time) *fixture {
 	index := state.NewIndex()
 	engine, err := iam.New(index)
 	if err != nil {
@@ -60,7 +63,7 @@ func setup(t *testing.T) *fixture {
 	}
 	registry := gateway.NewRegistry()
 	manager := backend.NewManager(time.Second, time.Second)
-	p, err := New(t.Context(), Config{}, registry, manager, index, engine)
+	p, err := New(t.Context(), Config{Now: now}, registry, manager, index, engine)
 	if err != nil {
 		t.Fatal(err)
 	}

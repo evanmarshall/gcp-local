@@ -22,6 +22,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage/xmlapi"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
@@ -52,7 +53,7 @@ var errProviderShape = errors.New("storage requires registry, lifecycle, index, 
 // arrives as storage.folders.insert from the generated route table.
 var registeredMethods = []string{
 	MethodBucketsInsert, MethodBucketsList, MethodBucketsGet, MethodBucketsPatch, MethodBucketsDelete,
-	MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy, MethodBucketsGetLayout,
+	MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy, MethodBucketsGetLayout, MethodBucketsLock,
 	MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete,
 	MethodFoldersInsert, MethodFoldersGet, MethodFoldersList, MethodFoldersDelete,
 	MethodXMLGet, MethodXMLPut, MethodObjectsRewrite, MethodObjectsPatch, MethodObjectsRestore,
@@ -151,6 +152,9 @@ func storageErrors(handler gateway.Handler) gateway.Handler {
 // statusRefusal is the Storage JSON API response for one handler error, or
 // nil for UNIMPLEMENTED. Reasons are GCP's for the same HTTP codes.
 func statusRefusal(err error) *gateway.RESTResponse {
+	if refusal := configRefusal(err); refusal != nil {
+		return refusal
+	}
 	var wrapped interface{ GRPCStatus() *status.Status }
 	if !errors.As(err, &wrapped) {
 		// A non-status error can carry backend payloads; report none of it.
@@ -174,6 +178,17 @@ func statusRefusal(err error) *gateway.RESTResponse {
 	default:
 		return wireError(400, "invalid", "Storage emulator fault: "+message)
 	}
+}
+
+// configRefusal renders a bucketconfig refusal or gap, or returns nil.
+func configRefusal(err error) *gateway.RESTResponse {
+	if refusal, ok := errors.AsType[*bucketconfig.RefusalError](err); ok {
+		return wireError(refusal.Status, refusal.Reason, refusal.Message)
+	}
+	if missing, ok := errors.AsType[bucketconfig.GapError](err); ok {
+		return wireError(400, "invalid", storageGap+string(missing))
+	}
+	return nil
 }
 
 // unsupported answers every generated Storage route this provider does not serve.
@@ -263,8 +278,10 @@ func denialText(call gateway.Call, target, permission string) (int, string, stri
 		kind = "object"
 	}
 	message := fmt.Sprintf("%s does not have %s access to the Google Cloud Storage %s. Permission '%s' denied on resource '%s' (or it may not exist).", actor, permission, kind, permission, target)
-	if call.Method == MethodObjectsInsert && permission == MethodObjectsDelete {
-		message = actor + " does not have storage.objects.delete access to the Google Cloud Storage object."
+	// Some denials omit the permission and resource sentence (recorded:
+	// storage-object-replacement, storage-object-retention "unlocked-set-denied").
+	if (call.Method == MethodObjectsInsert && permission == MethodObjectsDelete) || permission == permissionSetRetention {
+		message = fmt.Sprintf("%s does not have %s access to the Google Cloud Storage object.", actor, permission)
 	}
 	return httpCode, reason, message
 }
@@ -381,7 +398,7 @@ func (p *Provider) serve(ctx context.Context, driver backend.Backend, req reques
 			return notFound(req.bucket, ""), nil
 		}
 	}
-	features, current, err := p.objectFeatures(ctx, b, req.call, req.bucket, req.object)
+	features, current, err := p.requestFeatures(ctx, b, req)
 	if err != nil {
 		return nil, err
 	}
@@ -393,8 +410,42 @@ func (p *Provider) serve(ctx context.Context, driver backend.Backend, req reques
 		return denied, nil
 	}
 	response, err := p.execute(ctx, b, req, current)
+	if err == nil {
+		p.decorate(b, req.scope, req.bucket, response)
+	}
 	finishResponse(response, id, req.rest.Host)
 	return response, err
+}
+
+// requestFeatures resolves the request and state features of a request's
+// permission plan, and the existing object an insert or restore replaces.
+func (p *Provider) requestFeatures(ctx context.Context, b *memoryBackend, req request) (map[string]bool, map[string]any, error) {
+	features, current, err := p.objectFeatures(ctx, b, req.call, req.bucket, req.object)
+	if err != nil || req.call.Method != MethodObjectsPatch {
+		return features, current, err
+	}
+	return features, current, p.patchFeatures(req.rest, features)
+}
+
+// patchFeatures resolves objects.patch's retention features. A retention value
+// is validated here, after the baseline preflight and before the complete
+// authorization, as GCP refuses an invalid one before checking
+// storage.objects.setRetention (recorded: storage-object-retention
+// "mode-unknown" for a caller without it). The rest of the body is decoded
+// after authorization.
+func (p *Provider) patchFeatures(r *gateway.RESTRequest, features map[string]bool) error {
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(r.JSON, &fields)
+	raw, named := fields[keyRetention]
+	set := named && string(bytes.TrimSpace(raw)) != jsonNull
+	if set {
+		if _, err := bucketconfig.ParseRetention(raw, p.now()); err != nil {
+			return err //nolint:wrapcheck // GCP's refusal, rendered as is
+		}
+	}
+	override, _ := booleanOption(r.Query, queryOverrideRetention)
+	features[featureRetentionSet], features[featureRetentionOverride] = set, override
+	return nil
 }
 
 // finishResponse attaches the decision ID and publishes resource links.
@@ -418,7 +469,7 @@ func publishLinks(value map[string]any, origin string) {
 	bucket, _ := value[keyBucket].(string)
 	name, _ := value[keyName].(string)
 	switch value[keyKind] {
-	case "storage#object":
+	case kindObjectDocument:
 		self := "/storage/v1/b/" + url.PathEscape(bucket) + "/o/" + url.PathEscape(name)
 		value["selfLink"] = origin + self
 		generation, _ := value[keyGeneration].(string)
@@ -427,7 +478,7 @@ func publishLinks(value map[string]any, origin string) {
 	case kindBucketDocument:
 		value["selfLink"] = origin + "/storage/v1/b/" + url.PathEscape(name)
 	}
-	for _, key := range []string{"items", "resource"} {
+	for _, key := range []string{"items", keyResource} {
 		for _, document := range nestedDocuments(value[key]) {
 			publishLinks(document, origin)
 		}
@@ -470,8 +521,7 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 		Type: "storage.googleapis.com/Bucket", Service: "storage.googleapis.com"}
 	// Enforced public access prevention overrides public grants on the
 	// bucket and its objects (storage/docs/public-access-prevention).
-	_, public := p.bucketSettings(resource.Scope, bucket)
-	target.PublicPrevented = public == publicEnforced
+	target.PublicPrevented = p.bucketSettings(resource.Scope, bucket).public == publicEnforced
 	if object != "" {
 		target.Parent = target.Name
 		target.Name += "/objects/" + object
@@ -637,10 +687,11 @@ func (b *memoryBackend) removeBackendLinks(value map[string]any) {
 	delete(value, "acl")
 	delete(value, "defaultObjectAcl")
 	if generation, ok := value[keyGeneration].(string); ok {
-		if value[keyKind] == "storage#object" {
+		if value[keyKind] == kindObjectDocument {
 			bucket, _ := value[keyBucket].(string)
 			name, _ := value[keyName].(string)
 			value["metageneration"] = b.metageneration(bucket, name, generation)
+			b.overlay(bucket, name, generation).render(value)
 		}
 		metageneration, _ := value["metageneration"].(string)
 		value["etag"] = objectETag(generation, metageneration)
@@ -662,17 +713,25 @@ func objectETag(generation, metageneration string) string {
 }
 
 func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
-	if isFolderMethod(req.call.Method) {
+	switch {
+	case isFolderMethod(req.call.Method):
 		return p.executeFolder(req.call.Method, req.rest, req.scope, req.bucket)
+	case strings.HasPrefix(req.call.Method, "storage.buckets."):
+		return p.executeBucket(ctx, b, req)
 	}
+	return p.executeObject(ctx, b, req, current)
+}
+
+// executeBucket serves the bucket methods.
+func (p *Provider) executeBucket(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
 	path := "/storage/v1/b/" + url.PathEscape(req.bucket)
 	switch req.call.Method {
 	case MethodBucketsInsert:
 		return p.createBucket(ctx, b, req.rest, req.scope)
-	case MethodObjectsPatch:
-		return patchObject(ctx, b, req)
 	case MethodBucketsPatch:
 		return p.patchBucket(ctx, b, req.rest, req.scope, req.bucket)
+	case MethodBucketsLock:
+		return p.lockRetention(ctx, b, req.rest, req.scope, req.bucket)
 	case MethodBucketsGetIamPolicy:
 		return p.readBucketPolicy(req.bucket)
 	case MethodBucketsSetIamPolicy:
@@ -681,10 +740,8 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, c
 		return p.listBuckets(ctx, b, req.rest, req.scope)
 	case MethodBucketsGet, MethodBucketsGetLayout:
 		return p.readBucket(ctx, b, req, path)
-	case MethodBucketsDelete:
-		return p.deleteBucket(ctx, b, req.rest, req.scope, path, req.bucket)
 	}
-	return p.executeObject(ctx, b, req, current)
+	return p.deleteBucket(ctx, b, req.rest, req.scope, path, req.bucket)
 }
 
 // executeObject serves the object methods, including the XML API's and a
@@ -692,6 +749,8 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, c
 func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
 	softDeleted, _ := booleanOption(req.rest.Query, querySoftDeleted)
 	switch req.call.Method {
+	case MethodObjectsPatch:
+		return p.patchObject(ctx, b, req)
 	case MethodObjectsRestore:
 		return p.restoreObject(ctx, b, req, current)
 	case MethodObjectsList:
@@ -703,7 +762,7 @@ func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, req requ
 		case softDeleted:
 			return p.getSoftDeleted(req)
 		}
-		return readOrDeleteObject(ctx, b, req)
+		return p.readOrDeleteObject(ctx, b, req)
 	case MethodObjectsInsert:
 		if req.upload.resumable && !req.xml {
 			return p.startUpload(req, current)
@@ -715,8 +774,47 @@ func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, req requ
 // writeObject serves inserts (JSON, XML, and a resumable commit) and deletes.
 // Each may remove a generation, which a bucket with a soft-delete policy
 // keeps: the live one an overwrite or delete replaces, unless versioning
-// keeps it as noncurrent, or the generation a delete names.
+// keeps it as noncurrent, or the generation a delete names. An insert's
+// preconditions and the replaced generation's protection are checked first.
 func (p *Provider) writeObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
+	insert := req.call.Method == MethodObjectsInsert
+	if insert {
+		if response, err := p.replaceable(b, req.scope, req.bucket, req.rest, current); response != nil || err != nil {
+			return response, err
+		}
+	}
+	keep, err := p.retainWrite(ctx, b, req)
+	if err != nil {
+		return nil, err
+	}
+	var response *gateway.RESTResponse
+	if insert {
+		response, err = b.forward(ctx, "POST", "/upload/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", req.upload.query, req.upload.headers, req.upload.body)
+	} else {
+		response, err = p.readOrDeleteObject(ctx, b, req)
+	}
+	if err != nil {
+		return response, err
+	}
+	if err := keep(response); err != nil {
+		return nil, err
+	}
+	return p.written(b, req, response), nil
+}
+
+// replaceable checks an insert's preconditions against the live object it
+// replaces, then that object's holds and retention.
+func (p *Provider) replaceable(b *memoryBackend, scope state.Scope, bucket string, r *gateway.RESTRequest, current map[string]any) (*gateway.RESTResponse, error) {
+	if response, err := preconditions(r, current, MethodObjectsInsert); response != nil || err != nil {
+		return response, err
+	}
+	return nil, p.refuseRemoval(b, scope, bucket, current)
+}
+
+// retainWrite plans the soft-delete copy of the generation an insert,
+// restore, or delete removes for good: the one a delete names, or the live
+// one unless a versioned bucket keeps it as noncurrent.
+func (p *Provider) retainWrite(ctx context.Context, b *memoryBackend, req request) (func(*gateway.RESTResponse) error, error) {
 	versioned, err := b.versioned(ctx, req.bucket)
 	if err != nil {
 		return nil, err
@@ -725,40 +823,30 @@ func (p *Provider) writeObject(ctx context.Context, b *memoryBackend, req reques
 	if req.call.Method == MethodObjectsDelete {
 		generation = req.rest.Query.Get(keyGeneration)
 	}
-	keep, err := p.retainRemoved(ctx, b, req.scope, req.bucket, req.object, generation, generation != "" || !versioned)
-	if err != nil {
-		return nil, err
-	}
-	var response *gateway.RESTResponse
-	switch {
-	case req.xml:
-		response, err = executeXML(ctx, b, req, current)
-	case req.call.Method == MethodObjectsInsert:
-		response, err = insertObject(ctx, b, req, current)
-	default:
-		response, err = readOrDeleteObject(ctx, b, req)
-	}
-	if err != nil {
-		return response, err
-	}
-	return response, keep(response)
+	return p.retainRemoved(ctx, b, req.scope, req.bucket, req.object, generation, generation != "" || !versioned)
 }
 
-// insertObject uploads an object once its preconditions hold against the
-// existing object resolved during authorization.
-func insertObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
-	if response, err := preconditions(req.rest, current, MethodObjectsInsert); response != nil || err != nil {
-		return response, err
+// written finishes a successful insert: the new generation takes the
+// bucket's default hold, and an XML API insert answers with its empty body
+// and object headers.
+func (p *Provider) written(b *memoryBackend, req request, response *gateway.RESTResponse) *gateway.RESTResponse {
+	if req.call.Method != MethodObjectsInsert || response.Status != http.StatusOK {
+		return response
 	}
-	upload := req.upload
-	return b.forward(ctx, "POST", "/upload/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", upload.query, upload.headers, upload.body)
+	object := createdObject(response)
+	p.created(b, req.scope, req.bucket, object)
+	if req.xml && object != nil {
+		return xmlapi.Stored(object)
+	}
+	return response
 }
 
 // readOrDeleteObject serves object get and delete. Both address the live
 // generation, or the generation the request names, live or noncurrent, and
 // evaluate the preconditions against it (recorded: storage-object-versioning
-// "noncurrent-read-precondition", "noncurrent-delete-precondition").
-func readOrDeleteObject(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
+// "noncurrent-read-precondition", "noncurrent-delete-precondition"). A delete
+// is refused while a hold or retention protects the generation.
+func (p *Provider) readOrDeleteObject(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
 	generation := req.rest.Query.Get(keyGeneration)
 	current, refused, err := currentObject(ctx, b, req.bucket, req.object, generation)
 	if refused != nil || err != nil {
@@ -769,6 +857,9 @@ func readOrDeleteObject(ctx context.Context, b *memoryBackend, req request) (*ga
 	}
 	if req.call.Method == MethodObjectsGet {
 		return b.forward(ctx, "GET", objectPath(req.bucket, req.object), req.rest.Query, req.rest.Headers, nil)
+	}
+	if err := p.refuseRemoval(b, req.scope, req.bucket, current); err != nil {
+		return nil, err
 	}
 	response, err := b.forward(ctx, "DELETE", objectPath(req.bucket, req.object), req.rest.Query, nil, nil)
 	if err != nil {
@@ -845,7 +936,7 @@ func (p *Provider) writeBucketPolicy(scope state.Scope, bucket string, r *gatewa
 	// storage.publicAccessPrevention organization policy; the emulator models
 	// no organization policies, so, as for a hierarchy that sets none, it does
 	// not apply and public members are accepted and grant access.
-	if _, public := p.bucketSettings(scope, bucket); public != publicInherited && policyBindsPublic(request.Bindings) {
+	if p.bucketSettings(scope, bucket).public != publicInherited && policyBindsPublic(request.Bindings) {
 		return wireError(412, "conditionNotMet", "The member bindings allUsers and allAuthenticatedUsers are not allowed since public access prevention is enforced."), nil
 	}
 	result, err := p.iam.SetPolicy(BucketResource(bucket), request.Policy)
@@ -1107,13 +1198,22 @@ func RegisterPermissions(engine *iam.Engine) error {
 		MethodBucketsPatch:        {Baseline: []string{permissionBucketsUpdate}},
 		MethodBucketsGetIamPolicy: {Baseline: []string{MethodBucketsGetIamPolicy}},
 		MethodBucketsSetIamPolicy: {Baseline: []string{MethodBucketsSetIamPolicy}},
+		// buckets/lockRetentionPolicy needs storage.buckets.update; GCP's
+		// denial names storage.buckets.get first (recorded: storage-bucket-lock
+		// "lock-denied").
+		MethodBucketsLock: {Baseline: []string{permissionBucketsGet, permissionBucketsUpdate}},
 		// buckets/getStorageLayout requires storage.objects.list.
 		MethodBucketsGetLayout: {Baseline: []string{permissionObjectsList}},
 		MethodObjectsList:      {Baseline: []string{MethodObjectsList}},
 		MethodObjectsGet:       {Baseline: []string{MethodObjectsGet}},
 		MethodObjectsDelete:    {Baseline: []string{MethodObjectsDelete}},
-		MethodObjectsPatch:     {Baseline: []string{permissionObjectsUpdate}},
-		MethodObjectsInsert:    {Baseline: []string{"storage.objects.create"}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
+		// objects/patch: setting retention needs setRetention, and
+		// overrideUnlockedRetention=true needs that permission, whatever the
+		// object's retention (recorded: storage-object-retention
+		// "unlocked-set-denied", "unlocked-overridden-denied").
+		MethodObjectsPatch: {Baseline: []string{permissionObjectsUpdate}, When: map[string][]string{
+			featureRetentionSet: {permissionSetRetention}, featureRetentionOverride: {permissionOverrideRetention}}},
+		MethodObjectsInsert: {Baseline: []string{"storage.objects.create"}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
 		// objects/restore: restore and create, plus delete when a live object
 		// is overwritten. The recorded denial names storage.objects.restore
 		// first (storage-bucket-defaults "restore-denied").
@@ -1142,6 +1242,7 @@ const (
 	MethodBucketsGetIamPolicy = "storage.buckets.getIamPolicy"
 	MethodBucketsSetIamPolicy = "storage.buckets.setIamPolicy"
 	MethodBucketsGetLayout    = "storage.buckets.getStorageLayout"
+	MethodBucketsLock         = "storage.buckets.lockRetentionPolicy"
 	MethodFoldersCreate       = "storage.folders.create"
 	MethodFoldersInsert       = "storage.folders.insert"
 	MethodFoldersGet          = "storage.folders.get"
@@ -1175,28 +1276,34 @@ const (
 	permissionObjectsList         = "storage.objects.list"
 	permissionObjectsRestore      = "storage.objects.restore"
 	permissionObjectsUpdate       = "storage.objects.update"
+	permissionSetRetention        = "storage.objects.setRetention"
+	permissionOverrideRetention   = "storage.objects.overrideUnlockedRetention"
 )
 
 // Query and payload literals that repeat across validation and dispatch.
 const (
 	objectExistsCondition = "object_exists"
-	kindBucket            = "bucket"
-	altMedia              = "media"
-	uploadResumable       = "resumable"
-	keyBucket             = "bucket"
-	keyGeneration         = "generation"
-	keyCacheControl       = "cacheControl"
-	keyDisposition        = "contentDisposition"
-	keyContentType        = "contentType"
-	keyLanguage           = "contentLanguage"
-	keyMetadata           = "metadata"
-	queryAlt              = "alt"
-	queryUploadType       = "uploadType"
-	querySoftDeleted      = "softDeleted"
-	queryMaxResults       = "maxResults"
-	queryPrefix           = "prefix"
-	queryVersions         = "versions"
-	keyKind               = "kind"
+	// featureRetentionSet and featureRetentionOverride are objects.patch's
+	// request features: a non-null retention and overrideUnlockedRetention=true.
+	featureRetentionSet      = "retention_set"
+	featureRetentionOverride = "retention_override"
+	kindBucket               = "bucket"
+	altMedia                 = "media"
+	uploadResumable          = "resumable"
+	keyBucket                = "bucket"
+	keyGeneration            = "generation"
+	keyCacheControl          = "cacheControl"
+	keyDisposition           = "contentDisposition"
+	keyContentType           = "contentType"
+	keyLanguage              = "contentLanguage"
+	keyMetadata              = "metadata"
+	queryAlt                 = "alt"
+	queryUploadType          = "uploadType"
+	querySoftDeleted         = "softDeleted"
+	queryMaxResults          = "maxResults"
+	queryPrefix              = "prefix"
+	queryVersions            = "versions"
+	keyKind                  = "kind"
 	// queryFoldersAsPrefixes is objects.list includeFoldersAsPrefixes, which
 	// gcloud storage ls sends as True.
 	queryFoldersAsPrefixes = "includeFoldersAsPrefixes"
@@ -1206,8 +1313,19 @@ const (
 	storageClassStandard   = "STANDARD"
 	// keyName is the name key shared by query options, upload metadata, and
 	// bucket/folder documents.
-	keyName            = "name"
-	keyEnabled         = "enabled"
-	kindBucketDocument = "storage#bucket"
-	contentJSON        = "application/json"
+	keyName           = "name"
+	keyEnabled        = "enabled"
+	keyTemporaryHold  = "temporaryHold"
+	keyEventBasedHold = "eventBasedHold"
+	keyRetention      = "retention"
+	// queryOverrideRetention is objects.patch overrideUnlockedRetention.
+	queryOverrideRetention = "overrideUnlockedRetention"
+	// queryObjectRetention is buckets.insert enableObjectRetention.
+	queryObjectRetention = "enableObjectRetention"
+	keyDefaultHold       = "defaultEventBasedHold"
+	kindBucketDocument   = "storage#bucket"
+	kindObjectDocument   = "storage#object"
+	contentJSON          = "application/json"
+	jsonNull             = "null"
+	keyResource          = "resource"
 )

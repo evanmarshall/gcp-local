@@ -116,7 +116,6 @@ func TestBucketCreateRejectsUnsupportedConfiguration(t *testing.T) {
 		{"unknown field", `{"name":"b-unknown",` + base + `,"website":{}}`, 400},
 		{"malformed", `{"name":`, 400},
 		{"no uniform access", `{"name":"b-acl","location":"US","softDeletePolicy":{"retentionDurationSeconds":"0"}}`, 400},
-		{"default hold", `{"name":"b-hold",` + base + `,"defaultEventBasedHold":true}`, 400},
 		{"soft delete effective time", `{"name":"b-soft","location":"US","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0","effectiveTime":"2020-01-01T00:00:00Z"}}`, 400},
 		{"lifecycle rules", `{"name":"b-life",` + base + `,"lifecycle":{"rule":[{}]}}`, 400},
 		{"storage class", `{"name":"b-class",` + base + `,"storageClass":"NEARLINE"}`, 400},
@@ -252,6 +251,16 @@ func softPolicy(t *testing.T, bucket map[string]any) map[string]any {
 }
 
 // expectf fails the test with the message unless ok.
+// nested returns a JSON object field of a decoded document.
+func nested(t *testing.T, document map[string]any, key string) map[string]any {
+	t.Helper()
+	value, ok := document[key].(map[string]any)
+	if !ok {
+		t.Fatalf("%s is not an object: %v", key, document)
+	}
+	return value
+}
+
 func expectf(t *testing.T, ok bool, format string, args ...any) {
 	t.Helper()
 	if !ok {
@@ -291,8 +300,9 @@ func TestBucketCreateDefaults(t *testing.T) {
 func TestBucketCreateRefusals(t *testing.T) {
 	f := setup(t)
 	refusals := []struct{ name, query, body, message string }{
-		{"b-retain", "&enableObjectRetention=true", string(rcloneBucket("b-retain")), "Storage coverage gap: enableObjectRetention=true"},
-		{"b-retain2", "&enableObjectRetention=True", string(rcloneBucket("b-retain2")), "Storage coverage gap: enableObjectRetention=True"},
+		{"b-retain", "&enableObjectRetention=maybe", string(rcloneBucket("b-retain")), "enableObjectRetention must be a boolean"},
+		{"b-policy", "", `{"name":"b-policy","location":"US","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}},"retentionPolicy":{"retentionPeriod":"0"}}`,
+			"Retention policy must have a retention period greater than 0 and less than 100 years."},
 		{"b-pap", "", `{"name":"b-pap","location":"US","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"unspecified"}}`,
 			"Storage coverage gap: publicAccessPrevention unspecified"},
 		{"b-short", "", `{"name":"b-short","location":"US","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}},"softDeletePolicy":{"retentionDurationSeconds":"3600"}}`,
@@ -690,4 +700,85 @@ func TestBucketListPagingAndPartialSuccess(t *testing.T) {
 	expectf(t, len(itemList(foreign["items"])) == 0, "foreign token = %v", foreign)
 	refused(t, f.request(admin, "GET", base+"&maxResults=-1", nil, 400).Body.String(), "Invalid unsigned integer value: '-1'.")
 	refused(t, f.request(admin, "GET", base+"&returnPartialSuccess=maybe", nil, 400).Body.String(), "returnPartialSuccess must be a boolean")
+}
+
+// TestRetentionPolicyAndHolds follows storage-retention-holds: a retention
+// policy and each hold refuse deletes and overwrites with GCP's errors, a
+// default event-based hold reaches new objects, and releasing an event-based
+// hold starts the retention period.
+func TestRetentionPolicyAndHolds(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "retained", 200)
+	base := "/storage/v1/b/retained"
+	upload := "/upload/storage/v1/b/retained/o?uploadType=media&name="
+	policy := decodeBody(t, f.request(admin, "PATCH", base, []byte(`{"retentionPolicy":{"retentionPeriod":"3600"}}`), 200).Body.Bytes())
+	expectf(t, fmt.Sprint(nested(t, policy, "retentionPolicy")["retentionPeriod"]) == "3600" && policy[keyDefaultHold] == nil, "policy: %v", policy)
+	for body, message := range map[string]string{
+		`{"retentionPolicy":{"retentionPeriod":"0"}}`:    "Retention policy must have a retention period greater than 0 and less than 100 years.",
+		`{"retentionPolicy":{"retentionPeriod":"soon"}}`: `Parse Error: Invalid value for TYPE_INT64 field: '\"soon\"'.`, // JSON-escaped
+	} {
+		refused(t, f.request(admin, "PATCH", base, []byte(body), 400).Body.String(), message)
+	}
+	kept := decodeBody(t, f.request(admin, "POST", upload+"kept", []byte("kept"), 200).Body.Bytes())
+	created, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(kept["timeCreated"]))
+	expiry, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(kept["retentionExpirationTime"]))
+	expectf(t, expiry.Equal(created.Add(time.Hour)), "retentionExpirationTime %v, created %v", expiry, created)
+	retained := "Object 'retained/kept' is subject to bucket's retention policy or object retention and cannot be deleted or overwritten until "
+	refused(t, f.request(admin, "DELETE", base+"/o/kept", nil, 403).Body.String(), retained)
+	refused(t, f.request(admin, "POST", upload+"kept", []byte("again"), 403).Body.String(), retained)
+	f.request(admin, "PATCH", base+"/o/kept", []byte(`{"metadata":{"note":"kept"}}`), 200)
+	f.request(admin, "PATCH", base, []byte(`{"retentionPolicy":null}`), 200)
+	f.request(admin, "DELETE", base+"/o/kept", nil, 204)
+
+	f.request(admin, "POST", upload+"held", []byte("held"), 200)
+	for _, hold := range []struct{ field, label string }{{"temporaryHold", "Temporary"}, {"eventBasedHold", "Event-Based"}} {
+		set := decodeBody(t, f.request(admin, "PATCH", base+"/o/held", []byte(`{"`+hold.field+`":true}`), 200).Body.Bytes())
+		expectf(t, set[hold.field] == true, "%s not set: %v", hold.field, set)
+		message := "Object 'retained/held' is under active " + hold.label + " hold and cannot be deleted, overwritten or archived until hold is removed."
+		refused(t, f.request(admin, "DELETE", base+"/o/held", nil, 403).Body.String(), message)
+		refused(t, f.request(admin, "POST", upload+"held", []byte("again"), 403).Body.String(), message)
+		f.request(admin, "PATCH", base+"/o/held", []byte(`{"`+hold.field+`":false}`), 200)
+	}
+	f.request(admin, "DELETE", base+"/o/held", nil, 204)
+
+	f.request(admin, "PATCH", base, []byte(`{"defaultEventBasedHold":true}`), 200)
+	defaulted := decodeBody(t, f.request(admin, "POST", upload+"defaulted", []byte("defaulted"), 200).Body.Bytes())
+	expectf(t, defaulted[keyEventBasedHold] == true, "default hold missing: %v", defaulted)
+	f.request(admin, "PATCH", base, []byte(`{"defaultEventBasedHold":false}`), 200)
+	later := decodeBody(t, f.request(admin, "POST", upload+"later", []byte("later"), 200).Body.Bytes())
+	expectf(t, later[keyEventBasedHold] == nil, "hold after the default was cleared: %v", later)
+
+	f.request(admin, "PATCH", base, []byte(`{"retentionPolicy":{"retentionPeriod":"3600"}}`), 200)
+	held := decodeBody(t, f.request(admin, "PATCH", base+"/o/defaulted", []byte(`{"metadata":{"k":"v"}}`), 200).Body.Bytes())
+	expectf(t, held["retentionExpirationTime"] == nil, "retention runs during an event-based hold: %v", held)
+	released := decodeBody(t, f.request(admin, "PATCH", base+"/o/defaulted", []byte(`{"eventBasedHold":false}`), 200).Body.Bytes())
+	updated, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(released["updated"]))
+	expiry, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(released["retentionExpirationTime"]))
+	expectf(t, expiry.Equal(updated.Add(time.Hour)), "release did not start retention: %v", released)
+}
+
+// TestBucketLock follows storage-bucket-lock: locking needs
+// ifMetagenerationMatch and an unlocked policy, and a locked policy can't be
+// removed or shortened.
+func TestBucketLock(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "locked", 200)
+	base := "/storage/v1/b/locked"
+	lock := base + "/lockRetentionPolicy"
+	refused(t, f.request(admin, "POST", lock+"?ifMetagenerationMatch=1", nil, 400).Body.String(), "Bucket 'locked' does not have an unlocked retention policy.")
+	configured := decodeBody(t, f.request(admin, "PATCH", base, []byte(`{"retentionPolicy":{"retentionPeriod":"5"}}`), 200).Body.Bytes())
+	metageneration := fmt.Sprint(configured["metageneration"])
+	refused(t, f.request(admin, "POST", lock, nil, 400).Body.String(), "Required parameter: ifMetagenerationMatch")
+	f.request(admin, "POST", lock+"?ifMetagenerationMatch=99", nil, 412)
+	f.request("stranger@project-a.test", "POST", lock+"?ifMetagenerationMatch="+metageneration, nil, 403)
+	locked := decodeBody(t, f.request(admin, "POST", lock+"?ifMetagenerationMatch="+metageneration, nil, 200).Body.Bytes())
+	expectf(t, nested(t, locked, "retentionPolicy")["isLocked"] == true, "not locked: %v", locked)
+	refused(t, f.request(admin, "POST", lock+"?ifMetagenerationMatch="+fmt.Sprint(locked["metageneration"]), nil, 400).Body.String(),
+		"Bucket 'locked' does not have an unlocked retention policy.")
+	refused(t, f.request(admin, "PATCH", base, []byte(`{"retentionPolicy":null}`), 403).Body.String(), "Bucket 'locked' has a locked Retention Policy which cannot be removed.")
+	refused(t, f.request(admin, "PATCH", base, []byte(`{"retentionPolicy":{"retentionPeriod":"1"}}`), 403).Body.String(),
+		"Cannot reduce retention duration of a locked Retention Policy for bucket 'locked'.")
+	same := decodeBody(t, f.request(admin, "PATCH", base, []byte(`{"retentionPolicy":{"retentionPeriod":"5"}}`), 200).Body.Bytes())
+	expectf(t, nested(t, same, "retentionPolicy")["isLocked"] == true, "lock lost: %v", same)
+	f.request(admin, "DELETE", base, nil, 204)
 }

@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-13T04:06:36.023522+00:00",
+  "recorded_at": "2026-10-13T04:19:25.505908+00:00",
   "scenario": {
     "id": "storage-object-versioning",
     "service": "storage",
     "transport": "rest-json-v1",
-    "revision": "5f9aaf8125bfa084da35923b31bfc03c9bbac27220f8b5652a5ef37079392670",
+    "revision": "2fd79cfa0a1e1094d62bc92eca78b77ff257b553907484c51f1ca2faf230c193",
     "versions": {
       "sdk": "stdlib-http/3.14.2;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "62c90d338e9d99af0d1a54c52f41e8da6a88b6e478f276572fcb24ba34798840",
+  "snapshot_sha256": "95080cbb34a403610086212907ded0e740f87c6c33dedd17d6f66bb182f6e882",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -23,7 +23,7 @@
   "context": {
     "contract_files": {
       "gcp_validation/services/storage/client.py": "51d69bf56a4ee0dfd955142f2a70ad38db443ee4323437861a924e70ba46f8ad",
-      "gcp_validation/services/storage/configured.py": "6701ab00b30095ce3003029ef363a1e045edf1d0837084a9ded3775e9678f566",
+      "gcp_validation/services/storage/configured.py": "cd210381516e303f55ac06e8227e032bf5c8a93059cd6be1e5f3535fd97c6490",
       "gcp_validation/services/storage/normalization.py": "c76208471a34ba5e1995b9d879c7a9af28cf1f3b555644c6380cf815838fd545",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "gcp_validation/federation.py": "addf34416b0231baedb9747942a78952394d1592fc2ec1b2dbc0133d54ae513a",

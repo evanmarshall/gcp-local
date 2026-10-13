@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
+	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"github.com/fsouza/fake-gcs-server/fakestorage"
 )
@@ -283,6 +284,32 @@ type memoryBackend struct {
 type objectOverlay struct {
 	// metageneration is 0 until a patch, which reports as 1.
 	metageneration int64
+	// updated is the last patch's time; zero until a patch.
+	updated time.Time
+	// temporaryHold and eventBasedHold are nil until set: GCP omits a hold
+	// that was never set (recorded: storage-retention-holds "retained-upload").
+	temporaryHold, eventBasedHold *bool
+	// released is when an event-based hold was released. A bucket retention
+	// policy counts from it instead of from creation (recorded:
+	// storage-retention-holds "release-starts-retention").
+	released  time.Time
+	retention *bucketconfig.Retention
+}
+
+// render writes the overlay's fields into an object document.
+func (o objectOverlay) render(document map[string]any) {
+	delete(document, "retention")
+	if !o.updated.IsZero() {
+		document["updated"] = storageTime(o.updated)
+	}
+	for key, hold := range map[string]*bool{"temporaryHold": o.temporaryHold, "eventBasedHold": o.eventBasedHold} {
+		if hold != nil {
+			document[key] = *hold
+		}
+	}
+	if o.retention != nil {
+		document["retention"] = map[string]any{"mode": o.retention.Mode, "retainUntilTime": storageTime(o.retention.Until)}
+	}
 }
 
 // overlayKey names one object generation in memoryBackend.overlays.
@@ -339,12 +366,29 @@ func (b *memoryBackend) metageneration(bucket, name, generation string) string {
 	return strconv.FormatInt(max(b.overlays[overlayKey(bucket, name, generation)].metageneration, 1), 10)
 }
 
-// advanceMetageneration records a successful metadata update of one object
-// generation. It runs only after the backend accepted the update.
-func (b *memoryBackend) advanceMetageneration(bucket, name, generation string) {
+// overlay returns one object generation's overlay; the zero value until set.
+func (b *memoryBackend) overlay(bucket, name, generation string) objectOverlay {
+	return b.overlays[overlayKey(bucket, name, generation)]
+}
+
+// updateOverlay records a successful metadata update of one object
+// generation at now: change edits the overlay, and the metageneration
+// advances. It runs only after the backend accepted any backend-owned part.
+func (b *memoryBackend) updateOverlay(bucket, name, generation string, now time.Time, change func(*objectOverlay)) {
 	key := overlayKey(bucket, name, generation)
 	overlay := b.overlays[key]
+	change(&overlay)
 	overlay.metageneration = max(overlay.metageneration, 1) + 1
+	overlay.updated = now
+	b.overlays[key] = overlay
+}
+
+// setOverlay changes a new generation's overlay without counting it as a
+// metadata update.
+func (b *memoryBackend) setOverlay(bucket, name, generation string, change func(*objectOverlay)) {
+	key := overlayKey(bucket, name, generation)
+	overlay := b.overlays[key]
+	change(&overlay)
 	b.overlays[key] = overlay
 }
 

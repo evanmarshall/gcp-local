@@ -40,6 +40,10 @@ OBJECT_NAME = re.compile(r"([a-z0-9.-]{1,40}/){0,3}[a-z0-9.-]{1,80}")
 # The longest retention cleanup waits out. Scenarios retain for seconds.
 MAX_RETENTION_WAIT = 120
 MAX_FOLDERS = 20
+# How long a removed retention policy or released hold may keep refusing deletes.
+PROPAGATION_SECONDS = 90
+# How long to retry a bucket update GCP rate-limits (429).
+RATE_LIMIT_SECONDS = 30
 
 
 def parse_time(value: str) -> datetime:
@@ -170,8 +174,13 @@ class ConfiguredBucket(StorageFixture):
     def patch_bucket(
         self, body: dict, *, actor: str = "fixture", query: dict | None = None
     ) -> Response:
-        """Patch the owned bucket."""
-        return self.client.request(actor, "PATCH", self.path, query=query, body=body)
+        """Patch the owned bucket, waiting out GCP's limit of one bucket update per second."""
+        deadline = time.monotonic() + (RATE_LIMIT_SECONDS if self.sandbox else 0)
+        while True:
+            response = self.client.request(actor, "PATCH", self.path, query=query, body=body)
+            if response.status != 429 or time.monotonic() >= deadline:
+                return response
+            time.sleep(2)
 
     def versions(self, name: str) -> list[dict]:
         """Every generation of one owned object name, live and noncurrent."""
@@ -193,9 +202,10 @@ class ConfiguredBucket(StorageFixture):
                 bucket = response.require(200)
                 self.assert_owned(bucket)
                 self.release_bucket(bucket)
+                locked = bool(bucket.get("retentionPolicy", {}).get("isLocked"))
                 for name in self.manifest["objects"]:
                     for item in self.versions(name):
-                        self.remove_generation(item)
+                        self.remove_generation(item, locked=locked)
                 self.remove_folders(bucket)
                 self.client.request("fixture", "DELETE", self.path).require(204)
                 self.client.request("fixture", "GET", self.path).require(404)
@@ -219,8 +229,12 @@ class ConfiguredBucket(StorageFixture):
         if changes:
             self.patch_bucket(changes).require(200)
 
-    def remove_generation(self, item: dict) -> None:
-        """Release one generation's holds and retention, then delete it."""
+    def remove_generation(self, item: dict, *, locked: bool) -> None:
+        """Release one generation's holds and retention, then delete it.
+
+        locked is whether the bucket's retention policy is locked, so cleanup
+        must wait out the generation's retentionExpirationTime.
+        """
         path, generation = self.object_path(item["name"]), item["generation"]
         if item.get("temporaryHold") or item.get("eventBasedHold"):
             self.client.request(
@@ -239,15 +253,28 @@ class ConfiguredBucket(StorageFixture):
                 query={"generation": generation, "overrideUnlockedRetention": "true"},
                 body={"retention": None},
             ).require(200)
-        for until in (
-            retention.get("retainUntilTime") if retention.get("mode") == "Locked" else None,
-            item.get("retentionExpirationTime"),
-        ):
-            if until:
-                wait_until(parse_time(until))
-        deleted = self.client.request("fixture", "DELETE", path, query={"generation": generation})
+        if retention.get("mode") == "Locked":
+            wait_until(parse_time(retention["retainUntilTime"]))
+        if locked and item.get("retentionExpirationTime"):
+            wait_until(parse_time(item["retentionExpirationTime"]))
+        deleted = self.released_delete(item["name"], actor="fixture", generation=generation)
         if deleted.status != 404:
             deleted.require(204)
+
+    def released_delete(
+        self, name: str, *, actor: str = "allowed", generation: str | None = None
+    ) -> Response:
+        """Delete an object whose hold or retention was just removed.
+
+        GCP can keep refusing for seconds after the change; retry while live.
+        """
+        query = {"generation": generation} if generation else None
+        deadline = time.monotonic() + (PROPAGATION_SECONDS if self.sandbox else 0)
+        while True:
+            deleted = self.client.request(actor, "DELETE", self.object_path(name), query=query)
+            if deleted.status != 403 or time.monotonic() >= deadline:
+                return deleted
+            time.sleep(5)
 
     def remove_folders(self, bucket: dict) -> None:
         """Delete every folder of a hierarchical-namespace bucket, deepest first."""

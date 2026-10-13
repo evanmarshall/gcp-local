@@ -266,11 +266,11 @@ func TestObjectPatchRefusals(t *testing.T) {
 	for _, test := range []struct{ path, body, message string }{
 		{patchObjectPath, `{"acl":[]}`, "Storage coverage gap: unsupported object patch field acl"},
 		{patchObjectPath, `{"customTime":"2026-01-01T00:00:00Z"}`, "Storage coverage gap: unsupported object patch field customTime"},
-		{patchObjectPath, `{"contentType":"text/plain","temporaryHold":true}`, "Storage coverage gap: unsupported object patch field temporaryHold"},
+		{patchObjectPath, `{"contentType":"text/plain","temporaryHold":null}`, "Storage coverage gap: temporaryHold values other than true and false"},
+		{patchObjectPath, `{"retention":{"mode":"Unlocked","retainUntilTime":"2999-01-01T00:00:00Z"}}`, "Storage coverage gap: object retention in a bucket created without enableObjectRetention"},
 		{patchObjectPath, `{"contentType":null}`, "Storage coverage gap: clearing object field contentType"},
 		{patchObjectPath, `{"cacheControl":""}`, "Storage coverage gap: clearing object field cacheControl"},
 		{patchObjectPath + "?predefinedAcl=private", `{}`, "Storage coverage gap: unsupported query option predefinedAcl"},
-		{patchObjectPath + "?overrideUnlockedRetention=true", `{}`, "Storage coverage gap: unsupported query option overrideUnlockedRetention"},
 		{patchObjectPath + "?userProject=x", `{}`, "Storage coverage gap: unsupported query option userProject"},
 		{patchObjectPath, `[]`, "Expected a JSON object body"},
 		{patchObjectPath, `{"bucket":"other","contentType":"text/plain"}`, "Object bucket does not match the patch target"},
@@ -790,4 +790,51 @@ func TestVersioningWithSoftDelete(t *testing.T) {
 	expectf(t, soft() == 0, "a plain delete in a versioned bucket soft-deleted the live generation")
 	f.request(admin, "DELETE", "/storage/v1/b/soft-versioned/o/doc?generation="+first, nil, 204)
 	expectf(t, soft() == 1, "a deleted noncurrent generation was not soft-deleted")
+}
+
+// TestObjectRetention follows storage-object-retention: unlocked retention
+// shortens or goes only with overrideUnlockedRetention, locked retention only
+// extends, and both refuse deletes until retainUntilTime.
+func TestObjectRetention(t *testing.T) {
+	now := time.Now()
+	f := setupWithClock(t, func() time.Time { return now })
+	f.request(admin, "POST", "/storage/v1/b?project=project-a&enableObjectRetention=true", rcloneBucket("retaining"), 200)
+	bucket := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/retaining", nil, 200).Body.Bytes())
+	expectf(t, fmt.Sprint(bucket["objectRetention"]) == "map[mode:Enabled]", "objectRetention: %v", bucket["objectRetention"])
+	f.request(admin, "POST", "/upload/storage/v1/b/retaining/o?uploadType=media&name=doc", []byte("doc"), 200)
+	doc := "/storage/v1/b/retaining/o/doc"
+	until := func(offset time.Duration) string { return now.Add(offset).UTC().Format(time.RFC3339Nano) }
+	retention := func(mode string, offset time.Duration) string {
+		return `{"retention":{"mode":"` + mode + `","retainUntilTime":"` + until(offset) + `"}}`
+	}
+	f.policy(t, "retaining", "user@project-a.test", "roles/storage.objectUser")
+	refused(t, f.request("user@project-a.test", "PATCH", doc, []byte(retention("Unlocked", time.Hour)), 403).Body.String(),
+		"user@project-a.test does not have storage.objects.setRetention access to the Google Cloud Storage object.")
+	set := decodeBody(t, f.request(admin, "PATCH", doc, []byte(retention("Unlocked", time.Hour)), 200).Body.Bytes())
+	expectf(t, nested(t, set, keyRetention)["mode"] == "Unlocked", "retention: %v", set)
+	refused(t, f.request(admin, "DELETE", doc, nil, 403).Body.String(), "Object 'retaining/doc' is subject to bucket's retention policy or object retention")
+	unlocked := "The unlocked object retention cannot be removed and its retention period cannot be shortened without overriding unlocked retention intent and permission."
+	refused(t, f.request(admin, "PATCH", doc, []byte(retention("Unlocked", time.Minute)), 403).Body.String(), unlocked)
+	refused(t, f.request(admin, "PATCH", doc, []byte(`{"retention":null}`), 403).Body.String(), unlocked)
+	f.request(admin, "PATCH", doc, []byte(retention("Unlocked", 2*time.Hour)), 200)
+	refused(t, f.request("user@project-a.test", "PATCH", doc+"?overrideUnlockedRetention=true", []byte(`{"retention":null}`), 403).Body.String(),
+		"Permission 'storage.objects.overrideUnlockedRetention' denied")
+	cleared := decodeBody(t, f.request(admin, "PATCH", doc+"?overrideUnlockedRetention=true", []byte(`{"retention":null}`), 200).Body.Bytes())
+	expectf(t, cleared[keyRetention] == nil, "retention kept: %v", cleared)
+	for body, message := range map[string]string{
+		`{"retention":{"mode":"Forever","retainUntilTime":"` + until(time.Hour) + `"}}`: "Invalid value for: Forever is not a valid value",
+		`{"retention":{"mode":"Unlocked","retainUntilTime":"2020-01-01T00:00:00Z"}}`:    "Retain until time cannot be in the past.",
+		`{"retention":{"mode":"Unlocked"}}`:                                             "Missing retain until time. Both mode and retain until time are required.",
+		`{"retention":{"retainUntilTime":"` + until(time.Hour) + `"}}`:                  "Missing retention mode. Both mode and retain until time are required.",
+	} {
+		refused(t, f.request("user@project-a.test", "PATCH", doc, []byte(body), 400).Body.String(), message)
+	}
+	f.request(admin, "PATCH", doc, []byte(retention("Locked", time.Minute)), 200)
+	lockedMessage := "The locked object retention cannot be removed. Its retention mode cannot be changed and its retention period cannot be shortened."
+	refused(t, f.request(admin, "PATCH", doc+"?overrideUnlockedRetention=true", []byte(`{"retention":null}`), 403).Body.String(), lockedMessage)
+	refused(t, f.request(admin, "PATCH", doc+"?overrideUnlockedRetention=true", []byte(retention("Unlocked", time.Minute)), 403).Body.String(), lockedMessage)
+	f.request(admin, "PATCH", doc, []byte(retention("Locked", 2*time.Minute)), 200)
+	f.request(admin, "DELETE", doc, nil, 403)
+	now = now.Add(3 * time.Minute)
+	f.request(admin, "DELETE", doc, nil, 204)
 }

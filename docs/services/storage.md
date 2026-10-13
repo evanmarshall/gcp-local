@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-one scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
+Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, retention policies and Bucket Lock, object holds and object retention, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-four scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -33,27 +33,30 @@ Bucket create must set `location` and `iamConfiguration.uniformBucketLevelAccess
 | --- | --- | --- |
 | `iamConfiguration.publicAccessPrevention` | `inherited` | `inherited`, `enforced` |
 | `softDeletePolicy.retentionDurationSeconds` | `604800` (7 days), `effectiveTime` = `timeCreated` | `0`, or 604800 to 7776000 (90 days) |
-| `enableObjectRetention` query option | `false` | `false` in any case (gcloud sends `False`) |
+| `enableObjectRetention` query option | `false` | `true` or `false` in any case (gcloud sends `False`); `true` reports `objectRetention.mode: Enabled` |
+| `retentionPolicy.retentionPeriod` | none | 1 second to under 100 years; `effectiveTime` = `timeCreated` |
+| `defaultEventBasedHold` | off (omitted) | `true`, `false` |
 | `storageClass` | `STANDARD` | `STANDARD` |
 
-Default holds must stay off. Buckets report uniform access under both names, each with a `lockedTime` 90 days after creation.
+Buckets report uniform access under both names, each with a `lockedTime` 90 days after creation.
 
 ## Methods
 
-19 of 88 JSON API methods run.
+20 of 88 JSON API methods run.
 
 | Resource | Methods | Notes |
 | --- | --- | --- |
 | Buckets | `insert`, `get`, `delete` | Global name uniqueness across projects; a bucket holding only soft-deleted objects deletes |
 | Buckets | `list` | `prefix`, [paging](#lists), `returnPartialSuccess` (every bucket is reachable, so `unreachable` is omitted) |
-| Buckets | `patch` | `labels` (merges keys, null removes a key), `softDeletePolicy.retentionDurationSeconds`, and `versioning.enabled`; advances metageneration and etag |
+| Buckets | `patch` | `labels` (merges keys, null removes a key), `softDeletePolicy.retentionDurationSeconds`, `versioning.enabled`, `retentionPolicy` (null removes it), and `defaultEventBasedHold`; advances metageneration and etag |
+| Buckets | `lockRetentionPolicy` | Requires `ifMetagenerationMatch`; locks the retention policy per [retention](#retention-and-holds) |
 | Buckets | `getIamPolicy`, `setIamPolicy` | Version-3 conditions on `resource.name`; public members per [public access prevention](#public-access-prevention) |
 | Buckets | `getStorageLayout` | `locationType` and no `hierarchicalNamespace`, as gcloud reads them |
 | Objects | `insert` | Media, multipart, and resumable uploads, up to 128 MiB per object (larger is the 400 gap) |
 | Objects | `list` | `prefix`, `delimiter`, `startOffset`, `endOffset`, `versions` per [versioning](#versioning), [paging](#lists); `softDeleted=true` per [soft delete](#soft-delete) |
 | Objects | `get` (metadata and `alt=media`), `delete` | `generation` names a live or noncurrent generation; generation, metageneration, and etag preconditions; `softDeleted=true` per [soft delete](#soft-delete) |
 | Objects | `restore` | `generation`, preconditions on the live object |
-| Objects | `patch` | `contentType`, `cacheControl`, `contentDisposition`, `contentEncoding`, `contentLanguage`, `metadata` (merges keys, null removes a key, null removes all); `generation` and the four precondition options; advances metageneration and etag |
+| Objects | `patch` | `contentType`, `cacheControl`, `contentDisposition`, `contentEncoding`, `contentLanguage`, `metadata` (merges keys, null removes a key, null removes all), `temporaryHold`, `eventBasedHold`, `retention`; `generation`, `overrideUnlockedRetention`, and the four precondition options; advances metageneration, etag, and `updated` |
 | Objects | `rewrite` | Single call within one project; source metadata copied, body metadata replaces it. A JSON `null` body (rclone `moveto`) copies the source unchanged |
 | Objects (XML) | `GET`, `PUT /BUCKET/OBJECT` | Bearer token or V4 signature; `x-goog-meta-*`, `Content-MD5`, `response-content-*` |
 | Folders | `insert`/`create`, `get`, `list`, `delete` | Modeled locally in any bucket, not recorded; `list` takes `prefix` and `pageSize`/`pageToken` [paging](#lists); deleted with their bucket. GCP refuses folders in a bucket without hierarchical namespace, which the emulator does not model (see [gaps](#gaps)) |
@@ -85,6 +88,23 @@ A bucket with `versioning.enabled` keeps every live generation that an overwrite
 - Turning versioning off keeps the existing noncurrent generations; later overwrites replace the live one.
 - With soft delete, only a generation that leaves the bucket is soft-deleted: a deleted noncurrent generation, never a live one that becomes noncurrent. Restoring one makes the live generation noncurrent (recorded: `storage-versioning-soft-delete`).
 
+## Retention and holds
+
+A retention policy, a hold, or an object's own retention refuses deleting, overwriting, or making noncurrent the object it protects, with GCP's errors (recorded: `storage-retention-holds`, `storage-object-retention`, `storage-bucket-lock`):
+
+| Protection | Refusal |
+| --- | --- |
+| `temporaryHold` or `eventBasedHold` | 403 `forbidden`: `Object 'B/O' is under active Temporary hold and cannot be deleted, overwritten or archived until hold is removed.` (`Event-Based` for the other) |
+| `retentionPolicy`, until the object's `retentionExpirationTime` | 403 `retentionPolicyNotMet`: `Object 'B/O' is subject to bucket's retention policy or object retention and cannot be deleted or overwritten until TIME` |
+| Object `retention`, until `retainUntilTime` | The same 403 |
+
+- `retentionExpirationTime` is `timeCreated` plus the period; it applies to objects created before the policy too. While an event-based hold is on the object has none; releasing the hold starts the period then.
+- `defaultEventBasedHold: true` puts an event-based hold on every new object. Holds a patch never set are omitted.
+- Metadata patches of a protected object succeed.
+- `lockRetentionPolicy?ifMetagenerationMatch=M` locks the policy (`isLocked: true`). Without the option: 400 `Required parameter: ifMetagenerationMatch`. With no unlocked policy: 400 `Bucket 'B' does not have an unlocked retention policy.` A locked policy can't be removed (403 `retentionPolicyNotMet`) or shortened (403 `forbidden`); the same or a longer period is accepted. An empty locked bucket deletes.
+- Object retention needs a bucket created with `enableObjectRetention=true`. `mode` is `Unlocked` or `Locked`; both fields are required and `retainUntilTime` must be in the future, each refused with GCP's 400. Unlocked retention can be shortened or removed only with `overrideUnlockedRetention=true`; locked retention can only be extended. Each is refused with GCP's 403.
+- Not recorded: a plain delete in a versioned bucket of a retained object is refused too.
+
 ## Soft delete
 
 A bucket with a soft-delete policy keeps every object generation that a delete, overwrite, rewrite, or restore removes, until its `hardDeleteTime`.
@@ -108,7 +128,7 @@ A bucket with a soft-delete policy keeps every object generation that a delete, 
 - `restore` needs `storage.objects.restore` and `storage.objects.create`, plus `storage.objects.delete` to replace a live object. `getStorageLayout` needs `storage.objects.list`.
 - A resumable session URI is the credential for its chunks, as in GCP. The commit is authorized again as the principal that started the session, against the object at commit time.
 - A signed URL authorizes as its signer: the signing account's own Storage grants decide, and revoking them refuses a still-valid URL.
-- Object `patch` needs `storage.objects.update`.
+- Object `patch` needs `storage.objects.update`; a non-null `retention` adds `storage.objects.setRetention`, and `overrideUnlockedRetention=true` adds `storage.objects.overrideUnlockedRetention`. `lockRetentionPolicy` needs `storage.buckets.get` and `storage.buckets.update`.
 - `rewrite` needs `storage.objects.get` on the source and the insert permissions on the destination.
 - Project-level grants are inherited; bucket policies return only bucket bindings. A role in the caller's own project grants nothing on a foreign bucket; an explicit bucket binding does.
 - Anonymous callers get 401 on the JSON API and 403 `AccessDenied` on the XML API; authenticated callers without permission get 403.
@@ -134,6 +154,9 @@ All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/
 | `storage-bucket-policy-only` | 2026-10-12 | Bucket create with only `bucketPolicyOnly`; both names and their `lockedTime` on create and read |
 | `storage-go-client-projection` | 2026-10-13 | The Go client's `projection=full` bucket and object calls, a bucket list with `returnPartialSuccess=true`, object `patch`, an undefined query option, an XML read from a missing bucket, an invalid projection |
 | `storage-object-versioning` | 2026-10-13 | Versioning on and off, noncurrent generations in listings and pages, reads, media, and deletes by generation with preconditions, create-only uploads, bucket delete refused while noncurrent generations remain |
+| `storage-retention-holds` | 2026-10-13 | Retention policy set, invalid, and removed; retained delete and overwrite refused; temporary, event-based, and default event-based holds; retention starting at an event-based hold's release; object retention refused without `enableObjectRetention` |
+| `storage-object-retention` | 2026-10-13 | `enableObjectRetention=true`; unlocked retention set, refused deletes and overwrites, shortening and removal refused without override, extension, override, and the denials for both permissions; invalid values; locked retention refusals and extension |
+| `storage-bucket-lock` | 2026-10-13 | `lockRetentionPolicy` without and with a stale precondition, denied, locked, locked again; locked policy removal and reduction refused; delete after expiry; locked bucket deleted |
 | `storage-versioning-soft-delete` | 2026-10-13 | Soft delete in a versioned bucket: overwrites and plain deletes keep no soft-deleted copy, a deleted noncurrent generation is soft-deleted, restore makes the live generation noncurrent |
 | `storage-list-paging` | 2026-10-13 | Delimiter pages (prefixes count toward `maxResults`, none repeated), flat pages, prefix and offset selection, invalid page tokens and `maxResults` values for objects and buckets |
 | `storage-bucket-defaults` | 2026-10-12 | rclone's bucket insert: inherited prevention, 7-day soft delete; soft-deleted list, read, restore, denied restore, overwrite; bucket delete with only soft-deleted objects |
@@ -164,12 +187,13 @@ Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PR
 - Hierarchical namespace is not modeled. Bucket insert refuses `hierarchicalNamespace`, but folders are served in every bucket; GCP answers `folders.list` on a bucket without hierarchical namespace with 409 `The bucket does not support hierarchical namespace.` (observed 2026-10-13 in a `storage-list-paging` draft, not in its recording). The Terraform case `TestAccStorageBucket_basic` creates a folder in such a bucket.
 - `folders.list` refuses `delimiter`, `startOffset`, and `endOffset`; `includeTrailingDelimiter=true` and `matchGlob` on `objects.list` return the gap.
 - Patching a noncurrent generation returns the gap.
-- No ACLs, object retention (`enableObjectRetention=true` returns the 400 gap) or holds, lifecycle rules, requester pays, encryption keys, notifications, or compose.
+- A hold set to `null`, object retention in a bucket created without `enableObjectRetention`, and a `retentionPolicy` without `retentionPeriod` return the gap.
+- No ACLs, lifecycle rules, requester pays, encryption keys, notifications, or compose.
 - Bucket soft delete is not modeled: a deleted bucket and its soft-deleted objects are gone at once. `softDeleted` on `buckets.list` and `buckets.get`, and `buckets.restore`, return the 400 gap. `objects.restore` in a bucket whose policy is `0` returns the gap.
 - Soft-deleted media (`alt=media`), preconditions on a soft-deleted read, soft-deleted listings longer than one page or with other options, and `restoreToken` return the gap.
 - Organization policies are not modeled ([public access prevention](#public-access-prevention)). `publicAccessPrevention: unspecified` returns the gap.
-- Object `patch` refuses every other field (`acl`, `customTime`, holds, `retention`, `storageClass`, contexts) and clearing a string field (null or empty). It does not change `updated`. `objects.update` (PUT) is a gap.
+- Object `patch` refuses every other field (`acl`, `customTime`, `storageClass`, contexts) and clearing a string field (null or empty). `objects.update` (PUT) is a gap.
 - `rewrite` never returns a `rewriteToken` and refuses one; it refuses buckets in different projects.
 - XML API: object `GET` and `PUT` only. No HMAC signatures, signed resumable starts (`x-goog-resumable`), `x-goog-if-*` or `If-Match`/`If-None-Match` headers, signed payload hashes, or virtual-hosted URLs. A bucket named like an API path prefix (`storage`, `upload`, `v1`) is not reachable over XML.
-- Bucket `patch` accepts only `labels` and the soft-delete retention. Only the `STANDARD` class.
+- Bucket `patch` accepts only the fields in [methods](#methods). Only the `STANDARD` class.
 - State is in memory and lost on restart. Reset clears one project's buckets, bucket policies, soft-deleted objects, and open upload sessions.

@@ -1,0 +1,248 @@
+{
+  "storage-retention-holds": {
+    "recorded-date": "13-10-2026, 04:19:15",
+    "recorded-content": {
+      "policy-set": {
+        "defaultEventBasedHold": null,
+        "fields": [
+          "effectiveTime",
+          "retentionPeriod"
+        ],
+        "has_policy": true,
+        "retentionPeriod": "3600",
+        "status": 200
+      },
+      "policy-zero": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Retention policy must have a retention period greater than 0 and less than 100 years.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "policy-negative": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Retention policy must have a retention period greater than 0 and less than 100 years.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "policy-text": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Parse Error: Invalid value for TYPE_INT64 field: '\"soon\"'.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "policy-read": {
+        "defaultEventBasedHold": null,
+        "fields": [
+          "effectiveTime",
+          "retentionPeriod"
+        ],
+        "has_policy": true,
+        "retentionPeriod": "3600",
+        "status": 200
+      },
+      "retained-upload": {
+        "eventBasedHold": null,
+        "has_retention_expiration": true,
+        "retention_from_creation": true,
+        "status": 200,
+        "temporaryHold": null
+      },
+      "retained-delete": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/kept' is subject to bucket's retention policy or object retention and cannot be deleted or overwritten until <time>",
+        "reasons": [
+          "retentionPolicyNotMet"
+        ],
+        "status": 403
+      },
+      "retained-overwrite": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/kept' is subject to bucket's retention policy or object retention and cannot be deleted or overwritten until <time>",
+        "reasons": [
+          "retentionPolicyNotMet"
+        ],
+        "status": 403
+      },
+      "retained-patch": {
+        "eventBasedHold": null,
+        "has_retention_expiration": true,
+        "retention_from_creation": true,
+        "status": 200,
+        "temporaryHold": null
+      },
+      "object-retention-unavailable": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.setRetention access to the Google Cloud Storage object.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "policy-removed": {
+        "defaultEventBasedHold": null,
+        "fields": null,
+        "has_policy": false,
+        "retentionPeriod": null,
+        "status": 200
+      },
+      "released-read": {
+        "eventBasedHold": null,
+        "has_retention_expiration": false,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": null
+      },
+      "released-delete": {
+        "status": 204
+      },
+      "temporary-hold-set": {
+        "eventBasedHold": null,
+        "has_retention_expiration": false,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": true
+      },
+      "temporary-hold-delete": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/held' is under active Temporary hold and cannot be deleted, overwritten or archived until hold is removed.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "temporary-hold-overwrite": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/held' is under active Temporary hold and cannot be deleted, overwritten or archived until hold is removed.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "temporary-hold-released": {
+        "eventBasedHold": null,
+        "has_retention_expiration": false,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": false
+      },
+      "event-hold-set": {
+        "eventBasedHold": true,
+        "has_retention_expiration": false,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": false
+      },
+      "event-hold-delete": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/held' is under active Event-Based hold and cannot be deleted, overwritten or archived until hold is removed.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "event-hold-released": {
+        "eventBasedHold": false,
+        "has_retention_expiration": false,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": false
+      },
+      "hold-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.objects.update access to the Google Cloud Storage object. Permission 'storage.objects.update' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/held' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "released-hold-delete": {
+        "status": 204
+      },
+      "default-hold-set": {
+        "defaultEventBasedHold": true,
+        "fields": null,
+        "has_policy": false,
+        "retentionPeriod": null,
+        "status": 200
+      },
+      "default-hold-upload": {
+        "eventBasedHold": true,
+        "has_retention_expiration": false,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": null
+      },
+      "default-hold-delete": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/defaulted' is under active Event-Based hold and cannot be deleted, overwritten or archived until hold is removed.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "default-hold-cleared": {
+        "defaultEventBasedHold": false,
+        "fields": null,
+        "has_policy": false,
+        "retentionPeriod": null,
+        "status": 200
+      },
+      "after-default-upload": {
+        "eventBasedHold": null,
+        "has_retention_expiration": false,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": null
+      },
+      "event-hold-with-policy": {
+        "eventBasedHold": true,
+        "has_retention_expiration": false,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": null
+      },
+      "event-hold-release-with-policy": {
+        "eventBasedHold": false,
+        "has_retention_expiration": true,
+        "retention_from_creation": false,
+        "status": 200,
+        "temporaryHold": null
+      },
+      "release-starts-retention": {
+        "after_creation_period": true,
+        "from_update": true
+      },
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}

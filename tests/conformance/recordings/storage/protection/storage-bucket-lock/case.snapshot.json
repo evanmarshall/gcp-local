@@ -1,0 +1,116 @@
+{
+  "storage-bucket-lock": {
+    "recorded-date": "13-10-2026, 04:18:29",
+    "recorded-content": {
+      "policy-set": {
+        "fields": [
+          "effectiveTime",
+          "retentionPeriod"
+        ],
+        "isLocked": null,
+        "retentionPeriod": "5",
+        "status": 200
+      },
+      "lock-without-precondition": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Required parameter: ifMetagenerationMatch",
+        "reasons": [
+          "required"
+        ],
+        "status": 400
+      },
+      "lock-stale-precondition": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "At least one of the pre-conditions you specified did not hold.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "lock-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.buckets.get access to the Google Cloud Storage bucket. Permission 'storage.buckets.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "locked": {
+        "fields": [
+          "effectiveTime",
+          "isLocked",
+          "retentionPeriod"
+        ],
+        "isLocked": true,
+        "retentionPeriod": "5",
+        "status": 200
+      },
+      "locked-read": {
+        "fields": [
+          "effectiveTime",
+          "isLocked",
+          "retentionPeriod"
+        ],
+        "isLocked": true,
+        "retentionPeriod": "5",
+        "status": 200
+      },
+      "lock-again": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Bucket '<bucket>' does not have an unlocked retention policy.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "locked-remove": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Bucket '<bucket>' has a locked Retention Policy which cannot be removed.",
+        "reasons": [
+          "retentionPolicyNotMet"
+        ],
+        "status": 403
+      },
+      "locked-reduce": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Cannot reduce retention duration of a locked Retention Policy for bucket '<bucket>'.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "locked-same": {
+        "fields": [
+          "effectiveTime",
+          "isLocked",
+          "retentionPeriod"
+        ],
+        "isLocked": true,
+        "retentionPeriod": "5",
+        "status": 200
+      },
+      "retained-delete": {
+        "retained": true,
+        "status": 403
+      },
+      "expired-delete": {
+        "status": 204
+      },
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}

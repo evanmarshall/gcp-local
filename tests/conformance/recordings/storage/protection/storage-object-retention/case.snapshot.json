@@ -1,0 +1,195 @@
+{
+  "storage-object-retention": {
+    "recorded-date": "13-10-2026, 04:19:04",
+    "recorded-content": {
+      "bucket-object-retention": {
+        "objectRetention": {
+          "mode": "Enabled"
+        }
+      },
+      "bucket-read": {
+        "objectRetention": {
+          "mode": "Enabled"
+        }
+      },
+      "unlocked-set-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.setRetention access to the Google Cloud Storage object.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unlocked-set": {
+        "has_retain_until": true,
+        "has_retention": true,
+        "mode": "Unlocked",
+        "status": 200
+      },
+      "unlocked-delete": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/unlocked' is subject to bucket's retention policy or object retention and cannot be deleted or overwritten until <time>",
+        "reasons": [
+          "retentionPolicyNotMet"
+        ],
+        "status": 403
+      },
+      "unlocked-overwrite": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/unlocked' is subject to bucket's retention policy or object retention and cannot be deleted or overwritten until <time>",
+        "reasons": [
+          "retentionPolicyNotMet"
+        ],
+        "status": 403
+      },
+      "unlocked-metadata": {
+        "has_retain_until": true,
+        "has_retention": true,
+        "mode": "Unlocked",
+        "status": 200
+      },
+      "unlocked-shortened": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The unlocked object retention cannot be removed and its retention period cannot be shortened without overriding unlocked retention intent and permission.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unlocked-removed": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The unlocked object retention cannot be removed and its retention period cannot be shortened without overriding unlocked retention intent and permission.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unlocked-extended": {
+        "has_retain_until": true,
+        "has_retention": true,
+        "mode": "Unlocked",
+        "status": 200
+      },
+      "unlocked-overridden-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<allowed> does not have storage.objects.overrideUnlockedRetention access to the Google Cloud Storage object. Permission 'storage.objects.overrideUnlockedRetention' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/objects/unlocked' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "unlocked-overridden": {
+        "has_retain_until": false,
+        "has_retention": false,
+        "mode": null,
+        "status": 200
+      },
+      "unlocked-released-delete": {
+        "status": 204
+      },
+      "mode-unknown": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Invalid value for: Forever is not a valid value",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "until-past": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Retain until time cannot be in the past.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "until-missing": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Missing retain until time. Both mode and retain until time are required.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "mode-missing": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Missing retention mode. Both mode and retain until time are required.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "no-retention-removed": {
+        "has_retain_until": false,
+        "has_retention": false,
+        "mode": null,
+        "status": 200
+      },
+      "locked-set": {
+        "has_retain_until": true,
+        "has_retention": true,
+        "mode": "Locked",
+        "status": 200
+      },
+      "locked-removed": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The locked object retention cannot be removed. Its retention mode cannot be changed and its retention period cannot be shortened.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "locked-unlocked": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The locked object retention cannot be removed. Its retention mode cannot be changed and its retention period cannot be shortened.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "locked-extended": {
+        "has_retain_until": true,
+        "has_retention": true,
+        "mode": "Locked",
+        "status": 200
+      },
+      "locked-delete": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Object '<bucket>/locked' is subject to bucket's retention policy or object retention and cannot be deleted or overwritten until <time>",
+        "reasons": [
+          "retentionPolicyNotMet"
+        ],
+        "status": 403
+      },
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}
