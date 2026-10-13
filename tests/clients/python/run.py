@@ -148,11 +148,44 @@ def run_bigquery():
     rows = [dict(row) for row in client.query(query).result()]
     assert rows == [{"name": "ada", "age": 36}], rows
     assert [t.table_id for t in client.list_tables("python_matrix")] == ["people"], "list tables"
+    run_bigquery_partitions(client)
     other = bigquery.Client(
         project=PROJECT, credentials=credentials(denied=True), client_options={"api_endpoint": HTTP}
     )
     expect_denied("ungranted table get", lambda: other.get_table(table.reference))
     client.delete_dataset("python_matrix", delete_contents=True)
+
+
+def run_bigquery_partitions(client):
+    """A day-partitioned, clustered table that requires a partition filter."""
+    events = bigquery.Table(
+        f"{PROJECT}.python_matrix.events",
+        schema=[bigquery.SchemaField("ts", "TIMESTAMP"), bigquery.SchemaField("name", "STRING")],
+    )
+    events.time_partitioning = bigquery.TimePartitioning(
+        type_=bigquery.TimePartitioningType.DAY, field="ts", expiration_ms=86_400_000
+    )
+    events.clustering_fields = ["name"]
+    events.require_partition_filter = True
+    client.create_table(events)
+    fetched = client.get_table(f"{PROJECT}.python_matrix.events")
+    assert fetched.time_partitioning.field == "ts", fetched.time_partitioning
+    assert fetched.time_partitioning.expiration_ms == 86_400_000, fetched.time_partitioning
+    assert fetched.clustering_fields == ["name"], fetched.clustering_fields
+    assert fetched.require_partition_filter, "require_partition_filter"
+    table = f"`{PROJECT}.python_matrix.events`"
+    client.query(f"INSERT INTO {table} (ts, name) VALUES (CURRENT_TIMESTAMP(), 'ada')").result()  # noqa: S608 -- fixed synthetic project
+    recent = (
+        f"SELECT name FROM {table} WHERE ts > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)"  # noqa: S608 -- fixed synthetic project
+    )
+    assert [dict(row) for row in client.query(recent).result()] == [{"name": "ada"}], "filtered"
+    try:
+        client.query(f"SELECT name FROM {table}").result()  # noqa: S608 -- fixed synthetic project
+    except exceptions.BadRequest as error:
+        refused = str(error)
+    else:
+        refused = "a query without a partition filter ran"
+    assert "without a filter over column(s) 'ts'" in refused, refused
 
 
 def run_pubsub():
@@ -265,12 +298,19 @@ def run_cloudscheduler():
     # A yearly HTTP job: it never runs, so its unreachable target is never called.
     client = generated(scheduler_v1.CloudSchedulerClient)
     location = f"projects/{PROJECT}/locations/us-central1"
-    job = client.create_job(parent=location, job={
-        "name": f"{location}/jobs/python-matrix",
-        "schedule": "0 0 1 1 *",
-        "time_zone": "America/New_York",
-        "http_target": {"uri": "http://127.0.0.1:9/job", "http_method": "POST", "body": PAYLOAD},
-    })
+    job = client.create_job(
+        parent=location,
+        job={
+            "name": f"{location}/jobs/python-matrix",
+            "schedule": "0 0 1 1 *",
+            "time_zone": "America/New_York",
+            "http_target": {
+                "uri": "http://127.0.0.1:9/job",
+                "http_method": "POST",
+                "body": PAYLOAD,
+            },
+        },
+    )
     assert client.get_job(name=job.name).state == scheduler_v1.Job.State.ENABLED, "get job"
     assert job.name in [j.name for j in client.list_jobs(parent=location)], "list jobs"
     assert client.pause_job(name=job.name).state == scheduler_v1.Job.State.PAUSED, "pause job"

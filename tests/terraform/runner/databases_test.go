@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,6 +82,165 @@ EOS
 }
 
 `, name)
+}
+
+// TestLocalBigQueryPartitionsAndAccess creates time- and range-partitioned,
+// clustered tables under a dataset default partition expiration, a dataset
+// with inline access entries, and google_bigquery_dataset_access entries for
+// a user and an authorized dataset; then removes the user entry.
+func TestLocalBigQueryPartitionsAndAccess(t *testing.T) {
+	name := bqName()
+	reader := "allowed@" + projectID + ".iam.gserviceaccount.com"
+	localBigQueryCase(t, resource.TestCase{
+		PreCheck:          func() { preCheck(t) },
+		ExternalProviders: pinnedProvider(),
+		CheckDestroy:      testAccBigQueryDestroy(t, name+"_src"),
+		Steps: []resource.TestStep{
+			{
+				Config: testBigQueryLayoutConfig(name, true),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("google_bigquery_table.events", "time_partitioning.0.type", "DAY"),
+					resource.TestCheckResourceAttr("google_bigquery_table.events", "time_partitioning.0.field", "ts"),
+					resource.TestCheckResourceAttr("google_bigquery_table.events", "time_partitioning.0.expiration_ms", "172800000"),
+					resource.TestCheckResourceAttr("google_bigquery_table.events", "require_partition_filter", "true"),
+					resource.TestCheckResourceAttr("google_bigquery_table.events", "clustering.#", "2"),
+					resource.TestCheckResourceAttr("google_bigquery_table.ranged", "range_partitioning.0.range.0.interval", "10"),
+					resource.TestCheckResourceAttr("google_bigquery_dataset.views", "access.#", "2"),
+					testAccBigQueryAccess(name+"_src", []string{`"userByEmail":"` + reader + `"`, `"datasetId":"` + name + `_views"`}, nil),
+				),
+			},
+			{
+				Config: testBigQueryLayoutConfig(name, false),
+				Check:  testAccBigQueryAccess(name+"_src", []string{`"targetTypes":["VIEWS"]`}, []string{reader}),
+			},
+		},
+	})
+}
+
+// testBigQueryLayoutConfig renders the partitioned tables, the two datasets,
+// and the access entries; withReader keeps the user entry.
+func testBigQueryLayoutConfig(name string, withReader bool) string {
+	reader := ""
+	if withReader {
+		reader = fmt.Sprintf(`
+resource "google_bigquery_dataset_access" "reader" {
+ dataset_id    = google_bigquery_dataset.source.dataset_id
+ role          = "READER"
+ user_by_email = "allowed@%s.iam.gserviceaccount.com"
+}
+`, projectID)
+	}
+	return fmt.Sprintf(`
+resource "google_bigquery_dataset" "source" {
+ dataset_id                      = "%[1]s_src"
+ delete_contents_on_destroy      = true
+ default_partition_expiration_ms = 172800000
+}
+
+resource "google_bigquery_dataset" "views" {
+ dataset_id                  = "%[1]s_views"
+ delete_contents_on_destroy  = true
+ default_table_expiration_ms = 3600000
+ access {
+  role          = "OWNER"
+  user_by_email = "fixture@%[2]s.iam.gserviceaccount.com"
+ }
+ access {
+  role           = "READER"
+  group_by_email = "gcp-local-allowed@stitchwink.com"
+ }
+}
+
+resource "google_bigquery_table" "events" {
+ dataset_id               = google_bigquery_dataset.source.dataset_id
+ table_id                 = "events"
+ deletion_protection      = false
+ require_partition_filter = true
+ clustering               = ["name", "n"]
+ time_partitioning {
+  type  = "DAY"
+  field = "ts"
+ }
+ schema = <<EOS
+[
+ {"name": "ts", "type": "TIMESTAMP"},
+ {"name": "name", "type": "STRING"},
+ {"name": "n", "type": "INTEGER"}
+]
+EOS
+}
+
+resource "google_bigquery_table" "ranged" {
+ dataset_id          = google_bigquery_dataset.source.dataset_id
+ table_id            = "ranged"
+ deletion_protection = false
+ range_partitioning {
+  field = "n"
+  range {
+   start    = 0
+   end      = 100
+   interval = 10
+  }
+ }
+ schema = <<EOS
+[
+ {"name": "n", "type": "INTEGER"}
+]
+EOS
+}
+
+resource "google_bigquery_dataset_access" "authorized" {
+ dataset_id = google_bigquery_dataset.source.dataset_id
+ dataset {
+  dataset {
+   project_id = "%[2]s"
+   dataset_id = google_bigquery_dataset.views.dataset_id
+  }
+  target_types = ["VIEWS"]
+ }
+}
+%[3]s`, name, projectID, reader)
+}
+
+// testAccBigQueryAccess requires a dataset's access list to name each of
+// present and none of absent.
+func testAccBigQueryAccess(dataset string, present, absent []string) resource.TestCheckFunc {
+	return func(_ *terraform.State) error {
+		body, err := bqBody("/bigquery/v2/projects/" + projectID + "/datasets/" + dataset)
+		if err != nil {
+			return err
+		}
+		for _, text := range present {
+			if !strings.Contains(body, text) {
+				return fmt.Errorf("dataset %s access lacks %s: %s", dataset, text, body)
+			}
+		}
+		for _, text := range absent {
+			if strings.Contains(body, text) {
+				return fmt.Errorf("dataset %s access still names %s: %s", dataset, text, body)
+			}
+		}
+		return nil
+	}
+}
+
+// bqBody reads one local BigQuery document as the fixture principal.
+func bqBody(path string) (string, error) {
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint+path, nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+fixtureToken)
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<16))
+	if err != nil || response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("read %s: status %d, %v", path, response.StatusCode, err)
+	}
+	return string(body), nil
 }
 
 // bqAPI reads one local BigQuery path as the fixture principal.

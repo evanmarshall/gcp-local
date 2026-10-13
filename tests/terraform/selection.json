@@ -19,6 +19,7 @@
     "TestLocalCloudSchedulerJob",
     "TestLocalFirestoreDocument",
     "TestLocalBigQueryDatasetAndTable",
+    "TestLocalBigQueryPartitionsAndAccess",
     "TestLocalSpannerInstanceAndDatabase",
     "TestLocalPubSubTopicAndSubscription",
     "TestLocalComputeNetworkAndSubnetwork",
