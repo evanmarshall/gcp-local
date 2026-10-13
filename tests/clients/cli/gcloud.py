@@ -177,7 +177,8 @@ def run_iamcredentials():
         timeout=60,
         check=False,
     )
-    assert listed.returncode != 0 and "have iam.serviceAccounts.list access" in listed.stderr, (
+    denial = "Permission 'iam.serviceAccounts.list' denied"
+    assert listed.returncode != 0 and denial in listed.stderr, (
         f"impersonated list: {listed.stderr.strip()[-400:]}"
     )
     expect_denied("ungranted impersonation", [*GCLOUD, *describe], DENIED)
