@@ -31,7 +31,7 @@ These have no upstream counterpart. Their configurations and assertions are gcp-
 | `TestLocalArtifactRegistryRepository` | Docker repository through a long-running operation, empty plan, 404 after destroy |
 | `TestLocalServiceAccount` | Service account create, read, empty plan, destroy |
 | `TestLocalProjectIamCustomRole` | Project custom role and a project binding to it, title and permission update, empty plan, role reads back `deleted` after destroy |
-| `TestLocalCloudRunV2Service` | Cloud Run v2 service create, read, 404 after destroy |
+| `TestLocalCloudRunV2Service` | Cloud Run v2 service create, a traffic split with a tag and scaling, a traffic-only update to internal ingress, 404 after destroy |
 | `TestLocalFolderAndFolderIam` | Folder create through a polled operation under a seeded folder, folder IAM member, rename, import, empty plan, `DELETE_REQUESTED` after destroy |
 | `TestLocalProjectIamPolicy` | Project IAM policy replace; runs last because it replaces the whole policy |
 

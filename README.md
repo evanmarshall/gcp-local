@@ -64,7 +64,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [BigQuery](docs/services/databases/bigquery.md) | GoogleSQL engine | GoogleSQL queries, DML, DDL, parameters, streaming inserts, partitioned and clustered tables, dataset access and authorized views |
 | [Cloud SQL for PostgreSQL and MySQL](docs/services/databases/cloudsql.md) | Real PostgreSQL or MySQL | PostgreSQL and MySQL clients on `127.0.0.1` with a user password |
 | [Memorystore for Redis](docs/services/databases/memorystore.md) | Real Redis | Redis clients on the reported port, with AUTH |
-| [Cloud Run](docs/services/cloudrun.md) | Local processes or Docker | Your own images with `--cloud-run-docker`; ID-token invocation; admin API over REST and gRPC |
+| [Cloud Run](docs/services/cloudrun.md) | Local processes or Docker | Your own images with `--cloud-run-docker`; ID-token invocation; traffic splits, tag URLs, internal ingress; admin API over REST and gRPC |
 | [Spanner](docs/services/databases/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions |
 | [Bigtable](docs/services/databases/bigtable.md) | Official Google emulator code | Row reads, scans, mutations over gRPC; not recorded |
 | [Artifact Registry](docs/services/artifactregistry.md) | gcp-local | Repositories only; no push or pull |

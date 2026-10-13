@@ -80,7 +80,7 @@ LOCAL_SUPPORT = {
     "secret-manager": "single-recorded-scenario",
     "bigquery": "partial-recorded-slice",
     "firestore": "single-recorded-scenario",
-    "cloud-run": "single-recorded-scenario",
+    "cloud-run": "partial-recorded-slice",
 }
 ENDPOINT_VARIABLES = (
     "STORAGE_EMULATOR_HOST",
@@ -249,7 +249,7 @@ def inspect(root: Path) -> dict[str, object]:
             "detection is heuristic, not compatibility certification.",
             "Keep local endpoints and real-GCP credential profiles separate.",
             "Start the pinned packaged runtime; most services have one cloud-recorded scenario "
-            "and Cloud Run and Pub/Sub push are locally modeled only.",
+            "and Pub/Sub push is locally modeled only.",
             "For approved live tests, configure the explicit sandbox profile and Google Cloud CLI.",
         ],
     }

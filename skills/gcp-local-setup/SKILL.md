@@ -5,7 +5,7 @@ description: Set up an existing GCP application repository for local GCP testing
 
 # GCP application setup
 
-Connect this application to gcp-local while preserving its tools and instructions. The packaged environment selects every implemented provider with local ADC and explicit local IAM grants for its developer identity. Evidence differs by service: Storage has the most cloud-recorded scenarios, other services one to four (Cloud Run one, over REST), and Pub/Sub push is locally modeled only; the checkout's `docs/coverage.md` lists what each service supports. Packaged Cloud Run runs only the bundled workflow worker image unless the environment starts with `gcp-local --cloud-run-docker up`, which runs application images as containers and mounts the Docker socket (root-equivalent on the host); ask before enabling it. Inspect the application's actual operations before claiming compatibility.
+Connect this application to gcp-local while preserving its tools and instructions. The packaged environment selects every implemented provider with local ADC and explicit local IAM grants for its developer identity. Evidence differs by service: Storage has the most cloud-recorded scenarios, other services one to four (Cloud Run two, over REST), and Pub/Sub push is locally modeled only; the checkout's `docs/coverage.md` lists what each service supports. Packaged Cloud Run runs only the bundled workflow worker image unless the environment starts with `gcp-local --cloud-run-docker up`, which runs application images as containers and mounts the Docker socket (root-equivalent on the host); ask before enabling it. Inspect the application's actual operations before claiming compatibility.
 
 ## Inspect the application
 
