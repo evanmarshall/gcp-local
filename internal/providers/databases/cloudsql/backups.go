@@ -240,7 +240,7 @@ func (p *Provider) insertBackupRun(call gateway.Call, request *gateway.RESTReque
 		})
 	})
 	if err != nil {
-		return nil, err
+		return p.finish(call, project, "BACKUP_VOLUME", name, started, err)
 	}
 	return p.completeBackup(call, project, "BACKUP_VOLUME", name, id, started)
 }
@@ -337,10 +337,7 @@ func (p *Provider) deleteBackupRun(call gateway.Call, request *gateway.RESTReque
 			return nil
 		})
 	})
-	if err != nil {
-		return nil, err
-	}
-	return p.complete(call, project, "DELETE_BACKUP", name, started) // recorded: no backupContext
+	return p.finish(call, project, "DELETE_BACKUP", name, started, err) // recorded: no backupContext
 }
 
 // restoreRun restores one backup run of source over target.
@@ -398,10 +395,7 @@ func (p *Provider) restoreBackup(call gateway.Call, request *gateway.RESTRequest
 	err := p.use(call.Context, project, func(ctx context.Context, fleet driver) error {
 		return p.restoreRun(ctx, fleet, project, target, source, restore.BackupRunID)
 	})
-	if err != nil {
-		return nil, err
-	}
-	return p.complete(call, project, "RESTORE_VOLUME", target, started)
+	return p.finish(call, project, "RESTORE_VOLUME", target, started, err)
 }
 
 // scheduleBackups starts, restarts, or stops an instance's automated backup

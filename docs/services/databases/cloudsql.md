@@ -87,7 +87,7 @@ Each new connection checks `cloudsql.instances.connect` for the bound principal,
 | Users | `insert`, `list`, `delete` | `BUILT_IN` only. MySQL users have a `host` (default `%`) and `delete` takes `host`; users get the `cloudsqlsuperuser` role. A user without a password can't log in |
 | Operations | `get`, `list`, `cancel` | `list` filters by `instance`, newest first, with `maxResults` and `pageToken`; 1,000 kept per project. `cancel` refuses every served operation type with GCP's 400 (recorded for `CREATE`); `cancel` needs `cloudsql.instances.update` (`roles/cloudsql.viewer` is denied, recorded; the exact permission is inferred) |
 
-Operations report `PENDING` for 500 ms after the work ends, then `DONE`, as GCP reports `PENDING` first; the work itself is finished when the response is sent. Instances report `state: RUNNABLE` and one `127.0.0.1` address, `PRIMARY`, or `PRIVATE` when `ipv4Enabled` is false. A `PRIVATE` address is not reachable from the host.
+Operations report `PENDING` for 500 ms after the work ends, then `DONE`, as GCP reports `PENDING` first; the work itself is finished when the response is sent. Work the server fails (a server that won't start, a failed backup or restore) ends its operation `DONE` with an `INTERNAL_ERROR` naming the cause, never a 500, which clients retry. Instances report `state: RUNNABLE` and one `127.0.0.1` address, `PRIMARY`, or `PRIVATE` when `ipv4Enabled` is false. A `PRIVATE` address is not reachable from the host.
 
 ### Backups
 

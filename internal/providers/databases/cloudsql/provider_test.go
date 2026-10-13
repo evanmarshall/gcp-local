@@ -682,6 +682,8 @@ type fakeFleet struct {
 	flags    map[string][]server.Flag
 	backups  map[string][]string
 	restores []string
+	// failCreate, when set, is the error every Create returns.
+	failCreate error
 }
 
 type fakeServer struct {
@@ -732,6 +734,9 @@ func (f *fakeFleet) Reset(ctx context.Context) error { return f.Stop(ctx) }
 func (f *fakeFleet) Create(ctx context.Context, spec server.Spec) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failCreate != nil {
+		return f.failCreate
+	}
 	socket := filepath.Join(f.directory, spec.Instance+".sock")
 	var listen net.ListenConfig
 	listener, err := listen.Listen(ctx, "unix", socket)

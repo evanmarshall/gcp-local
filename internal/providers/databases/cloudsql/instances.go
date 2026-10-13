@@ -554,13 +554,11 @@ func (p *Provider) insertInstance(call gateway.Call, request *gateway.RESTReques
 	if errors.Is(err, dataplane.ErrExhausted) {
 		return apiError(http.StatusTooManyRequests, "RESOURCE_EXHAUSTED", "", "gcp-local: every published data-plane port is in use; delete an instance or widen the range"), nil
 	}
-	if err != nil {
-		return nil, err
-	}
 	if conflict {
 		return apiError(http.StatusConflict, "ALREADY_EXISTS", "instanceAlreadyExists", "The Cloud SQL instance already exists."), nil
 	}
-	return p.complete(call, project, "CREATE", record.Name, started)
+	// A server that failed to start leaves no instance; the operation reports why.
+	return p.finish(call, project, "CREATE", record.Name, started, err)
 }
 
 // start creates the instance's server and published port, then indexes and
@@ -719,10 +717,7 @@ func (p *Provider) patchInstance(call gateway.Call, request *gateway.RESTRequest
 	err = p.use(call.Context, project, func(ctx context.Context, fleet driver) error {
 		return p.applyPatch(ctx, fleet, project, name, patch, call.Method == methodInstancesUpdate)
 	})
-	if err != nil {
-		return nil, err
-	}
-	return p.complete(call, project, "UPDATE", name, started)
+	return p.finish(call, project, "UPDATE", name, started, err)
 }
 
 // applyPatch validates a patch against the stored instance, restarts the

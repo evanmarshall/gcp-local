@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -475,4 +476,26 @@ func walk(value any, path []string) any {
 		}
 	}
 	return value
+}
+
+// errInitdbDenied stands in for a server that can't initialize its data.
+var errInitdbDenied = errors.New("initdb: permission denied")
+
+// TestBackendFailureIsAnOperationError reports a server that fails to start
+// as a finished operation with an error, never a 500 that clients retry.
+func TestBackendFailureIsAnOperationError(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	h.fleet().mu.Lock()
+	h.fleet().failCreate = errInitdbDenied
+	h.fleet().mu.Unlock()
+	body := insertBody()
+	body[keyName] = "broken"
+	operation := h.expect(h.invoke(adminToken, http.MethodPost, testInstances, body), http.StatusOK)
+	subset(t, "failed create", operation, map[string]any{"operationType": "CREATE", "targetId": "broken"})
+	name, _ := operation[keyName].(string)
+	time.Sleep(operationLatency)
+	subset(t, "failed operation", h.expect(h.invoke(adminToken, http.MethodGet, testOperations+"/"+name, nil), http.StatusOK), map[string]any{
+		"status": statusDone, "error.errors.0.code": "INTERNAL_ERROR", "error.errors.0.message": "gcp-local: cloud SQL backend: initdb: permission denied"})
+	h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"/broken", nil), http.StatusNotFound)
 }

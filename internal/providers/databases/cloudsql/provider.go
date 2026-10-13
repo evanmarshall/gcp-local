@@ -298,6 +298,25 @@ func (p *Provider) completeBackup(call gateway.Call, project, kind, instance, ba
 	return &gateway.RESTResponse{JSON: operation.wire(project, ended)}, nil
 }
 
+// finish completes an operation: a refusal or gap stays an error response,
+// and any other failure, which is the backend's, becomes an operation that
+// ends with that error, as GCP reports work that failed. A 500 would make
+// clients that retry 5xx (Terraform, the Go client) retry forever.
+func (p *Provider) finish(call gateway.Call, project, kind, instance string, started time.Time, err error) (*gateway.RESTResponse, error) {
+	if err == nil {
+		return p.complete(call, project, kind, instance, started)
+	}
+	if _, refused := errors.AsType[failure](err); refused || status.Code(err) != codes.Unknown || call.Context.Err() != nil {
+		return nil, err
+	}
+	operation := newOperation(kind, instance, subject(call.Principal), started, p.clock(), p.latency)
+	operation.Error = "gcp-local: " + err.Error()
+	if err := p.catalog.With(provider.ProjectScope(project), func(c *catalog) error { c.record(operation); return nil }); err != nil {
+		return nil, fmt.Errorf("record the operation: %w", err)
+	}
+	return &gateway.RESTResponse{JSON: operation.wire(project, p.clock())}, nil
+}
+
 // errInstanceMissing is notFound as a handler error.
 var errInstanceMissing = failure{code: http.StatusNotFound, reason: "instanceDoesNotExist", domain: domainGlobal,
 	message: "The Cloud SQL instance does not exist."}
@@ -412,7 +431,10 @@ func (r instanceRecord) clone() instanceRecord {
 type operationRecord struct {
 	Name, Type, Instance, User string
 	// BackupID names the backup run of a BACKUP_VOLUME or DELETE_BACKUP operation.
-	BackupID       string
+	BackupID string
+	// Error is why the work failed in the backend, reported as the
+	// operation's error; empty when it succeeded.
+	Error          string
 	Inserted, Done time.Time
 }
 
@@ -469,6 +491,10 @@ func (o operationRecord) wire(project string, now time.Time) map[string]any {
 	}
 	if o.User != "" {
 		value["user"] = o.User
+	}
+	if o.Error != "" && value[keyStatus] == statusDone {
+		value["error"] = map[string]any{keyKind: "sql#operationErrors", "errors": []any{
+			map[string]any{keyKind: "sql#operationError", "code": "INTERNAL_ERROR", keyMessage: o.Error}}}
 	}
 	if o.BackupID != "" {
 		value["backupContext"] = map[string]any{keyKind: "sql#backupContext", "backupId": o.BackupID,
