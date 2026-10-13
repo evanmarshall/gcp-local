@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:40:19.942934+00:00",
+  "recorded_at": "2026-10-13T03:05:05.672273+00:00",
   "scenario": {
     "id": "cloudkms-asymmetric-mac-keys",
     "service": "cloudkms",
     "transport": "rest-v1",
-    "revision": "3cb08773f2b8ace2991a41918255a33df25c9d1c7aaf350bcb7d35b9514a6dc6",
+    "revision": "637349da0927fac83637a76dff8df68477b2e9e8c402e40f653cc1f78701dc1f",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "138127bfb6c2c051c05391114a41ec8617a4c39b58b8e61fc717df81a90f98ef",
+  "snapshot_sha256": "c5668e647417db2ad78fef820dc33e22384a94b4dc07d96bb1af77c12f29e29f",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -23,7 +23,7 @@
   "context": {
     "contract_files": {
       "gcp_validation/services/security/cloudkms_asymmetric.py": "494dee8577935b925486f6fa13bdd01f94388244de20e8c3b26811e91b61fa1f",
-      "gcp_validation/services/security/cloudkms.py": "d69a1963b2034f41bd0ba7bd3b74e3c3ca7b004fab041b346248e434a6db4fc0",
+      "gcp_validation/services/security/cloudkms.py": "a358b3f7fabc872633e35e1de5748e95ff63c1fa133515216fecccc9e3f3d039",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "tests/conformance/security/cloudkms/asymmetric/conftest.py": "8fd50c5172404704b9a16c57caf1dabb5fc89c12f70bcdb6b4bd6d2425a9cc42"

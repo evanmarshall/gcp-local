@@ -325,14 +325,11 @@ def observe_lists(fixture: KeyFixture, snapshot: object, observe: Observations) 
         query={'pageSize': 1},
         timeout=fixture.remaining(),
     )
-    # The shared ring holds every earlier run's key, so only the page shape is stable.
+    # The shared ring holds every earlier run's key, so whether a next page exists
+    # depends on the sandbox; only the page size is stable.
     snapshot.match(
         'keys-paged',
-        {
-            'http_status': keys.status,
-            'count': len(keys.json().get('cryptoKeys', [])),
-            'has_next': bool(keys.json().get('nextPageToken')),
-        },
+        {'http_status': keys.status, 'count': len(keys.json().get('cryptoKeys', []))},
     )
 
 
