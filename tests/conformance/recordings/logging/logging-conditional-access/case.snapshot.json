@@ -1,0 +1,33 @@
+{
+  "logging-conditional-access": {
+    "recorded-date": "13-10-2026, 03:25:37",
+    "recorded-content": {
+      "before": {
+        "artifactregistry-get": 403,
+        "logging-list": 403,
+        "logging-write": 403,
+        "vertexai-count": 403
+      },
+      "service-conditions-written": {
+        "http_status": 200
+      },
+      "service-conditions": {
+        "artifactregistry-get": 403,
+        "logging-list": 200,
+        "logging-write": 200,
+        "vertexai-count": 403
+      },
+      "controls-written": {
+        "http_status": 200
+      },
+      "controls": {
+        "artifactregistry-get": 200,
+        "vertexai-count": 200
+      },
+      "cleanup": {
+        "bindings_removed": true,
+        "repository_absent": true
+      }
+    }
+  }
+}

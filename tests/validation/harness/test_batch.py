@@ -44,7 +44,7 @@ def test_scope_contracts_match_the_loaders() -> None:
 
 
 def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
-    """Same-service scenarios run in order; project IAM runs alone."""
+    """Same-service scenarios run in order; project policy writers run alone."""
     lanes, alone = batch["schedule"](batch["plan"](), scope_tree(tmp_path))
     names = {key: [entry.name for entry in members] for key, members in lanes.items()}
     assert len(names["storage"]) >= 10
@@ -55,8 +55,9 @@ def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
         "compute-vmserviceaccounts-test_vmserviceaccounts",
     }
     assert set(names["compute"]) == compute
-    assert [entry.name for entry in alone] == ["security-resourcemanager-test_policy"]
-    # The read-only hierarchy scenario shares no lock; only project IAM runs alone.
+    assert sorted(entry.name for entry in alone) == [
+        "logging-test_cloudlogging_conditions", "security-resourcemanager-test_policy"]
+    # The read-only hierarchy scenario shares no lock; only project-policy writers run alone.
     laned = [name for members in names.values() for name in members]
     assert "security-resourcemanager-test_policy" not in laned
     hierarchy = "security-resourcemanager-hierarchy-test_hierarchy"

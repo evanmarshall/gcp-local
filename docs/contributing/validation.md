@@ -67,7 +67,7 @@ S=~/.config/gcp-local/PROJECT/scopes   # private, outside Git
 .venv-tools/bin/python scripts/live/batch.py --mode record --profile "$PWD/.env" --scopes "$S" --jobs 4 [--only NAME ...]
 ```
 
-`--write-approved-scopes` writes each scenario's exact scope from its loader; run it only for an authorized run. Scenarios that take the same sandbox lock (one per service) share a lane and run in order; lanes run in parallel, so a full re-record takes about as long as its slowest lane (Cloud SQL, about 25 minutes) instead of the sum. Project IAM runs alone at the end because it rewrites the project policy. Each run logs to `.artifacts/live/<mode>/<name>.log`. Promote candidates as below.
+`--write-approved-scopes` writes each scenario's exact scope from its loader; run it only for an authorized run. Scenarios that take the same sandbox lock (one per service) share a lane and run in order; lanes run in parallel, so a full re-record takes about as long as its slowest lane (Cloud SQL, about 25 minutes) instead of the sum. Project IAM and Logging conditional access run alone at the end because they rewrite the project policy. Each run logs to `.artifacts/live/<mode>/<name>.log`. Promote candidates as below.
 
 ## Network isolation
 

@@ -115,6 +115,9 @@ func (p *Provider) prepare(request *loggingpb.WriteLogEntriesRequest) ([]pending
 	entries := make([]pending, 0, len(request.GetEntries()))
 	var projects []string
 	for index, source := range request.GetEntries() {
+		if source.GetProtoPayload() != nil {
+			return nil, nil, gap("entries.protoPayload is not modeled")
+		}
 		item, err := p.prepareEntry(index, source, request, now)
 		if err != nil {
 			return nil, nil, err
@@ -156,11 +159,25 @@ func (p *Provider) store(project string, entries []pending) error {
 // write validates every entry, authorizes each project it names, then stores
 // them. Nothing is stored when any entry or project fails.
 func (p *Provider) write(call gateway.Call, request *loggingpb.WriteLogEntriesRequest) (*loggingpb.WriteLogEntriesResponse, error) {
+	// The Go, Node, and Python clients set partialSuccess. With every entry
+	// valid it changes nothing; GCP's partial write of the valid entries of
+	// a batch with an invalid one isn't modeled.
 	entries, projects, err := p.prepare(request)
 	if err != nil {
+		if request.GetPartialSuccess() && status.Code(err) == codes.InvalidArgument {
+			return nil, gap("partialSuccess with an invalid entry is not modeled: " + status.Convert(err).Message())
+		}
 		return nil, err
 	}
-	if err := p.authorize(call, projects); err != nil {
+	// A denial names the project's first log the request writes (recorded).
+	if err := p.authorize(call, projects, func(project string) string {
+		for _, item := range entries {
+			if item.project == project {
+				return logName(project, item.logID)
+			}
+		}
+		return "projects/" + project
+	}); err != nil {
 		return nil, err
 	}
 	if request.GetDryRun() {
@@ -266,7 +283,7 @@ func (p *Provider) list(call gateway.Call, request *loggingpb.ListLogEntriesRequ
 	if err != nil {
 		return nil, err
 	}
-	if err := p.authorize(call, q.projects); err != nil {
+	if err := p.authorize(call, q.projects, nil); err != nil {
 		return nil, err
 	}
 	matches, err := p.matching(q)
@@ -294,7 +311,7 @@ func orderOf(order string) (bool, error) {
 	case fieldTimestamp + " desc":
 		return true, nil
 	default:
-		return false, status.Errorf(codes.InvalidArgument, "Unsupported order_by %q: use \"timestamp asc\" or \"timestamp desc\"", order)
+		return false, status.Error(codes.InvalidArgument, "order_by must be on timestamp")
 	}
 }
 
@@ -326,28 +343,29 @@ func decodeToken(token, fingerprint string) (int, error) {
 	value, parseErr := strconv.Atoi(offset)
 	sum := sha256.Sum256([]byte(fingerprint))
 	if err != nil || !ok || parseErr != nil || value < 0 || hash != hex.EncodeToString(sum[:8]) {
-		return 0, status.Error(codes.InvalidArgument, "Invalid page token")
+		return 0, status.Error(codes.InvalidArgument, "Invalid page_token")
 	}
 	return value, nil
 }
 
-// logsQuery validates a logs.list request before authorization.
-func (p *Provider) logsQuery(request *loggingpb.ListLogsRequest) (string, int, int, error) {
+// logPaging is logs.list's page size and recorded page-token refusal; GCP's
+// negative-size wording is that of entries.list.
+var logPaging = provider.Paging{Default: defaultLogPage, Max: defaultLogPage,
+	InvalidToken: status.Error(codes.InvalidArgument, "Invalid page_token."),
+	NegativeSize: status.Error(codes.InvalidArgument, "page_size must not be negative")}
+
+// logsProject validates a logs.list request's names before authorization.
+func (p *Provider) logsProject(request *loggingpb.ListLogsRequest) (string, error) {
 	project, err := p.project(request.GetParent())
 	if err != nil {
-		return "", 0, 0, err
+		return "", err
 	}
 	for _, name := range request.GetResourceNames() {
 		if other, err := p.project(name); err != nil || other != project {
-			return "", 0, 0, status.Error(codes.InvalidArgument, "resource_names must match the parent project")
+			return "", status.Error(codes.InvalidArgument, "resource_names must match the parent project")
 		}
 	}
-	size, err := pageSize(request.GetPageSize(), defaultLogPage, defaultLogPage)
-	if err != nil {
-		return "", 0, 0, err
-	}
-	offset, err := decodeToken(request.GetPageToken(), "logs\x00"+project)
-	return project, size, offset, err
+	return project, nil
 }
 
 // logNames lists the distinct logs of one project in name order.
@@ -361,33 +379,28 @@ func (p *Provider) logNames(project string) ([]string, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("read logs: %w", err)
 	}
-	sorted := make([]string, 0, len(names))
-	for name := range names {
-		sorted = append(sorted, name)
-	}
-	sort.Strings(sorted)
-	return sorted, nil
+	return slices.Sorted(maps.Keys(names)), nil
 }
 
-// listLogs names the logs of one project that hold entries.
+// listLogs names the logs of one project that hold entries, one page at a time.
 func (p *Provider) listLogs(call gateway.Call, request *loggingpb.ListLogsRequest) (*loggingpb.ListLogsResponse, error) {
-	project, size, offset, err := p.logsQuery(request)
+	project, err := p.logsProject(request)
 	if err != nil {
 		return nil, err
 	}
-	if err := p.authorize(call, []string{project}); err != nil {
+	if err := p.authorize(call, []string{project}, nil); err != nil {
 		return nil, err
 	}
 	names, err := p.logNames(project)
 	if err != nil {
 		return nil, err
 	}
-	end := min(offset+size, len(names))
-	response := &loggingpb.ListLogsResponse{LogNames: names[min(offset, len(names)):end]}
-	if end < len(names) {
-		response.NextPageToken = encodeToken(end, "logs\x00"+project)
+	query := url.Values{"pageToken": {request.GetPageToken()}, "pageSize": {strconv.Itoa(int(request.GetPageSize()))}}
+	page, next, err := provider.Page(names, query, logPaging, gap)
+	if err != nil {
+		return nil, err
 	}
-	return response, nil
+	return &loggingpb.ListLogsResponse{LogNames: page, NextPageToken: next}, nil
 }
 
 // deleteLog removes every entry of one log.
@@ -396,7 +409,7 @@ func (p *Provider) deleteLog(call gateway.Call, request *loggingpb.DeleteLogRequ
 	if err != nil {
 		return err
 	}
-	if err := p.authorize(call, []string{project}); err != nil {
+	if err := p.authorize(call, []string{project}, func(string) string { return logName(project, id) }); err != nil {
 		return err
 	}
 	removed := 0

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -466,5 +467,164 @@ func TestGRPCReadAndDelete(t *testing.T) {
 	}
 	if _, err := client.DeleteLog(as(actorAdmin), &loggingpb.DeleteLogRequest{LogName: grpcLog}); err != nil {
 		t.Fatalf("delete: %v", err)
+	}
+}
+
+// errorOf reads a REST error's status and message.
+func errorOf(t *testing.T, recorder *httptest.ResponseRecorder) (int, string) {
+	t.Helper()
+	var wire struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("decode %s: %v", recorder.Body, err)
+	}
+	return recorder.Code, wire.Error.Message
+}
+
+// Query-language functions are gaps, never text searches; any other function
+// and any field LogEntry lacks are GCP's 400 (recorded).
+func TestUnevaluatedFiltersAreRefused(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	for _, item := range []struct {
+		filter string
+		code   int
+		want   string
+	}{
+		{`log_id("app")`, 501, "Logging coverage gap: filter function log_id() is not implemented"},
+		{`-log_id("app")`, 501, "filter function log_id() is not implemented"},
+		{`sample(insertId, 0.5)`, 501, "filter function sample() is not implemented"},
+		{`ip_in_net(jsonPayload.ip, "10.0.0.0/8")`, 501, "filter function ip_in_net() is not implemented"},
+		{`SEARCH("disk")`, 501, "filter function SEARCH() is not implemented"},
+		{`severity=ERROR OR search(textPayload, "disk")`, 501, "filter function search() is not implemented"},
+		{`cast(severity, STRING)="ERROR"`, 501, "filter function cast() is not implemented"},
+		{`textPayload=log_id("x")`, 501, "filter function log_id() is not implemented"},
+		{`httpRequest.status>=500`, 501, `filter field "httpRequest.status" is not implemented`},
+		{`operation.id="x"`, 501, `filter field "operation.id" is not implemented`},
+		{`source_location.file="x"`, 501, `filter field "source_location.file" is not implemented`},
+		{`protoPayload.methodName="x"`, 501, `filter field "protoPayload.methodName" is not implemented`},
+		{`nosuchfn("disk")`, 400, "Unsupported global function: 'nosuchfn'."},
+		{`notAField="x"`, 400, "Field not found: 'notAField'."},
+		{`resource.notAField="x"`, 400, "Field not found: 'resource.notAField'."},
+		{`severity.level="x"`, 400, "Field not found: 'severity.level'."},
+	} {
+		code, message := errorOf(t, h.call(http.MethodPost, "/v2/entries:list", map[string]any{
+			"resourceNames": []any{projectAName}, "filter": item.filter}, actorViewer))
+		if code != item.code || !strings.Contains(message, item.want) {
+			t.Fatalf("filter %q: %d %q, want %d %q", item.filter, code, message, item.code, item.want)
+		}
+	}
+}
+
+// Request fields the provider doesn't model are gaps; unknown names are
+// GCP's transcoder 400 (recorded); refusals store nothing.
+func TestUnmodeledWritesAreRefused(t *testing.T) {
+	h := newHarness(t)
+	for _, item := range []struct {
+		body map[string]any
+		code int
+		want string
+	}{
+		{map[string]any{"partialSuccess": true, "entries": []any{appEntry(severityInfo, "a", "")}}, 501, "Logging coverage gap: partialSuccess with an invalid entry is not modeled"},
+		{map[string]any{"resource": global(), "entries": []any{map[string]any{"logName": appLog, "protoPayload": map[string]any{"@type": "type.googleapis.com/google.cloud.audit.AuditLog"}}}}, 501, "entries.protoPayload is not modeled"},
+		{map[string]any{"resource": global(), "entries": []any{map[string]any{"logName": appLog, "textPayload": "x", "notAField": 1}}}, 400, `Invalid JSON payload received. Unknown name "notAField" at 'entries[0]': Cannot find field.`},
+		{map[string]any{"notAField": 1}, 400, `Invalid JSON payload received. Unknown name "notAField": Cannot find field.`},
+	} {
+		code, message := errorOf(t, h.call(http.MethodPost, "/v2/entries:write", item.body, actorWriter))
+		if code != item.code || !strings.Contains(message, item.want) {
+			t.Fatalf("write %v: %d %q", item.body, code, message)
+		}
+	}
+	client := loggingpb.NewLoggingServiceV2Client(grpcConnection(t, h))
+	if _, err := client.WriteLogEntries(as(actorWriter), &loggingpb.WriteLogEntriesRequest{PartialSuccess: true,
+		Resource: &monitoredres.MonitoredResource{Type: typeGlobal}, Entries: []*loggingpb.LogEntry{{LogName: grpcLog}, {}}}); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("gRPC partialSuccess with an invalid entry: %v", err)
+	}
+	if value, _ := h.listA(actorAdmin, nil); len(payloads(t, value)) != 0 {
+		t.Fatalf("a refused write stored entries: %v", value)
+	}
+	// The clients' default: partialSuccess with valid entries writes them all.
+	if code := h.write(actorWriter, map[string]any{"partialSuccess": true, "resource": global(),
+		"entries": []any{appEntry(severityInfo, "a", "")}}); code != http.StatusOK {
+		t.Fatalf("partialSuccess write: %d", code)
+	}
+}
+
+// Denials, page refusals, and order refusals carry GCP's wording (recorded).
+func TestRecordedRefusals(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	recorder := h.call(http.MethodPost, "/v2/entries:write", map[string]any{"logName": appLog, "resource": global(),
+		"entries": []any{map[string]any{"textPayload": "x"}}}, actorViewer)
+	if code, message := errorOf(t, recorder); code != 403 || message != "Permission 'logging.logEntries.create' denied on resource '//logging.googleapis.com/"+appLog+"' (or it may not exist)." ||
+		!strings.Contains(recorder.Body.String(), `"domain":"iam.googleapis.com"`) || !strings.Contains(recorder.Body.String(), `"resource":"`+appLog+`"`) {
+		t.Fatalf("write denial: %d %s", code, recorder.Body)
+	}
+	if code, message := errorOf(t, h.call(http.MethodDelete, "/v2/"+appLog, nil, actorViewer)); code != 403 || !strings.Contains(message, "'logging.logs.delete' denied on resource '//logging.googleapis.com/"+appLog+"'") {
+		t.Fatalf("delete denial: %d %q", code, message)
+	}
+	for _, item := range []struct {
+		code     int
+		recorder *httptest.ResponseRecorder
+		want     string
+	}{
+		{403, h.call(http.MethodPost, "/v2/entries:list", map[string]any{"resourceNames": []any{projectAName}}, actorWriter), "Permission denied for all log views"},
+		{403, h.call(http.MethodGet, "/v2/"+projectAName+"/logs", nil, actorWriter), "Permission denied for all log views"},
+		{400, h.call(http.MethodPost, "/v2/entries:list", map[string]any{"resourceNames": []any{projectAName}, "pageToken": "bogus"}, actorViewer), "Invalid page_token"},
+		{400, h.call(http.MethodPost, "/v2/entries:list", map[string]any{"resourceNames": []any{projectAName}, "pageSize": -1}, actorViewer), "page_size must not be negative"},
+		{400, h.call(http.MethodPost, "/v2/entries:list", map[string]any{"resourceNames": []any{projectAName}, "orderBy": "insertId desc"}, actorViewer), "order_by must be on timestamp"},
+		{400, h.call(http.MethodGet, "/v2/"+projectAName+"/logs?pageToken=bogus", nil, actorViewer), "Invalid page_token."},
+	} {
+		if code, message := errorOf(t, item.recorder); code != item.code || message != item.want {
+			t.Fatalf("got %d %q, want %d %q", code, message, item.code, item.want)
+		}
+	}
+}
+
+// Sinks, exclusions, buckets, views, and metrics aren't served: their routes
+// are explicit gaps, so nothing a write sends is silently unrouted.
+func TestConfigurationMethodsAreGaps(t *testing.T) {
+	h := newHarness(t)
+	for _, path := range []string{"/v2/" + projectAName + "/sinks", "/v2/" + projectAName + "/exclusions",
+		"/v2/" + projectAName + "/locations/global/buckets", "/v2/" + projectAName + "/metrics"} {
+		if code, _ := errorOf(t, h.call(http.MethodGet, path, nil, actorAdmin)); code != http.StatusNotImplemented {
+			t.Fatalf("%s: %d", path, code)
+		}
+	}
+}
+
+// A project-level condition on resource.service grants Logging methods, as
+// in GCP; resource.type and resource.name aren't supplied, so a condition
+// on them grants nothing (recorded: logging-conditional-access).
+func TestConditionsSeeTheServiceOnly(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	reader := "serviceAccount:conditional@" + projectA + ".iam.gserviceaccount.com"
+	grant := func(expression string) {
+		name := provider.ProjectResource(projectA)
+		policy, err := h.engine.GetPolicy(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		condition, err := json.Marshal(map[string]string{"title": "c", "expression": expression})
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy.Version = 3
+		policy.Bindings = append(policy.Bindings[:3:3], iam.Binding{Role: "roles/logging.viewer", Members: []string{reader}, Condition: condition})
+		if _, err := h.engine.SetPolicy(name, policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	grant(`resource.service == "logging.googleapis.com"`)
+	if _, code := h.listA("conditional", nil); code != http.StatusOK {
+		t.Fatalf("service condition: %d", code)
+	}
+	grant(`resource.type == "logging.googleapis.com/LogEntry"`)
+	if _, code := h.listA("conditional", nil); code != http.StatusForbidden {
+		t.Fatalf("type condition: %d", code)
 	}
 }

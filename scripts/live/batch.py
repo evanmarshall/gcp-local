@@ -35,7 +35,10 @@ _spec.loader.exec_module(replay)
 
 # These rewrite the project IAM policy; concurrent policy writes from other
 # scenarios' temporary grants would fail on the policy etag.
-EXCLUSIVE = frozenset({"tests/conformance/security/resourcemanager/test_policy.py"})
+EXCLUSIVE = frozenset({
+    "tests/conformance/security/resourcemanager/test_policy.py",
+    "tests/conformance/logging/test_cloudlogging_conditions.py",
+})
 # Scope services of the compute scenarios, which share one lane.
 COMPUTE_SCOPES = frozenset({"networking", "vmconnectivity", "vmserviceaccounts"})
 # The scope option each scenario directory's conftest reads, most specific first.

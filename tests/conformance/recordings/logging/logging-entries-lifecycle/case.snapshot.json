@@ -1,6 +1,6 @@
 {
   "logging-entries-lifecycle": {
-    "recorded-date": "12-10-2026, 17:34:24",
+    "recorded-date": "13-10-2026, 00:52:29",
     "recorded-content": {
       "write": {
         "fields": [],
@@ -71,17 +71,130 @@
       },
       "denied-write": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "logging.logEntries.create",
+              "resource": "projects/<project>/logs/<log>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'logging.logEntries.create' denied on resource '//logging.googleapis.com/projects/<project>/logs/<log>' (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "denied-list": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "Permission denied for all log views",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-logs-list": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission denied for all log views",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-log-delete": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "logging.logs.delete",
+              "resource": "projects/<project>/logs/<log>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'logging.logs.delete' denied on resource '//logging.googleapis.com/projects/<project>/logs/<log>' (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "invalid-filter": {
         "code": 400,
         "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "filter-unknown-function": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Unsupported global function: 'nosuchfn'.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "filter-unknown-field": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Field not found: 'notAField'.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "bad-page-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page_token",
+        "status": "INVALID_ARGUMENT"
+      },
+      "negative-page-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "page_size must not be negative",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unsupported-order": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "order_by must be on timestamp",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-list-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"notAField\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"notAField\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-entry-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"notAField\" at 'entries[0]': Cannot find field.",
+                "field": "entries[0]"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"notAField\" at 'entries[0]': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "logs-bad-page-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page_token.",
         "status": "INVALID_ARGUMENT"
       },
       "delete": {

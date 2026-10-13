@@ -13,6 +13,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request
 
+from gcp_validation.errors import detailed
 from gcp_validation.evidence import Inconclusive, SnapshotCase, now
 from gcp_validation.live_rest import ACTORS, LiveScope, Observations, OwnedRun, Response, RestClient
 from gcp_validation.sandbox import Sandbox
@@ -22,6 +23,11 @@ LIMITS = {'max_entries': 10, 'max_run_seconds': 600}
 LIVE_ENDPOINT = 'https://logging.googleapis.com'
 ENTRY_FIELDS = ('severity', 'labels', 'resource')
 ENTRIES_PATHS = frozenset({'/v2/entries:write', '/v2/entries:list'})
+# Filters Cloud Logging refuses with 400: an unknown function and an unknown field.
+REFUSED_FILTERS = {
+    'unknown-function': 'nosuchfn("second")',
+    'unknown-field': 'notAField="x"',
+}
 
 
 def load_scope(filename: str, sandbox: Sandbox, mode: str) -> LiveScope:
@@ -167,10 +173,29 @@ def run_scenario(fixture: LogFixture, snapshot: SnapshotCase) -> None:
                                  'owned': fixture.log_name in logs.json().get('logNames', [])})
     denied = {'logName': fixture.log_name, 'resource': {'type': 'global'},
               'entries': [{'textPayload': 'denied'}]}
-    snapshot.match('denied-write', observe.error(
-        client.request('denied', 'POST', '/v2/entries:write', body=denied)))
-    snapshot.match('denied-list', observe.error(fixture.list('', actor='denied')))
+    snapshot.match('denied-write', detailed(observe, client.request(
+        'denied', 'POST', '/v2/entries:write', body=denied)))
+    snapshot.match('denied-list', detailed(observe, fixture.list('', actor='denied')))
+    snapshot.match('denied-logs-list', detailed(observe, client.request(
+        'denied', 'GET', f'/v2/projects/{fixture.project}/logs')))
+    snapshot.match('denied-log-delete', detailed(observe, client.request(
+        'denied', 'DELETE', f'/v2/{fixture.log_name}')))
     snapshot.match('invalid-filter', observe.error(fixture.list('severity>=LOUD')))
+    for name, expression in REFUSED_FILTERS.items():
+        snapshot.match('filter-' + name, detailed(observe, fixture.list(expression)))
+    snapshot.match('bad-page-token', detailed(observe, fixture.list('',
+                                                                    pageToken='not-a-token')))
+    snapshot.match('negative-page-size', detailed(observe, fixture.list('', pageSize=-1)))
+    snapshot.match('unsupported-order', detailed(observe, fixture.list('',
+                                                                       orderBy='insertId desc')))
+    snapshot.match('unknown-list-field', detailed(observe, fixture.list('', notAField=1)))
+    unknown = {'logName': fixture.log_name, 'resource': {'type': 'global'},
+               'entries': [{'textPayload': 'refused', 'notAField': 1}]}
+    snapshot.match('unknown-entry-field', detailed(observe, client.request(
+        'fixture', 'POST', '/v2/entries:write', body=unknown, timeout=fixture.remaining())))
+    snapshot.match('logs-bad-page-token', detailed(observe, client.request(
+        'fixture', 'GET', f'/v2/projects/{fixture.project}/logs',
+        query={'pageToken': 'not-a-token'}, timeout=fixture.remaining())))
     deleted = client.request('fixture', 'DELETE', f'/v2/{fixture.log_name}',
                              timeout=fixture.remaining())
     snapshot.match('delete', {'http_status': deleted.status, 'fields': sorted(deleted.json())})

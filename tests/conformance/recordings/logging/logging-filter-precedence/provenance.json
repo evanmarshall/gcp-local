@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:34:40.871774+00:00",
+  "recorded_at": "2026-10-13T00:53:06.203587+00:00",
   "scenario": {
     "id": "logging-filter-precedence",
     "service": "logging",
     "transport": "rest-v2",
-    "revision": "f4e1e0f0567650407d456c0f41e7f3a177231be9c57422a859d8b526819a42c3",
+    "revision": "aebea7d6601a713856d2405d9ec508bc2a99c0992255465b3fef32904c157498",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "0435330f310ad50852556f75bce0618a3948d4b4db5f8e8b5a90685f8d0292f6",
+  "snapshot_sha256": "ee2d41ed7ab93ce357dc3543909b684ee00d9a7579801a90ea02aa27d5d4f2fe",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -23,7 +23,7 @@
   "context": {
     "contract_files": {
       "gcp_validation/services/cloudlogging_precedence.py": "128fedfadd7450853697d340ed65e783545a70e3faca49fb27a3102781b47c35",
-      "gcp_validation/services/cloudlogging.py": "6c91320375f0c6d3254b3c9d0f440493396a751856f89fbe19b215e661ebec5f",
+      "gcp_validation/services/cloudlogging.py": "0478b0a6a6ce3dc0c7aa139f0bbdbd26fa701a99333fa2170009392779bf4c09",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "tests/conformance/logging/conftest.py": "d1bc1aaf53c97e26b2790381ec52324d292488012ea34afcc9e2c5b128dec49b"

@@ -1,7 +1,8 @@
 // Package logging implements a Cloud Logging v2 slice: entries write and
 // list, logs list and delete, over REST and gRPC. Entries stay in provider
-// state, scoped per project, and reset with the scope. No cloud recording
-// covers these methods.
+// state, scoped per project, and reset with the scope. Recordings
+// logging-entries-lifecycle, logging-filter-precedence, and
+// logging-conditional-access pin the wire behavior.
 package logging
 
 import (
@@ -76,9 +77,25 @@ const (
 type Provider struct {
 	index  *state.Index
 	engine *iam.Engine
+	gate   provider.Gate
 	scopes *state.Store[scopeState]
 	clock  func() time.Time
 }
+
+// Recorded denials (logging-entries-lifecycle): a write or log delete names
+// the log, with an iam.googleapis.com ErrorInfo; a read names no resource.
+const (
+	logDenial = "Permission '%s' denied on resource '//logging.googleapis.com/%s' (or it may not exist)."
+	logDomain = "iam.googleapis.com"
+)
+
+// errViewsDenied is the recorded 403 of entries.list and logs.list.
+var errViewsDenied = status.Error(codes.PermissionDenied, "Permission denied for all log views")
+
+// serviceHost is the resource.service a project-level IAM Condition sees for
+// every Logging method (recorded: logging-conditional-access). Logging
+// supplies no resource.name or resource.type locally.
+const serviceHost = "logging.googleapis.com"
 
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("logging requires registry, manager, index, and iam")
@@ -88,7 +105,8 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	p := &Provider{index: index, engine: engine, scopes: state.NewStore(newScopeState, state.GlobalScope), clock: time.Now}
+	p := &Provider{index: index, engine: engine, scopes: state.NewStore(newScopeState, state.GlobalScope), clock: time.Now,
+		gate: provider.Gate{Engine: engine, Message: logDenial, Domain: logDomain}}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
 		New:      provider.NoBackend,
@@ -171,13 +189,20 @@ func (p *Provider) handleRPC(call gateway.Call, raw proto.Message) (proto.Messag
 	}
 }
 
-// restMessage builds the protobuf request of one REST call.
+// unmodeledWrite are the write request fields the provider doesn't model;
+// set to anything but their default, each is a gap.
+var unmodeledWrite = []string{"entries.protoPayload"}
+
+// restMessage builds the protobuf request of one REST call, decoding a body
+// strictly with GCP's transcoder refusals.
 func restMessage(call gateway.Call, request *gateway.RESTRequest) (proto.Message, error) {
 	switch call.Method {
 	case restWrite:
-		return &loggingpb.WriteLogEntriesRequest{}, nil
+		message := &loggingpb.WriteLogEntriesRequest{}
+		return message, provider.DecodeProto(request.JSON, "", message, gap, unmodeledWrite...)
 	case restList:
-		return &loggingpb.ListLogEntriesRequest{}, nil
+		message := &loggingpb.ListLogEntriesRequest{}
+		return message, provider.DecodeProto(request.JSON, "", message, gap)
 	case restLogsList:
 		return logsRequest(request)
 	case restLogsDelete:
@@ -193,11 +218,6 @@ func (p *Provider) handleREST(call gateway.Call, request *gateway.RESTRequest) (
 	message, err := restMessage(call, request)
 	if err != nil {
 		return nil, err
-	}
-	if request.JSON != nil {
-		if err := protojson.Unmarshal(request.JSON, message); err != nil {
-			return nil, status.Error(codes.InvalidArgument, "Invalid JSON payload received: "+err.Error())
-		}
 	}
 	response, err := p.handleRPC(call, message)
 	if err != nil {
@@ -246,23 +266,24 @@ func (p *Provider) project(name string) (string, error) {
 }
 
 // authorize checks the method's permission on every named project before any
-// state is read or written.
-func (p *Provider) authorize(call gateway.Call, projects []string) error {
+// state is read or written. denied names the resource a project's denial
+// reports; nil reports GCP's log-view denial, which names none.
+func (p *Provider) authorize(call gateway.Call, projects []string, denied func(project string) string) error {
 	for _, project := range projects {
 		scoped := call
 		scoped.Project = project
 		scoped.Resource = provider.ProjectResource(project)
-		_, err := p.engine.Authorize(scoped, iam.Target{Name: provider.ProjectResource(project)}, nil)
-		if err == nil {
-			continue
+		target := iam.Target{Name: scoped.Resource, Attributes: iam.ResourceAttributes{Service: serviceHost}}
+		resource := ""
+		if denied != nil {
+			resource = denied(project)
 		}
-		switch status.Code(err) {
-		case codes.PermissionDenied:
-			return status.Errorf(codes.PermissionDenied, "Permission '%s' denied on resource 'projects/%s' (or it may not exist).", permissions[call.Method], project)
-		case codes.Unauthenticated:
-			return status.Error(codes.Unauthenticated, "Request is missing required authentication credential. Expected OAuth 2 access token, login cookie or other valid authentication credential.")
-		default:
-			return fmt.Errorf("authorize %s: %w", call.Method, err)
+		_, err := p.gate.Check(scoped, target, resource)
+		if denied == nil && status.Code(err) == codes.PermissionDenied {
+			return errViewsDenied
+		}
+		if err != nil {
+			return err
 		}
 	}
 	return nil

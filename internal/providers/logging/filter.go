@@ -11,13 +11,14 @@ import (
 	ltype "google.golang.org/genproto/googleapis/logging/type"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // This file implements a subset of the Logging query language: comparisons
 // on named fields, bare or quoted global text terms, AND (explicit or
-// implicit), OR, NOT or a leading "-", and parentheses. Unsupported fields
-// and operators are rejected, never ignored.
+// implicit), OR, NOT or a leading "-", and parentheses. Functions and LogEntry
+// fields it doesn't evaluate are gaps, never text searches or ignored terms.
 
 // Field names the filter and ordering read.
 const (
@@ -98,6 +99,7 @@ const (
 	tokenOp     = "op"
 	tokenOpen   = "("
 	tokenClose  = ")"
+	tokenCall   = "call" // a word directly followed by "(": a function call
 )
 
 // operators lists comparison operators longest-first.
@@ -134,7 +136,7 @@ func wordRune(runes []rune, i int) bool {
 	return !unicode.IsSpace(r) && r != '(' && r != ')' && r != '"' && operatorAt(runes[i:]) == ""
 }
 
-// lexBare reads an operator or a bare word.
+// lexBare reads an operator, a bare word, or a function name and its "(".
 func lexBare(runes []rune, i int) (token, int) {
 	if op := operatorAt(runes[i:]); op != "" {
 		return token{kind: tokenOp, text: op}, i + len(op)
@@ -143,7 +145,29 @@ func lexBare(runes []rune, i int) (token, int) {
 	for i < len(runes) && wordRune(runes, i) {
 		i++
 	}
-	return token{kind: tokenWord, text: string(runes[start:i])}, i
+	word := string(runes[start:i])
+	if i < len(runes) && runes[i] == '(' && !keywords[word] {
+		return token{kind: tokenCall, text: strings.TrimPrefix(word, "-")}, i + 1
+	}
+	return token{kind: tokenWord, text: word}, i
+}
+
+// keywords are the boolean operators, which a "(" may follow directly.
+var keywords = map[string]bool{"AND": true, "OR": true, "NOT": true}
+
+// queryFunctions are the Logging query language's functions
+// (https://cloud.google.com/logging/docs/view/logging-query-language#functions).
+// GCP evaluates them; the local filter doesn't, so each is a gap. GCP refuses
+// any other function (recorded: logging-entries-lifecycle).
+var queryFunctions = map[string]bool{"log_id": true, "sample": true, "ip_in_net": true, "search": true, "cast": true}
+
+// refuseCall refuses a function call: a gap for a query-language function,
+// GCP's 400 for any other name.
+func refuseCall(name string) error {
+	if queryFunctions[strings.ToLower(name)] {
+		return gap("filter function " + name + "() is not implemented")
+	}
+	return status.Errorf(codes.InvalidArgument, "Unsupported global function: '%s'.", name)
 }
 
 // lex splits a filter into tokens.
@@ -302,6 +326,8 @@ func (p *parser) primary() (*node, error) {
 		return inner, nil
 	case tokenString:
 		return &node{kind: nodeText, text: next.text}, nil
+	case tokenCall:
+		return nil, refuseCall(next.text)
 	case tokenWord:
 		return p.comparison(next.text)
 	default:
@@ -317,6 +343,9 @@ func (p *parser) comparison(field string) (*node, error) {
 	}
 	p.at++
 	value, ok := p.peek()
+	if ok && value.kind == tokenCall {
+		return nil, refuseCall(value.text)
+	}
 	if !ok || (value.kind != tokenWord && value.kind != tokenString) {
 		return nil, invalidFilter("comparison " + strconv.Quote(field+op.text) + " has no value")
 	}
@@ -390,10 +419,53 @@ func supportedField(field string) bool {
 	return false
 }
 
-// newComparison validates one comparison before evaluation.
+// entryField reports whether a filter field path names a LogEntry field in
+// either spelling: each segment a field of the message before it, with
+// anything allowed below a map, Struct, or Any (labels, jsonPayload,
+// protoPayload).
+func entryField(path string) bool {
+	message := (&loggingpb.LogEntry{}).ProtoReflect().Descriptor()
+	segments := strings.Split(path, ".")
+	for i, segment := range segments {
+		fields := message.Fields()
+		field := fields.ByJSONName(segment)
+		if field == nil {
+			field = fields.ByName(protoreflect.Name(segment))
+		}
+		last := i == len(segments)-1
+		switch {
+		case field == nil:
+			return false
+		case field.IsMap():
+			return true
+		case field.Kind() != protoreflect.MessageKind:
+			return last
+		case freeForm[field.Message().FullName()] || last:
+			return true
+		}
+		message = field.Message()
+	}
+	return true
+}
+
+// freeForm are the message types whose fields a filter may name freely.
+var freeForm = map[protoreflect.FullName]bool{"google.protobuf.Struct": true, "google.protobuf.Any": true}
+
+// fieldRefusal refuses a field the local filter doesn't read: a gap for a
+// LogEntry field, GCP's 400 for any other.
+func fieldRefusal(field string) error {
+	if entryField(field) {
+		return gap("filter field " + strconv.Quote(field) + " is not implemented")
+	}
+	return status.Errorf(codes.InvalidArgument, "Field not found: '%s'.", field)
+}
+
+// newComparison validates one comparison before evaluation. A LogEntry field
+// the local filter doesn't read is a gap; any other field is GCP's 400
+// (recorded: logging-entries-lifecycle).
 func newComparison(field, op, value string) (comparison, error) {
 	if !supportedField(field) {
-		return comparison{}, status.Errorf(codes.InvalidArgument, "Invalid filter: field %q is not supported locally", field)
+		return comparison{}, fieldRefusal(field)
 	}
 	compare := comparison{field: field, op: op, value: value}
 	switch {
