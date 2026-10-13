@@ -27,6 +27,8 @@
      "option": "--gcp-live-scope-file", "scope": "databases/bigquery.json"},
     {"name": "bigquery-api", "tests": ["tests/conformance/databases/bigquery/test_bigquery_api.py"],
      "option": "--gcp-live-scope-file", "scope": "databases/bigquery_api.json"},
+    {"name": "bigquery-partitions", "tests": ["tests/conformance/databases/bigquery/test_bigquery_partitions.py"],
+     "option": "--gcp-live-scope-file", "scope": "databases/bigquery_partitions.json"},
     {"name": "firestore", "tests": ["tests/conformance/databases/firestore/documents/test_firestore.py"],
      "option": "--gcp-live-scope-file", "scope": "databases/firestore.json"},
     {"name": "firestore-query", "tests": ["tests/conformance/databases/firestore/query/test_firestore_query.py"],

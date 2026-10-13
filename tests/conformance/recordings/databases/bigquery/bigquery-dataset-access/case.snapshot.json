@@ -1,0 +1,312 @@
+{
+  "bigquery-dataset-access": {
+    "recorded-date": "13-10-2026, 04:09:25",
+    "recorded-content": {
+      "default-access": {
+        "access": [
+          {
+            "role": "WRITER",
+            "specialGroup": "projectWriters"
+          },
+          {
+            "role": "OWNER",
+            "specialGroup": "projectOwners"
+          },
+          {
+            "role": "OWNER",
+            "userByEmail": "<fixture>"
+          },
+          {
+            "role": "READER",
+            "specialGroup": "projectReaders"
+          }
+        ],
+        "http_status": 200
+      },
+      "default-dataset-iam": {
+        "errors": [],
+        "http_status": 400,
+        "message": "This feature requires allowlisting.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "baseline-view-denied": {
+        "errors": [
+          {
+            "message": "Access Denied: Table <project>:<views>.v: User does not have permission to query table <project>:<views>.v, or perhaps it does not exist.",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Table <project>:<views>.v: User does not have permission to query table <project>:<views>.v, or perhaps it does not exist.",
+        "status": "PERMISSION_DENIED"
+      },
+      "group-entry-added": {
+        "access": [
+          {
+            "role": "WRITER",
+            "specialGroup": "projectWriters"
+          },
+          {
+            "role": "WRITER",
+            "userByEmail": "<allowed>"
+          },
+          {
+            "role": "OWNER",
+            "specialGroup": "projectOwners"
+          },
+          {
+            "role": "OWNER",
+            "userByEmail": "<fixture>"
+          },
+          {
+            "groupByEmail": "gcp-local-nested@stitchwink.com",
+            "role": "READER"
+          },
+          {
+            "role": "READER",
+            "specialGroup": "projectReaders"
+          }
+        ],
+        "http_status": 200
+      },
+      "view-entry-added": {
+        "access": [
+          {
+            "role": "WRITER",
+            "specialGroup": "projectWriters"
+          },
+          {
+            "role": "OWNER",
+            "specialGroup": "projectOwners"
+          },
+          {
+            "role": "OWNER",
+            "userByEmail": "<fixture>"
+          },
+          {
+            "role": "READER",
+            "specialGroup": "projectReaders"
+          },
+          {
+            "view": {
+              "datasetId": "<views>",
+              "projectId": "<project>",
+              "tableId": "v"
+            }
+          }
+        ],
+        "http_status": 200
+      },
+      "views-dataset-iam": {
+        "errors": [],
+        "http_status": 400,
+        "message": "This feature requires allowlisting.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "source-dataset-iam": {
+        "errors": [],
+        "http_status": 400,
+        "message": "This feature requires allowlisting.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "authorized-view-read": {
+        "http_status": 200,
+        "rows": [
+          [
+            "ada"
+          ],
+          [
+            "grace"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        }
+      },
+      "unauthorized-view-denied": {
+        "errors": [
+          {
+            "message": "Access Denied: Table <project>:<dataset>.t: User does not have permission to query table <project>:<dataset>.t, or perhaps it does not exist.",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Table <project>:<dataset>.t: User does not have permission to query table <project>:<dataset>.t, or perhaps it does not exist.",
+        "status": "PERMISSION_DENIED"
+      },
+      "source-query-denied": {
+        "errors": [
+          {
+            "message": "Access Denied: Table <project>:<dataset>.t: User does not have permission to query table <project>:<dataset>.t, or perhaps it does not exist.",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Table <project>:<dataset>.t: User does not have permission to query table <project>:<dataset>.t, or perhaps it does not exist.",
+        "status": "PERMISSION_DENIED"
+      },
+      "source-rows-denied": {
+        "errors": [
+          {
+            "message": "Access Denied: Table <project>:<dataset>.t: Permission bigquery.tables.getData denied on table <project>:<dataset>.t (or it may not exist).",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Table <project>:<dataset>.t: Permission bigquery.tables.getData denied on table <project>:<dataset>.t (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "source-table-denied": {
+        "errors": [
+          {
+            "message": "Access Denied: Table <project>:<dataset>.t: Permission bigquery.tables.get denied on table <project>:<dataset>.t (or it may not exist).",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Table <project>:<dataset>.t: Permission bigquery.tables.get denied on table <project>:<dataset>.t (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "dataset-entry-added": {
+        "access": [
+          {
+            "role": "WRITER",
+            "specialGroup": "projectWriters"
+          },
+          {
+            "role": "OWNER",
+            "specialGroup": "projectOwners"
+          },
+          {
+            "role": "OWNER",
+            "userByEmail": "<fixture>"
+          },
+          {
+            "role": "READER",
+            "specialGroup": "projectReaders"
+          },
+          {
+            "view": {
+              "datasetId": "<views>",
+              "projectId": "<project>",
+              "tableId": "v"
+            }
+          },
+          {
+            "dataset": {
+              "dataset": {
+                "datasetId": "<views>",
+                "projectId": "<project>"
+              },
+              "targetTypes": [
+                "VIEWS"
+              ]
+            }
+          }
+        ],
+        "http_status": 200
+      },
+      "authorized-dataset-read": {
+        "http_status": 200,
+        "rows": [
+          [
+            "ADA"
+          ],
+          [
+            "GRACE"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        }
+      },
+      "denied-identity-view": {
+        "errors": [
+          {
+            "message": "Access Denied: Project <project>: User does not have bigquery.jobs.create permission in project <project>.",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Project <project>: User does not have bigquery.jobs.create permission in project <project>.",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-identity-dataset": {
+        "errors": [
+          {
+            "message": "Access Denied: Dataset <project>:<views>: Permission bigquery.datasets.get denied on dataset <project>:<views> (or it may not exist).",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Dataset <project>:<views>: Permission bigquery.datasets.get denied on dataset <project>:<views> (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "missing-view-entry": {
+        "errors": [
+          {
+            "message": "View <project>:<views>.absent to authorize not found in location US.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "View <project>:<views>.absent to authorize not found in location US.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "missing-group-entry": {
+        "errors": [
+          {
+            "message": "IAM setPolicy failed for Dataset <project>:<views>: Group gcp-local-absent@stitchwink.com does not exist.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "IAM setPolicy failed for Dataset <project>:<views>: Group gcp-local-absent@stitchwink.com does not exist.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-role-entry": {
+        "errors": [
+          {
+            "message": "IAM setPolicy failed for Dataset <project>:<views>: The role name must be in the form \"roles/{role}\", \"organizations/{organization_id}/roles/{role}\", or \"projects/{project_id}/roles/{role}\".",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "IAM setPolicy failed for Dataset <project>:<views>: The role name must be in the form \"roles/{role}\", \"organizations/{organization_id}/roles/{role}\", or \"projects/{project_id}/roles/{role}\".",
+        "status": "INVALID_ARGUMENT"
+      },
+      "roleless-member-entry": {
+        "errors": [
+          {
+            "message": "Invalid or missing role",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid or missing role",
+        "status": "INVALID_ARGUMENT"
+      },
+      "dataset-set-iam": {
+        "errors": [],
+        "http_status": 400,
+        "message": "This feature requires allowlisting.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "cleanup": {
+        "datasets_absent": true
+      }
+    }
+  }
+}

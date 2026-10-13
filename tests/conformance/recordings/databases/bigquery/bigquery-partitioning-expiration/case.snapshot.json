@@ -1,0 +1,844 @@
+{
+  "bigquery-partitioning-expiration": {
+    "recorded-date": "13-10-2026, 04:08:05",
+    "recorded-content": {
+      "time-partitioned-created": {
+        "clustering": {
+          "fields": [
+            "name",
+            "n"
+          ]
+        },
+        "fields": [
+          "clustering",
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "partitionDefinition",
+          "requirePartitionFilter",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "timePartitioning",
+          "type"
+        ],
+        "http_status": 200,
+        "rangePartitioning": null,
+        "requirePartitionFilter": true,
+        "timePartitioning": {
+          "expirationMs": "86400000",
+          "field": "ts",
+          "type": "DAY"
+        }
+      },
+      "time-partitioned-read": {
+        "clustering": {
+          "fields": [
+            "name",
+            "n"
+          ]
+        },
+        "fields": [
+          "clustering",
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "partitionDefinition",
+          "requirePartitionFilter",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "timePartitioning",
+          "type"
+        ],
+        "http_status": 200,
+        "rangePartitioning": null,
+        "requirePartitionFilter": true,
+        "timePartitioning": {
+          "expirationMs": "86400000",
+          "field": "ts",
+          "requirePartitionFilter": true,
+          "type": "DAY"
+        }
+      },
+      "ingestion-created": {
+        "clustering": null,
+        "fields": [
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "timePartitioning",
+          "type"
+        ],
+        "http_status": 200,
+        "rangePartitioning": null,
+        "requirePartitionFilter": null,
+        "timePartitioning": {
+          "type": "DAY"
+        }
+      },
+      "time-units-created": {
+        "hourly": {
+          "clustering": null,
+          "fields": [
+            "creationTime",
+            "etag",
+            "id",
+            "kind",
+            "lastModifiedTime",
+            "location",
+            "numActiveLogicalBytes",
+            "numBytes",
+            "numLongTermBytes",
+            "numLongTermLogicalBytes",
+            "numRows",
+            "numTotalLogicalBytes",
+            "partitionDefinition",
+            "schema",
+            "selfLink",
+            "tableReference",
+            "timePartitioning",
+            "type"
+          ],
+          "http_status": 200,
+          "rangePartitioning": null,
+          "requirePartitionFilter": null,
+          "timePartitioning": {
+            "field": "ts",
+            "type": "HOUR"
+          }
+        },
+        "monthly": {
+          "clustering": null,
+          "fields": [
+            "creationTime",
+            "etag",
+            "id",
+            "kind",
+            "lastModifiedTime",
+            "location",
+            "numActiveLogicalBytes",
+            "numBytes",
+            "numLongTermBytes",
+            "numLongTermLogicalBytes",
+            "numRows",
+            "numTotalLogicalBytes",
+            "partitionDefinition",
+            "schema",
+            "selfLink",
+            "tableReference",
+            "timePartitioning",
+            "type"
+          ],
+          "http_status": 200,
+          "rangePartitioning": null,
+          "requirePartitionFilter": null,
+          "timePartitioning": {
+            "field": "d",
+            "type": "MONTH"
+          }
+        },
+        "yearly": {
+          "clustering": null,
+          "fields": [
+            "creationTime",
+            "etag",
+            "id",
+            "kind",
+            "lastModifiedTime",
+            "location",
+            "numActiveLogicalBytes",
+            "numBytes",
+            "numLongTermBytes",
+            "numLongTermLogicalBytes",
+            "numRows",
+            "numTotalLogicalBytes",
+            "schema",
+            "selfLink",
+            "tableReference",
+            "timePartitioning",
+            "type"
+          ],
+          "http_status": 200,
+          "rangePartitioning": null,
+          "requirePartitionFilter": null,
+          "timePartitioning": {
+            "type": "YEAR"
+          }
+        }
+      },
+      "range-created": {
+        "clustering": {
+          "fields": [
+            "d"
+          ]
+        },
+        "fields": [
+          "clustering",
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "partitionDefinition",
+          "rangePartitioning",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "type"
+        ],
+        "http_status": 200,
+        "rangePartitioning": {
+          "field": "n",
+          "range": {
+            "end": "100",
+            "interval": "10",
+            "start": "0"
+          }
+        },
+        "requirePartitionFilter": null,
+        "timePartitioning": null
+      },
+      "clustering-too-many": {
+        "errors": [
+          {
+            "message": "5 clustering fields specified, exceeding the limit of 4.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "5 clustering fields specified, exceeding the limit of 4.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "clustering-repeated": {
+        "errors": [
+          {
+            "message": "Field can only appear once in clustering fields. Invalid field: n.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Field can only appear once in clustering fields. Invalid field: n.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "clustering-field-missing": {
+        "errors": [
+          {
+            "message": "The field specified for clustering cannot be found in the schema. Invalid field: absent.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "The field specified for clustering cannot be found in the schema. Invalid field: absent.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "partition-field-missing": {
+        "errors": [
+          {
+            "message": "The field specified for partitioning cannot be found in the schema.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "The field specified for partitioning cannot be found in the schema.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "partition-field-type": {
+        "errors": [
+          {
+            "message": "The field specified for time partitioning can only be of type TIMESTAMP, DATE or DATETIME. The type found is: STRING.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "The field specified for time partitioning can only be of type TIMESTAMP, DATE or DATETIME. The type found is: STRING.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "partition-type-unknown": {
+        "errors": [
+          {
+            "message": "Invalid value for timePartitioning.type: WEEK is not a valid value",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value for timePartitioning.type: WEEK is not a valid value",
+        "status": "INVALID_ARGUMENT"
+      },
+      "range-field-type": {
+        "errors": [
+          {
+            "message": "The field specified for integer range partitioning can only be of type INT64. The type found is: TIMESTAMP.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "The field specified for integer range partitioning can only be of type INT64. The type found is: TIMESTAMP.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "range-interval-zero": {
+        "errors": [
+          {
+            "message": "Interval must be larger than 0 for range partition.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Interval must be larger than 0 for range partition.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "both-partitionings": {
+        "fields": [
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "partitionDefinition",
+          "rangePartitioning",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "type"
+        ],
+        "http_status": 200
+      },
+      "tables-list-items": {
+        "events": {
+          "clustering": {
+            "fields": [
+              "name",
+              "n"
+            ]
+          },
+          "fields": [
+            "clustering",
+            "creationTime",
+            "id",
+            "kind",
+            "requirePartitionFilter",
+            "tableReference",
+            "timePartitioning",
+            "type"
+          ],
+          "rangePartitioning": null,
+          "requirePartitionFilter": true,
+          "timePartitioning": {
+            "expirationMs": "86400000",
+            "field": "ts",
+            "type": "DAY"
+          }
+        },
+        "ingest": {
+          "clustering": null,
+          "fields": [
+            "creationTime",
+            "id",
+            "kind",
+            "tableReference",
+            "timePartitioning",
+            "type"
+          ],
+          "rangePartitioning": null,
+          "requirePartitionFilter": null,
+          "timePartitioning": {
+            "type": "DAY"
+          }
+        },
+        "ranged": {
+          "clustering": {
+            "fields": [
+              "d"
+            ]
+          },
+          "fields": [
+            "clustering",
+            "creationTime",
+            "id",
+            "kind",
+            "rangePartitioning",
+            "tableReference",
+            "type"
+          ],
+          "rangePartitioning": {
+            "field": "n",
+            "range": {
+              "end": "100",
+              "interval": "10",
+              "start": "0"
+            }
+          },
+          "requirePartitionFilter": null,
+          "timePartitioning": null
+        }
+      },
+      "require-filter-refused": {
+        "errors": [
+          {
+            "message": "Cannot query over table '<dataset>.events' without a filter over column(s) 'ts' that can be used for partition elimination",
+            "reason": "invalidQuery"
+          }
+        ],
+        "http_status": 400,
+        "message": "Cannot query over table '<dataset>.events' without a filter over column(s) 'ts' that can be used for partition elimination",
+        "status": "INVALID_ARGUMENT"
+      },
+      "require-filter-delete-refused": {
+        "errors": [
+          {
+            "message": "Cannot query over table '<dataset>.events' without a filter over column(s) 'ts' that can be used for partition elimination",
+            "reason": "invalidQuery"
+          }
+        ],
+        "http_status": 400,
+        "message": "Cannot query over table '<dataset>.events' without a filter over column(s) 'ts' that can be used for partition elimination",
+        "status": "INVALID_ARGUMENT"
+      },
+      "insert-into-expiring-partitions": {
+        "http_status": 200,
+        "numDmlAffectedRows": "2",
+        "rows": [],
+        "schema": {
+          "fields": [
+            {
+              "name": "ts",
+              "type": "TIMESTAMP"
+            },
+            {
+              "name": "d",
+              "type": "DATE"
+            },
+            {
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "name": "n",
+              "type": "INTEGER"
+            }
+          ]
+        },
+        "statementType": "INSERT"
+      },
+      "expired-partition-unread": {
+        "http_status": 200,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "new"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "SELECT"
+      },
+      "ingestion-insert": {
+        "http_status": 200,
+        "numDmlAffectedRows": null,
+        "rows": [],
+        "schema": null,
+        "statementType": "SCRIPT"
+      },
+      "pseudo-columns": {
+        "http_status": 200,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "now",
+            null,
+            null,
+            "true",
+            "true"
+          ],
+          [
+            "past",
+            "1.5778368E9",
+            "2020-01-01",
+            "false",
+            "false"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "pt",
+              "type": "TIMESTAMP"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "pd",
+              "type": "DATE"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "current_partition",
+              "type": "BOOLEAN"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "today",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "statementType": "SELECT"
+      },
+      "star-excludes-pseudo-columns": {
+        "http_status": 200,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "now",
+            "1"
+          ],
+          [
+            "past",
+            "2"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "n",
+              "type": "INTEGER"
+            }
+          ]
+        },
+        "statementType": "SELECT"
+      },
+      "pseudo-column-on-column-partitioned": {
+        "errors": [
+          {
+            "message": "Unrecognized name: _PARTITIONTIME at [1:8]",
+            "reason": "invalidQuery"
+          }
+        ],
+        "http_status": 400,
+        "message": "Unrecognized name: _PARTITIONTIME at [1:8]",
+        "status": "INVALID_ARGUMENT"
+      },
+      "clustering-patched": {
+        "clustering": {
+          "fields": [
+            "n"
+          ]
+        },
+        "fields": [
+          "clustering",
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "partitionDefinition",
+          "requirePartitionFilter",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "timePartitioning",
+          "type"
+        ],
+        "http_status": 200,
+        "rangePartitioning": null,
+        "requirePartitionFilter": true,
+        "timePartitioning": {
+          "expirationMs": "86400000",
+          "field": "ts",
+          "requirePartitionFilter": true,
+          "type": "DAY"
+        }
+      },
+      "require-filter-patched": {
+        "clustering": {
+          "fields": [
+            "n"
+          ]
+        },
+        "fields": [
+          "clustering",
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "partitionDefinition",
+          "requirePartitionFilter",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "timePartitioning",
+          "type"
+        ],
+        "http_status": 200,
+        "rangePartitioning": null,
+        "requirePartitionFilter": false,
+        "timePartitioning": {
+          "expirationMs": "86400000",
+          "field": "ts",
+          "type": "DAY"
+        }
+      },
+      "partition-expiration-patched": {
+        "clustering": {
+          "fields": [
+            "n"
+          ]
+        },
+        "fields": [
+          "clustering",
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "partitionDefinition",
+          "requirePartitionFilter",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "timePartitioning",
+          "type"
+        ],
+        "http_status": 200,
+        "rangePartitioning": null,
+        "requirePartitionFilter": false,
+        "timePartitioning": {
+          "expirationMs": "172800000",
+          "field": "ts",
+          "type": "DAY"
+        }
+      },
+      "partition-type-change": {
+        "errors": [
+          {
+            "message": "Cannot change partitioning/clustering spec for a partitioned/clustered table.",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Cannot change partitioning/clustering spec for a partitioned/clustered table.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "require-filter-off": {
+        "http_status": 200,
+        "numDmlAffectedRows": null,
+        "rows": [
+          [
+            "new"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "name",
+              "type": "STRING"
+            }
+          ]
+        },
+        "statementType": "SELECT"
+      },
+      "expiration-set": {
+        "as_sent": true,
+        "http_status": 200
+      },
+      "expiration-patched": {
+        "as_sent": true,
+        "http_status": 200
+      },
+      "expiration-cleared": {
+        "expirationTime": null,
+        "fields": [
+          "creationTime",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "type"
+        ],
+        "http_status": 200
+      },
+      "expiration-past": {
+        "errors": [
+          {
+            "message": "Expiration time must be at least 1 seconds in the future",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Expiration time must be at least 1 seconds in the future",
+        "status": "INVALID_ARGUMENT"
+      },
+      "dataset-defaults-set": {
+        "defaultPartitionExpirationMs": "172800000",
+        "defaultTableExpirationMs": "86400000",
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "defaultPartitionExpirationMs",
+          "defaultTableExpirationMs",
+          "etag",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200
+      },
+      "dataset-defaults-applied": {
+        "inserted": {
+          "expiration_after_creation_ms": null,
+          "timePartitioning": {
+            "expirationMs": "172800000",
+            "field": "ts",
+            "type": "DAY"
+          }
+        },
+        "read": {
+          "expiration_after_creation_ms": null,
+          "timePartitioning": {
+            "expirationMs": "172800000",
+            "field": "ts",
+            "type": "DAY"
+          }
+        },
+        "unpartitioned": {
+          "expiration_after_creation_ms": 86400000,
+          "timePartitioning": null
+        }
+      },
+      "dataset-default-too-short": {
+        "errors": [
+          {
+            "message": "Table expiration is less than 3600000ms",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Table expiration is less than 3600000ms",
+        "status": "INVALID_ARGUMENT"
+      },
+      "dataset-defaults-cleared": {
+        "defaultPartitionExpirationMs": null,
+        "defaultTableExpirationMs": null,
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "etag",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200
+      },
+      "cleanup": {
+        "dataset_absent": true
+      }
+    }
+  }
+}
