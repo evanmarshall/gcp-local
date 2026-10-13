@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -239,6 +240,12 @@ func (p *Provider) newCryptoKey(request *gateway.RESTRequest, name string) (*cry
 		Labels: maps.Clone(body.Labels), DestroyDuration: destroy, DestroyText: body.DestroyDuration,
 		Versions: map[string]*versionRecord{}, CreatedAt: now,
 	}
+	if record.NextRotation, record.RotationPeriod, err = parseRotation(body.NextRotation, body.RotationPeriod); err != nil {
+		return nil, err
+	}
+	if err := checkRotation(record); err != nil {
+		return nil, err
+	}
 	if request.Query.Get("skipInitialVersionCreation") == "true" {
 		return record, nil
 	}
@@ -291,6 +298,12 @@ func cryptoKeyDocument(resource ref, record *cryptoKeyRecord) map[string]any {
 	}
 	if len(record.Labels) > 0 {
 		document["labels"] = maps.Clone(record.Labels)
+	}
+	if !record.NextRotation.IsZero() {
+		document["nextRotationTime"] = stamp(record.NextRotation)
+	}
+	if record.RotationPeriod > 0 {
+		document["rotationPeriod"] = strconv.FormatInt(int64(record.RotationPeriod/time.Second), 10) + "s"
 	}
 	return document
 }
@@ -363,15 +376,55 @@ func (p *Provider) cryptoKeysList(request *gateway.RESTRequest, scope state.Scop
 
 // keyUpdateBody is one decoded crypto key PATCH body.
 type keyUpdateBody struct {
-	Labels   map[string]string `json:"labels"`
-	Template versionTemplate   `json:"versionTemplate"`
+	Labels         map[string]string `json:"labels"`
+	Template       versionTemplate   `json:"versionTemplate"`
+	RotationPeriod string            `json:"rotationPeriod"`
+	NextRotation   string            `json:"nextRotationTime"`
 }
 
 // unmodeledKeyFields are the CryptoKey fields a create or update refuses
-// when set. Scheduled rotation is stored by GCP and acted on; it is not
-// modeled (#93), nor are import-only keys, external backends, or Key Access
+// when set: import-only keys, external backends, and Key Access
 // Justifications.
-var unmodeledKeyFields = []string{"rotationPeriod", "nextRotationTime", "importOnly", "cryptoKeyBackend", "keyAccessJustificationsPolicy"}
+var unmodeledKeyFields = []string{"importOnly", "cryptoKeyBackend", "keyAccessJustificationsPolicy"}
+
+// Rotation limits from the CryptoKey reference: a period of 24 to 876,000
+// hours.
+const (
+	minRotationPeriod = 24 * time.Hour
+	maxRotationPeriod = 876000 * time.Hour
+)
+
+// parseRotation reads a rotation schedule; both texts may be empty.
+func parseRotation(next, period string) (time.Time, time.Duration, error) {
+	var at time.Time
+	var every time.Duration
+	var err error
+	if next != "" {
+		if at, err = time.Parse(time.RFC3339Nano, next); err != nil {
+			return at, every, status.Errorf(codes.InvalidArgument, "Invalid nextRotationTime %q", next)
+		}
+	}
+	if period != "" {
+		every, err = time.ParseDuration(period)
+		if err != nil || !strings.HasSuffix(period, "s") || every < minRotationPeriod || every > maxRotationPeriod {
+			return at, every, status.Errorf(codes.InvalidArgument, "Invalid rotationPeriod %q: it must be between 24 hours and 876000 hours.", period)
+		}
+	}
+	return at, every, nil
+}
+
+// checkRotation applies the documented rules to a key's schedule: only
+// ENCRYPT_DECRYPT keys rotate automatically, and a period needs a next time.
+func checkRotation(record *cryptoKeyRecord) error {
+	scheduled := !record.NextRotation.IsZero() || record.RotationPeriod > 0
+	switch {
+	case scheduled && record.Purpose != purposeEncryptDecrypt:
+		return status.Errorf(codes.InvalidArgument, "Automatic rotation is not supported for keys with purpose %s.", record.Purpose)
+	case record.RotationPeriod > 0 && record.NextRotation.IsZero():
+		return status.Error(codes.InvalidArgument, "nextRotationTime must be set when rotationPeriod is set.")
+	}
+	return nil
+}
 
 // cryptoKeysUpdate applies the fields named by updateMask.
 func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
@@ -383,15 +436,24 @@ func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Sc
 	if err := decode(request.JSON, "crypto_key", &kmspb.CryptoKey{}, &body, unmodeledKeyFields...); err != nil {
 		return nil, err
 	}
+	next, period, err := parseRotation(body.NextRotation, body.RotationPeriod)
+	if err != nil {
+		return nil, err
+	}
 	return p.keyResponse(scope, resource, func(record *cryptoKeyRecord) error {
 		for _, path := range paths {
 			if err := validateKeyPath(record, path, body); err != nil {
 				return err
 			}
 		}
+		patched := *record
 		for _, path := range paths {
-			applyKeyPath(record, path, body)
+			applyKeyPath(&patched, path, body, next, period)
 		}
+		if err := checkRotation(&patched); err != nil {
+			return err
+		}
+		*record = patched
 		return nil
 	})
 }
@@ -403,8 +465,6 @@ func validateKeyPath(record *cryptoKeyRecord, path string, body keyUpdateBody) e
 	case "labels":
 		return nil
 	case "rotationPeriod", "rotation_period", "nextRotationTime", "next_rotation_time":
-		// Decoding refused a schedule; clearing one keeps rotation off. The
-		// released Terraform provider clears it this way on destroy.
 		return nil
 	case "versionTemplate.algorithm", "version_template.algorithm":
 		return algorithmAllowed(record.Purpose, string(body.Template.Algorithm))
@@ -427,13 +487,18 @@ func algorithmAllowed(purpose, algorithm string) error {
 	return nil
 }
 
-// applyKeyPath writes one validated mask path.
-func applyKeyPath(record *cryptoKeyRecord, path string, body keyUpdateBody) {
+// applyKeyPath writes one validated mask path; an unset schedule field
+// clears it, as the released Terraform provider does on destroy.
+func applyKeyPath(record *cryptoKeyRecord, path string, body keyUpdateBody, next time.Time, period time.Duration) {
 	switch path {
 	case "labels":
 		record.Labels = maps.Clone(body.Labels)
 	case "versionTemplate.algorithm", "version_template.algorithm":
 		record.Algorithm = string(body.Template.Algorithm)
+	case "rotationPeriod", "rotation_period":
+		record.RotationPeriod = period
+	case "nextRotationTime", "next_rotation_time":
+		record.NextRotation = next
 	}
 }
 

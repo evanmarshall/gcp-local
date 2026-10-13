@@ -24,13 +24,44 @@ var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 // maxPayload bounds plaintext and AAD, as the real surface does.
 const maxPayload = 64 << 10
 
-// settle completes scheduled destruction whose time has passed.
+// maxCatchUp bounds the rotations one settle performs after a long gap.
+const maxCatchUp = 64
+
+// settle applies what the clock has made due: scheduled destruction, then
+// automatic rotation.
 func settle(record *cryptoKeyRecord, now time.Time) {
 	for _, version := range record.Versions {
 		if version.State == stateDestroyScheduled && !now.Before(version.DestroyAt) {
 			version.State = stateDestroyed
 			version.Material, version.Private = nil, nil
 		}
+	}
+	rotate(record, now)
+}
+
+// rotate performs the rotations that are due. At each nextRotationTime GCP
+// creates a version, makes it primary, and advances nextRotationTime by
+// rotationPeriod; without a period the schedule ends. The version's
+// createTime is the rotation time, so a key read late reads as if rotated on
+// schedule. Beyond maxCatchUp rotations the schedule skips ahead.
+func rotate(record *cryptoKeyRecord, now time.Time) {
+	for range maxCatchUp {
+		if record.NextRotation.IsZero() || now.Before(record.NextRotation) {
+			return
+		}
+		number := strconv.Itoa(len(record.Versions) + 1)
+		version, err := newVersion(number, record.Algorithm, record.NextRotation)
+		if err != nil {
+			return
+		}
+		record.Versions[number], record.Primary = version, number
+		record.NextRotation = record.NextRotation.Add(record.RotationPeriod)
+		if record.RotationPeriod == 0 {
+			record.NextRotation = time.Time{}
+		}
+	}
+	for record.RotationPeriod > 0 && !now.Before(record.NextRotation) {
+		record.NextRotation = record.NextRotation.Add(record.RotationPeriod)
 	}
 }
 

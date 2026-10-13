@@ -447,17 +447,17 @@ func TestEncryptChecksums(t *testing.T) {
 	h.fails(h.as(testAllowed, http.MethodPost, testKeyPath+":encrypt", body), "bad checksum", 400, "INVALID_ARGUMENT")
 }
 
-// Scheduled rotation is a coverage gap: a schedule is refused on create and
-// update rather than stored and never acted on. Clearing one is accepted.
+// TestKeyUpdateMaskAndRotation: a rotation schedule is validated, stored,
+// reported, patched, and cleared.
 func TestKeyUpdateMaskAndRotation(t *testing.T) {
 	h := newHarness(t)
 	h.ring()
 	h.failsWith(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
 		"purpose": purposeEncryptDecrypt, "rotationPeriod": testRotation,
-	}), "rotating key", 501, "UNIMPLEMENTED", "Cloud KMS coverage gap: rotationPeriod is not modeled")
+	}), "period alone", 400, "INVALID_ARGUMENT", "nextRotationTime must be set when rotationPeriod is set.")
 	h.failsWith(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
-		"purpose": purposeEncryptDecrypt, "nextRotationTime": "2030-01-01T00:00:00Z",
-	}), "scheduled key", 501, "UNIMPLEMENTED", "Cloud KMS coverage gap: nextRotationTime is not modeled")
+		"purpose": purposeEncryptDecrypt, "rotationPeriod": "3600s", "nextRotationTime": "2030-01-01T00:00:00Z",
+	}), "short period", 400, "INVALID_ARGUMENT", `Invalid rotationPeriod "3600s": it must be between 24 hours and 876000 hours.`)
 	created := h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
 		"purpose": purposeEncryptDecrypt}), "key")
 	if created["destroyScheduledDuration"] != defaultDestroyDuration {
@@ -472,15 +472,53 @@ func TestKeyUpdateMaskAndRotation(t *testing.T) {
 		t.Fatalf("labeled = %v", labeled)
 	}
 	h.failsWith(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=rotationPeriod",
-		map[string]any{"rotationPeriod": testRotation}), "schedule rotation", 501, "UNIMPLEMENTED",
-		"Cloud KMS coverage gap: rotationPeriod is not modeled")
+		map[string]any{"rotationPeriod": testRotation}), "period without a time", 400, "INVALID_ARGUMENT",
+		"nextRotationTime must be set when rotationPeriod is set.")
+	scheduled := h.ok(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=rotationPeriod,nextRotationTime",
+		map[string]any{"rotationPeriod": testRotation, "nextRotationTime": "2030-01-01T00:00:00Z"}), "schedule rotation")
+	if scheduled["rotationPeriod"] != testRotation || scheduled["nextRotationTime"] != "2030-01-01T00:00:00.000000000Z" {
+		t.Fatalf("scheduled = %v", scheduled)
+	}
 	// The released Terraform provider clears rotation this way on destroy.
 	cleared := h.ok(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=rotationPeriod,nextRotationTime",
 		map[string]any{"rotationPeriod": nil, "nextRotationTime": nil}), "clear rotation")
-	if _, present := cleared["rotationPeriod"]; present || cleared["labels"] == nil {
+	if _, present := cleared["rotationPeriod"]; present || cleared["nextRotationTime"] != nil || cleared["labels"] == nil {
 		t.Fatalf("cleared = %v", cleared)
 	}
 	h.fails(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=primary", map[string]any{}), "invented primary path", 400, "INVALID_ARGUMENT")
+}
+
+// TestScheduledRotationCreatesPrimaryVersions: at each nextRotationTime the
+// key gains a version that becomes primary, created at that time, and the
+// schedule advances by rotationPeriod. Older versions still decrypt.
+func TestScheduledRotationCreatesPrimaryVersions(t *testing.T) {
+	h := newHarness(t)
+	h.ring()
+	start := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	h.provider.clock = func() time.Time { return start }
+	h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{"purpose": purposeEncryptDecrypt,
+		"rotationPeriod": "86400s", "nextRotationTime": "2026-10-14T00:00:00Z"}), "key")
+	h.grant()
+	sealed := h.ok(h.encrypt(testAllowed), "encrypt with version 1")
+	h.provider.clock = func() time.Time { return start.Add(37 * time.Hour) }
+	key := h.ok(h.invoke(http.MethodGet, testKeyPath, nil), "rotated key")
+	primary, _ := key["primary"].(map[string]any)
+	if versionOf(primary[keyName]) != "3" || primary[keyCreateTime] != "2026-10-15T00:00:00.000000000Z" ||
+		key["nextRotationTime"] != "2026-10-16T00:00:00.000000000Z" {
+		t.Fatalf("key = %v", key)
+	}
+	if states := h.versionStates(); len(states) != 3 {
+		t.Fatalf("versions = %v", states)
+	}
+	ciphertext, _ := sealed["ciphertext"].(string)
+	opened := h.ok(h.decrypt(ciphertext, testAad), "decrypt with version 1")
+	if opened["usedPrimary"] != nil {
+		t.Fatalf("decrypt = %v", opened)
+	}
+	reencrypted := h.ok(h.encrypt(testAllowed), "encrypt with the new primary")
+	if versionOf(reencrypted[keyName]) != "3" {
+		t.Fatalf("encrypt = %v", reencrypted)
+	}
 }
 
 func TestSkipInitialVersionCreation(t *testing.T) {

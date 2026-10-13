@@ -1,6 +1,6 @@
 # Cloud KMS
 
-Cloud KMS v1 over REST and gRPC: key rings, crypto keys, versions, symmetric encrypt/decrypt, asymmetric sign and decrypt, and HMAC, with per-resource IAM. Recorded against GCP: symmetric keys (`cloudkms-symmetric-key-lifecycle`) and asymmetric sign and MAC keys (`cloudkms-asymmetric-mac-keys`, 2026-10-12).
+Cloud KMS v1 over REST and gRPC: key rings, crypto keys, versions, symmetric encrypt/decrypt, asymmetric sign and decrypt, HMAC, and scheduled rotation, with per-resource IAM. Recorded against GCP: symmetric keys (`cloudkms-symmetric-key-lifecycle`) and asymmetric sign and MAC keys (`cloudkms-asymmetric-mac-keys`, 2026-10-12).
 
 ## Use
 
@@ -35,11 +35,20 @@ client, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint("127.0.0.1:45
 | --- | --- | --- |
 | Locations | `locations.get` | Any location id |
 | Key rings | `create`, `get`, `list`, `getIamPolicy`, `setIamPolicy` | No delete, as in GCP |
-| Crypto keys | `create`, `get`, `list`, `patch`, `getIamPolicy`, `setIamPolicy` | Purposes and algorithms below; `skipInitialVersionCreation`; `patch` takes `labels` and `versionTemplate.algorithm`, and clears rotation; conditional bindings with policy version 3 |
+| Crypto keys | `create`, `get`, `list`, `patch`, `getIamPolicy`, `setIamPolicy` | Purposes and algorithms below; `skipInitialVersionCreation`; [rotation](#rotation); `patch` takes `labels`, `versionTemplate.algorithm`, `rotationPeriod`, and `nextRotationTime`; conditional bindings with policy version 3 |
 | Crypto keys | `encrypt`, `decrypt`, `updatePrimaryVersion` | `ENCRYPT_DECRYPT` only; optional CRC32C checksums verified; wrong AAD is 400 |
 | Versions | `create`, `get`, `list`, `patch`, `destroy`, `restore` | `patch` sets `ENABLED`/`DISABLED`; `restore` returns a scheduled version to `DISABLED`; material is removed after `destroyScheduledDuration` (default 30 days) |
 | Versions | `asymmetricSign`, `asymmetricDecrypt`, `getPublicKey` | `digest` or `data` (hashed with the algorithm's hash); EC signatures are DER; PSS salt equals the hash length; OAEP uses SHA-256 with no label; PEM with `pemCrc32c` |
 | Versions | `macSign`, `macVerify` | A wrong tag is 200 with `success` omitted |
+
+## Rotation
+
+An `ENCRYPT_DECRYPT` key with `nextRotationTime` rotates on the process clock: at that time it gains a new version, created at the rotation time, that becomes primary, and `nextRotationTime` advances by `rotationPeriod`; without a period the schedule ends. Older versions still decrypt. A manual `versions.create` or `updatePrimaryVersion` doesn't move the schedule.
+
+- `rotationPeriod` is 24 to 876000 hours (`"86400s"`) and needs `nextRotationTime`; otherwise 400 `INVALID_ARGUMENT`.
+- A schedule on any other purpose is 400 `INVALID_ARGUMENT`, as the CryptoKey reference documents.
+- A `patch` mask naming a schedule field with the field unset clears it, as the released Terraform provider does on destroy.
+- Rotation is applied when the key is next read or used, so a key read late shows every rotation due since, up to 64, then skips ahead.
 
 | Purpose | Algorithms |
 | --- | --- |
@@ -56,7 +65,7 @@ Refusals, modeled locally:
 
 - A key use that the key's purpose does not allow is 400 `FAILED_PRECONDITION`. So is any use of a version that is not `ENABLED`, and `updatePrimaryVersion` on a non-symmetric key.
 - Missing `versionTemplate.algorithm` for a non-symmetric purpose, an algorithm of another purpose, both or neither of `digest` and `data`, a digest of the wrong hash or length, and any CRC32C mismatch are 400 `INVALID_ARGUMENT`.
-- Other purposes, algorithms, protection levels, and `publicKeyFormat` are 501 `UNIMPLEMENTED`, as are `rotationPeriod`, `nextRotationTime`, `importOnly`, `cryptoKeyBackend`, `keyAccessJustificationsPolicy`, and `externalProtectionLevelOptions` when set.
+- Other purposes, algorithms, protection levels, and `publicKeyFormat` are 501 `UNIMPLEMENTED`, as are `importOnly`, `cryptoKeyBackend`, `keyAccessJustificationsPolicy`, and `externalProtectionLevelOptions` when set.
 
 ## IAM
 
@@ -87,13 +96,15 @@ sh scripts/check/recordings.sh   # the symmetric recording
 sh scripts/check/sdk/cloudkms.sh         # google-cloud-kms over REST and gRPC, and the Go client over gRPC, with local ADC
 ```
 
+`cloudkms-rotation-schedule` (`tests/conformance/security/cloudkms/rotation/`) is written and runs locally but is not recorded: schedule refusals (a period alone, a 1-hour period, an asymmetric key), the schedule on create and get, period and time patches, clearing the time alone, clearing both, and a destroy honoring a 1-day `destroyScheduledDuration`. GCP rotates only after a period of at least a day, so an automatic rotation is not observed; the timing is modeled from the CryptoKey reference.
+
 `cloudkms-asymmetric-mac-keys` was recorded and revalidated against GCP on 2026-10-12 and matches locally (`sh scripts/check/recordings.sh`): sign by digest and data, public key PEM and CRC32C, HMAC sign and verify, CRC32C and digest refusals, wrong-purpose and disabled-version `FAILED_PRECONDITION`, destroy and restore. `TestLocalKMSKeyRingCryptoKey` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
 ## Gaps
 
 - `ASYMMETRIC_DECRYPT` (RSA-OAEP) is modeled locally, not recorded.
 - Versions are `ENABLED` at once; GCP reports `PENDING_GENERATION` first for asymmetric keys.
-- No HSM, external, raw, PQC, or key-encapsulation algorithms; no RSA 3072/4096, SHA-512, or other HMAC hashes; no import jobs.
-- No scheduled rotation: a schedule is refused, not stored ([#93](https://github.com/evanmarshall/gcp-local/issues/93)).
+- No HSM, external, raw, PQC, or key-encapsulation algorithms; no RSA 3072/4096, SHA-512, or other HMAC hashes; no import jobs (`importOnly` is refused and the import job RPCs are `UNIMPLEMENTED`).
+- Rotation refusal messages and the `nextRotationTime` rendering are modeled, not recorded.
 - `locations.list` (`GET /v1/projects/{project}/locations`) reaches Secret Manager's location list on the shared host.
 - List filters and ordering are not served; key ring and location IAM conditions and gRPC denials are not recorded.

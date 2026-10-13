@@ -43,8 +43,8 @@ func kmsName(prefix string) string {
 }
 
 // TestLocalKMSKeyRingCryptoKey exercises the local Cloud KMS slice with the
-// pinned provider: a key ring, a symmetric crypto key, and IAM members.
-// Scheduled rotation is a coverage gap, so the key sets no rotation_period.
+// pinned provider: a key ring, a symmetric crypto key with a rotation
+// schedule, and IAM members.
 func TestLocalKMSKeyRingCryptoKey(t *testing.T) {
 	ringName := kmsName("ring")
 	keyName := kmsName("key")
@@ -59,6 +59,7 @@ func TestLocalKMSKeyRingCryptoKey(t *testing.T) {
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("google_kms_key_ring.ring", "name", ringName),
 					resource.TestCheckResourceAttr("google_kms_crypto_key.key", "name", keyName),
+					resource.TestCheckResourceAttr("google_kms_crypto_key.key", "rotation_period", "7776000s"),
 					resource.TestCheckResourceAttr("google_kms_key_ring_iam_member.member", "role", "roles/cloudkms.cryptoKeyEncrypterDecrypter"),
 				),
 			},
@@ -75,8 +76,9 @@ resource "google_kms_key_ring" "ring" {
 }
 
 resource "google_kms_crypto_key" "key" {
- name     = "%s"
- key_ring = google_kms_key_ring.ring.id
+ name            = "%s"
+ key_ring        = google_kms_key_ring.ring.id
+ rotation_period = "7776000s"
 }
 
 resource "google_kms_key_ring_iam_member" "member" {

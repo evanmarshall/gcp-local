@@ -224,6 +224,8 @@ type cryptoKeyBody struct {
 	Labels          map[string]string `json:"labels"`
 	Template        versionTemplate   `json:"versionTemplate"`
 	DestroyDuration string            `json:"destroyScheduledDuration"`
+	RotationPeriod  string            `json:"rotationPeriod"`
+	NextRotation    string            `json:"nextRotationTime"`
 }
 
 type keyRingRecord struct {
@@ -232,7 +234,8 @@ type keyRingRecord struct {
 }
 
 // cryptoKeyRecord is one stored crypto key. Primary is set only for
-// ENCRYPT_DECRYPT keys, as in GCP.
+// ENCRYPT_DECRYPT keys, as in GCP. NextRotation and RotationPeriod are the
+// automatic rotation schedule, zero when unset.
 type cryptoKeyRecord struct {
 	Name            string
 	Purpose         string
@@ -243,6 +246,8 @@ type cryptoKeyRecord struct {
 	Versions        map[string]*versionRecord
 	Primary         string
 	CreatedAt       time.Time
+	NextRotation    time.Time
+	RotationPeriod  time.Duration
 }
 
 // versionRecord is one stored crypto key version. Material holds symmetric
