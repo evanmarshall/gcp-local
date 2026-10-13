@@ -761,10 +761,12 @@ func (p *Provider) listObjects(ctx context.Context, b *memoryBackend, req reques
 // the provider's (objectEntries, pageAfter), as GCP applies them.
 func listedObjects(ctx context.Context, b *memoryBackend, bucket string, query url.Values) ([]map[string]any, *gateway.RESTResponse, error) {
 	backendQuery := url.Values{}
-	for _, key := range []string{queryPrefix, queryVersions} {
-		if value := query.Get(key); value != "" {
-			backendQuery.Set(key, value)
-		}
+	if prefix := query.Get(queryPrefix); prefix != "" {
+		backendQuery.Set(queryPrefix, prefix)
+	}
+	// The backend reads only a lowercase true; GCP reads booleans in any case.
+	if versions, _ := booleanOption(query, queryVersions); versions {
+		backendQuery.Set(queryVersions, "true")
 	}
 	listed, err := b.forward(ctx, http.MethodGet, "/storage/v1/b/"+url.PathEscape(bucket)+"/o", backendQuery, nil, nil)
 	if err != nil || listed.Status != http.StatusOK {
