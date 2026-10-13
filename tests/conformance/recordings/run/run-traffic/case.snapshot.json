@@ -1,6 +1,6 @@
 {
   "run-traffic": {
-    "recorded-date": "13-10-2026, 04:07:55",
+    "recorded-date": "13-10-2026, 20:25:58",
     "recorded-content": {
       "created": {
         "generation": "1",
@@ -350,10 +350,16 @@
           }
         ]
       },
-      "revisions": [
-        "<run>-b-00003",
-        "<run>-b-00002"
-      ],
+      "revisions": {
+        "aliases": [
+          "<rev3>",
+          "<rev2>"
+        ],
+        "numbers": [
+          "00003",
+          "00002"
+        ]
+      },
       "ingress-internal-only": {
         "anonymous_status": 404,
         "generation": "7",
