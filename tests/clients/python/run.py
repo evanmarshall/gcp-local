@@ -337,7 +337,91 @@ def run_cloudrun():
         "ungranted create service",
         lambda: other.create_service(parent=location, service=service, service_id="denied"),
     )
+    invoke_tag_url(client, created)
     client.delete_service(name=created.name).result(timeout=60)
+
+
+def invoke_tag_url(client, created):
+    """Split traffic onto a second revision, tag the first, and invoke its tag URL.
+
+    The token is minted at gcp-local for an account the run creates, with the
+    service URL as its audience, as GCP requires for a tag URL.
+    """
+    first = created.latest_ready_revision.rsplit("/", 1)[-1]
+    kinds = run_v2.TrafficTargetAllocationType
+    split = run_v2.Service(
+        name=created.name,
+        template=run_v2.RevisionTemplate(
+            containers=[
+                run_v2.Container(
+                    image=REVISION_IMAGE, env=[run_v2.EnvVar(name="MODE", value="second")]
+                )
+            ]
+        ),
+        traffic=[
+            run_v2.TrafficTarget(
+                type_=kinds.TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION,
+                revision=first,
+                percent=50,
+                tag="blue",
+            ),
+            run_v2.TrafficTarget(type_=kinds.TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST, percent=50),
+        ],
+    )
+    updated = client.update_service(service=split).result(timeout=60)
+    tagged = [status for status in updated.traffic_statuses if status.tag == "blue"]
+    assert tagged and tagged[0].revision == first and tagged[0].uri, "tag status"
+    accounts = generated(iam_admin_v1.IAMClient)
+    account = accounts.create_service_account(
+        name=f"projects/{PROJECT}",
+        account_id="python-invoker",
+        service_account=iam_admin_v1.ServiceAccount(),
+    )
+    name = f"projects/{PROJECT}/serviceAccounts/{account.email}"
+    try:
+        accounts.set_iam_policy(
+            request={
+                "resource": name,
+                "policy": policy_pb2.Policy(
+                    bindings=[
+                        policy_pb2.Binding(
+                            role="roles/iam.serviceAccountOpenIdTokenCreator",
+                            members=[f"serviceAccount:app@{PROJECT}.iam.gserviceaccount.com"],
+                        )
+                    ]
+                ),
+            }
+        )
+        client.set_iam_policy(
+            request={
+                "resource": created.name,
+                "policy": policy_pb2.Policy(
+                    bindings=[
+                        policy_pb2.Binding(
+                            role="roles/run.invoker", members=[f"serviceAccount:{account.email}"]
+                        )
+                    ]
+                ),
+            }
+        )
+        session = AuthorizedSession(
+            google.auth.credentials.with_scopes_if_required(credentials(), [CLOUD_PLATFORM])
+        )
+        session.trust_env = False
+        minted = session.post(
+            f"{HTTP}/v1/projects/-/serviceAccounts/{account.email}:generateIdToken",
+            json={"audience": updated.uri, "includeEmail": True},
+        )
+        assert minted.status_code == 200, f"generateIdToken: {minted.status_code}"
+        plain = requests.Session()
+        plain.trust_env = False
+        headers = {"Authorization": "Bearer " + minted.json()["token"]}
+        answered = plain.get(tagged[0].uri + "/", headers=headers, timeout=30)
+        assert answered.status_code == 200, f"tag URL: {answered.status_code}"
+        anonymous = plain.get(tagged[0].uri + "/", timeout=30)
+        assert anonymous.status_code == 403, f"anonymous tag URL: {anonymous.status_code}"
+    finally:
+        accounts.delete_service_account(name=name)
 
 
 def run_iam():
