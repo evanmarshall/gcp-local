@@ -16,7 +16,7 @@ The runner uses `terraform-plugin-testing v1.15.0` and the unmodified, checksum-
 | Temporary source file and CRC32C helper | Private test directory; original checksum algorithm and expected content assertions retained |
 | Destroy/check clients | Explicit loopback Storage client with no proxy/redirects, bounded response/time limits, and actual 404 verification |
 | Post-apply lifecycle | Additional refresh and unchanged plan checks after each configuration, including label removals and file replacement |
-| Basic test's bucket HCL | Adds a `google_storage_bucket_iam_member` and a `google_storage_folder` beside the upstream bucket, and `hierarchical_namespace { enabled = true }` inside it: GCP serves folders only in hierarchical-namespace buckets (observed 2026-10-13 in a `storage-folders-flat` draft), so the upstream bucket can't hold the added folder without it |
+| Basic test's bucket HCL | Adds a `google_storage_bucket_iam_member` and a `google_storage_folder` beside the upstream bucket, and `hierarchical_namespace { enabled = true }` inside it: GCP serves folders only in hierarchical-namespace buckets (recorded: `storage-folders-flat`), so the upstream bucket can't hold the added folder without it |
 
 The original bucket/object attribute checks remain except for the documented regional RPO assertion. Provider `terraform_labels` is excluded from import comparison because the adapter adds an ownership default label; effective labels remain checked. Import tests cover qualified IDs only. These are adapted upstream cases, not an unmodified provider-wide certification.
 

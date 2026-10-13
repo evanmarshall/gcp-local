@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, lifecycle rules, retention policies and Bucket Lock, object holds and object retention, Pub/Sub notifications, hierarchical-namespace folders, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-five scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
+Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, lifecycle rules, retention policies and Bucket Lock, object holds and object retention, Pub/Sub notifications, hierarchical-namespace folders, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-eight scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -94,7 +94,7 @@ A bucket with `versioning.enabled` keeps every live generation that an overwrite
 
 ## Hierarchical namespace
 
-A bucket created with `hierarchicalNamespace.enabled: true` serves folders. Not recorded: drafts of `storage-hierarchical-namespace` and `storage-folders-flat` observed this behavior on 2026-10-13, and the emulator's answers matched both; the recordings wait on a sandbox run.
+A bucket created with `hierarchicalNamespace.enabled: true` serves folders (recorded: `storage-hierarchical-namespace`, `storage-folders-flat`).
 
 - The bucket needs uniform bucket-level access: without it, 400 `Hierarchical namespace buckets must use uniform bucket-level access.` It reports `hierarchicalNamespace` on reads and in `getStorageLayout`.
 - A folder name gets a trailing `/`. Creating an existing folder is 409 `The folder you tried to create already exists.`; creating one under a missing parent is 409 `The parent folder does not exist.` unless `recursive=true` creates the parents.
@@ -118,7 +118,7 @@ Bucket insert and patch take `lifecycle.rule` with the `Delete`, `SetStorageClas
 
 ## Notifications
 
-Notification configurations publish object changes to Pub/Sub through the local Pub/Sub provider, as the project's Storage service agent. Run with `-services storage,pubsub`. Not recorded: a draft of `storage-notifications` observed the configuration behavior, the publisher check, and the finalize, metadata-update, and delete messages on 2026-10-13; the overwrite attributes, `OBJECT_ARCHIVE`, and lifecycle events are modeled from GCP's documentation. The scenario's recording waits on a sandbox run.
+Notification configurations publish object changes to Pub/Sub through the local Pub/Sub provider, as the project's Storage service agent. Run with `-services storage,pubsub`. Recorded: `storage-notifications`, including the overwrite attributes; `OBJECT_ARCHIVE` and lifecycle events are modeled from GCP's documentation, not recorded.
 
 Grant the agent `roles/pubsub.publisher` on the topic first, as in GCP.
 
@@ -195,6 +195,9 @@ All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/
 | `storage-bucket-policy-only` | 2026-10-12 | Bucket create with only `bucketPolicyOnly`; both names and their `lockedTime` on create and read |
 | `storage-go-client-projection` | 2026-10-13 | The Go client's `projection=full` bucket and object calls, a bucket list with `returnPartialSuccess=true`, object `patch`, an undefined query option, an XML read from a missing bucket, an invalid projection |
 | `storage-object-versioning` | 2026-10-13 | Versioning on and off, noncurrent generations in listings and pages, reads, media, and deletes by generation with preconditions, create-only uploads, bucket delete refused while noncurrent generations remain |
+| `storage-notifications` | 2026-10-13 | The Storage service agent and its denial; configurations refused without the publisher grant and for a missing topic; filtered, unfiltered, and short-topic configurations; invalid payload, event type, and topic; list, get, delete; finalize, metadata-update, overwrite (with `overwroteGeneration` and `overwrittenByGeneration`), and delete messages per configuration |
+| `storage-hierarchical-namespace` | 2026-10-13 | Bucket create and layout, the uniform-access refusal; folder create, nested, duplicate, missing parent, recursive, trailing slash, denied; get, list, prefix, paging; folders an upload creates; non-empty deletes refused; folders as object prefixes; bucket delete with folders |
+| `storage-folders-flat` | 2026-10-13 | Every folder method refused with 409 in a bucket without hierarchical namespace; the denied list |
 | `storage-lifecycle-rules` | 2026-10-13 | Every action and condition set and read back, fourteen invalid rules, rules emptied and cleared, a denied update; `customTime` set, decreased, nulled, and advanced |
 | `storage-retention-holds` | 2026-10-13 | Retention policy set, invalid, and removed; retained delete and overwrite refused; temporary, event-based, and default event-based holds; retention starting at an event-based hold's release; object retention refused without `enableObjectRetention` |
 | `storage-object-retention` | 2026-10-13 | `enableObjectRetention=true`; unlocked retention set, refused deletes and overwrites, shortening and removal refused without override, extension, override, and the denials for both permissions; invalid values; locked retention refusals and extension |

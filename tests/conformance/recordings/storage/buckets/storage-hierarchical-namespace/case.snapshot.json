@@ -1,0 +1,264 @@
+{
+  "storage-hierarchical-namespace": {
+    "recorded-date": "13-10-2026, 20:20:41",
+    "recorded-content": {
+      "bucket-created": {
+        "hierarchicalNamespace": {
+          "enabled": true
+        },
+        "uniform": true
+      },
+      "storage-layout": {
+        "fields": [
+          "bucket",
+          "hierarchicalNamespace",
+          "kind",
+          "location",
+          "locationType"
+        ],
+        "hierarchicalNamespace": {
+          "enabled": true
+        }
+      },
+      "namespace-without-uniform": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Hierarchical namespace buckets must use uniform bucket-level access.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "create": {
+        "bucket": "<bucket>",
+        "fields": [
+          "bucket",
+          "createTime",
+          "id",
+          "kind",
+          "metageneration",
+          "name",
+          "selfLink",
+          "updateTime"
+        ],
+        "kind": "storage#folder",
+        "metageneration": "1",
+        "name": "f1/",
+        "status": 200
+      },
+      "create-nested": {
+        "bucket": "<bucket>",
+        "fields": [
+          "bucket",
+          "createTime",
+          "id",
+          "kind",
+          "metageneration",
+          "name",
+          "selfLink",
+          "updateTime"
+        ],
+        "kind": "storage#folder",
+        "metageneration": "1",
+        "name": "f1/f2/",
+        "status": 200
+      },
+      "create-duplicate": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The folder you tried to create already exists.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "create-missing-parent": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The parent folder does not exist.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "create-recursive": {
+        "bucket": "<bucket>",
+        "fields": [
+          "bucket",
+          "createTime",
+          "id",
+          "kind",
+          "metageneration",
+          "name",
+          "selfLink",
+          "updateTime"
+        ],
+        "kind": "storage#folder",
+        "metageneration": "1",
+        "name": "x/y/",
+        "status": 200
+      },
+      "create-without-slash": {
+        "bucket": "<bucket>",
+        "fields": [
+          "bucket",
+          "createTime",
+          "id",
+          "kind",
+          "metageneration",
+          "name",
+          "selfLink",
+          "updateTime"
+        ],
+        "kind": "storage#folder",
+        "metageneration": "1",
+        "name": "plain/",
+        "status": 200
+      },
+      "create-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.folders.create access to the Google Cloud Storage bucket. Permission 'storage.folders.create' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>/folders/d/' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "get": {
+        "bucket": "<bucket>",
+        "fields": [
+          "bucket",
+          "createTime",
+          "id",
+          "kind",
+          "metageneration",
+          "name",
+          "selfLink",
+          "updateTime"
+        ],
+        "kind": "storage#folder",
+        "metageneration": "1",
+        "name": "f1/",
+        "status": 200
+      },
+      "get-missing": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The folder does not exist.",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "list": {
+        "has_next": false,
+        "kind": "storage#folders",
+        "names": [
+          "f1/",
+          "f1/f2/",
+          "plain/",
+          "x/",
+          "x/y/"
+        ],
+        "status": 200
+      },
+      "list-prefix": {
+        "has_next": false,
+        "kind": "storage#folders",
+        "names": [
+          "f1/",
+          "f1/f2/"
+        ],
+        "status": 200
+      },
+      "list-page": {
+        "has_next": true,
+        "kind": "storage#folders",
+        "names": [
+          "f1/"
+        ],
+        "status": 200
+      },
+      "list-after-upload": {
+        "has_next": false,
+        "kind": "storage#folders",
+        "names": [
+          "f1/",
+          "f1/f2/",
+          "g/",
+          "plain/",
+          "x/",
+          "x/y/"
+        ],
+        "status": 200
+      },
+      "delete-with-subfolder": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The folder you tried to delete is not empty.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "delete-with-object": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The folder you tried to delete is not empty.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "objects-with-folder-prefixes": {
+        "items": [],
+        "prefixes": [
+          "f1/",
+          "g/",
+          "plain/",
+          "x/"
+        ]
+      },
+      "delete-nested": {
+        "status": 204
+      },
+      "delete": {
+        "status": 204
+      },
+      "delete-missing": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The folder does not exist.",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "list-after-object-delete": {
+        "has_next": false,
+        "kind": "storage#folders",
+        "names": [
+          "g/",
+          "plain/",
+          "x/",
+          "x/y/"
+        ],
+        "status": 200
+      },
+      "bucket-delete-with-folders": {
+        "status": 204
+      },
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}

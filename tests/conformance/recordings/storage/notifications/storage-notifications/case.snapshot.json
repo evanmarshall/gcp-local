@@ -1,0 +1,618 @@
+{
+  "storage-notifications": {
+    "recorded-date": "13-10-2026, 20:20:24",
+    "recorded-content": {
+      "service-agent": {
+        "email": "<storage-agent>",
+        "fields": [
+          "email_address",
+          "kind"
+        ],
+        "kind": "storage#serviceAccount",
+        "named_by_number": true
+      },
+      "service-agent-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have resourcemanager.projects.get access to the Google Cloud project. Permission 'resourcemanager.projects.get' denied on resource (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "create-without-grant": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The service account '<storage-agent>' does not have permission to publish messages to to the Cloud Pub/Sub topic '//pubsub.googleapis.com/projects/<project>/topics/<topic>', or that topic does not exist.",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "create-missing-topic": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Cloud Pub/Sub topic '//pubsub.googleapis.com/projects/<project>/topics/gl-absent' not found, or user '<storage-agent>' does not have permission to it.",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "grant": {
+        "status": 200
+      },
+      "create-filtered": {
+        "custom_attributes": {
+          "source": "gcp-local"
+        },
+        "event_types": [
+          "OBJECT_FINALIZE",
+          "OBJECT_METADATA_UPDATE",
+          "OBJECT_DELETE"
+        ],
+        "fields": [
+          "custom_attributes",
+          "etag",
+          "event_types",
+          "id",
+          "kind",
+          "object_name_prefix",
+          "payload_format",
+          "selfLink",
+          "topic"
+        ],
+        "id": "<config-1>",
+        "kind": "storage#notification",
+        "object_name_prefix": "n-",
+        "payload_format": "JSON_API_V1",
+        "self_link_path": "b/<bucket>/notificationConfigs/<config-1>",
+        "status": 200,
+        "topic": "//pubsub.googleapis.com/projects/<project>/topics/<topic>"
+      },
+      "create-unfiltered-short-topic": {
+        "custom_attributes": null,
+        "event_types": null,
+        "fields": [
+          "etag",
+          "id",
+          "kind",
+          "payload_format",
+          "selfLink",
+          "topic"
+        ],
+        "id": "<config-2>",
+        "kind": "storage#notification",
+        "object_name_prefix": null,
+        "payload_format": "NONE",
+        "self_link_path": "b/<bucket>/notificationConfigs/<config-2>",
+        "status": 200,
+        "topic": "//pubsub.googleapis.com/projects/<project>/topics/<topic>"
+      },
+      "payload-unknown": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "You must specify a payload format in the 'payload_format' field.",
+        "reasons": [
+          "required"
+        ],
+        "status": 400
+      },
+      "event-unknown": {
+        "custom_attributes": null,
+        "event_types": null,
+        "fields": [
+          "etag",
+          "id",
+          "kind",
+          "payload_format",
+          "selfLink",
+          "topic"
+        ],
+        "id": "<config-3>",
+        "kind": "storage#notification",
+        "object_name_prefix": null,
+        "payload_format": "NONE",
+        "self_link_path": "b/<bucket>/notificationConfigs/<config-3>",
+        "status": 200,
+        "topic": "//pubsub.googleapis.com/projects/<project>/topics/<topic>"
+      },
+      "topic-malformed": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Invalid Google Cloud Pub/Sub topic. It should look like '//pubsub.googleapis.com/projects/*/topics/*.'",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "topic-missing": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "You must specify a Cloud Pub/Sub topic in the 'topic' field.",
+        "reasons": [
+          "required"
+        ],
+        "status": 400
+      },
+      "create-denied": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.buckets.get access to the Google Cloud Storage bucket. Permission 'storage.buckets.get' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "list": {
+        "ids": [
+          "<config-1>",
+          "<config-2>",
+          "<config-3>"
+        ],
+        "kind": "storage#notifications"
+      },
+      "get": {
+        "custom_attributes": {
+          "source": "gcp-local"
+        },
+        "event_types": [
+          "OBJECT_FINALIZE",
+          "OBJECT_METADATA_UPDATE",
+          "OBJECT_DELETE"
+        ],
+        "fields": [
+          "custom_attributes",
+          "etag",
+          "event_types",
+          "id",
+          "kind",
+          "object_name_prefix",
+          "payload_format",
+          "selfLink",
+          "topic"
+        ],
+        "id": "<config-1>",
+        "kind": "storage#notification",
+        "object_name_prefix": "n-",
+        "payload_format": "JSON_API_V1",
+        "self_link_path": "b/<bucket>/notificationConfigs/<config-1>",
+        "status": 200,
+        "topic": "//pubsub.googleapis.com/projects/<project>/topics/<topic>"
+      },
+      "get-missing": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The requested resource was not found.",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "finalize": [
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat",
+            "source"
+          ],
+          "eventType": "OBJECT_FINALIZE",
+          "payloadFormat": "JSON_API_V1",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-1>",
+          "source": "gcp-local",
+          "has_payload": true,
+          "objectGeneration": "<generation-1>",
+          "payload": {
+            "kind": "storage#object",
+            "name": "n-1",
+            "contentType": "application/octet-stream",
+            "storageClass": "STANDARD",
+            "generation": "<generation-1>",
+            "has_links": true
+          }
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_FINALIZE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-2>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-1>"
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_FINALIZE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-3>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-1>"
+        }
+      ],
+      "finalize-unfiltered": [
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_FINALIZE",
+          "payloadFormat": "NONE",
+          "objectId": "other",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-2>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-2>"
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_FINALIZE",
+          "payloadFormat": "NONE",
+          "objectId": "other",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-3>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-2>"
+        }
+      ],
+      "metadata-update": [
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat",
+            "source"
+          ],
+          "eventType": "OBJECT_METADATA_UPDATE",
+          "payloadFormat": "JSON_API_V1",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-1>",
+          "source": "gcp-local",
+          "has_payload": true,
+          "objectGeneration": "<generation-1>",
+          "payload": {
+            "kind": "storage#object",
+            "name": "n-1",
+            "contentType": "application/octet-stream",
+            "storageClass": "STANDARD",
+            "generation": "<generation-1>",
+            "has_links": true
+          }
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_METADATA_UPDATE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-2>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-1>"
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_METADATA_UPDATE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-3>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-1>"
+        }
+      ],
+      "overwrite": [
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "overwrittenByGeneration",
+            "payloadFormat",
+            "source"
+          ],
+          "eventType": "OBJECT_DELETE",
+          "payloadFormat": "JSON_API_V1",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-1>",
+          "source": "gcp-local",
+          "has_payload": true,
+          "objectGeneration": "<generation-1>",
+          "overwrittenByGeneration": "<generation-3>",
+          "payload": {
+            "kind": "storage#object",
+            "name": "n-1",
+            "contentType": "application/octet-stream",
+            "storageClass": "STANDARD",
+            "generation": "<generation-1>",
+            "has_links": true
+          }
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "overwrittenByGeneration",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_DELETE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-2>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-1>",
+          "overwrittenByGeneration": "<generation-3>"
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "overwrittenByGeneration",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_DELETE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-3>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-1>",
+          "overwrittenByGeneration": "<generation-3>"
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "overwroteGeneration",
+            "payloadFormat",
+            "source"
+          ],
+          "eventType": "OBJECT_FINALIZE",
+          "payloadFormat": "JSON_API_V1",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-1>",
+          "source": "gcp-local",
+          "has_payload": true,
+          "objectGeneration": "<generation-3>",
+          "overwroteGeneration": "<generation-1>",
+          "payload": {
+            "kind": "storage#object",
+            "name": "n-1",
+            "contentType": "application/octet-stream",
+            "storageClass": "STANDARD",
+            "generation": "<generation-3>",
+            "has_links": true
+          }
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "overwroteGeneration",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_FINALIZE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-2>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-3>",
+          "overwroteGeneration": "<generation-1>"
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "overwroteGeneration",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_FINALIZE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-3>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-3>",
+          "overwroteGeneration": "<generation-1>"
+        }
+      ],
+      "delete": [
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat",
+            "source"
+          ],
+          "eventType": "OBJECT_DELETE",
+          "payloadFormat": "JSON_API_V1",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-1>",
+          "source": "gcp-local",
+          "has_payload": true,
+          "objectGeneration": "<generation-3>",
+          "payload": {
+            "kind": "storage#object",
+            "name": "n-1",
+            "contentType": "application/octet-stream",
+            "storageClass": "STANDARD",
+            "generation": "<generation-3>",
+            "has_links": true
+          }
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_DELETE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-2>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-3>"
+        },
+        {
+          "attributes": [
+            "bucketId",
+            "eventTime",
+            "eventType",
+            "notificationConfig",
+            "objectGeneration",
+            "objectId",
+            "payloadFormat"
+          ],
+          "eventType": "OBJECT_DELETE",
+          "payloadFormat": "NONE",
+          "objectId": "n-1",
+          "bucketId": "<bucket>",
+          "notificationConfig": "projects/_/buckets/<bucket>/notificationConfigs/<config-3>",
+          "source": null,
+          "has_payload": false,
+          "objectGeneration": "<generation-3>"
+        }
+      ],
+      "deleted-config-1": {
+        "status": 204
+      },
+      "deleted-config-2": {
+        "status": 204
+      },
+      "deleted-config-3": {
+        "status": 204
+      },
+      "deleted-get": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The requested resource was not found.",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "after-configs-deleted": [],
+      "topic-cleanup": {
+        "grant_removed_and_topic_absent": true
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

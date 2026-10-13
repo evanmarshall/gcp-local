@@ -1,0 +1,61 @@
+{
+  "storage-folders-flat": {
+    "recorded-date": "13-10-2026, 20:20:50",
+    "recorded-content": {
+      "create": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The bucket does not support hierarchical namespace.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "get": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The bucket does not support hierarchical namespace.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "list": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The bucket does not support hierarchical namespace.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "delete": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The bucket does not support hierarchical namespace.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "denied-list": {
+        "code": 403,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "<denied> does not have storage.folders.list access to the Google Cloud Storage bucket. Permission 'storage.folders.list' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ],
+        "status": 403
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}
