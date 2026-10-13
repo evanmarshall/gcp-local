@@ -66,6 +66,7 @@ Limits:
 - Recorded denials of Cloud Scheduler and Memorystore carry no `details`, and their wording differs (`cloudscheduler-job-lifecycle`, `memorystore-redis-instance-admin`). No recording yet shows a service's ErrorInfo domain; record one before setting `Domain`.
 - Page-token and page-size refusals differ per service; set `Paging` from the service's recording.
 - Page tokens aren't bound to the other list parameters.
+- Storage's JSON API doesn't fit `Gate`, `Nearest`, or `Page`. Its recorded denials are wire bodies with an `errors[]` list, actor-specific wording, and `text/html` on uploads; `authorize` in the Storage provider renders them. Its list tokens resume after the last entry's name and it pages by `maxResults`; `Page`'s offset tokens would shift when entries change between pages (`storage-list-paging`). It uses `ListBody` and `DecodeJSON` (folders).
 
 ## Backend lifecycle
 

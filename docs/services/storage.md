@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Seventeen scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
+Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Nineteen scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -44,25 +44,35 @@ Versioning and default holds must stay off. Buckets report uniform access under 
 
 | Resource | Methods | Notes |
 | --- | --- | --- |
-| Buckets | `insert`, `list`, `get`, `delete` | Global name uniqueness across projects; a bucket holding only soft-deleted objects deletes |
+| Buckets | `insert`, `get`, `delete` | Global name uniqueness across projects; a bucket holding only soft-deleted objects deletes |
+| Buckets | `list` | `prefix`, [paging](#lists), `returnPartialSuccess` (every bucket is reachable, so `unreachable` is omitted) |
 | Buckets | `patch` | `labels` (merges keys, null removes a key) and `softDeletePolicy.retentionDurationSeconds`; advances metageneration and etag |
 | Buckets | `getIamPolicy`, `setIamPolicy` | Version-3 conditions on `resource.name`; public members per [public access prevention](#public-access-prevention) |
 | Buckets | `getStorageLayout` | `locationType` and no `hierarchicalNamespace`, as gcloud reads them |
-| Objects | `insert` | Media, multipart, and resumable uploads, up to 128 MiB per object |
-| Objects | `list`, `get` (metadata and `alt=media`), `delete` | Generation, metageneration, and etag preconditions; `softDeleted=true` per [soft delete](#soft-delete) |
+| Objects | `insert` | Media, multipart, and resumable uploads, up to 128 MiB per object (larger is the 400 gap) |
+| Objects | `list` | `prefix`, `delimiter`, `startOffset`, `endOffset`, `versions`, [paging](#lists); `softDeleted=true` per [soft delete](#soft-delete) |
+| Objects | `get` (metadata and `alt=media`), `delete` | Generation, metageneration, and etag preconditions; `softDeleted=true` per [soft delete](#soft-delete) |
 | Objects | `restore` | `generation`, preconditions on the live object |
 | Objects | `patch` | `contentType`, `cacheControl`, `contentDisposition`, `contentEncoding`, `contentLanguage`, `metadata` (merges keys, null removes a key, null removes all); `generation` and the four precondition options; advances metageneration and etag |
 | Objects | `rewrite` | Single call within one project; source metadata copied, body metadata replaces it. A JSON `null` body (rclone `moveto`) copies the source unchanged |
 | Objects (XML) | `GET`, `PUT /BUCKET/OBJECT` | Bearer token or V4 signature; `x-goog-meta-*`, `Content-MD5`, `response-content-*` |
-| Folders | `insert`/`create`, `get`, `list`, `delete` | Modeled locally, not recorded; deleted with their bucket |
+| Folders | `insert`/`create`, `get`, `list`, `delete` | Modeled locally in any bucket, not recorded; `list` takes `prefix` and `pageSize`/`pageToken` [paging](#lists); deleted with their bucket. GCP refuses folders in a bucket without hierarchical namespace, which the emulator does not model (see [gaps](#gaps)) |
 
-- `projection=full` returns the `noAcl` shape: uniform buckets have no ACLs. `returnPartialSuccess=false`, empty `matchGlob`, and `includeTrailingDelimiter=false` are accepted as the defaults they are. Boolean options are case-insensitive.
+- `projection=full` returns the `noAcl` shape: uniform buckets have no ACLs. Empty `matchGlob` and `includeTrailingDelimiter=false` are accepted as the defaults they are. Boolean options are case-insensitive.
 - `includeFoldersAsPrefixes=true` (gcloud `ls`) is accepted in a bucket without folders; managed folders are not modeled. In a bucket with [folders](#methods) it returns the 400 gap.
 - Multipart uploads accept the single-quoted boundary gcloud's apitools sends (`boundary='===...=='`).
 - A query option that Google's [discovery document](../../api/discovery/storage-v1.json) does not define for the method is ignored, as GCP ignores it (recorded in `storage-go-client-projection`). A defined option the emulator does not serve, such as `userProject`, `predefinedAcl`, `quotaUser`, or `oauth_token`, returns the 400 gap, and so does `access_token`. The XML API has no discovery document and refuses every option it does not serve.
 - Objects carry `selfLink` and `mediaLink` at the emulator's origin, with GCP's paths and `mediaLink` query (`?generation=N&alt=media`). GCP's `selfLink` origin is `https://www.googleapis.com`.
 - Resumable sessions: initiate with `uploadType=resumable`, then `PUT` (Python) or `POST` (Go) chunks with `Content-Range` to the returned `Location`. A status query (`bytes */N`) returns 308 with `Range`; `X-GUploader-No-308: yes` gets 200 with `X-Http-Status-Code-Override: 308`. A retried chunk's repeated bytes are skipped. `X-Goog-Hash` on the last chunk is checked. `DELETE` cancels with 499, and every later request to that session also gets 499. A session expires a week after initiation, as GCP documents (not recorded); its URI then returns 404 and its bytes are freed.
 - Signed URLs: `GOOG4-RSA-SHA256` only. The signature must verify against a key of the signing service account: one created with `serviceAccountKeys.create`, or the account's managed key that `signBlob` uses ([service accounts](security/serviceaccounts.md)). Expired, future-dated, wrongly scoped, tampered, or other-method URLs are refused with XML errors.
+
+## Lists
+
+`objects.list`, `buckets.list`, and `folders.list` page as GCP does (recorded: `storage-list-paging`):
+
+- Entries are in name order. With a `delimiter`, each prefix is one entry toward `maxResults`, in name order among the objects, and no later page repeats it. `startOffset` and `endOffset` select objects before they collapse into prefixes.
+- `maxResults` (`pageSize` for folders) is an unsigned integer, capped at 1000. A negative or non-integer value is 400 `Invalid unsigned integer value: '-1'.` (reason `invalidParameter`). `maxResults=0` lists no objects but a full page of buckets.
+- A page token resumes after the previous page's last entry, so entries added or removed between pages are neither repeated nor skipped. An object listing refuses a token it did not issue with 400 `Next page token not valid: TOKEN`; a bucket listing lists nothing after one.
 
 ## Soft delete
 
@@ -111,7 +121,8 @@ All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/
 | `storage-iam-groups` | 2026-10-12 | `objectViewer` granted to a real group, to a group nesting it, and conditionally (object prefix) to the nested group: the member reads, the non-member gets 403, and each revocation returns 403 |
 | `storage-resumable-signed-url` | 2026-10-12 | Resumable session, status query, cancel and a request after it, signed PUT and GET, tampered, expired, and wrong-method URLs |
 | `storage-bucket-policy-only` | 2026-10-12 | Bucket create with only `bucketPolicyOnly`; both names and their `lockedTime` on create and read |
-| `storage-go-client-projection` | 2026-10-12 | The Go client's `projection=full` bucket and object calls, object `patch`, an undefined query option, an invalid projection |
+| `storage-go-client-projection` | 2026-10-13 | The Go client's `projection=full` bucket and object calls, a bucket list with `returnPartialSuccess=true`, object `patch`, an undefined query option, an XML read from a missing bucket, an invalid projection |
+| `storage-list-paging` | 2026-10-13 | Delimiter pages (prefixes count toward `maxResults`, none repeated), flat pages, prefix and offset selection, invalid page tokens and `maxResults` values for objects and buckets |
 | `storage-bucket-defaults` | 2026-10-12 | rclone's bucket insert: inherited prevention, 7-day soft delete; soft-deleted list, read, restore, denied restore, overwrite; bucket delete with only soft-deleted objects |
 | `storage-gcloud-bucket-defaults` | 2026-10-12 | gcloud's bucket insert with `enableObjectRetention=False`; a below-minimum retention refused; disabling soft delete; soft-deleted listing refused without a policy |
 | `storage-public-access-enforced` | 2026-10-12 | `allUsers` and `allAuthenticatedUsers` refused under enforced prevention; policy unchanged |
@@ -133,8 +144,12 @@ Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PR
 
 ## Gaps
 
-- A coverage gap returns 400 `Storage coverage gap: ...`, not 501. This is a deliberate exception to `UNIMPLEMENTED`: the Go client retries every 5xx without limit, so a 501 would hang it. A path no route claims (and no bucket name matches on the XML API) still returns 501.
-- 128 MiB per object; uploads are buffered whole in memory. Chunk sizes are not checked against 256 KiB multiples.
+- A coverage gap returns 400 `Storage coverage gap: ...`, not 501. This is a deliberate exception to `UNIMPLEMENTED`: the Go client retries every 5xx without limit, so a 501 would hang it.
+- No Storage method answers 5xx or 429. Every refusal has the JSON API's body (`error.code`, `error.message`, `error.errors[]` with `domain` and `reason`), or an XML error document on the XML API. A failure inside the emulator that GCP would not have (a backend 5xx, a broken invariant) returns 400 `Storage emulator fault: ...`. A missing bucket on the XML API is 404 `NoSuchBucket`, as in GCP (recorded: `storage-go-client-projection`); only a path whose first segment can't name a bucket returns the gateway's 501.
+- Outside the provider, the shared gateway still renders a malformed or rejected bearer token (401) and a JSON body over 2 MiB (429) in the generic error body.
+- 128 MiB per object; uploads are buffered whole in memory, and a larger upload is the 400 gap. Chunk sizes are not checked against 256 KiB multiples.
+- Hierarchical namespace is not modeled. Bucket insert refuses `hierarchicalNamespace`, but folders are served in every bucket; GCP answers `folders.list` on a bucket without hierarchical namespace with 409 `The bucket does not support hierarchical namespace.` (observed 2026-10-13 in a `storage-list-paging` draft, not in its recording). The Terraform case `TestAccStorageBucket_basic` creates a folder in such a bucket.
+- `folders.list` refuses `delimiter`, `startOffset`, and `endOffset`; `includeTrailingDelimiter=true` and `matchGlob` on `objects.list` return the gap.
 - No ACLs, versioning, object retention (`enableObjectRetention=true` returns the 400 gap) or holds, lifecycle rules, requester pays, encryption keys, notifications, or compose.
 - Bucket soft delete is not modeled: a deleted bucket and its soft-deleted objects are gone at once. `softDeleted` on `buckets.list` and `buckets.get`, and `buckets.restore`, return the 400 gap. `objects.restore` in a bucket whose policy is `0` returns the gap.
 - Soft-deleted media (`alt=media`), preconditions on a soft-deleted read, soft-deleted listings longer than one page or with other options, and `restoreToken` return the gap.
