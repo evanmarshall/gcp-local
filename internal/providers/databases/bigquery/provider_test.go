@@ -35,6 +35,8 @@ const (
 	testActor    = "serviceAccount:actor@" + testProject + ".iam.gserviceaccount.com"
 	// testPeerProject is a second project with the same grants, for isolation.
 	testPeerProject = "peer-bq"
+	// testGroup is the directory group that holds the "viewer" principal.
+	testGroup = "readers@example.com"
 )
 
 // harness drives the provider through the gateway.
@@ -54,6 +56,12 @@ func newHarness(t *testing.T) *harness {
 	engine, err := iam.New(index)
 	if err != nil {
 		t.Fatalf("build the iam engine: %v", err)
+	}
+	// The local directory: one group holding the "viewer" principal.
+	if err := engine.SetDirectory(iam.Directory{Domains: []string{"example.com"}, Groups: map[string][]string{
+		testGroup: {"serviceAccount:viewer@" + testProject + ".iam.gserviceaccount.com"},
+	}}); err != nil {
+		t.Fatalf("declare the directory: %v", err)
 	}
 	for number, project := range []string{testProject, testPeerProject} {
 		if err := index.Put("resourcemanager", state.Resource{
@@ -527,8 +535,12 @@ func TestUnmodeledFieldsAreGaps(t *testing.T) {
 	} {
 		want(t, field, h.invoke(http.MethodPost, testDatasets, with(dataset, field, value)), 501, "BigQuery coverage gap: "+field+" is not modeled")
 	}
-	want(t, "access", h.invoke(http.MethodPost, testDatasets, with(dataset, "access", []any{map[string]any{"role": "READER", "userByEmail": "a@b.c"}})),
-		501, "BigQuery coverage gap: dataset access entries other than the defaults")
+	want(t, "routine access", h.invoke(http.MethodPost, testDatasets, with(dataset, "access", []any{map[string]any{
+		"routine": map[string]any{"projectId": testProject, "datasetId": testDataset, "routineId": "f"}}})),
+		501, "BigQuery coverage gap: routine access entries (routines are not modeled)")
+	want(t, "access condition", h.invoke(http.MethodPost, testDatasets, with(dataset, "access", []any{map[string]any{
+		"role": "READER", "userByEmail": "a@b.c", "condition": map[string]any{"expression": "true"}}})),
+		501, "BigQuery coverage gap: dataset access entry conditions")
 	want(t, "time travel", h.invoke(http.MethodPost, testDatasets, with(dataset, "maxTimeTravelHours", "48")), 501, "BigQuery coverage gap: maxTimeTravelHours other than 168")
 	want(t, "dataset view", h.invoke(http.MethodGet, testDatasets+"/"+testDataset+"?datasetView=ACL", nil), 501, "BigQuery coverage gap: query parameter datasetView")
 	want(t, "list filter", h.invoke(http.MethodGet, testDatasets+"?filter=labels.a:1", nil), 501, "BigQuery coverage gap: query parameter filter")
@@ -802,7 +814,10 @@ func TestConcurrentRequests(t *testing.T) {
 		return []providertest.Request{
 			{Method: http.MethodPost, Path: testDatasets, Body: map[string]any{"datasetReference": map[string]any{"datasetId": testDataset}}, Want: []int{200, 409}},
 			{Method: http.MethodPatch, Path: dataset, Body: map[string]any{"labels": map[string]string{"k": "v"}}, Want: []int{200, 404}},
-			{Method: http.MethodPatch, Path: dataset, Body: map[string]any{"defaultTableExpirationMs": "3600000"}, Want: []int{200, 404}},
+			{Method: http.MethodPatch, Path: dataset, Body: map[string]any{"defaultTableExpirationMs": "3600000", "access": []any{
+				map[string]any{"role": "OWNER", "userByEmail": "actor@" + testProject + ".iam.gserviceaccount.com"},
+				map[string]any{"role": "READER", "groupByEmail": testGroup},
+			}}, Want: []int{200, 404}},
 			{Method: http.MethodPost, Path: dataset + "/tables", Body: map[string]any{"tableReference": map[string]any{"tableId": "parted"}, "schema": map[string]any{
 				"fields": layoutFields}, "timePartitioning": map[string]any{"type": "DAY", "expirationMs": "3600000"}, "clustering": map[string]any{"fields": []string{"n"}}},
 				Want: []int{200, 404, 409}},

@@ -22,7 +22,7 @@ import (
 func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodDatasetsCreate:
-		return p.datasetsCreate(request, scope)
+		return p.datasetsCreate(call, request, scope)
 	case methodDatasetsGet:
 		return p.datasetsGet(request, scope)
 	case methodDatasetsList:
@@ -87,6 +87,7 @@ func (p *Provider) datasetCopy(scope state.Scope, dataset string) *datasetRecord
 		if record := s.datasets[dataset]; record != nil {
 			clone := *record
 			clone.Labels = maps.Clone(record.Labels)
+			clone.Access = record.Access.clone()
 			copied = &clone
 		}
 		return nil
@@ -112,8 +113,9 @@ var datasetFields = provider.Fields{
 }
 
 // datasetBody is the slice of the Dataset resource the provider models.
-// access and maxTimeTravelHours are accepted only at the values GCP assigns
-// (a client's read-modify-write sends them back); anything else is a gap.
+// maxTimeTravelHours is accepted only at the value GCP assigns (a client's
+// read-modify-write sends it back); anything else is a gap. Access is nil
+// when the body doesn't name it.
 type datasetBody struct {
 	DatasetReference struct {
 		ProjectID string `json:"projectId"`
@@ -123,7 +125,7 @@ type datasetBody struct {
 	FriendlyName                 patchText          `json:"friendlyName"`
 	Description                  patchText          `json:"description"`
 	Location                     string             `json:"location"`
-	Access                       json.RawMessage    `json:"access"`
+	Access                       *[]accessEntry     `json:"access"`
 	MaxTimeTravelHours           json.RawMessage    `json:"maxTimeTravelHours"`
 	DefaultTableExpirationMs     optionalInt        `json:"defaultTableExpirationMs"`
 	DefaultPartitionExpirationMs optionalInt        `json:"defaultPartitionExpirationMs"`
@@ -179,15 +181,12 @@ func (t *patchText) UnmarshalJSON(raw []byte) error {
 // defaultTimeTravel is the time-travel window GCP reports, in hours.
 const defaultTimeTravel = "168"
 
-// decodeDataset strictly decodes a dataset body and refuses access lists and
-// time-travel windows other than GCP's defaults.
+// decodeDataset strictly decodes a dataset body and refuses time-travel
+// windows other than GCP's default.
 func decodeDataset(request *gateway.RESTRequest) (datasetBody, error) {
 	var body datasetBody
 	if err := provider.DecodeJSON(request.JSON, "", &body, gap, datasetFields); err != nil {
 		return body, err
-	}
-	if !defaultAccessList(body.Access) {
-		return body, gap("dataset access entries other than the defaults; see issue #90")
 	}
 	if hours := strings.Trim(string(body.MaxTimeTravelHours), `"`); hours != "" && hours != jsonNull && hours != defaultTimeTravel {
 		return body, gap("maxTimeTravelHours other than " + defaultTimeTravel)
@@ -195,31 +194,17 @@ func decodeDataset(request *gateway.RESTRequest) (datasetBody, error) {
 	return body, nil
 }
 
-// defaultAccessList reports an absent or empty access list, or one equal to
-// the default list, in any order.
-func defaultAccessList(raw json.RawMessage) bool {
-	var entries []map[string]any
-	if len(raw) == 0 || string(raw) == jsonNull {
-		return true
+// accessTarget is what normalizing dataset's access list reads, under the
+// scope lock.
+func (s *scopeState) accessTarget(project, dataset, location string) accessTarget {
+	return accessTarget{
+		project: project, dataset: dataset, location: location,
+		view: func(dataset, table string) bool {
+			record := s.tables[tableKey(dataset, table)]
+			return record != nil && record.Type == typeView
+		},
+		datasetExists: func(dataset string) bool { return s.datasets[dataset] != nil },
 	}
-	if json.Unmarshal(raw, &entries) != nil {
-		return false
-	}
-	if len(entries) == 0 {
-		return true
-	}
-	want := map[string]bool{}
-	for _, entry := range defaultAccess() {
-		encoded, _ := json.Marshal(entry) //nolint:errchkjson // plain maps
-		want[string(encoded)] = true
-	}
-	for _, entry := range entries {
-		encoded, _ := json.Marshal(entry) //nolint:errchkjson // plain maps
-		if !want[string(encoded)] {
-			return false
-		}
-	}
-	return len(entries) == len(want)
 }
 
 // refuseOptions refuses the documented query parameters a method doesn't
@@ -250,8 +235,10 @@ func policyVersion(query url.Values) error {
 	return nil
 }
 
-// datasetsCreate validates and stores one dataset.
-func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+// datasetsCreate validates and stores one dataset. Without an access list it
+// gets GCP's default, the creator as OWNER included (recorded); its member
+// entries become the dataset's IAM policy.
+func (p *Provider) datasetsCreate(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	if err := policyVersion(request.Query); err != nil {
 		return nil, err
 	}
@@ -273,22 +260,9 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 	}
 	var document map[string]any
 	err = p.scopes.With(scope, func(s *scopeState) error {
-		if s.datasets[dataset] != nil {
-			return failure(codes.AlreadyExists, reasonDuplicate, "Already Exists: Dataset "+scope.Project+":"+dataset)
+		if err := p.insertDataset(s, scope, call.Principal.Subject, body.Access, created); err != nil {
+			return err
 		}
-		for id := range s.datasets {
-			if strings.EqualFold(id, dataset) {
-				// The engine folds name case, so it cannot keep the two apart.
-				return gap("datasets " + id + " and " + dataset + " differ only in case")
-			}
-		}
-		if err := p.index.Put(serviceName, state.Resource{
-			Name: datasetResource(scope.Project, dataset), Service: serviceName,
-			Kind: kindDataset, Parent: provider.ProjectResource(scope.Project), Scope: scope,
-		}); err != nil {
-			return fmt.Errorf("index the dataset: %w", err)
-		}
-		s.datasets[dataset] = created
 		document = datasetWire(scope.Project, dataset, created)
 		return nil
 	})
@@ -296,6 +270,41 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 		return nil, fmt.Errorf("create the dataset: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// insertDataset admits a new dataset, gives it its access list and IAM
+// policy, and stores it, under the scope lock.
+func (p *Provider) insertDataset(s *scopeState, scope state.Scope, creator string, access *[]accessEntry, created *datasetRecord) error {
+	dataset := created.ID
+	if s.datasets[dataset] != nil {
+		return failure(codes.AlreadyExists, reasonDuplicate, "Already Exists: Dataset "+scope.Project+":"+dataset)
+	}
+	for id := range s.datasets {
+		if strings.EqualFold(id, dataset) {
+			// The engine folds name case, so it cannot keep the two apart.
+			return gap("datasets " + id + " and " + dataset + " differ only in case")
+		}
+	}
+	created.Access = defaultAccessList(creator)
+	if access != nil && len(*access) > 0 {
+		var err error
+		if created.Access, err = normalizeAccess(*access, s.accessTarget(scope.Project, dataset, created.Location)); err != nil {
+			return err
+		}
+	}
+	resource := datasetResource(scope.Project, dataset)
+	if err := p.index.Put(serviceName, state.Resource{
+		Name: resource, Service: serviceName,
+		Kind: kindDataset, Parent: provider.ProjectResource(scope.Project), Scope: scope,
+	}); err != nil {
+		return fmt.Errorf("index the dataset: %w", err)
+	}
+	if err := p.setDatasetPolicy(scope.Project, dataset, created.Access); err != nil {
+		// Removing the entry also forgets any policy.
+		return errors.Join(err, p.index.Remove(serviceName, scope, resource))
+	}
+	s.datasets[dataset] = created
+	return nil
 }
 
 // setLabels merges a patch's labels into current, as GCP does (recorded:
@@ -331,7 +340,7 @@ func datasetWire(project, dataset string, record *datasetRecord) map[string]any 
 		"datasetReference": map[string]any{keyDatasetID: dataset, keyProjectID: project},
 		keyLocation:        cmp.Or(record.Location, "US"),
 		keyType:            "DEFAULT",
-		"access":           defaultAccess(),
+		"access":           record.Access.wire(project),
 		keyCreationTime:    strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
 		keyLastModified:    strconv.FormatInt(record.ModifiedAt.UnixMilli(), 10),
 	}
@@ -442,8 +451,10 @@ func datasetItem(project string, record *datasetRecord) map[string]any {
 }
 
 // datasetsUpdate is datasets.patch: labels merge, and friendlyName,
-// description, and the default expirations change only when the body names
-// them (recorded). The whole body is validated before anything changes.
+// description, the default expirations, and the access list change only when
+// the body names them (recorded). An access list replaces the dataset's, and
+// with it the dataset's IAM policy. The whole body is validated before
+// anything changes.
 func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	if err := refuseOptions(request.Query, "updateMode"); err != nil {
 		return nil, err
@@ -465,7 +476,7 @@ func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scop
 		if record == nil {
 			return datasetNotFound(scope.Project, dataset)
 		}
-		if err := patchDataset(record, body); err != nil {
+		if err := p.patchDataset(s, scope, record, body); err != nil {
 			return err
 		}
 		record.Labels = setLabels(record.Labels, body.Labels)
@@ -481,12 +492,29 @@ func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scop
 }
 
 // patchDataset checks a patch's location, which cannot change, and applies
-// its default expirations after checking both.
-func patchDataset(record *datasetRecord, body datasetBody) error {
+// its default expirations and its access list, which replaces the dataset's
+// IAM policy, after checking both. The caller holds the scope lock.
+func (p *Provider) patchDataset(s *scopeState, scope state.Scope, record *datasetRecord, body datasetBody) error {
 	if body.Location != "" && !strings.EqualFold(body.Location, record.Location) {
 		return failure(codes.InvalidArgument, reasonInvalid, "A dataset's location cannot change")
 	}
-	return body.defaults(record)
+	changed := *record
+	if err := body.defaults(&changed); err != nil {
+		return err
+	}
+	if body.Access != nil {
+		access, err := normalizeAccess(*body.Access, s.accessTarget(scope.Project, record.ID, record.Location))
+		if err != nil {
+			return err
+		}
+		if err := p.setDatasetPolicy(scope.Project, record.ID, access); err != nil {
+			return err
+		}
+		changed.Access = access
+	}
+	record.Access, record.DefaultTableExpirationMs, record.DefaultPartitionExpirationMs =
+		changed.Access, changed.DefaultTableExpirationMs, changed.DefaultPartitionExpirationMs
+	return nil
 }
 
 // datasetsDelete removes one dataset. A dataset with tables is refused unless

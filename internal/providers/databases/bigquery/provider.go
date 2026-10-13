@@ -534,8 +534,10 @@ const (
 )
 
 // datasetRecord is one stored BigQuery dataset. Patched records that a
-// patch ran: GCP then reports maxTimeTravelHours (recorded). The default
-// expirations are in milliseconds, 0 for none.
+// patch ran: GCP then reports maxTimeTravelHours (recorded). Access is the
+// dataset's access list; the provider owns it and derives the dataset's IAM
+// policy in the engine from its member entries. The default expirations are
+// in milliseconds, 0 for none.
 type datasetRecord struct {
 	ID                           string
 	Labels                       map[string]string
@@ -545,6 +547,7 @@ type datasetRecord struct {
 	CreatedAt                    time.Time
 	ModifiedAt                   time.Time
 	Patched                      bool
+	Access                       accessList
 	DefaultTableExpirationMs     int64
 	DefaultPartitionExpirationMs int64
 }

@@ -15,11 +15,13 @@ type tableName struct{ dataset, table string }
 
 // catalog is the planner's copy of the scope's datasets and tables. The
 // engine folds name case, so lookups do too; datasets or tables whose ids
-// differ only in case are refused at creation.
+// differ only in case are refused at creation. access holds each dataset's
+// access list, for authorized views.
 type catalog struct {
 	project  string
 	datasets map[string]string       // lowercased id -> id
 	tables   map[string]*tableRecord // lowercased dataset/table -> record
+	access   map[string]accessList   // lowercased id -> access list
 }
 
 func foldKey(dataset, table string) string {
@@ -178,7 +180,7 @@ func (p *planner) statement(script string, statement statementRefs) error {
 		if err := requireFilter(record, statement.targetFilter); err != nil {
 			return err
 		}
-		return p.readTable(target, 0)
+		return p.readTable(target, 0, nil)
 	case nodeCreateTable, nodeCreateView:
 		return p.create(script, statement, target, exists, reads)
 	case nodeDrop:
@@ -294,7 +296,7 @@ func (p *planner) read(path tablePath) ([]tableName, error) {
 		var names []tableName
 		for _, record := range p.catalog.looseMatches(path.parts) {
 			name := tableName{dataset: record.Dataset, table: record.ID}
-			if err := p.readTable(name, 0); err != nil {
+			if err := p.readTable(name, 0, nil); err != nil {
 				return nil, err
 			}
 			names = append(names, name)
@@ -308,7 +310,7 @@ func (p *planner) read(path tablePath) ([]tableName, error) {
 	if err := p.noteRead(path, name); err != nil {
 		return nil, err
 	}
-	return []tableName{name}, p.readTable(name, 0)
+	return []tableName{name}, p.readTable(name, 0, nil)
 }
 
 // noteRead records the table a path reads, or that it reads none, and
@@ -329,18 +331,23 @@ const maxViewDepth = 16
 
 // readTable checks bigquery.tables.getData on a table, and on every table a
 // view reads: querying a view needs access to its underlying tables (views
-// guide). Authorized views are not modeled.
-func (p *planner) readTable(name tableName, depth int) error {
+// guide), unless the table's dataset authorizes the view (via), by name or
+// through the view's dataset (authorized views and datasets; recorded:
+// bigquery-dataset-access). A view authorized that way reads under its own
+// authorizations in turn.
+func (p *planner) readTable(name tableName, depth int, via *tableName) error {
 	if depth > maxViewDepth {
 		return gap("views nested deeper than 16 levels")
 	}
 	record := p.catalog.tables[foldKey(name.dataset, name.table)]
-	p.check(checkQueryTable, name, record != nil)
+	if via == nil || !p.catalog.access[strings.ToLower(name.dataset)].authorizes(*via) {
+		p.check(checkQueryTable, name, record != nil)
+	}
 	if record == nil {
 		return nil
 	}
 	for _, ref := range record.ViewRefs {
-		if err := p.readTable(ref, depth+1); err != nil {
+		if err := p.readTable(ref, depth+1, &name); err != nil {
 			return err
 		}
 	}

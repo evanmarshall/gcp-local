@@ -647,14 +647,15 @@ func (t ddlTarget) replaces(record *tableRecord) bool {
 	return t.create && t.replace && record != nil
 }
 
-// catalogOf copies the scope's datasets and live tables for planning; an
-// expired table is gone.
+// catalogOf copies the scope's datasets, their access lists, and live tables
+// for planning; an expired table is gone.
 func (p *Provider) catalogOf(scope state.Scope) *catalog {
-	c := &catalog{project: scope.Project, datasets: map[string]string{}, tables: map[string]*tableRecord{}}
+	c := &catalog{project: scope.Project, datasets: map[string]string{}, tables: map[string]*tableRecord{}, access: map[string]accessList{}}
 	now := p.clock()
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for id := range s.datasets {
+		for id, record := range s.datasets {
 			c.datasets[strings.ToLower(id)] = id
+			c.access[strings.ToLower(id)] = record.Access.clone()
 		}
 		for _, record := range s.tables {
 			if !record.expired(now) {
@@ -667,13 +668,23 @@ func (p *Provider) catalogOf(scope state.Scope) *catalog {
 }
 
 // authorizeCheck runs one of a query's table checks; a denial names the
-// checked table or dataset.
+// checked table or dataset. A denied read of a table is GCP's query wording
+// (recorded: bigquery-dataset-access).
 func (p *Provider) authorizeCheck(call gateway.Call, project string, check tableCheck) error {
 	related := call
 	related.Method = check.method
 	related.Resource = check.resource
 	_, err := p.authorize(related, call.Method, project, check.resource)
-	return err
+	var refused *apiError
+	if check.method != checkQueryTable || !strings.Contains(check.resource, "/tables/") || !errors.As(err, &refused) ||
+		refused.status.Code() != codes.PermissionDenied {
+		return err
+	}
+	name := project + ":" + datasetOfResource(check.resource) + "." + provider.LastSegment(check.resource)
+	denial := refusal(codes.PermissionDenied, reasonAccessDenied,
+		"Access Denied: Table "+name+": User does not have permission to query table "+name+", or perhaps it does not exist.")
+	denial.decision = refused.decision
+	return denial
 }
 
 // ownJobCheck names the permission plan that authorizes a job read: a stored
@@ -839,13 +850,6 @@ const selfLink = "https://bigquery.googleapis.com/bigquery/v2/projects/"
 // etagOf renders a stable revision tag for one stored resource.
 func etagOf(moment time.Time) string {
 	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatInt(moment.UnixNano(), 36)))
-}
-
-// defaultAccess is the access list GCP attaches to a new dataset. Only the
-// field's presence is recorded; the entries are the documented defaults.
-func defaultAccess() []any {
-	entry := func(role, group string) any { return map[string]any{"role": role, "specialGroup": group} }
-	return []any{entry("WRITER", "projectWriters"), entry("OWNER", "projectOwners"), entry("READER", "projectReaders")}
 }
 
 // queryResponse renders a completed jobs.query result page; a dry run

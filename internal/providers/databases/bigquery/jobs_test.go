@@ -243,11 +243,11 @@ func TestJobsAuthorizeTheTable(t *testing.T) {
 	h.rows()
 	h.grantJobUsers()
 	denied := h.invokeAs("runner", http.MethodPost, testJobs, queryJob("denied", testSQL))
-	want(t, "query without table access", denied, 403, "bigquery.tables.getData")
+	want(t, "query without table access", denied, 403, "User does not have permission to query table demo-bq:demo_dataset.demo_table")
 	if denied.Header().Get(headerDecision) == "" {
 		t.Error("the table denial names no decision")
 	}
-	want(t, "jobs.query without table access", h.invokeAs("runner", http.MethodPost, testQueries, map[string]any{"query": testSQL}), 403, "bigquery.tables.getData")
+	want(t, "jobs.query without table access", h.invokeAs("runner", http.MethodPost, testQueries, map[string]any{"query": testSQL}), 403, "accessDenied")
 	h.expect(http.MethodGet, testJobs+"/denied", nil, 404)
 	want(t, "job user read of a missing job", h.invokeAs("runner", http.MethodGet, testJobs+"/denied", nil), 404, "Not found: Job demo-bq:US.denied")
 	want(t, "ungranted read of a missing job", h.invokeAs("stranger", http.MethodGet, testJobs+"/denied", nil), 403, "bigquery.jobs.create")
@@ -526,7 +526,7 @@ func TestQueryAuthorizesEveryTable(t *testing.T) {
 	}
 	for _, d := range denied {
 		recorder := h.queryAs("reader", d.sql, nil)
-		want(t, d.name, recorder, 403, "bigquery.tables.getData")
+		want(t, d.name, recorder, 403, "accessDenied")
 		want(t, d.name+" names the resource", recorder, 403, d.resource)
 	}
 	// A string that spells a node line forges nothing; the real read of
@@ -855,4 +855,154 @@ func TestLayoutDDLIsAGap(t *testing.T) {
 	want(t, "option gap names the option", h.queryAs(testToken, "CREATE TABLE "+ds+"r (d DATE) OPTIONS (require_partition_filter = TRUE)", nil), 501,
 		"DDL option require_partition_filter")
 	h.rowsAre("other options run", h.queryAs(testToken, "CREATE TABLE "+ds+"o (d DATE) OPTIONS (description = 'kept')", nil))
+}
+
+// addAccess appends entries to a dataset's access list with one patch.
+func (h *harness) addAccess(dataset string, entries ...any) *httptest.ResponseRecorder {
+	h.t.Helper()
+	current, _ := documentOf(h.t, h.expect(http.MethodGet, testDatasets+"/"+dataset, nil, 200))["access"].([]any)
+	return h.invoke(http.MethodPatch, testDatasets+"/"+dataset, map[string]any{"access": append(current, entries...)})
+}
+
+// TestDatasetAccess stores access entries as GCP returns them and evaluates
+// their members as the dataset's IAM policy, groups through the directory
+// (recorded: bigquery-dataset-access).
+func TestDatasetAccess(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	got := fmt.Sprint(documentOf(t, h.expect(http.MethodGet, testDatasets+"/shop", nil, 200))["access"])
+	if got != "[map[role:WRITER specialGroup:projectWriters] map[role:OWNER specialGroup:projectOwners] "+
+		"map[role:OWNER userByEmail:actor@demo-bq.iam.gserviceaccount.com] map[role:READER specialGroup:projectReaders]]" {
+		t.Fatalf("default access = %s", got)
+	}
+	viewer := "viewer@" + testProject + ".iam.gserviceaccount.com"
+	added := documentOf(t, h.addAccess("shop",
+		map[string]any{"role": "READER", "groupByEmail": testGroup},
+		map[string]any{"role": "roles/bigquery.dataEditor", "iamMember": "serviceAccount:" + viewer},
+		map[string]any{"role": "WRITER", "userByEmail": viewer},
+		map[string]any{"role": "READER", "domain": "example.com"},
+	))
+	if got := fmt.Sprint(added["access"]); got != "[map[role:WRITER specialGroup:projectWriters] map[role:WRITER userByEmail:"+viewer+"] "+
+		"map[role:OWNER specialGroup:projectOwners] map[role:OWNER userByEmail:actor@demo-bq.iam.gserviceaccount.com] "+
+		"map[domain:example.com role:READER] map[groupByEmail:"+testGroup+" role:READER] map[role:READER specialGroup:projectReaders]]" {
+		t.Fatalf("access after the patch = %s", got)
+	}
+	want(t, "viewer reads shop", h.invokeAs("viewer", http.MethodGet, testDatasets+"/shop/tables/people/data", nil), 200, "ada")
+	want(t, "viewer denied vault", h.invokeAs("viewer", http.MethodGet, testDatasets+"/vault/tables/secrets/data", nil), 403, "accessDenied")
+	h.expect(http.MethodPatch, testDatasets+"/shop", map[string]any{"friendlyName": "kept"}, 200)
+	want(t, "viewer reads shop", h.invokeAs("viewer", http.MethodGet, testDatasets+"/shop/tables/people/data", nil), 200, "ada")
+	want(t, "dataset IAM stays allowlisted", h.invoke(http.MethodPost, testDatasets+"/shop:getIamPolicy", map[string]any{}), 400, "This feature requires allowlisting.")
+
+	refused := func(step string, entry map[string]any, code int, message string) {
+		t.Helper()
+		want(t, step, h.addAccess("shop", entry), code, message)
+	}
+	refused("missing view", map[string]any{"view": map[string]any{"projectId": testProject, "datasetId": "vault", "tableId": "absent"}},
+		400, "View demo-bq:vault.absent to authorize not found in location US.")
+	refused("table as view", map[string]any{"view": map[string]any{"datasetId": "vault", "tableId": "secrets"}}, 400, "to authorize not found")
+	refused("missing group", map[string]any{"role": "READER", "groupByEmail": "absent@example.com"},
+		400, "IAM setPolicy failed for Dataset demo-bq:shop: Group absent@example.com does not exist.")
+	refused("unknown role", map[string]any{"role": "READ", "specialGroup": "projectReaders"},
+		400, `IAM setPolicy failed for Dataset demo-bq:shop: The role name must be in the form \"roles/{role}\"`)
+	refused("role-less", map[string]any{"userByEmail": viewer}, 400, "Invalid or missing role")
+	refused("two members", map[string]any{"role": "READER", "userByEmail": viewer, "domain": "example.com"}, 400, "exactly one member")
+	refused("bad special group", map[string]any{"role": "READER", "specialGroup": "everyone"}, 400, "Invalid special group: everyone")
+	refused("cross-project view", map[string]any{"view": map[string]any{"projectId": "other", "datasetId": "d", "tableId": "v"}},
+		501, "BigQuery coverage gap: authorized views in other projects")
+	refused("unpinned role", map[string]any{"role": "roles/bigquery.metadataViewer", "userByEmail": viewer}, 501, "outside the pinned supported role set")
+	want(t, "viewer reads shop", h.invokeAs("viewer", http.MethodGet, testDatasets+"/shop/tables/people/data", nil), 200, "ada")
+
+	// A dataset created with an access list takes it as given.
+	created := documentOf(t, h.invoke(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": "given"},
+		"access": []any{map[string]any{"role": "OWNER", "userByEmail": "actor@demo-bq.iam.gserviceaccount.com"}}}))
+	if got := fmt.Sprint(created["access"]); got != "[map[role:OWNER userByEmail:actor@demo-bq.iam.gserviceaccount.com]]" {
+		t.Fatalf("given access = %s", got)
+	}
+	want(t, "refused create", h.invoke(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": "refused"},
+		"access": []any{map[string]any{"role": "READER", "groupByEmail": "absent@example.com"}}}), 400, "Group absent@example.com does not exist.")
+	h.expect(http.MethodGet, testDatasets+"/refused", nil, 404)
+}
+
+// TestAuthorizedViews lets a view listed in a source dataset's access, or
+// any view of a dataset listed there, read the source for a caller who can
+// query the view but not the source (recorded: bigquery-dataset-access).
+func TestAuthorizedViews(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	for _, sql := range []string{
+		"CREATE VIEW shop.leak AS SELECT code FROM vault.secrets",
+		"CREATE VIEW shop.leak2 AS SELECT UPPER(code) AS code FROM vault.secrets",
+	} {
+		h.expect(http.MethodPost, testQueries, map[string]any{"query": sql}, 200)
+	}
+	if err := h.engineSet(iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/bigquery.dataOwner", Members: []string{testActor}},
+		{Role: "roles/bigquery.jobUser", Members: []string{testActor, account("viewer"), account("stranger")}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	denied := "User does not have permission to query table demo-bq:"
+	want(t, "no view access", h.queryAs("viewer", "SELECT code FROM shop.leak", nil), 403, denied+"shop.leak")
+	h.expect(http.MethodPatch, testDatasets+"/shop", map[string]any{"access": []any{
+		map[string]any{"role": "OWNER", "userByEmail": "actor@demo-bq.iam.gserviceaccount.com"},
+		map[string]any{"role": "READER", "groupByEmail": testGroup},
+	}}, 200)
+	want(t, "view not authorized", h.queryAs("viewer", "SELECT code FROM shop.leak", nil), 403, denied+"vault.secrets")
+	added := documentOf(t, h.addAccess("vault", map[string]any{"view": map[string]any{"projectId": testProject, "datasetId": "shop", "tableId": "leak"}}))
+	if got := fmt.Sprint(pick(added, "access", 4)); got != "map[view:map[datasetId:shop projectId:demo-bq tableId:leak]]" {
+		t.Fatalf("view entry = %s (%v)", got, added["access"])
+	}
+	h.rowsAre("authorized view", h.queryAs("viewer", "SELECT code FROM shop.leak", nil), "s3cret")
+	want(t, "other view", h.queryAs("viewer", "SELECT code FROM shop.leak2", nil), 403, denied+"vault.secrets")
+	want(t, "source query", h.queryAs("viewer", "SELECT code FROM vault.secrets", nil), 403, denied+"vault.secrets")
+	want(t, "view and source", h.queryAs("viewer", "SELECT l.code FROM shop.leak l JOIN vault.secrets s USING (code)", nil), 403, denied+"vault.secrets")
+	want(t, "source rows", h.invokeAs("viewer", http.MethodGet, testDatasets+"/vault/tables/secrets/data", nil), 403,
+		"Permission bigquery.tables.getData denied on table demo-bq:vault.secrets")
+	want(t, "stranger", h.queryAs("stranger", "SELECT code FROM shop.leak", nil), 403, denied+"shop.leak")
+
+	h.addAccess("vault", map[string]any{"dataset": map[string]any{"dataset": map[string]any{"projectId": testProject, "datasetId": "shop"},
+		"targetTypes": []string{"VIEWS"}}})
+	h.rowsAre("authorized dataset", h.queryAs("viewer", "SELECT code FROM shop.leak2", nil), "S3CRET")
+	want(t, "missing dataset", h.addAccess("vault", map[string]any{"dataset": map[string]any{"dataset": map[string]any{"datasetId": "absent"}}}),
+		400, "Dataset demo-bq:absent to authorize not found in location US.")
+
+	// A view in the source dataset reads under its own dataset's access.
+	h.expect(http.MethodPost, testQueries, map[string]any{"query": "CREATE VIEW shop.nested AS SELECT code FROM shop.leak"}, 200)
+	h.rowsAre("nested authorized view", h.queryAs("viewer", "SELECT code FROM shop.nested", nil), "s3cret")
+}
+
+// TestAccessStaysInItsProject keeps an access list, and the views it
+// authorizes, to its own project.
+func TestAccessStaysInItsProject(t *testing.T) {
+	h := newHarness(t)
+	peer := "/bigquery/v2/projects/" + testPeerProject
+	for _, base := range []string{testDatasets, peer + "/datasets"} {
+		for _, dataset := range []string{"shop", "vault"} {
+			h.expect(http.MethodPost, base, map[string]any{"datasetReference": map[string]any{"datasetId": dataset}}, 200)
+		}
+	}
+	for _, base := range []string{"/bigquery/v2/projects/" + testProject, peer} {
+		for _, sql := range []string{"CREATE TABLE vault.secrets AS SELECT 's3cret' AS code", "CREATE VIEW shop.leak AS SELECT code FROM vault.secrets"} {
+			h.expect(http.MethodPost, base+"/queries", map[string]any{"query": sql}, 200)
+		}
+	}
+	h.addAccess("vault", map[string]any{"view": map[string]any{"datasetId": "shop", "tableId": "leak"}})
+	peerAccess := fmt.Sprint(documentOf(t, h.expect(http.MethodGet, peer+"/datasets/vault", nil, 200))["access"])
+	if strings.Contains(peerAccess, "leak") {
+		t.Fatalf("the peer dataset took the access entry: %s", peerAccess)
+	}
+	for _, base := range []string{testDatasets, peer + "/datasets"} {
+		h.expect(http.MethodPatch, base+"/shop", map[string]any{"access": []any{map[string]any{"role": "READER", "groupByEmail": testGroup}}}, 200)
+	}
+	if _, err := h.engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/"+testPeerProject, iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/bigquery.jobUser", Members: []string{account("viewer")}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.engineSet(iam.Policy{Bindings: []iam.Binding{{Role: "roles/bigquery.jobUser", Members: []string{account("viewer")}}}}); err != nil {
+		t.Fatal(err)
+	}
+	h.rowsAre("authorized in its project", h.queryAs("viewer", "SELECT code FROM shop.leak", nil), "s3cret")
+	want(t, "not in the peer project", h.invokeAs("viewer", http.MethodPost, peer+"/queries", map[string]any{"query": "SELECT code FROM shop.leak"}),
+		403, "User does not have permission to query table "+testPeerProject+":vault.secrets")
 }
