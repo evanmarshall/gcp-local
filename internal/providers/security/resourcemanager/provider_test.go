@@ -209,11 +209,6 @@ func TestProjectPolicyRoundTrip(t *testing.T) {
 	if recorder.Code != 400 || !strings.Contains(recorder.Body.String(), `Unknown name \"bogus\" at 'policy'`) {
 		t.Fatalf("unknown policy field = %d %s", recorder.Code, recorder.Body.String())
 	}
-	recorder = h.post(testBase+":setIamPolicy", map[string]any{"policy": map[string]any{
-		"auditConfigs": []any{map[string]any{"service": "allServices"}}}})
-	if recorder.Code != 501 || !strings.Contains(recorder.Body.String(), "policy.auditConfigs is not modeled") {
-		t.Fatalf("audit configs = %d %s", recorder.Code, recorder.Body.String())
-	}
 }
 
 // at follows a path through decoded JSON: a string indexes an object and an

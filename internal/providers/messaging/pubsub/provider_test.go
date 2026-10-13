@@ -462,7 +462,7 @@ func TestIAMPolicyRequestsAreValidated(t *testing.T) {
 		{"project mismatch", owner, foreignTopic, getIAM, &iampb.GetIamPolicyRequest{Resource: foreignTopic}, codes.InvalidArgument},
 		{"non-proto", owner, testTopic, getIAM, "raw", codes.InvalidArgument},
 		{"foreign request type", owner, testTopic, getIAM, &pb.Topic{Name: testTopic}, codes.Unimplemented},
-		{"version two", owner, testTopic, getIAM, &iampb.GetIamPolicyRequest{Resource: testTopic, Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 2}}, codes.Unimplemented},
+		{"version seven", owner, testTopic, getIAM, &iampb.GetIamPolicyRequest{Resource: testTopic, Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 7}}, codes.InvalidArgument},
 		{"update mask", owner, testTopic, setIAM, &iampb.SetIamPolicyRequest{Resource: testTopic, Policy: &iampb.Policy{Bindings: binding}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"bindings"}}}, codes.Unimplemented},
 		{"missing policy", owner, testTopic, setIAM, &iampb.SetIamPolicyRequest{Resource: testTopic}, codes.InvalidArgument},
 		{"nil binding", owner, testTopic, setIAM, &iampb.SetIamPolicyRequest{Resource: testTopic, Policy: &iampb.Policy{Bindings: []*iampb.Binding{nil}}}, codes.InvalidArgument},

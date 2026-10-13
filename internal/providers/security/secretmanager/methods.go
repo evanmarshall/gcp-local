@@ -144,7 +144,7 @@ func (p *Provider) executeSecret(call gateway.Call, request *gateway.RESTRequest
 	case methodSecretsDelete:
 		return p.delete(request, scope, s, record)
 	case methodSecretsGetIam:
-		return p.getIam(scope, record)
+		return p.getIam(request, scope, record)
 	default:
 		return p.setIam(request, scope, record)
 	}
@@ -532,13 +532,17 @@ func (p *Provider) delete(request *gateway.RESTRequest, scope state.Scope, s *sc
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
 
-// getIam returns the stored secret policy.
-func (p *Provider) getIam(scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
+// getIam returns the stored secret policy at the requested policy version.
+func (p *Provider) getIam(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
+	version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
+	}
 	policy, err := p.engine.GetPolicy(secretResource(scope.Project, record.Name))
 	if err != nil {
 		return nil, fmt.Errorf("read secret policy: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return &gateway.RESTResponse{JSON: policy.View(version)}, nil
 }
 
 // setIam stores one secret policy; conditional bindings need version 3.

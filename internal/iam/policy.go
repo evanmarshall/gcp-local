@@ -1,7 +1,9 @@
 package iam
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -27,9 +29,24 @@ type Policy struct {
 	Version   int        `json:"version"`
 	Bindings  []Binding  `json:"bindings"`
 	DenyRules []DenyRule `json:"denyRules,omitempty"`
+	// AuditConfigs are stored and returned on projects, folders, and
+	// organizations. They aren't enforced: no audit logs are written.
+	AuditConfigs []AuditConfig `json:"auditConfigs,omitempty"`
 	// PAB is the principal access boundary policy attached to this resource.
 	PAB  *PABPolicy `json:"principalAccessBoundary,omitempty"`
 	ETag string     `json:"etag"`
+}
+
+// AuditConfig is one service's audit logging configuration in an allow policy.
+type AuditConfig struct {
+	Service         string           `json:"service"`
+	AuditLogConfigs []AuditLogConfig `json:"auditLogConfigs,omitempty"`
+}
+
+// AuditLogConfig enables one log type, minus its exempted members.
+type AuditLogConfig struct {
+	LogType         string   `json:"logType"`
+	ExemptedMembers []string `json:"exemptedMembers,omitempty"`
 }
 
 // PABPolicy bounds the resources the principal set of the resource-manager
@@ -81,6 +98,15 @@ func clonePolicy(p Policy) Policy {
 		result.Bindings[i].Members = append([]string(nil), binding.Members...)
 		result.Bindings[i].Condition = append(json.RawMessage(nil), binding.Condition...)
 	}
+	if p.AuditConfigs != nil {
+		result.AuditConfigs = make([]AuditConfig, len(p.AuditConfigs))
+		for i, config := range p.AuditConfigs {
+			result.AuditConfigs[i] = AuditConfig{Service: config.Service, AuditLogConfigs: make([]AuditLogConfig, len(config.AuditLogConfigs))}
+			for j, log := range config.AuditLogConfigs {
+				result.AuditConfigs[i].AuditLogConfigs[j] = AuditLogConfig{LogType: log.LogType, ExemptedMembers: append([]string(nil), log.ExemptedMembers...)}
+			}
+		}
+	}
 	return result
 }
 func emptyPolicy() Policy { return Policy{Version: 1, Bindings: []Binding{}, ETag: "MA=="} }
@@ -118,8 +144,8 @@ func (e *Engine) setPolicy(decisionID, resource string, policy Policy) (Policy, 
 	if err := validatePolicyShape(policy); err != nil {
 		return Policy{}, err
 	}
-	if policy.PAB != nil && (owner.Service != "resourcemanager" || owner.Kind == "") {
-		return Policy{}, status.Error(codes.InvalidArgument, "A principal access boundary binds only to a project, folder, or organization principal set")
+	if err := checkPlacement(owner, policy); err != nil {
+		return Policy{}, err
 	}
 	e.mu.Lock()
 	directory, lookup := e.directory, e.customRoles
@@ -128,6 +154,9 @@ func (e *Engine) setPolicy(decisionID, resource string, policy Policy) (Policy, 
 		previous = clonePolicy(stored.policy)
 	}
 	e.mu.Unlock()
+	if err := checkConditionalWrite(previous, policy); err != nil {
+		return Policy{}, err
+	}
 	denies, err := e.compileDenies(policy.DenyRules, directory)
 	if err != nil {
 		return Policy{}, err
@@ -136,10 +165,38 @@ func (e *Engine) setPolicy(decisionID, resource string, policy Policy) (Policy, 
 	if err != nil {
 		return Policy{}, err
 	}
+	if err := checkAuditConfigs(policy.AuditConfigs, directory); err != nil {
+		return Policy{}, err
+	}
 	if err := e.checkMemberDomains(decisionID, resource, previous, policy); err != nil {
 		return Policy{}, err
 	}
 	return e.storePolicy(resource, owner, policy, conditions, denies)
+}
+
+// checkPlacement refuses the policy parts only resource-manager nodes hold: a
+// principal access boundary (projects, folders, organizations) and audit
+// configs, which are stored there and not modeled elsewhere.
+func checkPlacement(owner state.Resource, policy Policy) error {
+	node := owner.Service == "resourcemanager"
+	if policy.PAB != nil && (!node || owner.Kind == "") {
+		return status.Error(codes.InvalidArgument, "A principal access boundary binds only to a project, folder, or organization principal set")
+	}
+	if len(policy.AuditConfigs) > 0 && !node {
+		return status.Error(codes.Unimplemented, "Audit configs on a "+owner.Service+" resource policy are not modeled")
+	}
+	return nil
+}
+
+// checkConditionalWrite refuses a write below version 3 to a policy with a
+// conditional binding; only a write without an etag may replace it blindly
+// (Policy.version reference; recorded: project-iam-policy-versions).
+func checkConditionalWrite(previous, policy Policy) error {
+	if policy.ETag != "" && policy.Version < 3 && previous.View(3).Version == 3 {
+		return status.Errorf(codes.InvalidArgument, "Specified policy version (%d) must be at least 3 based on the policy's contents. "+
+			"For more information, please refer to https://cloud.google.com/iam/help/allow-policies/versions.", max(policy.Version, 1))
+	}
+	return nil
 }
 
 // validatePolicyShape checks the version, version-gated features, deny rule
@@ -472,9 +529,9 @@ func (e *Engine) ClearScope(owner string, scope state.Scope) {
 }
 
 // Wire renders a policy as GCP returns it: a policy without bindings, deny
-// rules, or a boundary reads back as only its etag.
+// rules, audit configs, or a boundary reads back as only its etag.
 func (p Policy) Wire() any {
-	if len(p.Bindings) == 0 && len(p.DenyRules) == 0 && p.PAB == nil {
+	if len(p.Bindings) == 0 && len(p.DenyRules) == 0 && len(p.AuditConfigs) == 0 && p.PAB == nil {
 		return map[string]any{"etag": p.ETag}
 	}
 	return p
@@ -820,3 +877,57 @@ func (e *Engine) localAccount(email string) bool {
 // managedAccountNumber reads the project number from a Google-managed
 // account's local part.
 var managedAccountNumber = regexp.MustCompile(`^(?:service-)?([0-9]+)(?:-compute)?$`)
+
+// auditLogTypes are the AuditLogConfig log types a policy may enable.
+var auditLogTypes = map[string]bool{"ADMIN_READ": true, "DATA_WRITE": true, "DATA_READ": true}
+
+// checkAuditConfigs validates each audit config's service, log types, and
+// exempted members, as GCP refuses a malformed one.
+func checkAuditConfigs(configs []AuditConfig, directory directory) error {
+	for _, config := range configs {
+		if config.Service == "" {
+			return status.Error(codes.InvalidArgument, "An audit config requires a service")
+		}
+		for _, log := range config.AuditLogConfigs {
+			if !auditLogTypes[log.LogType] {
+				return status.Errorf(codes.InvalidArgument, "Invalid audit log type %q", log.LogType)
+			}
+			for _, member := range log.ExemptedMembers {
+				if err := checkMember(member, directory); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// View renders a stored policy as getIamPolicy returns it for a requested
+// version; anything below 3 reads as 1 (https://cloud.google.com/iam/docs/policies#versions,
+// recorded: project-iam-policy-versions).
+// The version is 3 only for a policy with a conditional binding read at
+// version 3. Read at a lower version, each conditional binding loses its
+// condition and its role gains "_withcond_" and an opaque hash of the
+// condition, so a version-1 client never mistakes it for an unconditional
+// grant.
+func (p Policy) View(requested int) Policy {
+	view := clonePolicy(p)
+	view.Version = 1
+	for i, binding := range view.Bindings {
+		if len(binding.Condition) == 0 {
+			continue
+		}
+		if requested >= 3 {
+			view.Version = 3
+			continue
+		}
+		digest := sha256.Sum256(binding.Condition)
+		view.Bindings[i].Role += "_withcond_" + hex.EncodeToString(digest[:])[:withcondLength]
+		view.Bindings[i].Condition = nil
+	}
+	return view
+}
+
+// withcondLength is the length of the hash a version-1 read appends to a
+// conditional binding's role.
+const withcondLength = 20

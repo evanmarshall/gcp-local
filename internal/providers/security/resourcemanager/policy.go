@@ -19,13 +19,13 @@ type getPolicyBody struct {
 	} `json:"options"`
 }
 
-// setPolicyBody is a SetIamPolicyRequest body. Audit configs aren't modeled.
+// setPolicyBody is a SetIamPolicyRequest body.
 type setPolicyBody struct {
 	Policy     iam.Policy `json:"policy"`
 	UpdateMask string     `json:"updateMask"`
 }
 
-var setPolicyFields = provider.Fields{Unmodeled: []string{"policy.auditConfigs"}}
+var setPolicyFields = provider.Fields{}
 
 // decodePolicyRequest strictly decodes a get or set policy body. set reports
 // a set, whose policy it returns.

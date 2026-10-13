@@ -183,10 +183,11 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 			return nil, status.Errorf(codes.NotFound, "Resource not found: %s", addressed(request.Path))
 		}
 		if call.Method == methodInstancesGetIam || call.Method == methodDatabasesGetIam {
-			if err := provider.DecodeProto(request.JSON, "", &iampb.GetIamPolicyRequest{}, gap); err != nil {
-				return nil, err
+			version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+			if err != nil {
+				return nil, err //nolint:wrapcheck // wire statuses
 			}
-			return p.getIam(target)
+			return p.getIam(target, version)
 		}
 		return p.setIam(request, target)
 	default:
@@ -194,13 +195,14 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	}
 }
 
-// getIam returns the stored policy of an instance or database.
-func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
+// getIam returns the stored policy of an instance or database at the
+// requested policy version.
+func (p *Provider) getIam(target iam.Target, version int) (*gateway.RESTResponse, error) {
 	policy, err := p.engine.GetPolicy(target.Name)
 	if err != nil {
 		return nil, fmt.Errorf("read the Spanner policy: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
+	return &gateway.RESTResponse{JSON: policy.View(version).Wire()}, nil
 }
 
 // setIam stores the policy of an instance or database. The body is a

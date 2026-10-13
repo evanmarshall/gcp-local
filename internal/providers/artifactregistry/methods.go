@@ -359,13 +359,17 @@ func (p *Provider) repositoriesDelete(scope state.Scope, repository string) (*ga
 	})
 }
 
-// getIam returns the stored policy.
-func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
+// getIam returns the stored policy at the requested policy version.
+func (p *Provider) getIam(request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
+	version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
+	}
 	policy, err := p.engine.GetPolicy(target.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the Artifact Registry policy: %v", err)
 	}
-	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
+	return &gateway.RESTResponse{JSON: policy.View(version).Wire()}, nil
 }
 
 // decodePolicy reads a SetIamPolicyRequest strictly. Repository policies

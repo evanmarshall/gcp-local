@@ -150,7 +150,7 @@ func (p *Provider) executeService(call gateway.Call, request *gateway.RESTReques
 	case methodServicesDelete:
 		return p.delete(call, scope, id)
 	case methodServicesGetIam:
-		return p.getIam(scope, id)
+		return p.getIam(request, scope, id)
 	case methodServicesSetIam:
 		return p.setIam(request, scope, id)
 	default:
@@ -1031,20 +1031,24 @@ func (p *Provider) delete(call gateway.Call, scope state.Scope, id string) (*gat
 	return p.deleted(scope, wireName(scope, "services", id), typeService, snapshot)
 }
 
-// getIam returns the stored service policy.
-func (p *Provider) getIam(scope state.Scope, id string) (*gateway.RESTResponse, error) {
+// getIam returns the stored service policy at the requested policy version.
+func (p *Provider) getIam(request *gateway.RESTRequest, scope state.Scope, id string) (*gateway.RESTResponse, error) {
+	version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
+	}
 	var policy iam.Policy
 	if err := p.withService(scope, id, func(*scopeState, *serviceRecord) error {
-		var err error
-		policy, err = p.engine.GetPolicy(serviceResource(scope.Project, scope.Location, id))
-		if err != nil {
-			return fmt.Errorf("read service policy: %w", err)
+		var readErr error
+		policy, readErr = p.engine.GetPolicy(serviceResource(scope.Project, scope.Location, id))
+		if readErr != nil {
+			return fmt.Errorf("read service policy: %w", readErr)
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
+	return &gateway.RESTResponse{JSON: policy.View(version).Wire()}, nil
 }
 
 // setIam stores a service policy, conditional bindings included (recording

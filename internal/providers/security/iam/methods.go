@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/iam/admin/apiv1/adminpb"
-	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/iam/orgpolicy"
@@ -628,17 +627,18 @@ func userKeyID(record *accountRecord, keyID string) string {
 	return "projects/" + record.Project + "/serviceAccounts/" + record.ID + "/keys/" + keyID
 }
 
-// getIam returns the stored policy of the account. The body is a
-// GetIamPolicyRequest; every requested policy version reads the stored policy.
+// getIam returns the stored policy of the account at the requested policy
+// version. The body is a GetIamPolicyRequest.
 func (p *Provider) getIam(request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
-	if err := provider.DecodeProto(request.JSON, "", &iampb.GetIamPolicyRequest{}, gap); err != nil {
-		return nil, err
+	version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
 	}
 	policy, err := p.engine.GetPolicy(target.Name)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read the IAM policy: %v", err)
 	}
-	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
+	return &gateway.RESTResponse{JSON: policy.View(version).Wire()}, nil
 }
 
 // setIam stores the policy of the account. A member outside the permitted

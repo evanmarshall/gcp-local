@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
+	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -620,4 +621,35 @@ func ApplyMask[M proto.Message](current, update M, paths [][]protoreflect.FieldD
 		}
 	}
 	return merged
+}
+
+// PolicyVersion checks a getIamPolicy request's requested policy version.
+// GCP refuses one above 3 and reads any other below 3, 2 and negative
+// included, as version 1 (recorded: project-iam-policy-versions,
+// compute-lists-operations-iam).
+func PolicyVersion(version int) error {
+	if version > 3 {
+		return Invalid(fmt.Sprintf("Invalid requested policy version %d", version))
+	}
+	return nil
+}
+
+// RequestedPolicyVersion reads and checks a getIamPolicy request's requested
+// policy version: the query parameter param on a GET (options.requestedPolicyVersion,
+// or Compute's optionsRequestedPolicyVersion), else the body, a
+// google.iam.v1.GetIamPolicyRequest decoded strictly. Absent is 0.
+func RequestedPolicyVersion(request *gateway.RESTRequest, param string, gap func(string) error) (int, error) {
+	if text := request.Query.Get(param); text != "" {
+		version, err := strconv.Atoi(text)
+		if err != nil {
+			return 0, FieldViolation("options.requested_policy_version", "Invalid value at 'options.requested_policy_version' (TYPE_INT32), "+strconv.Quote(text))
+		}
+		return version, PolicyVersion(version)
+	}
+	var get iampb.GetIamPolicyRequest
+	if err := DecodeProto(request.JSON, "", &get, gap); err != nil {
+		return 0, err
+	}
+	version := int(get.GetOptions().GetRequestedPolicyVersion())
+	return version, PolicyVersion(version)
 }

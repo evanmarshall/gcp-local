@@ -695,11 +695,15 @@ func (p *Provider) tableIam(call gateway.Call, request *gateway.RESTRequest, sco
 	}
 	resource := tableResource(scope.Project, dataset, table)
 	if call.Method == methodTablesGetIam {
+		version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+		if err != nil {
+			return nil, err //nolint:wrapcheck // wire statuses
+		}
 		policy, err := p.engine.GetPolicy(resource)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "read the table policy: %v", err)
 		}
-		return &gateway.RESTResponse{JSON: policy.Wire()}, nil
+		return &gateway.RESTResponse{JSON: policy.View(version).Wire()}, nil
 	}
 	policy, err := decodeTablePolicy(request.JSON)
 	if err != nil {

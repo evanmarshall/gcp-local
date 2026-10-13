@@ -158,7 +158,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		err := p.withRepository(scope, repository, func(*scopeState, *repositoryRecord) error {
 			var policyErr error
 			if call.Method == methodReposGetIam {
-				response, policyErr = p.getIam(target)
+				response, policyErr = p.getIam(request, target)
 			} else {
 				response, policyErr = p.setIam(request, target)
 			}

@@ -35,7 +35,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		methodTableOpDelete, methodTableOpCancel:
 		return p.operationMethod(call.Method, request, scope)
 	case methodInstancesGetIam, methodTablesGetIam:
-		return p.policy(call, request, scope, target, p.engine.GetPolicy)
+		return p.getPolicy(call, request, scope, target)
 	case methodInstancesSetIam, methodTablesSetIam:
 		var envelope struct {
 			Policy iam.Policy `json:"policy"`
@@ -49,6 +49,18 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	default:
 		return p.mutate(call, request, scope)
 	}
+}
+
+// getPolicy reads the instance's or table's policy at the requested version.
+func (p *Provider) getPolicy(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
+	version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
+	}
+	return p.policy(call, request, scope, target, func(name string) (iam.Policy, error) {
+		policy, err := p.engine.GetPolicy(name)
+		return policy.View(version), err
+	})
 }
 
 // policy checks the instance (and, for a table method, the published table)

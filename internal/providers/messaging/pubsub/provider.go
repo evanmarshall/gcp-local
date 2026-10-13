@@ -990,8 +990,9 @@ func (p *Provider) policyUpdate(call *gateway.Call, request proto.Message) (*iam
 	}
 }
 
-// validatePolicyOptions accepts only policy version 1, which is what the
-// emulator's conditional-policy gap already excludes.
+// validatePolicyOptions checks the requested policy version. Any valid
+// version reads the same policy: no Pub/Sub policy holds a condition
+// (recorded: pubsub-rest-data-plane).
 func validatePolicyOptions(options *iampb.GetPolicyOptions) error {
 	if options == nil {
 		return nil
@@ -999,10 +1000,7 @@ func validatePolicyOptions(options *iampb.GetPolicyOptions) error {
 	if err := validation.Fields(options, "requested_policy_version"); err != nil {
 		return err
 	}
-	if version := options.GetRequestedPolicyVersion(); version != 0 && version != 1 && version != 3 {
-		return gap("requested IAM policy version")
-	}
-	return nil
+	return provider.PolicyVersion(int(options.GetRequestedPolicyVersion())) //nolint:wrapcheck // a wire status
 }
 
 // decodeSetPolicy converts the wire policy into the engine representation.

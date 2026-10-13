@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	taskspb "cloud.google.com/go/cloudtasks/apiv2beta3/cloudtaskspb"
-	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
@@ -295,12 +294,16 @@ func (p *Provider) purgeQueue(request *gateway.RESTRequest, scope state.Scope) (
 	return response, err
 }
 
-// getQueueIam reads the queue's policy.
+// getQueueIam reads the queue's policy at the requested policy version.
 func (p *Provider) getQueueIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	if err := decodeRequest(request.JSON, &iampb.GetIamPolicyRequest{}); err != nil {
-		return nil, err
+	version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
 	}
-	return p.queuePolicy(call, request, scope, p.engine.GetPolicy)
+	return p.queuePolicy(call, request, scope, func(name string) (iam.Policy, error) {
+		policy, err := p.engine.GetPolicy(name)
+		return policy.View(version), err
+	})
 }
 
 // setQueueIam stores one queue policy. Queues refuse conditional bindings,

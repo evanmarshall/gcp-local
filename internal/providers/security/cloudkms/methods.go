@@ -577,24 +577,29 @@ func decodeBody(raw []byte, target any) error {
 }
 
 // ringGetIam, ringSetIam, keyGetIam, and keySetIam serve resource policies.
-func (p *Provider) ringGetIam(_ *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
-	return p.getIam(resource.ringResource(), "KeyRing", resource.ringName())
+func (p *Provider) ringGetIam(request *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return p.getIam(request, resource.ringResource(), "KeyRing", resource.ringName())
 }
 
 func (p *Provider) ringSetIam(request *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	return p.setIam(request, resource.ringResource(), "KeyRing", resource.ringName())
 }
 
-func (p *Provider) keyGetIam(_ *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
-	return p.getIam(resource.keyResource(), "CryptoKey", resource.keyName())
+func (p *Provider) keyGetIam(request *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return p.getIam(request, resource.keyResource(), "CryptoKey", resource.keyName())
 }
 
 func (p *Provider) keySetIam(request *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	return p.setIam(request, resource.keyResource(), "CryptoKey", resource.keyName())
 }
 
-// getIam returns one resource's policy; an empty policy renders as its etag.
-func (p *Provider) getIam(indexed, kind, name string) (*gateway.RESTResponse, error) {
+// getIam returns one resource's policy at the requested policy version; an
+// empty policy renders as its etag.
+func (p *Provider) getIam(request *gateway.RESTRequest, indexed, kind, name string) (*gateway.RESTResponse, error) {
+	version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
+	}
 	if _, ok := p.index.Get(indexed); !ok {
 		return nil, notFound(kind, name)
 	}
@@ -602,7 +607,7 @@ func (p *Provider) getIam(indexed, kind, name string) (*gateway.RESTResponse, er
 	if err != nil {
 		return nil, fmt.Errorf("read KMS policy: %w", err)
 	}
-	return respond(policy.Wire())
+	return respond(policy.View(version).Wire())
 }
 
 // setIam stores one resource's policy.

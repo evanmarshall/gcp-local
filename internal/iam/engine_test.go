@@ -1011,3 +1011,73 @@ func TestPermittedThroughAncestry(t *testing.T) {
 		t.Fatalf("unindexed target = %v", err)
 	}
 }
+
+func TestPolicyViewByRequestedVersion(t *testing.T) {
+	engine, _ := setup(t)
+	condition := json.RawMessage(`{"title":"t","expression":"request.time < timestamp(\"2100-01-01T00:00:00Z\")"}`)
+	stored, err := engine.SetPolicy(projectA, iam.Policy{Version: 3, Bindings: []iam.Binding{
+		{Role: "roles/storage.admin", Members: []string{fixture}},
+		{Role: testViewerRole, Members: []string{allowed}, Condition: condition},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v3 := stored.View(3); v3.Version != 3 || v3.Bindings[1].Role != testViewerRole || len(v3.Bindings[1].Condition) == 0 {
+		t.Fatalf("v3 view = %+v", v3)
+	}
+	for _, requested := range []int{-1, 0, 1, 2} {
+		expectWithcond(t, stored.View(requested))
+	}
+	if len(stored.Bindings[1].Condition) == 0 || stored.Bindings[1].Role != testViewerRole {
+		t.Fatal("View changed the stored policy")
+	}
+	if _, err := engine.SetPolicy(projectA, iam.Policy{Version: 1, ETag: stored.ETag, Bindings: stored.Bindings[:1]}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("version-1 write over a condition = %v", err)
+	}
+}
+
+func TestUnconditionalPolicyReadsAsVersionOne(t *testing.T) {
+	engine, _ := setup(t)
+	plain, err := engine.SetPolicy(projectB, iam.Policy{Version: 3, Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{peer}}}})
+	if err != nil || plain.View(3).Version != 1 {
+		t.Fatalf("unconditional policy read at v3 = %+v %v", plain.View(3), err)
+	}
+}
+
+// expectWithcond requires a version-1 view of the conditional policy.
+func expectWithcond(t *testing.T, view iam.Policy) {
+	t.Helper()
+	role, hash, found := strings.Cut(view.Bindings[1].Role, "_withcond_")
+	if view.Version != 1 || !found || role != testViewerRole || len(hash) != 20 || view.Bindings[1].Condition != nil ||
+		view.Bindings[0].Role != "roles/storage.admin" {
+		t.Fatalf("below-3 view = %+v", view)
+	}
+}
+
+func TestAuditConfigsRenderWithoutBindings(t *testing.T) {
+	audit := []iam.AuditConfig{{Service: "allServices"}}
+	if wire, ok := (iam.Policy{ETag: "x", AuditConfigs: audit}).Wire().(iam.Policy); !ok || len(wire.AuditConfigs) != 1 {
+		t.Fatal("a policy with only audit configs rendered as its etag")
+	}
+}
+
+func TestAuditConfigsStoreOnlyOnResourceManagerNodes(t *testing.T) {
+	engine, _ := setup(t)
+	audit := []iam.AuditConfig{{Service: "allServices", AuditLogConfigs: []iam.AuditLogConfig{{LogType: "DATA_READ", ExemptedMembers: []string{allowed}}}}}
+	stored, err := engine.SetPolicy(projectA, iam.Policy{Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{fixture}}}, AuditConfigs: audit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := engine.GetPolicy(projectA)
+	if err != nil || len(read.AuditConfigs) != 1 || read.AuditConfigs[0].AuditLogConfigs[0].ExemptedMembers[0] != allowed || read.ETag != stored.ETag {
+		t.Fatalf("read back = %+v %v", read, err)
+	}
+	_, err = engine.SetPolicy(storage.BucketResource("bucket-a"), iam.Policy{AuditConfigs: audit})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "Audit configs on a storage resource policy are not modeled") {
+		t.Fatalf("bucket audit configs = %v", err)
+	}
+	bad := []iam.AuditConfig{{Service: "allServices", AuditLogConfigs: []iam.AuditLogConfig{{LogType: "BOGUS"}}}}
+	if _, err = engine.SetPolicy(projectA, iam.Policy{AuditConfigs: bad}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("bad log type = %v", err)
+	}
+}
