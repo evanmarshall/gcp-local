@@ -17,7 +17,16 @@ fi
 sh scripts/go.sh run ./tools/genapi -check
 sh scripts/go.sh vet ./...
 low_disk
-sh scripts/go.sh test -race -timeout 60s ./...
+# BigQuery's tests drive one process-global GoogleSQL wasm module, which
+# serializes them (t.Parallel gains nothing) and takes about 35 s under -race
+# on an M-series Mac and up to twice that on GitHub runners. They run as
+# separate processes in parallel shards, each under the same 60 s limit.
+sharded=internal/providers/databases/bigquery
+sh scripts/go.sh test -race -timeout 60s $(sh scripts/go.sh list ./... | grep -v "/$sharded\$")
+mkdir -p bin
+sh scripts/go.sh test -race -c -o "$PWD/bin/bigquery.test" "./$sharded"
+python3 scripts/check/shards.py --binary "$PWD/bin/bigquery.test" --dir "$sharded" --shards 3 --timeout 60s
+rm -f bin/bigquery.test
 low_disk
 mkdir -p bin
 sh scripts/go.sh build -trimpath -o bin/gcp-local ./cmd/gcp-local
