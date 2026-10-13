@@ -633,6 +633,24 @@ func TestOperationsReportPending(t *testing.T) {
 		"Invalid request: You can't cancel operation "+name+" because Cloud SQL doesn't support the cancellation of the CREATE operation.")
 }
 
+// TestSlowWorkStillReportsPending covers a machine where creating the server
+// takes longer than the latency: the response is still PENDING.
+func TestSlowWorkStillReportsPending(t *testing.T) {
+	h := newHarness(t)
+	h.provider.latency = 50 * time.Millisecond
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
+	h.provider.clock = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		now = now.Add(time.Second) // every reading is a second later
+		return now
+	}
+	if created := h.expect(h.invoke(adminToken, http.MethodPost, testInstances, insertBody()), http.StatusOK); created["status"] != statusPending {
+		t.Fatalf("slow work reported done: %v", created)
+	}
+}
+
 // TestConditionsSeeTheInstance grants roles/cloudsql.viewer on one instance
 // through a project binding conditioned on resource.name, resource.type, and
 // resource.service.

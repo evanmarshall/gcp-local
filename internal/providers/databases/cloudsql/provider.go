@@ -269,11 +269,12 @@ func (p *Provider) lookup(project, instance string) (instanceRecord, bool) {
 
 // complete records a finished operation and returns its wire form.
 func (p *Provider) complete(call gateway.Call, project, kind, instance string, started time.Time) (*gateway.RESTResponse, error) {
-	operation := newOperation(kind, instance, subject(call.Principal), started, p.clock(), p.latency)
+	ended := p.clock()
+	operation := newOperation(kind, instance, subject(call.Principal), started, ended, p.latency)
 	if err := p.catalog.With(provider.ProjectScope(project), func(c *catalog) error { c.record(operation); return nil }); err != nil {
 		return nil, fmt.Errorf("record the operation: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: operation.wire(project, p.clock())}, nil
+	return &gateway.RESTResponse{JSON: operation.wire(project, ended)}, nil
 }
 
 // subject renders the operation user as GCP does: the caller's email.
@@ -381,13 +382,11 @@ func (c *catalog) operation(name string) *operationRecord {
 }
 
 // newOperation builds the operation of finished work: DONE once latency has
-// passed since the request started.
+// passed since the work ended, so the response always reports PENDING, as
+// GCP's insert does (recorded), however long a slow machine took to start
+// the server.
 func newOperation(kind, instance, user string, started, ended time.Time, latency time.Duration) operationRecord {
-	done := started.Add(latency)
-	if ended.After(done) {
-		done = ended
-	}
-	return operationRecord{Name: operationID(), Type: kind, Instance: instance, User: user, Inserted: started, Done: done}
+	return operationRecord{Name: operationID(), Type: kind, Instance: instance, User: user, Inserted: started, Done: ended.Add(latency)}
 }
 
 // wire renders the sql#operation resource at now: PENDING without endTime
