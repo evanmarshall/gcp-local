@@ -41,6 +41,8 @@ type Provider struct {
 	// operations holds every rollout and delete operation, one name each.
 	operations *provider.Operations
 	clock      func() time.Time
+	// router picks a revision for each request to a service URL.
+	router *router
 }
 
 // operationLatency is the least time from an operation's start to done, so
@@ -72,7 +74,7 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 		scopes:     state.NewStore(newScopeState, state.Scope.Validate),
 		operations: provider.NewOperations(state.Scope.Validate, operationLatency, operationMetadata).NewestFirst(),
 		hosts:      map[string]hostEntry{}, reapers: map[string]context.CancelFunc{},
-		clock: time.Now,
+		clock: time.Now, router: newRouter(config.TrafficSeed),
 	}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.Scope.Validate,

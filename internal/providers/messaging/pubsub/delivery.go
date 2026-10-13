@@ -671,6 +671,8 @@ func (p *Provider) pushMessage(ctx context.Context, call gateway.Call, config *p
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+token)
+	// Cloud Run counts the subscription's own project's pushes as internal.
+	provider.MarkInternal(request, call.Project)
 	response, err := client.Do(request)
 	if err != nil {
 		return false

@@ -31,6 +31,9 @@ type Config struct {
 	// MetadataBind binds one workload metadata handler and returns the
 	// host:port the container must dial. Called only when Metadata is set.
 	MetadataBind func(handler http.Handler) (string, func(), error)
+	// TrafficSeed seeds the weighted choice that routes each request to a
+	// service URL; one seed gives one sequence of choices.
+	TrafficSeed uint64
 }
 
 // invocationPath is the local serving prefix, one level below the local
@@ -38,8 +41,9 @@ type Config struct {
 const invocationPath = "/_run/"
 
 // Invocation serves the local traffic surface of deployed services. It is the
-// local stand-in for the run.app HTTPS endpoint: audience-bound ID-token
-// verification and the run.invoker grant are checked before any forwarding.
+// local stand-in for the run.app HTTPS endpoint: ingress, then the
+// audience-bound ID token and the run.invoker grant, are checked before any
+// cold start or forwarding.
 func (p *Provider) Invocation() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, path, refused := splitInvocation(r.URL.Path)
@@ -48,29 +52,92 @@ func (p *Provider) Invocation() http.Handler {
 			return
 		}
 		serving, err := p.lookupServing(host)
+		if err == nil {
+			err = admitIngress(r, serving)
+		}
+		if err == nil {
+			err = p.authorizeInvocation(r, serving)
+		}
+		if err == nil && serving.address == "" {
+			serving, err = p.wake(serving) //nolint:contextcheck // the restarted revision outlives the invocation by design
+		}
+		var release func()
+		if err == nil {
+			release, err = p.admit(serving)
+		}
 		if err != nil {
 			writeInvocationError(w, err)
 			return
 		}
-		if serving.address == "" {
-			// The reaper stopped the container: start it again, or wait for
-			// the cold start another invocation began.
-			p.coldStart(serving) //nolint:contextcheck // the restarted revision outlives the invocation by design
-			if serving, err = p.lookupServing(host); err == nil && serving.address == "" {
-				err = status.Error(codes.Unavailable, "The revision container failed to cold-start")
-			}
-			if err != nil {
-				writeInvocationError(w, err)
-				return
-			}
-		}
-		p.touchActivity(serving)
-		if err := p.authorizeInvocation(r, serving); err != nil {
-			writeInvocationError(w, err)
-			return
-		}
+		defer release()
 		p.forward(w, r, serving, path)
 	})
+}
+
+// wake cold-starts a reaped revision, or waits for the cold start another
+// invocation began, and returns it running.
+func (p *Provider) wake(serving servingRef) (servingRef, error) {
+	p.coldStart(serving)
+	address := ""
+	_ = p.withService(state.Scope{Project: serving.project, Location: serving.location}, serving.id, func(_ *scopeState, record *serviceRecord) error {
+		if revision := record.Revisions[serving.revision]; revision != nil {
+			address = revision.Address
+		}
+		return nil
+	})
+	if address == "" {
+		return servingRef{}, status.Error(codes.Unavailable, "The revision container failed to cold-start")
+	}
+	serving.address = address
+	return serving, nil
+}
+
+// admitIngress refuses an external caller of a service whose ingress is
+// internal, with GCP's 404 (recording run-traffic). Internal callers are
+// gcp-local's own Pub/Sub push, Cloud Tasks, and Cloud Scheduler deliveries
+// for a service in their project (provider.MarkInternal). Every other caller
+// is external: the host, other machines, and revision containers, which have
+// no VPC egress. No load balancer exists locally, so internal and cloud load
+// balancing admits the same callers as internal only.
+func admitIngress(r *http.Request, serving servingRef) error {
+	if serving.ingress == ingressAll {
+		return nil
+	}
+	if project, ok := provider.InternalProject(r); ok && project == serving.project {
+		return nil
+	}
+	return status.Error(codes.NotFound, "The service's ingress settings refuse external callers")
+}
+
+// admit counts one request against the revision's capacity, its maximum
+// instances times their concurrency, and returns its release. A request
+// beyond it is refused as GCP documents (errNoInstance).
+func (p *Provider) admit(serving servingRef) (func(), error) {
+	scope := state.Scope{Project: serving.project, Location: serving.location}
+	err := p.withService(scope, serving.id, func(_ *scopeState, record *serviceRecord) error {
+		revision := record.Revisions[serving.revision]
+		switch {
+		case revision == nil:
+			return status.Error(codes.Unavailable, "No ready revision is serving traffic")
+		case revision.inflight >= revision.Template.Scaling.capacity():
+			return errNoInstance
+		}
+		revision.inflight++
+		revision.lastActivity = p.clock()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		_ = p.withService(scope, serving.id, func(_ *scopeState, record *serviceRecord) error {
+			if revision := record.Revisions[serving.revision]; revision != nil {
+				revision.inflight = max(revision.inflight-1, 0)
+				revision.lastActivity = p.clock()
+			}
+			return nil
+		})
+	}, nil
 }
 
 // splitInvocation separates the local service host from the request path.
@@ -89,27 +156,28 @@ func splitInvocation(path string) (string, string, error) {
 	if !found || host == "" {
 		return "", "", status.Error(codes.NotFound, "No service is bound to this path")
 	}
-	if fragment == "" {
-		fragment = "/"
-	}
-	return host, fragment, nil
+	return host, "/" + fragment, nil
 }
 
-// servingRef is one resolved, running service for invocation.
+// servingRef is one resolved revision of a service for invocation.
 type servingRef struct {
 	project  string
 	location string
 	id       string
 	revision string
 	address  string
+	ingress  string
 }
 
-// lookupServing resolves the host to its serving revision: the newest ready
-// one, since all traffic goes to the latest revision. A reaped revision
-// resolves with an empty address, for the caller to cold-start.
+// lookupServing resolves the host to the revision one request goes to: a tag
+// URL's tagged revision, or for the service URL a weighted choice over the
+// percents in effect. Before any rollout succeeded, the newest revision. A
+// reaped revision resolves with an empty address, for the caller to
+// cold-start. It changes nothing.
 func (p *Provider) lookupServing(host string) (servingRef, error) {
+	tag, base := splitTag(host)
 	p.hostMu.RLock()
-	entry, ok := p.hosts[host]
+	entry, ok := p.hosts[base]
 	p.hostMu.RUnlock()
 	unbound := status.Errorf(codes.NotFound, "No service is bound to host %q", host)
 	if !ok {
@@ -119,13 +187,16 @@ func (p *Provider) lookupServing(host string) (servingRef, error) {
 	serving := servingRef{project: scope.Project, location: scope.Location, id: entry.id}
 	var unavailable bool
 	if err := p.withService(scope, entry.id, func(_ *scopeState, record *serviceRecord) error {
-		revision := servingRevision(record)
-		switch {
-		case revision == nil || (revision.Address == "" && !revision.reaped):
-			unavailable = true
-		default:
-			serving.revision, serving.address = revision.ID, revision.Address
+		serving.ingress = record.Spec.Ingress
+		revision := p.chooseRevision(record, tag)
+		if tag != "" && revision == nil {
+			return unbound
 		}
+		if revision == nil || (revision.Address == "" && !revision.reaped) {
+			unavailable = true
+			return nil
+		}
+		serving.revision, serving.address = revision.ID, revision.Address
 		return nil
 	}); err != nil {
 		return servingRef{}, unbound
@@ -134,6 +205,27 @@ func (p *Provider) lookupServing(host string) (servingRef, error) {
 		return servingRef{}, status.Error(codes.Unavailable, "No ready revision is serving traffic")
 	}
 	return serving, nil
+}
+
+// chooseRevision picks the revision a request reaches: the tagged one for a
+// tag, else a weighted choice, else (before any rollout succeeded) the newest.
+func (p *Provider) chooseRevision(record *serviceRecord, tag string) *revisionRecord {
+	switch {
+	case tag != "":
+		return record.Revisions[tagged(record.Statuses, tag)]
+	case len(record.Statuses) > 0:
+		return record.Revisions[p.router.pick(record.Statuses)]
+	default:
+		return servingRevision(record)
+	}
+}
+
+// upstreamURL is the revision URL a request forwards to, with its query.
+func upstreamURL(address, path, query string) string {
+	if query != "" {
+		return "http://" + address + path + "?" + query
+	}
+	return "http://" + address + path
 }
 
 // forward proxies the request to the revision container. Only the method,
@@ -157,7 +249,7 @@ func (p *Provider) forward(w http.ResponseWriter, r *http.Request, serving servi
 		writeInvocationError(w, status.Error(codes.InvalidArgument, "The invocation body exceeds the supported size"))
 		return
 	}
-	target, err := http.NewRequestWithContext(r.Context(), r.Method, "http://"+serving.address+path, bytes.NewReader(body)) //nolint:gosec // the address is the provider-owned revision port and the path is a single local URL path
+	target, err := http.NewRequestWithContext(r.Context(), r.Method, upstreamURL(serving.address, path, r.URL.RawQuery), bytes.NewReader(body)) //nolint:gosec // the address is the provider-owned revision port and the path is a single local URL path
 
 	if err != nil {
 		writeInvocationError(w, status.Error(codes.Internal, "Build the container request"))
@@ -205,6 +297,8 @@ var invocationStatus = map[codes.Code]int{
 	codes.Unauthenticated:  401,
 	codes.PermissionDenied: 403,
 	codes.InvalidArgument:  400,
+	// GCP's documented answer at a revision's capacity (errNoInstance).
+	codes.ResourceExhausted: 429,
 }
 
 // writeInvocationError renders a Cloud Run-style invocation error.
@@ -230,6 +324,10 @@ func (p *Provider) authorizeToken(r *http.Request, bearer string, serving servin
 		return status.Error(codes.Unauthenticated, "Local ID-token verification is not configured")
 	}
 	claims, verifyErr := p.tokens.Verify(bearer, p.audienceOf(serving))
+	if verifyErr != nil {
+		// The service's uri is an audience too, as in GCP (recording run-traffic).
+		claims, verifyErr = p.tokens.Verify(bearer, p.serviceURI(state.Scope{Project: serving.project, Location: serving.location}, serving.id))
+	}
 	if verifyErr != nil {
 		return status.Error(codes.Unauthenticated, "Invalid local ID token")
 	}
@@ -307,7 +405,8 @@ func (p *Provider) forgetHost(scope state.Scope, id string) {
 	p.hostMu.Unlock()
 }
 
-// audienceOf returns the verified invocation audience of one service.
+// audienceOf returns the run.app-shaped invocation audience of one service.
+// A tag URL is never an audience: GCP answers 401 (recording run-traffic).
 func (p *Provider) audienceOf(serving servingRef) string {
 	return "https://" + hostOf(state.Scope{Project: serving.project, Location: serving.location}, serving.id)
 }
@@ -322,17 +421,6 @@ func revisionAddress(address string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip.IsLoopback() || ip.IsPrivate()
-}
-
-// touchActivity records one invocation against the revision's idle clock.
-func (p *Provider) touchActivity(serving servingRef) {
-	scope := state.Scope{Project: serving.project, Location: serving.location}
-	_ = p.withService(scope, serving.id, func(_ *scopeState, record *serviceRecord) error {
-		if revision := record.Revisions[serving.revision]; revision != nil {
-			revision.lastActivity = p.clock()
-		}
-		return nil
-	})
 }
 
 // coldStart restarts a reaped revision's container. The launch runs outside

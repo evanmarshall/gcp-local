@@ -216,10 +216,10 @@ func main() {
 	must(tokenErr)
 	_, err = pubsubprovider.New(registry, server.Backends, index, engine, pubsubprovider.Config{Java: java, JAR: jar, IDTokens: tokens})
 	must(err)
-	runProvider, err := runprovider.New(context.Background(), runprovider.Config{BaseURL: "http://127.0.0.1:4566"}, registry, server.Backends, index, engine, &servingRuntime{servers: map[string]*http.Server{}})
+	runProvider, err := runprovider.New(context.Background(), runprovider.Config{BaseURL: "http://127.0.0.1:4566", Tokens: tokens}, registry, server.Backends, index, engine, &servingRuntime{servers: map[string]*http.Server{}})
 	must(err)
 	// Serve the invocation surface as cmd/gcp-local does, so the Cloud Run
-	// scenario's anonymous and invalid-token invocations replay.
+	// scenarios' invocations replay, with ID tokens IAM Credentials mints.
 	server.Run = runProvider.Invocation()
 	_, err = computeprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
@@ -282,20 +282,28 @@ func must(err error) {
 }
 
 // servingRuntime is a test-only Cloud Run runtime: each revision is a loopback
-// HTTP server answering 200, so control-plane cases (Terraform) observe real
+// HTTP server answering 200 with its revision name, so control-plane cases (Terraform) observe real
 // readiness without a container engine. Production uses the Docker or process runtime.
 type servingRuntime struct {
 	mu      sync.Mutex
 	servers map[string]*http.Server
 }
 
-func (r *servingRuntime) Start(_ context.Context, _ container.StartSpec) (container.Started, error) {
+func (r *servingRuntime) Start(_ context.Context, spec container.StartSpec) (container.Started, error) {
+	// Like Google's sample image, each revision's page names the revision.
+	revision := ""
+	for _, entry := range spec.Env {
+		if value, ok := strings.CutPrefix(entry, "K_REVISION="); ok {
+			revision = value
+		}
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return container.Started{}, fmt.Errorf("listen for the revision: %w", err)
 	}
 	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Revision: " + revision))
 	})}
 	go func() { _ = server.Serve(listener) }()
 	id := listener.Addr().String()

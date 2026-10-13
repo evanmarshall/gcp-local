@@ -530,17 +530,9 @@ func TestUnmodeledServiceFieldsAreGaps(t *testing.T) {
 		body map[string]any
 		want string
 	}{
-		{map[string]any{"template": template(nil), "traffic": []any{
-			map[string]any{"type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION", "revision": testFirstRevision, "percent": 90},
-			map[string]any{"type": latestTraffic, "percent": 10},
-		}}, "traffic other than 100% to the latest revision is not implemented"},
-		{map[string]any{"template": template(nil), "traffic": []any{map[string]any{"type": latestTraffic, "percent": 100, "tag": "blue"}}},
-			"traffic other than 100% to the latest revision is not implemented"},
-		{map[string]any{"template": template(nil), "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY"}, "ingress INGRESS_TRAFFIC_INTERNAL_ONLY is not implemented"},
+		{map[string]any{"template": template(nil), "ingress": "INGRESS_TRAFFIC_NONE"}, "ingress INGRESS_TRAFFIC_NONE is not implemented"},
 		{map[string]any{"template": template(nil), "scaling": map[string]any{"minInstanceCount": 1}}, "scaling is not modeled"},
-		{map[string]any{"template": template(map[string]any{"scaling": map[string]any{"maxInstanceCount": 2}})}, "template.scaling is not modeled"},
 		{map[string]any{"template": template(map[string]any{"vpcAccess": map[string]any{"connector": "c"}})}, "template.vpcAccess is not modeled"},
-		{map[string]any{"template": template(map[string]any{"maxInstanceRequestConcurrency": 1})}, "template.maxInstanceRequestConcurrency is not modeled"},
 		{map[string]any{"template": template(map[string]any{"encryptionKey": "k"})}, "template.encryptionKey is not modeled"},
 		{map[string]any{"template": template(nil), "binaryAuthorization": map[string]any{"useDefault": true}}, "binaryAuthorization is not modeled"},
 		{map[string]any{"template": map[string]any{"containers": []any{container(map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": "2"}}})}}},
@@ -1099,6 +1091,8 @@ func TestInvocationColdStartsAReapedRevision(t *testing.T) {
 	}
 	scope := state.Scope{Project: "demo-project", Location: "us-central1"}
 	h.provider.clock = func() time.Time { return time.Now().Add(2 * idleTimeout) }
+	// The first pass stops the idle container; the next finds nothing running.
+	h.provider.reap(context.Background(), scope, "svc")
 	if !h.provider.reap(context.Background(), scope, "svc") {
 		t.Fatal("the idle revision was not reaped")
 	}

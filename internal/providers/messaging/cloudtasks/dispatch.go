@@ -256,6 +256,8 @@ func (p *Provider) send(ctx context.Context, scope state.Scope, record taskRecor
 	for key, value := range headers {
 		request.Header.Set(key, value)
 	}
+	// Cloud Run counts the queue's own project's deliveries as internal.
+	provider.MarkInternal(request, scope.Project)
 	response, err := p.client.Do(request)
 	if errors.Is(err, context.DeadlineExceeded) {
 		// The target did not answer within the task's dispatchDeadline.

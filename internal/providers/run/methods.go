@@ -1,6 +1,7 @@
 package run
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"github.com/evanmarshall/gcp-local/internal/providers/run/container"
@@ -51,6 +52,9 @@ type revisionRecord struct {
 	// cold-starts it. starting is closed when a cold start in flight ends.
 	reaped   bool
 	starting chan struct{}
+	// inflight counts the requests the revision is serving now; its scaling
+	// caps it.
+	inflight int
 }
 
 // serviceRecord is one stored service of a scope.
@@ -62,9 +66,16 @@ type serviceRecord struct {
 	Creator    string
 	Modifier   string
 	Revisions  map[string]*revisionRecord
-	// Ready is the newest revision whose rollout succeeded; it serves all
-	// traffic, the only split the provider models.
+	// Created counts the revisions created; it numbers the next one, as GCP
+	// does (recording run-traffic).
+	Created int
+	// Ready is the newest revision whose rollout succeeded; LATEST traffic
+	// targets resolve to it.
 	Ready string
+	// Statuses is the routing in effect: the traffic block of the newest
+	// rollout that succeeded, resolved. A failed rollout leaves it as it was
+	// (recording run-traffic).
+	Statuses []trafficStatus
 	// Rollout is the operation ID of the newest rollout; only it may change
 	// Ready and the condition. Reconciling holds while it runs.
 	Rollout     string
@@ -291,9 +302,9 @@ func (p *Provider) serviceDocument(scope state.Scope, record *serviceRecord) map
 		"creator":            record.Creator,
 		"lastModifier":       record.Modifier,
 		"launchStage":        record.Spec.LaunchStage,
-		"ingress":            "INGRESS_TRAFFIC_ALL",
+		"ingress":            record.Spec.Ingress,
 		"template":           templateDocument(record.Spec.Template),
-		"traffic":            []any{map[string]any{keyType: latestTraffic, "percent": 100}},
+		"traffic":            trafficDocuments(record.Spec.Traffic),
 		"uri":                uri,
 		"urls":               []any{uri},
 		"terminalCondition":  terminal,
@@ -307,7 +318,11 @@ func (p *Provider) serviceDocument(scope state.Scope, record *serviceRecord) map
 	}
 	if record.Ready != "" {
 		document["latestReadyRevision"] = wireName(scope, "services", record.Name, "revisions", record.Ready)
-		document["trafficStatuses"] = []any{map[string]any{keyType: latestTraffic, "revision": record.Ready, "percent": 100}}
+	}
+	if len(record.Statuses) > 0 {
+		document["trafficStatuses"] = statusDocuments(record.Statuses, func(tag string) string {
+			return p.serviceURI(scope, tag+tagSeparator+record.Name)
+		})
 	}
 	if record.Reconciling {
 		document["reconciling"] = true
@@ -339,7 +354,8 @@ func templateDocument(template templateShape) map[string]any {
 		env = append(env, map[string]any{"name": key, "value": template.Container.Env[key]})
 	}
 	document := map[string]any{
-		"serviceAccount": template.ServiceAccount,
+		"serviceAccount":                template.ServiceAccount,
+		"maxInstanceRequestConcurrency": template.Scaling.concurrency(),
 		"containers": []any{map[string]any{
 			"image":     template.Container.Image,
 			"ports":     []any{map[string]any{"containerPort": template.Container.Port, keyName: "http1"}},
@@ -350,6 +366,9 @@ func templateDocument(template templateShape) map[string]any {
 	if template.RevisionNamed {
 		document["revision"] = template.Revision
 	}
+	if scaling := template.Scaling.document(); len(scaling) > 0 {
+		document["scaling"] = scaling
+	}
 	return document
 }
 
@@ -359,16 +378,23 @@ func (p *Provider) revisionDocument(scope state.Scope, record *serviceRecord, re
 	if revision.Container == "" && !revision.reaped {
 		ready, detail = conditionFailed, "The revision container is not running"
 	}
-	return map[string]any{
+	template := templateDocument(revision.Template)
+	document := map[string]any{
 		keyName:          wireName(scope, "services", record.Name, "revisions", revision.ID),
 		"service":        wireName(scope, "services", record.Name),
 		"uid":            revision.ID + "-uid",
 		"generation":     strconv.FormatInt(revision.Generation, 10),
 		"createTime":     provider.Stamp(revision.CreatedAt),
-		"containers":     templateDocument(revision.Template)["containers"],
+		"containers":     template["containers"],
 		"serviceAccount": revision.Template.ServiceAccount,
 		"conditions":     []any{map[string]any{keyType: "ContainerReady", keyState: ready, "message": detail}},
+		// The revision carries its template's scaling (recording run-traffic).
+		"maxInstanceRequestConcurrency": template["maxInstanceRequestConcurrency"],
 	}
+	if scaling, ok := template["scaling"]; ok {
+		document["scaling"] = scaling
+	}
+	return document
 }
 
 // launched is one started revision container and its metadata listener.
@@ -477,33 +503,62 @@ func (p *Provider) startReaper(scope state.Scope, id string) {
 	}()
 }
 
-// reap stops the service's serving container when it has been idle past the
-// timeout. It reports whether the reaper is done.
+// reap stops every revision container of the service that has been idle
+// past the timeout and serves no request, except a revision whose minimum
+// instances keep it warm. It reports whether the reaper is done: no
+// container of the service runs.
 func (p *Provider) reap(ctx context.Context, scope state.Scope, id string) bool {
-	var container string
-	var idle time.Duration
-	if err := p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
-		if revision := servingRevision(record); revision != nil {
-			container, idle = revision.Container, p.clock().Sub(revision.lastActivity)
-		}
-		return nil
-	}); err != nil {
+	idle, running, err := p.idleContainers(scope, id)
+	if err != nil {
 		return false
 	}
-	if container == "" {
+	if !running {
 		return true
 	}
-	if idle < idleTimeout || p.runtime.Stop(ctx, container) != nil {
-		return false
+	for revisionID, container := range idle {
+		if p.runtime.Stop(ctx, container) != nil {
+			continue
+		}
+		_ = p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
+			if revision := record.Revisions[revisionID]; revision != nil && revision.Container == container {
+				revision.Container, revision.Address, revision.reaped = "", "", true
+				releaseMetadata(revision)
+			}
+			return nil
+		})
 	}
-	_ = p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
-		if revision := servingRevision(record); revision != nil && revision.Container == container {
-			revision.Container, revision.Address, revision.reaped = "", "", true
-			releaseMetadata(revision)
+	return false
+}
+
+// idleContainers names the service's containers to stop, by revision, and
+// reports whether any container runs.
+func (p *Provider) idleContainers(scope state.Scope, id string) (map[string]string, bool, error) {
+	idle, running := map[string]string{}, false
+	err := p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
+		for _, revision := range record.Revisions {
+			if revision.Container == "" {
+				continue
+			}
+			running = true
+			if !keptWarm(record, revision) && revision.inflight == 0 && p.clock().Sub(revision.lastActivity) >= idleTimeout {
+				idle[revision.ID] = revision.Container
+			}
 		}
 		return nil
 	})
-	return true
+	return idle, running, err
+}
+
+// keptWarm reports a revision whose minInstanceCount keeps it running while
+// it receives traffic. Locally one process stands in for every instance.
+func keptWarm(record *serviceRecord, revision *revisionRecord) bool {
+	if revision.Template.Scaling.MinInstances == 0 {
+		return false
+	}
+	if len(record.Statuses) == 0 {
+		return servingRevision(record) == revision
+	}
+	return referenced(record.Statuses, revision.ID)
 }
 
 // workloadEnv builds the workload environment: service identity variables plus
@@ -549,7 +604,7 @@ func (p *Provider) create(call gateway.Call, request *gateway.RESTRequest, scope
 	if err != nil {
 		return nil, err
 	}
-	spec, err := validateService(service)
+	spec, err := validateService(service, requestCreateName)
 	if err != nil {
 		return nil, err
 	}
@@ -580,7 +635,7 @@ func (p *Provider) create(call gateway.Call, request *gateway.RESTRequest, scope
 		record := &serviceRecord{
 			Name: id, UID: id + "-uid", Generation: 1, Spec: spec,
 			Creator: principalEmail(call), Modifier: principalEmail(call),
-			Revisions:   map[string]*revisionRecord{revision.ID: revision},
+			Revisions: map[string]*revisionRecord{revision.ID: revision}, Created: 1,
 			Reconciling: true, Condition: conditionPending, CreatedAt: now, UpdatedAt: now,
 		}
 		s.services[id] = record
@@ -685,12 +740,7 @@ func (p *Provider) finishRollout(scope state.Scope, id, revisionID, operation st
 	var document map[string]any
 	_ = p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
 		if record.Rollout == operation && record.Reconciling {
-			record.Reconciling = false
-			if failure == nil {
-				record.Ready, record.Condition, record.Detail = revisionID, conditionSucceeded, ""
-			} else {
-				record.Condition, record.Detail = conditionFailed, status.Convert(failure).Message()
-			}
+			failure = settleRollout(record, revisionID, failure)
 		}
 		document = typed(p.serviceDocument(scope, record), typeService)
 		return nil
@@ -699,6 +749,25 @@ func (p *Provider) finishRollout(scope state.Scope, id, revisionID, operation st
 		failure = status.Error(codes.Aborted, "The service was deleted during its rollout")
 	}
 	p.operations.Finish(scope, operation, document, failure)
+}
+
+// settleRollout ends the newest rollout on its record and returns its
+// failure. A ready revision becomes the latest ready even when its traffic
+// block can't take effect; the routing in effect then stays as it was.
+func settleRollout(record *serviceRecord, revisionID string, failure error) error {
+	record.Reconciling = false
+	if failure == nil {
+		record.Ready = revisionID
+		statuses, missing := resolveStatuses(record.Spec.Traffic, revisionID, func(name string) bool { return record.Revisions[name] != nil })
+		if failure = missing; missing == nil {
+			record.Statuses = statuses
+		}
+	}
+	record.Condition, record.Detail = conditionSucceeded, ""
+	if failure != nil {
+		record.Condition, record.Detail = conditionFailed, status.Convert(failure).Message()
+	}
+	return failure
 }
 
 // releaseMetadata stops the revision's private metadata listener, if one runs.
@@ -811,71 +880,109 @@ func (p *Provider) list(request *gateway.RESTRequest, scope state.Scope) (*gatew
 	return &gateway.RESTResponse{JSON: body}, nil
 }
 
-// pendingUpdate is what an update decided under the lock before its launch.
+// pendingUpdate is what an update decided under the lock before its launch:
+// the generation it read, and the revision to launch, if the template changed.
 type pendingUpdate struct {
 	generation int64
 	revision   *revisionRecord
 	spec       launchSpec
 }
 
-// update replaces the service, starts a new revision outside the store
-// lock, and returns its rollout operation; the new revision serves once it
-// is ready. An update that raced another update or a delete during its
-// launch discards its container.
+// update replaces the service and returns its rollout operation. A changed
+// template starts a new revision outside the store lock, which serves once it
+// is ready; an unchanged one creates no revision, and the rollout applies the
+// new routing at once (recording run-traffic). An update that raced another
+// update or a delete during its launch discards its container.
 func (p *Provider) update(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, id string) (*gateway.RESTResponse, error) {
 	service, err := decodeService(request.JSON)
 	if err != nil {
 		return nil, err
 	}
-	spec, err := validateService(service)
+	spec, err := validateService(service, requestUpdateName)
 	if err != nil {
 		return nil, err
 	}
-	var pending pendingUpdate
-	if err := p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
-		revisionID := spec.Template.Revision
-		if revisionID == "" {
-			revisionID = fmt.Sprintf("%s-%05d", record.Name, record.Generation+1)
-		} else if record.Revisions[revisionID] != nil {
-			return status.Errorf(codes.AlreadyExists, "Revision named '%s' already exists.", revisionID)
-		}
-		spec.Template.RevisionNamed = spec.Template.Revision != ""
-		spec.Template.Revision = revisionID
-		pending.generation = record.Generation
-		pending.revision = &revisionRecord{ID: revisionID, Generation: record.Generation + 1, Template: spec.Template, CreatedAt: p.clock()}
-		pending.spec = launchSpecOf(record, pending.revision)
-		return nil
-	}); err != nil {
+	pending, err := p.planUpdate(scope, id, &spec)
+	if err != nil {
 		return nil, err
 	}
-	started, launchErr := p.launch(pending.spec)
-	if launchErr != nil {
-		return nil, status.Errorf(codes.Internal, "The revision container failed to start: %v", launchErr)
-	}
-	var document map[string]any
-	if err := p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
-		if record.Generation != pending.generation {
-			return status.Errorf(codes.Aborted, "service %q changed during the rollout; retry the update", id)
+	var started launched
+	if pending.revision != nil {
+		var launchErr error
+		if started, launchErr = p.launch(pending.spec); launchErr != nil {
+			return nil, status.Errorf(codes.Internal, "The revision container failed to start: %v", launchErr)
 		}
-		record.Generation++
-		record.Spec, record.Modifier = spec, principalEmail(call)
-		record.UpdatedAt = pending.revision.CreatedAt
-		record.Reconciling, record.Condition, record.Detail = true, conditionPending, ""
-		p.attach(pending.revision, started)
-		record.Revisions[pending.revision.ID] = pending.revision
-		document = p.serviceDocument(scope, record)
-		return nil
-	}); err != nil {
-		p.discard(started)
+	}
+	document, ready, err := p.commitUpdate(call, scope, id, spec, pending, started)
+	if err != nil {
+		if pending.revision != nil {
+			p.discard(started)
+		}
 		return nil, err
 	}
 	operation, err := p.startRollout(scope, id, pending.generation+1, document)
 	if err != nil {
 		return nil, err
 	}
+	if pending.revision == nil {
+		p.finishRollout(scope, id, ready, operation, nil)
+		return p.operation(scope, operation)
+	}
 	p.startReaper(scope, id)
 	p.watch(scope, id, pending.revision.ID, operation)
 	return p.operation(scope, operation)
+}
+
+// commitUpdate stores an update, with its launched revision if any, unless
+// another change won the race. It returns the service document and the
+// revision LATEST traffic resolves to now.
+func (p *Provider) commitUpdate(call gateway.Call, scope state.Scope, id string, spec serviceSpec, pending pendingUpdate, started launched) (map[string]any, string, error) {
+	var document map[string]any
+	var ready string
+	err := p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
+		if record.Generation != pending.generation {
+			return status.Errorf(codes.Aborted, "service %q changed during the rollout; retry the update", id)
+		}
+		record.Generation++
+		record.Spec, record.Modifier, record.UpdatedAt = spec, principalEmail(call), p.clock()
+		record.Reconciling, record.Condition, record.Detail = true, conditionPending, ""
+		if pending.revision != nil {
+			p.attach(pending.revision, started)
+			record.Revisions[pending.revision.ID] = pending.revision
+			record.Created++
+			record.UpdatedAt = pending.revision.CreatedAt
+		}
+		ready = cmp.Or(record.Ready, latestRevision(record).ID)
+		document = p.serviceDocument(scope, record)
+		return nil
+	})
+	return document, ready, err
+}
+
+// planUpdate reads the service and decides an update's revision: none when
+// the template is unchanged (spec then keeps the current one), else a new one
+// named by the request or numbered after the revisions created so far.
+func (p *Provider) planUpdate(scope state.Scope, id string, spec *serviceSpec) (pendingUpdate, error) {
+	var pending pendingUpdate
+	err := p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
+		pending.generation = record.Generation
+		spec.Template.RevisionNamed = spec.Template.Revision != ""
+		if sameTemplate(record.Spec.Template, spec.Template) {
+			spec.Template = record.Spec.Template
+			return nil
+		}
+		revisionID := spec.Template.Revision
+		if revisionID == "" {
+			revisionID = fmt.Sprintf("%s-%05d", record.Name, record.Created+1)
+		} else if record.Revisions[revisionID] != nil {
+			return status.Errorf(codes.AlreadyExists, "Revision named '%s' already exists.", revisionID)
+		}
+		spec.Template.Revision = revisionID
+		pending.revision = &revisionRecord{ID: revisionID, Generation: record.Generation + 1, Template: spec.Template, CreatedAt: p.clock()}
+		pending.spec = launchSpecOf(record, pending.revision)
+		return nil
+	})
+	return pending, err
 }
 
 // deleted records the operation of a finished delete. Its metadata is the
@@ -1006,20 +1113,24 @@ func (p *Provider) revisionGet(request *gateway.RESTRequest, scope state.Scope, 
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// revisionDelete removes one revision that serves no traffic. A reaped
-// revision (container stopped) cannot be deleted through the runtime stop
-// path; deleting it now is still correct since nothing serves it. The stop
-// runs under the scope lock so a failed stop leaves the revision in place.
+// revisionDelete removes one revision that is neither the latest created
+// nor serving a percent of the traffic in effect, with GCP's refusals
+// (recording run-traffic). A tag alone doesn't keep a revision: its traffic
+// targets go with it, which changes the service's generation and routing, as
+// in GCP. The stop runs under the scope lock so a failed stop leaves the
+// revision in place.
 func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, id string) (*gateway.RESTResponse, error) {
 	revisionID := request.Path["revision"]
 	var snapshot map[string]any
 	if err := p.withService(scope, id, func(_ *scopeState, record *serviceRecord) error {
 		revision := record.Revisions[revisionID]
-		if revision == nil {
+		switch {
+		case revision == nil:
 			return errNoRevision(revisionID)
-		}
-		if serving := servingRevision(record); serving != nil && serving.ID == revisionID {
-			return status.Errorf(codes.InvalidArgument, "Revision %q is still serving traffic", revisionID)
+		case latestRevision(record) == revision:
+			return status.Errorf(codes.FailedPrecondition, "The latest created Revision %q cannot be directly deleted.", revisionID)
+		case serves(record.Statuses, revisionID):
+			return status.Errorf(codes.FailedPrecondition, "Revision %q cannot be directly deleted because it is actively serving.", revisionID)
 		}
 		if err := p.runtime.Stop(call.Context, revision.Container); err != nil {
 			return fmt.Errorf("stop the revision container: %w", err)
@@ -1027,11 +1138,26 @@ func (p *Provider) revisionDelete(call gateway.Call, request *gateway.RESTReques
 		snapshot = p.revisionDocument(scope, record, revision)
 		releaseMetadata(revision)
 		delete(record.Revisions, revisionID)
+		untarget(record, revisionID, p.clock())
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	return p.deleted(scope, wireName(scope, "services", id, "revisions", revisionID), typeRevision, snapshot)
+}
+
+// untarget drops a deleted revision's traffic targets. When the traffic
+// block named it, the service moves one generation on and its routing drops
+// the revision; otherwise nothing changes (recording run-traffic).
+func untarget(record *serviceRecord, revisionID string, now time.Time) {
+	kept := slices.DeleteFunc(slices.Clone(record.Spec.Traffic), func(target trafficTarget) bool { return target.Revision == revisionID })
+	if len(kept) == len(record.Spec.Traffic) {
+		return
+	}
+	record.Spec.Traffic = kept
+	record.Statuses = slices.DeleteFunc(slices.Clone(record.Statuses), func(entry trafficStatus) bool { return entry.Revision == revisionID })
+	record.Generation++
+	record.UpdatedAt = now
 }
 
 // serviceURI returns the local invocation URL of one service. The loopback

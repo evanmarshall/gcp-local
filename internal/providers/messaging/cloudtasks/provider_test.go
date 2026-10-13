@@ -19,6 +19,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider/providertest"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
@@ -892,5 +893,39 @@ func TestStaleWorkerLeavesARecreatedTaskAlone(t *testing.T) {
 	task := decode(t, h.invoke(http.MethodGet, queuePath+"/tasks/same", nil))
 	if task["dispatchCount"] != nil || task["lastAttempt"] != nil {
 		t.Fatalf("the old worker changed the recreated task: %v", task)
+	}
+}
+
+// A delivery to a local Cloud Run service is marked internal for the queue's
+// project, which Cloud Run's internal ingress admits; other targets get no mark.
+func TestDispatchMarksLocalCloudRunDeliveriesInternal(t *testing.T) {
+	h := newHarness(t)
+	h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{"name": testQueue})
+	marks := make(chan string, 2)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		project, _ := provider.InternalProject(r)
+		marks <- r.URL.Path + "=" + project
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	for _, path := range []string{"/_run/svc-p.us-central1.run.app/work", "/elsewhere"} {
+		recorder := h.invoke(http.MethodPost, basePrefix+"/queues/"+testQueue+"/tasks", map[string]any{"task": map[string]any{
+			"httpRequest": map[string]any{"url": target.URL + path, "httpMethod": "POST"},
+		}})
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("task create = %d %s", recorder.Code, recorder.Body.String())
+		}
+		select {
+		case got := <-marks:
+			want := path + "="
+			if strings.HasPrefix(path, "/_run/") {
+				want += testProject
+			}
+			if got != want {
+				t.Fatalf("delivery mark = %q, want %q", got, want)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the task was not dispatched")
+		}
 	}
 }

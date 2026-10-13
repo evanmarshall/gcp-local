@@ -1,6 +1,7 @@
 package run
 
 import (
+	"maps"
 	"net/url"
 	"regexp"
 
@@ -25,14 +26,14 @@ func serviceResource(project, location, id string) string {
 
 // modeledService are the google.cloud.run.v2.Service input fields the
 // provider models, by JSON path. Every other input field is refused with a
-// gap naming it unless unset (provider.Unmodeled): scaling, VPC access,
-// concurrency, resource limits, probes, CMEK, Binary Authorization, volumes,
-// and the rest. ingress and traffic take only the values validateService
-// accepts; the rest of their range is #92.
+// gap naming it unless unset (provider.Unmodeled): service-level scaling, VPC
+// access, resource limits, probes, CMEK, Binary Authorization, volumes, and
+// the rest. ingress takes only the values validateService accepts.
 var modeledService = []string{
 	"name", "description", "labels", "annotations", "client", "clientVersion", "launchStage",
 	"ingress", "traffic",
 	"template.revision", "template.serviceAccount",
+	"template.scaling.minInstanceCount", "template.scaling.maxInstanceCount", "template.maxInstanceRequestConcurrency",
 	"template.containers.image", "template.containers.ports.containerPort", "template.containers.ports.name",
 	"template.containers.env.name", "template.containers.env.value",
 }
@@ -50,29 +51,43 @@ func decodeService(body []byte) (*runpb.Service, error) {
 	return service, nil
 }
 
-// serviceSpec is a validated service request: its metadata and template.
+// serviceSpec is a validated service request: its metadata, routing, and
+// template.
 type serviceSpec struct {
 	Description, Client, ClientVersion, LaunchStage string
 	Labels, Annotations                             map[string]string
+	Ingress                                         string
+	Traffic                                         []trafficTarget
 	Template                                        templateShape
 }
 
-// latestTraffic is the one traffic shape the provider serves: all traffic to
-// the latest ready revision, GCP's default.
-const latestTraffic = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+// Ingress settings the provider enforces. INGRESS_TRAFFIC_NONE is a gap.
+const (
+	ingressAll        = "INGRESS_TRAFFIC_ALL"
+	ingressNone       = "INGRESS_TRAFFIC_NONE"
+	requestCreateName = "CreateServiceRequest"
+	requestUpdateName = "UpdateServiceRequest"
+)
 
-// validateService checks a decoded service and returns its spec. Ingress
-// other than all traffic and any traffic block other than 100% to the latest
-// revision are gaps: the local invocation surface would not enforce them.
-func validateService(service *runpb.Service) (serviceSpec, error) {
-	if ingress := service.GetIngress(); ingress != runpb.IngressTraffic_INGRESS_TRAFFIC_UNSPECIFIED && ingress != runpb.IngressTraffic_INGRESS_TRAFFIC_ALL {
-		return serviceSpec{}, coverageGap("ingress " + ingress.String())
+// validateService checks a decoded service and returns its spec. request
+// names the request message, as GCP's scaling violations do.
+func validateService(service *runpb.Service, request string) (serviceSpec, error) {
+	ingress := service.GetIngress().String()
+	if service.GetIngress() == runpb.IngressTraffic_INGRESS_TRAFFIC_UNSPECIFIED {
+		ingress = ingressAll
 	}
-	if !allLatest(service.GetTraffic()) {
-		return serviceSpec{}, coverageGap("traffic other than 100% to the latest revision")
+	if ingress == ingressNone {
+		return serviceSpec{}, coverageGap("ingress " + ingressNone)
+	}
+	traffic, err := validateTraffic(service.GetTraffic())
+	if err != nil {
+		return serviceSpec{}, err
 	}
 	template, err := resolveTemplate(service.GetTemplate())
 	if err != nil {
+		return serviceSpec{}, err
+	}
+	if template.Scaling, err = validateScaling(service.GetTemplate(), request); err != nil {
 		return serviceSpec{}, err
 	}
 	stage := service.GetLaunchStage().String()
@@ -81,22 +96,9 @@ func validateService(service *runpb.Service) (serviceSpec, error) {
 	}
 	return serviceSpec{
 		Description: service.GetDescription(), Client: service.GetClient(), ClientVersion: service.GetClientVersion(),
-		LaunchStage: stage, Labels: service.GetLabels(), Annotations: service.GetAnnotations(), Template: template,
+		LaunchStage: stage, Labels: service.GetLabels(), Annotations: service.GetAnnotations(),
+		Ingress: ingress, Traffic: traffic, Template: template,
 	}, nil
-}
-
-// allLatest reports a traffic block that is absent or sends 100% to the
-// latest revision, untagged.
-func allLatest(traffic []*runpb.TrafficTarget) bool {
-	switch {
-	case len(traffic) == 0:
-		return true
-	case len(traffic) > 1:
-		return false
-	}
-	only := traffic[0]
-	return only.GetType() == runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST &&
-		only.GetPercent() == 100 && only.GetRevision() == "" && only.GetTag() == ""
 }
 
 // templateShape is the validated revision template of a service request.
@@ -107,6 +109,20 @@ type templateShape struct {
 	RevisionNamed  bool
 	ServiceAccount string
 	Container      containerSpec
+	Scaling        scalingShape
+}
+
+// sameTemplate reports whether a request's template deploys what the
+// service's current one does. GCP creates a revision only when the template
+// changes (recording run-traffic); a request naming its revision must name
+// the current one.
+func sameTemplate(current, requested templateShape) bool {
+	if requested.RevisionNamed && requested.Revision != current.Revision {
+		return false
+	}
+	return current.ServiceAccount == requested.ServiceAccount && current.Scaling == requested.Scaling &&
+		current.Container.Image == requested.Container.Image && current.Container.Port == requested.Container.Port &&
+		maps.Equal(current.Container.Env, requested.Container.Env)
 }
 
 // containerSpec is one validated container of a revision template.

@@ -252,6 +252,8 @@ func (p *Provider) send(ctx context.Context, agent gateway.Call, job *schedulerp
 	} else if authorization != "" {
 		request.Header.Set("Authorization", authorization)
 	}
+	// Cloud Run counts the job's own project's deliveries as internal.
+	provider.MarkInternal(request, agent.Project)
 	response, err := p.client.Do(request)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
