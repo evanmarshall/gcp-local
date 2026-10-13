@@ -282,6 +282,8 @@ func TestOAuthScopesLimitPlansBeforeIAM(t *testing.T) {
 	engine, _ := setup(t)
 	const auth = "https://www.googleapis.com/auth/"
 	insert := map[string]bool{"object_exists": false}
+	// objects.patch resolves its retention features before authorizing.
+	patch := map[string]bool{"retention_set": false, "retention_override": false}
 	for _, tc := range []struct {
 		scopes   []string
 		method   string
@@ -292,8 +294,8 @@ func TestOAuthScopesLimitPlansBeforeIAM(t *testing.T) {
 		{[]string{auth + "devstorage.read_only"}, "storage.objects.insert", insert, false},
 		{[]string{auth + "devstorage.read_write"}, "storage.objects.insert", insert, true},
 		// storage v1 discovery: objects.patch accepts full_control, not read_write.
-		{[]string{auth + "devstorage.read_write"}, "storage.objects.patch", nil, false},
-		{[]string{auth + "devstorage.full_control"}, "storage.objects.patch", nil, true},
+		{[]string{auth + "devstorage.read_write"}, "storage.objects.patch", patch, false},
+		{[]string{auth + "devstorage.full_control"}, "storage.objects.patch", patch, true},
 		{[]string{auth + "cloud-platform.read-only"}, testObjectGet, nil, true},
 		{[]string{auth + "cloud-platform.read-only"}, "storage.objects.insert", insert, false},
 		{[]string{auth + "cloudkms", auth + "pubsub"}, testObjectGet, nil, false},
