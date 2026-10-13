@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -284,9 +285,10 @@ func TestQueueUpdateReplacesRateLimits(t *testing.T) {
 	if queue.RateLimits["maxDispatchesPerSecond"] == nil {
 		t.Fatalf("rate limits = %v", queue.RateLimits)
 	}
+	// GCP creates a missing queue on patch; that is a gap, not a 404.
 	recorder = h.invoke(http.MethodPatch, basePrefix+"/queues/missing", map[string]any{})
-	if recorder.Code != 404 {
-		t.Fatalf("missing queue update status = %d", recorder.Code)
+	if recorder.Code != 501 || !strings.Contains(recorder.Body.String(), "creating a queue through queues.patch is not implemented") {
+		t.Fatalf("missing queue update = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -568,7 +570,7 @@ func TestConcurrentQueueAndTaskRequests(t *testing.T) {
 			{Method: http.MethodPost, Path: task + ":run", Want: []int{200, 404}},
 			{Method: http.MethodGet, Path: queue, Want: []int{200, 404}},
 			{Method: http.MethodGet, Path: queues, Want: []int{200}},
-			{Method: http.MethodPatch, Path: queue, Body: map[string]any{"rateLimits": map[string]any{"maxDispatchesPerSecond": worker + 1}, "retryConfig": retry}, Want: []int{200, 404}},
+			{Method: http.MethodPatch, Path: queue, Body: map[string]any{"rateLimits": map[string]any{"maxDispatchesPerSecond": worker + 1}, "retryConfig": retry}, Want: []int{200, 501}},
 			{Method: http.MethodPost, Path: queue + ":pause", Want: []int{200, 404}},
 			{Method: http.MethodPost, Path: queue + ":resume", Want: []int{200, 404}},
 			{Method: http.MethodDelete, Path: task, Want: []int{200, 404}},
@@ -584,5 +586,311 @@ func TestConcurrentQueueAndTaskRequests(t *testing.T) {
 	_, indexed := h.provider.index.Get(queueResource(testProject, testLocation, testQueue))
 	if stored := h.invoke(http.MethodGet, queue, nil).Code == 200; stored != indexed {
 		t.Fatalf("queue stored = %v but indexed = %v", stored, indexed)
+	}
+}
+
+// Lists page in name order with GCP's recorded refusals.
+func TestListsPage(t *testing.T) {
+	h := newHarness(t)
+	h.createRetryQueue()
+	_ = h.invoke(http.MethodPost, queuePath+":pause", map[string]any{})
+	for _, id := range []string{"t-b", "t-a"} {
+		if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", namedTask(testUnreached, id, "")); recorder.Code != 200 {
+			t.Fatalf("create %s = %d %s", id, recorder.Code, recorder.Body.String())
+		}
+	}
+	first := decode(t, h.invoke(http.MethodGet, queuePath+"/tasks?pageSize=1", nil))
+	token, _ := first["nextPageToken"].(string)
+	second := decode(t, h.invoke(http.MethodGet, queuePath+"/tasks?pageSize=1&pageToken="+token, nil))
+	names := func(page map[string]any) []string {
+		items, _ := page["tasks"].([]any)
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			name, _ := object(item)["name"].(string)
+			out = append(out, name[strings.LastIndex(name, "/")+1:])
+		}
+		return out
+	}
+	if !reflect.DeepEqual(names(first), []string{"t-a"}) || !reflect.DeepEqual(names(second), []string{"t-b"}) || second["nextPageToken"] == nil {
+		t.Fatalf("pages = %v %v", first, second)
+	}
+	for path, message := range map[string]string{
+		queuePath + "/tasks?pageToken=bogus":    "Invalid page_token",
+		queuePath + "/tasks?pageSize=-1":        "ListTasksRequest.pageSize cannot be negative.",
+		basePrefix + "/queues?pageToken=bogus":  "Invalid page_token",
+		basePrefix + "/queues?pageSize=-1":      "ListQueuesRequest.pageSize cannot be negative.",
+		queuePath + "/tasks?responseView=BOGUS": `Invalid value at 'response_view' (type.googleapis.com/google.cloud.tasks.v2beta3.Task.View), "BOGUS"`,
+	} {
+		recorder := h.invoke(http.MethodGet, path, nil)
+		if recorder.Code != 400 || !strings.Contains(recorder.Body.String(), strconv.Quote(message)[1:len(strconv.Quote(message))-1]) {
+			t.Errorf("%s = %d %s", path, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+// Request fields the provider would otherwise accept and ignore are explicit
+// gaps naming the field.
+func TestUnmodeledFieldsAreGaps(t *testing.T) {
+	h := newHarness(t)
+	queues := basePrefix + "/queues"
+	cases := []struct {
+		verb, path string
+		body       map[string]any
+		want       string
+	}{
+		{http.MethodPost, queues, map[string]any{"name": "q1", "appEngineHttpQueue": map[string]any{"appEngineRoutingOverride": map[string]any{"service": "s"}}}, "appEngineHttpQueue is not modeled"},
+		{http.MethodPost, queues, map[string]any{"name": "q1", "httpTarget": map[string]any{"uriOverride": map[string]any{"host": "h"}}}, "httpTarget is not modeled"},
+		{http.MethodPost, queues, map[string]any{"name": "q1", "stackdriverLoggingConfig": map[string]any{"samplingRatio": 1}}, "stackdriverLoggingConfig is not modeled"},
+		{http.MethodPost, queues, map[string]any{"name": "q1", "type": "PULL"}, "pull queues are not implemented"},
+		{http.MethodPost, queues, map[string]any{"name": "q1", "taskTtl": "86400s"}, "taskTtl other than the default 2678400s is not implemented"},
+		{http.MethodGet, queues + "?readMask=stats", nil, "the readMask option is not implemented"},
+		{http.MethodGet, queues + "?filter=state%3APAUSED", nil, "list filter is not implemented"},
+	}
+	for _, c := range cases {
+		recorder := h.invoke(c.verb, c.path, c.body)
+		if recorder.Code != 501 || !strings.Contains(recorder.Body.String(), "Cloud Tasks coverage gap: "+c.want) {
+			t.Errorf("%s %s %v = %d %s", c.verb, c.path, c.body, recorder.Code, recorder.Body.String())
+		}
+	}
+	h.createRetryQueue()
+	oauth := map[string]any{"task": map[string]any{"httpRequest": map[string]any{"url": testUnreached,
+		"oauthToken": map[string]any{"serviceAccountEmail": email("denied")}}}}
+	for body, want := range map[string]map[string]any{
+		"task.httpRequest.oauthToken is not modeled": oauth,
+		"task.pullMessage is not modeled":            {"task": map[string]any{"pullMessage": map[string]any{"payload": "eA=="}}},
+	} {
+		recorder := h.invoke(http.MethodPost, queuePath+"/tasks", want)
+		if recorder.Code != 501 || !strings.Contains(recorder.Body.String(), "Cloud Tasks coverage gap: "+body) {
+			t.Errorf("%s = %d %s", body, recorder.Code, recorder.Body.String())
+		}
+	}
+	if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", map[string]any{"task": map[string]any{"httpRequest": map[string]any{"url": testUnreached}}, "bogus": 1}); recorder.Code != 400 ||
+		!strings.Contains(recorder.Body.String(), `Unknown name \"bogus\": Cannot find field.`) {
+		t.Errorf("unknown task request field = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// A task's name is tombstoned for its queue's tombstoneTtl after the task is
+// deleted (recording cloudtasks-dispatch-retry).
+func TestDeletedTaskNamesAreTombstoned(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now()
+	h.provider.clock = func() time.Time { return now }
+	h.createRetryQueue()
+	_ = h.invoke(http.MethodPost, queuePath+":pause", map[string]any{})
+	body := namedTask(testUnreached, "named", "")
+	if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", body); recorder.Code != 200 {
+		t.Fatalf("create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := h.invoke(http.MethodDelete, queuePath+"/tasks/named", nil); recorder.Code != 200 {
+		t.Fatalf("delete = %d %s", recorder.Code, recorder.Body.String())
+	}
+	recorder := h.invoke(http.MethodPost, queuePath+"/tasks", body)
+	if recorder.Code != 409 || !strings.Contains(recorder.Body.String(), "a task with this name existed too recently") {
+		t.Fatalf("recreate = %d %s", recorder.Code, recorder.Body.String())
+	}
+	now = now.Add(defaultTombstoneTTL + time.Second)
+	if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", body); recorder.Code != 200 {
+		t.Fatalf("recreate after the tombstone = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// dispatchDeadline is echoed, bounded, and ends a slow attempt with
+// DEADLINE_EXCEEDED.
+func TestDispatchDeadline(t *testing.T) {
+	h := newHarness(t)
+	h.createRetryQueue()
+	_ = h.invoke(http.MethodPost, queuePath+":pause", map[string]any{})
+	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+		}
+	}))
+	defer slow.Close()
+	created := decode(t, h.invoke(http.MethodPost, queuePath+"/tasks", namedTask(slow.URL, "slow", "20s")))
+	if created["dispatchDeadline"] != "20s" {
+		t.Fatalf("created = %v", created)
+	}
+	if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", namedTask(slow.URL, "short", "5s")); recorder.Code != 400 || !strings.Contains(recorder.Body.String(), "Task.dispatchDeadline must be between [15s, 30m].") {
+		t.Fatalf("short deadline = %d %s", recorder.Code, recorder.Body.String())
+	}
+	// Shorten the stored deadline so the test need not wait 15 seconds.
+	if err := h.provider.scopes.With(state.Scope{Project: testProject, Location: state.Global}, func(s *scopeState) error {
+		s.tasks[testLocation+"/"+testQueue+"/slow"].Deadline = 100 * time.Millisecond
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = h.invoke(http.MethodPost, queuePath+":resume", map[string]any{})
+	attempted := decode(t, h.pollTask(queuePath+"/tasks/slow", func(recorder *httptest.ResponseRecorder) bool {
+		last, _ := decode(t, recorder)["lastAttempt"].(map[string]any)
+		return last["responseStatus"] != nil
+	}))
+	if code := object(object(attempted["lastAttempt"])["responseStatus"])["code"]; code != float64(4) {
+		t.Fatalf("slow attempt = %v", attempted)
+	}
+}
+
+// maxConcurrentDispatches holds attempts beyond the limit, and the dispatch
+// rate spaces them.
+func TestRateLimitsHoldDispatches(t *testing.T) {
+	h := newHarness(t)
+	var inflight, peak atomic.Int64
+	var mu sync.Mutex
+	var starts []time.Time
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		starts = append(starts, time.Now())
+		mu.Unlock()
+		raise(&peak, inflight.Add(1))
+		time.Sleep(50 * time.Millisecond)
+		inflight.Add(-1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	recorder := h.invoke(http.MethodPost, basePrefix+"/queues", map[string]any{"name": testQueue,
+		"rateLimits": map[string]any{"maxConcurrentDispatches": 1, "maxDispatchesPerSecond": 10, "maxBurstSize": 1}})
+	if recorder.Code != 200 {
+		t.Fatalf("queue = %d %s", recorder.Code, recorder.Body.String())
+	}
+	for range 4 {
+		if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", taskBody(target.URL, "")); recorder.Code != 200 {
+			t.Fatalf("task = %d %s", recorder.Code, recorder.Body.String())
+		}
+	}
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(starts) == 4
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	sort.Slice(starts, func(i, j int) bool { return starts[i].Before(starts[j]) })
+	if peak.Load() != 1 || starts[3].Sub(starts[0]) < 250*time.Millisecond {
+		t.Fatalf("peak concurrency %d, spread %v", peak.Load(), starts[3].Sub(starts[0]))
+	}
+}
+
+// maxRetryDuration and maxAttempts must both be spent before a task stops.
+func TestRetryNeedsBothLimitsSpent(t *testing.T) {
+	policy := retryPolicy{MaxAttempts: 2, MaxDuration: time.Minute}
+	for _, c := range []struct {
+		dispatches int
+		since      time.Duration
+		want       bool
+	}{{2, time.Second, false}, {1, 2 * time.Minute, false}, {2, 2 * time.Minute, true}} {
+		if got := policy.exhausted(c.dispatches, c.since); got != c.want {
+			t.Errorf("exhausted(%d, %v) = %v", c.dispatches, c.since, got)
+		}
+	}
+	if (retryPolicy{MaxAttempts: -1}).exhausted(1000, time.Hour) || !(retryPolicy{MaxAttempts: 2}).exhausted(2, 0) {
+		t.Error("unlimited attempts stopped, or attempts without a duration limit did not")
+	}
+}
+
+// An update mask changes only the fields it names.
+func TestQueueUpdateMask(t *testing.T) {
+	h := newHarness(t)
+	h.createRetryQueue()
+	recorder := h.invoke(http.MethodPatch, queuePath+"?updateMask=retryConfig.maxAttempts,retryConfig.maxRetryDuration",
+		map[string]any{"retryConfig": map[string]any{"maxAttempts": 3, "maxDoublings": 2, "maxRetryDuration": "30s"}})
+	retry, _ := decode(t, recorder)["retryConfig"].(map[string]any)
+	want := map[string]any{"maxAttempts": float64(3), "maxRetryDuration": "30s", "minBackoff": "1s", "maxBackoff": "1s", "maxDoublings": float64(16)}
+	if !reflect.DeepEqual(retry, want) {
+		t.Fatalf("masked update = %d %v", recorder.Code, retry)
+	}
+	expectError(t, h.invoke(http.MethodPatch, queuePath+"?updateMask=state", map[string]any{}), 400, "INVALID_ARGUMENT")
+}
+
+// Queues refuse conditional bindings, as GCP does (recording
+// cloudtasks-dispatch-retry).
+func TestQueuePoliciesRefuseConditions(t *testing.T) {
+	h := newHarness(t)
+	h.createRetryQueue()
+	recorder := h.invoke(http.MethodPost, queuePath+":setIamPolicy", map[string]any{"policy": map[string]any{"version": 3, "bindings": []any{map[string]any{
+		"role": "roles/cloudtasks.viewer", "members": []any{"serviceAccount:" + email("viewer")},
+		"condition": map[string]any{"title": "t", "expression": `resource.type == "cloudtasks.googleapis.com/Queue"`},
+	}}}})
+	if recorder.Code != 400 || !strings.Contains(recorder.Body.String(), "Can't set conditional policy on this resource") {
+		t.Fatalf("conditional policy = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// namedTask builds a task body with a name in the test queue and an
+// optional dispatchDeadline.
+func namedTask(target, id, deadline string) map[string]any {
+	task := map[string]any{"name": strings.TrimPrefix(queuePath, "/v2beta3/") + "/tasks/" + id,
+		"httpRequest": map[string]any{"url": target, "httpMethod": "POST"}}
+	if deadline != "" {
+		task["dispatchDeadline"] = deadline
+	}
+	return map[string]any{"task": task}
+}
+
+// object reads a decoded JSON object, or an empty one.
+func object(value any) map[string]any {
+	entry, _ := value.(map[string]any)
+	return entry
+}
+
+// raise lifts peak to current if current is higher.
+func raise(peak *atomic.Int64, current int64) {
+	for previous := peak.Load(); current > previous; previous = peak.Load() {
+		if peak.CompareAndSwap(previous, current) {
+			return
+		}
+	}
+}
+
+// waitUntil polls a condition for up to ten seconds.
+func waitUntil(t *testing.T, condition func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !condition(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the condition did not hold in time")
+		}
+	}
+}
+
+// A worker finishing an attempt must not touch a task created again under
+// its name (here after the queue is deleted and recreated); that task has
+// its own worker. The old worker once dereferenced the new task's missing
+// first attempt.
+func TestStaleWorkerLeavesARecreatedTaskAlone(t *testing.T) {
+	h := newHarness(t)
+	entered, release := make(chan struct{}, 4), make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		entered <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer target.Close()
+	defer close(release)
+	h.createRetryQueue()
+	if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", namedTask(target.URL, "same", "")); recorder.Code != 200 {
+		t.Fatalf("create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	<-entered
+	// Remove the queue without stopping its worker, as a delete does in the
+	// moment before it cancels the worker.
+	if err := h.provider.scopes.With(state.Scope{Project: testProject, Location: state.Global}, func(s *scopeState) error {
+		delete(s.queues, testLocation+"/"+testQueue)
+		removeTasks(s, testLocation+"/"+testQueue)
+		return h.provider.index.Remove(serviceName, state.Scope{Project: testProject, Location: state.Global},
+			queueResource(testProject, testLocation, testQueue))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.createRetryQueue()
+	_ = h.invoke(http.MethodPost, queuePath+":pause", map[string]any{})
+	if recorder := h.invoke(http.MethodPost, queuePath+"/tasks", namedTask(target.URL, "same", "")); recorder.Code != 200 {
+		t.Fatalf("recreate = %d %s", recorder.Code, recorder.Body.String())
+	}
+	release <- struct{}{}
+	time.Sleep(100 * time.Millisecond)
+	task := decode(t, h.invoke(http.MethodGet, queuePath+"/tasks/same", nil))
+	if task["dispatchCount"] != nil || task["lastAttempt"] != nil {
+		t.Fatalf("the old worker changed the recreated task: %v", task)
 	}
 }

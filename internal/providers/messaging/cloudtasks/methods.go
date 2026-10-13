@@ -1,17 +1,20 @@
 package cloudtasks
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
+	"strings"
 
+	taskspb "cloud.google.com/go/cloudtasks/apiv2beta3/cloudtaskspb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // execute dispatches one authorized method to its resource family.
@@ -25,25 +28,37 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.executeTask(call, request, scope)
 	}
 	if call.Method == methodLocationsList {
-		return &gateway.RESTResponse{JSON: map[string]any{"locations": []any{
-			map[string]any{"locationId": "us-central1"},
-		}}}, nil
+		return listLocations(request)
 	}
 	return nil, gap("this method is not implemented")
 }
 
-// executeQueue dispatches the queue methods.
+// locationsPaging pages the one served location.
+var locationsPaging = provider.Paging{Default: 100, Max: 100}
+
+// listLocations lists the one location the provider serves.
+func listLocations(request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+	items := []map[string]any{{keyName: "projects/" + request.Path["project"] + "/locations/us-central1", "locationId": "us-central1"}}
+	page, next, err := provider.Page(items, request.Query, locationsPaging, gap)
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: provider.ListBody("locations", page, next)}, nil
+}
+
+// executeQueue dispatches the queue methods. readMask, which selects the
+// queue's stats, is a gap.
 func (p *Provider) executeQueue(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	if request.Query.Get("readMask") != "" {
+		return nil, gap("the readMask option is not implemented")
+	}
 	switch call.Method {
 	case methodQueuesCreate:
 		return p.createQueue(request, scope)
 	case methodQueuesGet:
-		return p.getQueue(request, scope)
+		return p.withQueue(scope, queueKey(request), readQueue)
 	case methodQueuesList:
-		if request.Query.Get("filter") != "" {
-			return nil, gap("queue list filters are not implemented")
-		}
-		return p.listQueues(scope)
+		return p.listQueues(request, scope)
 	case methodQueuesDelete:
 		return p.deleteQueue(request, scope)
 	case methodQueuesUpdate:
@@ -57,17 +72,30 @@ func (p *Provider) executeQueue(call gateway.Call, request *gateway.RESTRequest,
 	}
 }
 
+// queueStateBodies are the request messages of pause, resume, and purge,
+// whose bodies bind the whole request; each holds only the queue name.
+var queueStateBodies = map[string]func() proto.Message{
+	methodQueuesPause:  func() proto.Message { return &taskspb.PauseQueueRequest{} },
+	methodQueuesResume: func() proto.Message { return &taskspb.ResumeQueueRequest{} },
+	methodQueuesPurge:  func() proto.Message { return &taskspb.PurgeQueueRequest{} },
+}
+
 // executeQueueState dispatches the pause/resume/purge state family.
 func (p *Provider) executeQueueState(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	body, ok := queueStateBodies[call.Method]
+	if !ok {
+		return nil, gap("this method is not implemented")
+	}
+	if err := decodeRequest(request.JSON, body()); err != nil {
+		return nil, err
+	}
 	switch call.Method {
 	case methodQueuesPause:
-		return p.setQueueState(request, scope, "PAUSED")
+		return p.setQueueState(request, scope, taskspb.Queue_PAUSED)
 	case methodQueuesResume:
-		return p.setQueueState(request, scope, "RUNNING")
-	case methodQueuesPurge:
-		return p.purgeQueue(request, scope)
+		return p.setQueueState(request, scope, taskspb.Queue_RUNNING)
 	default:
-		return nil, gap("this method is not implemented")
+		return p.purgeQueue(request, scope)
 	}
 }
 
@@ -83,59 +111,54 @@ func (p *Provider) executeTask(call gateway.Call, request *gateway.RESTRequest, 
 	case methodTasksDelete:
 		return p.deleteTask(request, scope)
 	case methodTasksRun:
-		return p.runTask(request, scope)
+		return p.runTask(call, request, scope)
 	default:
 		return nil, gap("this method is not implemented")
 	}
 }
 
+// queueKey addresses one queue in its project scope; queue IDs are unique
+// within a location.
+func queueKey(request *gateway.RESTRequest) string {
+	return request.Path["location"] + "/" + request.Path["queue"]
+}
+
 // queueDocument renders the queue wire shape; call it under the scope lock.
-func queueDocument(project string, record *queueRecord) map[string]any {
-	return map[string]any{
-		"name":         queueName(project, record.Location, record.Name),
-		"rateLimits":   maps.Clone(record.Rate),
-		"retryConfig":  record.Retry.wire(),
-		"state":        record.State,
-		"taskTtl":      defaultTaskTTL,
-		"tombstoneTtl": defaultTombstoneTTL,
-		"type":         queueTypePush,
-	}
+func queueDocument(record *queueRecord) map[string]any {
+	return render(record.queue)
 }
 
-// parseBody decodes one request body as a plain map; an absent body is empty.
-func parseBody(body []byte) (map[string]any, error) {
-	if len(body) == 0 {
-		return map[string]any{}, nil
-	}
-	var value map[string]any
-	if json.Unmarshal(body, &value) != nil {
-		return nil, provider.Invalid("Invalid request body")
-	}
-	return value, nil
-}
-
+// createQueue validates, stores, and indexes one queue.
 func (p *Provider) createQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := parseBody(request.JSON)
+	queue, err := decodeQueue(request.JSON)
 	if err != nil {
 		return nil, err
 	}
-	record, err := newQueue(request, body)
-	if err != nil {
+	location := request.Path["location"]
+	id := provider.LastSegment(queue.GetName())
+	if !queuePattern.MatchString(id) {
+		return nil, provider.Invalid("Invalid queue name " + id)
+	}
+	if err := normalizeQueue(queue); err != nil {
 		return nil, err
 	}
+	queue.Name = queueName(scope.Project, location, id)
+	queue.State, queue.PurgeTime, queue.Stats = taskspb.Queue_RUNNING, nil, nil
+	key := location + "/" + id
 	var document map[string]any
 	err = p.scopes.With(scope, func(s *scopeState) error {
-		if s.queues[record.Name] != nil {
-			return statusExists("Queue " + record.Name + " already exists")
+		if s.queues[key] != nil {
+			return statusExists("Queue " + queue.GetName() + " already exists")
 		}
 		if err := p.index.Put(serviceName, state.Resource{
-			Name: queueResource(scope.Project, record.Location, record.Name), Service: serviceName,
+			Name: queueResource(scope.Project, location, id), Service: serviceName,
 			Kind: "queue", Parent: provider.ProjectResource(scope.Project), Scope: scope,
 		}); err != nil {
 			return fmt.Errorf("index the queue: %w", err)
 		}
-		s.queues[record.Name] = record
-		document = queueDocument(scope.Project, record)
+		record := &queueRecord{queue: queue}
+		s.queues[key] = record
+		document = queueDocument(record)
 		return nil
 	})
 	if err != nil {
@@ -144,33 +167,19 @@ func (p *Provider) createQueue(request *gateway.RESTRequest, scope state.Scope) 
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// newQueue validates one queue creation body into its record.
-func newQueue(request *gateway.RESTRequest, body map[string]any) (*queueRecord, error) {
-	id := provider.LastSegment(provider.Text(body["name"]))
-	if !queuePattern.MatchString(id) {
-		return nil, provider.Invalid("Invalid queue name " + id)
-	}
-	rate, _ := body["rateLimits"].(map[string]any)
-	retry, err := parseRetry(defaultRetry(), body["retryConfig"])
-	if err != nil {
-		return nil, err
-	}
-	return &queueRecord{Name: id, Location: request.Path["location"], Rate: mergeRates(nil, rate), Retry: retry, State: "RUNNING"}, nil
-}
-
 // withQueue runs one mutation or read of an existing queue under the scope
 // lock and renders the resulting queue document.
-func (p *Provider) withQueue(scope state.Scope, id string, use func(*scopeState, *queueRecord) error) (*gateway.RESTResponse, error) {
+func (p *Provider) withQueue(scope state.Scope, key string, use func(*scopeState, *queueRecord) error) (*gateway.RESTResponse, error) {
 	var document map[string]any
 	err := p.scopes.With(scope, func(s *scopeState) error {
-		record := s.queues[id]
+		record := s.queues[key]
 		if record == nil {
-			return provider.NotFound("queues", id)
+			return provider.NotFound("queues", provider.LastSegment(key))
 		}
 		if err := use(s, record); err != nil {
 			return err
 		}
-		document = queueDocument(scope.Project, record)
+		document = queueDocument(record)
 		return nil
 	})
 	if err != nil {
@@ -182,28 +191,34 @@ func (p *Provider) withQueue(scope state.Scope, id string, use func(*scopeState,
 // readQueue makes no change.
 func readQueue(*scopeState, *queueRecord) error { return nil }
 
-func (p *Provider) getQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	return p.withQueue(scope, request.Path["queue"], readQueue)
-}
+// queuesPaging is ListQueues' documented page sizes (maximum 9800, the
+// default when unset) and recorded refusals.
+var queuesPaging = provider.Paging{Default: 9800, Max: 9800, InvalidToken: provider.Invalid("Invalid page_token"),
+	NegativeSize: provider.Invalid("ListQueuesRequest.pageSize cannot be negative.")}
 
-// listQueues returns the project's queues.
-func (p *Provider) listQueues(scope state.Scope) (*gateway.RESTResponse, error) {
-	var items []any
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		names := make([]string, 0, len(s.queues))
-		for name := range s.queues {
-			names = append(names, name)
+// listQueues returns one page of the location's queues in name order. A
+// filter is a gap.
+func (p *Provider) listQueues(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	var body map[string]any
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		prefix := request.Path["location"] + "/"
+		keys := slices.Sorted(maps.Keys(s.queues))
+		keys = slices.DeleteFunc(keys, func(key string) bool { return !strings.HasPrefix(key, prefix) })
+		page, next, err := provider.Page(keys, request.Query, queuesPaging, gap)
+		if err != nil {
+			return err
 		}
-		sort.Strings(names)
-		for _, name := range names {
-			items = append(items, queueDocument(scope.Project, s.queues[name]))
+		items := make([]map[string]any, 0, len(page))
+		for _, key := range page {
+			items = append(items, queueDocument(s.queues[key]))
 		}
+		body = provider.ListBody("queues", items, next)
 		return nil
 	})
-	if items == nil {
-		return &gateway.RESTResponse{JSON: map[string]any{}}, nil
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{"queues": items}}, nil
+	return &gateway.RESTResponse{JSON: body}, nil
 }
 
 // removeTasks deletes every task of one queue and returns their keys; call
@@ -219,22 +234,26 @@ func removeTasks(s *scopeState, queue string) []string {
 	return keys
 }
 
-// deleteQueue removes one queue, its tasks, and its policy. GCP returns an
-// empty body.
+// deleteQueue removes one queue, its tasks and tombstones, and its policy.
+// GCP returns an empty body.
 func (p *Provider) deleteQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	id := request.Path["queue"]
-	name := queueResource(scope.Project, request.Path["location"], id)
+	key := queueKey(request)
 	var removed []string
 	err := p.scopes.With(scope, func(s *scopeState) error {
-		if s.queues[id] == nil {
-			return provider.NotFound("queues", id)
+		if s.queues[key] == nil {
+			return provider.NotFound("queues", request.Path["queue"])
 		}
 		// Removing the index entry also drops the queue's policy.
-		if err := p.index.Remove(serviceName, scope, name); err != nil {
+		if err := p.index.Remove(serviceName, scope, queueResource(scope.Project, request.Path["location"], request.Path["queue"])); err != nil {
 			return fmt.Errorf("unindex the queue: %w", err)
 		}
-		delete(s.queues, id)
-		removed = removeTasks(s, id)
+		delete(s.queues, key)
+		removed = removeTasks(s, key)
+		for tombstone := range s.tombstones {
+			if strings.HasPrefix(tombstone, key+"/") {
+				delete(s.tombstones, tombstone)
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -247,41 +266,58 @@ func (p *Provider) deleteQueue(request *gateway.RESTRequest, scope state.Scope) 
 }
 
 // setQueueState pauses or resumes one queue.
-func (p *Provider) setQueueState(request *gateway.RESTRequest, scope state.Scope, state string) (*gateway.RESTResponse, error) {
-	return p.withQueue(scope, request.Path["queue"], func(_ *scopeState, record *queueRecord) error {
-		record.State = state
+func (p *Provider) setQueueState(request *gateway.RESTRequest, scope state.Scope, value taskspb.Queue_State) (*gateway.RESTResponse, error) {
+	return p.withQueue(scope, queueKey(request), func(_ *scopeState, record *queueRecord) error {
+		record.queue.State = value
 		return nil
 	})
 }
 
-// purgeQueue removes every task of one queue.
+// purgeQueue removes every task of one queue, tombstoning each, and records
+// the purge time.
 func (p *Provider) purgeQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	var removed []string
-	response, err := p.withQueue(scope, request.Path["queue"], func(s *scopeState, record *queueRecord) error {
-		removed = removeTasks(s, record.Name)
+	key := queueKey(request)
+	response, err := p.withQueue(scope, key, func(s *scopeState, record *queueRecord) error {
+		now := p.clock()
+		for task, value := range s.tasks {
+			if value.Queue == key {
+				s.bury(task, now)
+				removed = append(removed, task)
+			}
+		}
+		record.queue.PurgeTime = timestamppb.New(now)
 		return nil
 	})
-	for _, key := range removed {
-		p.stopWorker(scope, key)
+	for _, task := range removed {
+		p.stopWorker(scope, task)
 	}
 	return response, err
 }
 
 // getQueueIam reads the queue's policy.
 func (p *Provider) getQueueIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	if err := decodeRequest(request.JSON, &iampb.GetIamPolicyRequest{}); err != nil {
+		return nil, err
+	}
 	return p.queuePolicy(call, request, scope, p.engine.GetPolicy)
 }
 
-// setQueueIam stores one unconditional version-1 queue policy.
+// setQueueIam stores one queue policy. Queues refuse conditional bindings,
+// as GCP does (recording cloudtasks-dispatch-retry); audit configs and
+// masks beyond bindings and etag are gaps.
 func (p *Provider) setQueueIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	var envelope struct {
-		Policy iam.Policy `json:"policy"`
+	requested, err := provider.DecodePolicy(request.JSON, gap)
+	if err != nil {
+		return nil, err
 	}
-	if json.Unmarshal(request.JSON, &envelope) != nil {
-		return nil, provider.Invalid("Invalid IAM policy")
+	for _, binding := range requested.Bindings {
+		if len(binding.Condition) > 0 && string(binding.Condition) != "null" {
+			return nil, provider.Invalid("Can't set conditional policy on this resource")
+		}
 	}
 	return p.queuePolicy(call, request, scope, func(name string) (iam.Policy, error) {
-		return p.engine.SetPolicy(name, envelope.Policy)
+		return p.engine.SetPolicy(name, requested)
 	})
 }
 
@@ -290,19 +326,15 @@ func (p *Provider) setQueueIam(call gateway.Call, request *gateway.RESTRequest, 
 // index entry (and so the policy) under that lock, so a policy call racing a
 // delete reads NOT_FOUND and never touches a recreated queue's policy.
 func (p *Provider) queuePolicy(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, change func(string) (iam.Policy, error)) (*gateway.RESTResponse, error) {
-	name := queueResource(scope.Project, request.Path["location"], request.Path["queue"])
+	location, queue := request.Path["location"], request.Path["queue"]
+	name := queueResource(scope.Project, location, queue)
 	var response *gateway.RESTResponse
 	err := p.scopes.With(scope, func(s *scopeState) error {
-		if s.queues[request.Path["queue"]] == nil {
-			return provider.NotFound("queues", request.Path["queue"])
+		if s.queues[queueKey(request)] == nil {
+			return provider.NotFound("queues", queue)
 		}
-		target := iam.Target{Name: name}
-		if decision, err := p.engine.Authorize(call, target, nil); err != nil {
-			if code := status.Code(err); code != codes.PermissionDenied && code != codes.Unauthenticated {
-				return fmt.Errorf("authorize %s: %w", call.Method, err)
-			}
-			response = p.denied(call, decision, target)
-			return nil
+		if _, err := p.gate.Check(call, iam.Target{Name: name}, queueName(scope.Project, location, queue)); err != nil {
+			return err
 		}
 		policy, err := change(name)
 		if err != nil {
@@ -317,21 +349,44 @@ func (p *Provider) queuePolicy(call gateway.Call, request *gateway.RESTRequest, 
 	return response, nil
 }
 
-// updateQueue patches one queue's rate limits and retry configuration.
+// updateQueue replaces one queue (no updateMask) or the fields its
+// updateMask names, then fills the defaults again and validates the whole
+// result before applying it. GCP creates a missing queue here; that is a gap.
 func (p *Provider) updateQueue(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	body, err := parseBody(request.JSON)
+	update, err := decodeQueue(request.JSON)
 	if err != nil {
 		return nil, err
 	}
-	return p.withQueue(scope, request.Path["queue"], func(_ *scopeState, record *queueRecord) error {
-		retry, err := parseRetry(record.Retry, body["retryConfig"])
-		if err != nil {
+	mask := request.Query.Get("updateMask")
+	var paths [][]protoreflect.FieldDescriptor
+	if mask != "" {
+		if paths, err = provider.MaskPaths(mask, update, queueOutputNames); err != nil {
+			return nil, err
+		}
+	}
+	var document map[string]any
+	err = p.scopes.With(scope, func(s *scopeState) error {
+		record := s.queues[queueKey(request)]
+		if record == nil {
+			return gap("creating a queue through queues.patch is not implemented")
+		}
+		merged := proto.CloneOf(update)
+		if paths != nil {
+			merged = provider.ApplyMask(record.queue, update, paths)
+		}
+		if err := normalizeQueue(merged); err != nil {
 			return err
 		}
-		if rate, ok := body["rateLimits"].(map[string]any); ok {
-			record.Rate = mergeRates(record.Rate, rate)
-		}
-		record.Retry = retry
+		merged.Name, merged.State, merged.PurgeTime = record.queue.GetName(), record.queue.GetState(), record.queue.GetPurgeTime()
+		record.queue = merged
+		document = queueDocument(record)
 		return nil
 	})
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
+	}
+	return &gateway.RESTResponse{JSON: document}, nil
 }
+
+// queueOutputNames are queueOutput as proto names, for update masks.
+var queueOutputNames = map[protoreflect.Name]bool{keyName: true, "state": true, "purge_time": true, "stats": true}

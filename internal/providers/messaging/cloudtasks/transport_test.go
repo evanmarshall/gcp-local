@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -182,12 +183,13 @@ func queueSteps() []taskStep {
 			return c.ListQueues(ctx, &cloudtaskspb.ListQueuesRequest{Parent: parentName})
 		}, func() proto.Message { return &cloudtaskspb.ListQueuesResponse{} }},
 		{"list queues with filter", http.MethodGet, "/v2beta3/" + parentName + "/queues?filter=state%3APAUSED", nil, "actor", codes.Unimplemented,
-			"Cloud Tasks coverage gap: queue list filters are not implemented", func(ctx context.Context, c cloudtaskspb.CloudTasksClient) (proto.Message, error) {
+			"Cloud Tasks coverage gap: list filter is not implemented", func(ctx context.Context, c cloudtaskspb.CloudTasksClient) (proto.Message, error) {
 				return c.ListQueues(ctx, &cloudtaskspb.ListQueuesRequest{Parent: parentName, Filter: "state:PAUSED"})
 			}, nil},
 		{"update queue", http.MethodPatch, queuePath + "?updateMask=retryConfig.maxAttempts", map[string]any{"name": testQueueName, "retryConfig": map[string]any{"maxAttempts": 9}}, "actor", codes.OK, "",
 			func(ctx context.Context, c cloudtaskspb.CloudTasksClient) (proto.Message, error) {
-				return c.UpdateQueue(ctx, &cloudtaskspb.UpdateQueueRequest{Queue: &cloudtaskspb.Queue{Name: testQueueName, RetryConfig: &cloudtaskspb.RetryConfig{MaxAttempts: 9}}})
+				return c.UpdateQueue(ctx, &cloudtaskspb.UpdateQueueRequest{Queue: &cloudtaskspb.Queue{Name: testQueueName, RetryConfig: &cloudtaskspb.RetryConfig{MaxAttempts: 9}},
+					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"retry_config.max_attempts"}}})
 			}, queueDoc},
 		{"pause", http.MethodPost, queuePath + ":pause", nil, "actor", codes.OK, "", queueRPC("pause"), queueDoc},
 		{"resume", http.MethodPost, queuePath + ":resume", nil, "actor", codes.OK, "", queueRPC("resume"), queueDoc},
@@ -213,7 +215,7 @@ func taskSteps() []taskStep {
 		{"enqueue", http.MethodPost, tasks, taskBody, "enqueuer", codes.OK, "", createTaskRPC, taskDoc},
 		{"enqueue again", http.MethodPost, tasks, taskBody, "enqueuer", codes.AlreadyExists, "", createTaskRPC, taskDoc},
 		{"App Engine task", http.MethodPost, tasks, map[string]any{"task": map[string]any{"appEngineHttpRequest": map[string]any{"relativeUri": "/work"}}}, "actor", codes.Unimplemented,
-			"Cloud Tasks coverage gap: only HTTP target tasks are supported", func(ctx context.Context, c cloudtaskspb.CloudTasksClient) (proto.Message, error) {
+			"Cloud Tasks coverage gap: task.appEngineHttpRequest is not modeled", func(ctx context.Context, c cloudtaskspb.CloudTasksClient) (proto.Message, error) {
 				return c.CreateTask(ctx, &cloudtaskspb.CreateTaskRequest{Parent: testQueueName, Task: &cloudtaskspb.Task{
 					MessageType: &cloudtaskspb.Task_AppEngineHttpRequest{AppEngineHttpRequest: &cloudtaskspb.AppEngineHttpRequest{RelativeUri: "/work"}},
 				}})

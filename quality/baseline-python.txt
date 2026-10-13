@@ -130,7 +130,6 @@
 10	E501	gcp_validation/services/artifactregistry.py
 11	ANN201	gcp_validation/services/databases/bigquery.py
 11	ANN201	gcp_validation/services/security/cloudkms.py
-11	E501	gcp_validation/services/messaging/cloudtasks.py
 11	PLC0415	gcp_validation/services/messaging/pubsub.py
 13	D102	gcp_validation/services/messaging/pubsub.py
 13	E501	gcp_validation/services/compute/vm_connectivity.py

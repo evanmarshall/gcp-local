@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	taskspb "cloud.google.com/go/cloudtasks/apiv2beta3/cloudtaskspb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -81,6 +82,7 @@ type DeliveryConfig struct {
 type Provider struct {
 	index   *state.Index
 	engine  *iam.Engine
+	gate    provider.Gate
 	scopes  *state.Store[scopeState]
 	tokens  *identity.IDTokens
 	clock   func() time.Time
@@ -104,6 +106,8 @@ func New(_ context.Context, config DeliveryConfig, registry *gateway.Registry, m
 	}
 	p := &Provider{
 		index: index, engine: engine, tokens: config.Tokens,
+		// Cloud Tasks' denials carry no details (recording cloudtasks-dispatch-retry).
+		gate:      provider.Gate{Engine: engine, Index: index, Message: provider.LacksPermission},
 		scopes:    state.NewStore(newScopeState, state.GlobalScope),
 		client:    dispatchClient(),
 		clock:     time.Now,
@@ -132,10 +136,10 @@ func New(_ context.Context, config DeliveryConfig, registry *gateway.Registry, m
 	return p, nil
 }
 
-// dispatchClient bounds each attempt; a target that never answers fails as a
-// transport error well inside the queue's retry schedule.
+// dispatchClient bounds the connection; each attempt's own deadline is its
+// task's dispatchDeadline.
 func dispatchClient() *http.Client {
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{}
 	if base, ok := http.DefaultTransport.(*http.Transport); ok {
 		transport := base.Clone()
 		transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
@@ -169,21 +173,36 @@ func (p *Provider) stopWorkers(scope state.Scope) {
 }
 
 // stopWorker cancels one task's dispatch worker.
+// A task created again under the name since keeps its own worker. p.mu is
+// held while the store is read; no store callback takes p.mu.
 func (p *Provider) stopWorker(scope state.Scope, key string) {
 	p.mu.Lock()
-	if active := p.workers[provider.WorkerKey(scope, key)]; active != nil {
-		active.cancel()
-		delete(p.workers, provider.WorkerKey(scope, key))
+	defer p.mu.Unlock()
+	active := p.workers[provider.WorkerKey(scope, key)]
+	if active == nil {
+		return
 	}
-	p.mu.Unlock()
+	var current *taskRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		current = s.tasks[key]
+		return nil
+	})
+	if current != nil && current == active.own {
+		return
+	}
+	active.cancel()
+	delete(p.workers, provider.WorkerKey(scope, key))
 }
 
+// queueRecord is one stored queue: its wire fields, defaults filled, and
+// the dispatch limiter's state.
 type queueRecord struct {
-	Name     string
-	Location string
-	Rate     map[string]any
-	Retry    retryPolicy
-	State    string // RUNNING, PAUSED
+	queue *taskspb.Queue
+	// tokens and refilled are the rate limiter's bucket; inflight counts the
+	// attempts under way.
+	tokens   float64
+	refilled time.Time
+	inflight int
 }
 
 // attemptRecord is one dispatch attempt. Code is the RPC status of the
@@ -205,6 +224,7 @@ type taskRecord struct {
 	Headers        map[string]string
 	ServiceAccount string
 	Audience       string
+	Deadline       time.Duration
 	Created        time.Time
 	ScheduleAt     time.Time
 	Dispatches     int
@@ -216,19 +236,34 @@ type taskRecord struct {
 // taskKey addresses one task; task IDs are unique only within a queue.
 func taskKey(queue, id string) string { return queue + "/" + id }
 
-// scopeState is one project slice of provider state.
+// scopeState is one project slice of provider state. Queues are keyed by
+// location and ID, tasks by queue key and ID; tombstones hold the names of
+// removed tasks until they may be reused.
 type scopeState struct {
-	queues map[string]*queueRecord
-	tasks  map[string]*taskRecord
+	queues     map[string]*queueRecord
+	tasks      map[string]*taskRecord
+	tombstones map[string]time.Time
 }
 
 func newScopeState() scopeState {
-	return scopeState{queues: map[string]*queueRecord{}, tasks: map[string]*taskRecord{}}
+	return scopeState{queues: map[string]*queueRecord{}, tasks: map[string]*taskRecord{}, tombstones: map[string]time.Time{}}
 }
 
 func (s *scopeState) reset() {
-	s.queues = map[string]*queueRecord{}
-	s.tasks = map[string]*taskRecord{}
+	*s = newScopeState()
+}
+
+// bury removes a task and tombstones its name for the queue's tombstoneTtl,
+// as GCP does after a task is deleted, succeeds, or exhausts its retries.
+func (s *scopeState) bury(key string, now time.Time) {
+	task := s.tasks[key]
+	if task == nil {
+		return
+	}
+	delete(s.tasks, key)
+	if queue := s.queues[task.Queue]; queue != nil {
+		s.tombstones[key] = now.Add(queue.queue.GetTombstoneTtl().AsDuration())
+	}
 }
 
 // handle is the gateway entry point for every Cloud Tasks method.
@@ -238,41 +273,39 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, status.Error(codes.Internal, "Invalid Cloud Tasks request")
 	}
 	scope := provider.ProjectScope(request.Path["project"])
-	decision, target, authorizeErr := p.authorize(call, request)
-	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-		}
-		return p.denied(call, decision, target), nil
+	decision, target, err := p.authorize(call, request)
+	if err != nil {
+		return nil, err
 	}
 	call.Resource = target.Name
 	response, err := p.execute(call, request, scope)
 	if err != nil {
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
 // authorize checks the method against its queue, so queue policies grant
-// queue and task access. A queue that is not indexed authorizes through the
-// project anchor and then reads 404.
+// queue and task access, or against the project for a queue that is not
+// indexed (which then reads 404) and for collection methods. Queue create
+// and delete change the index under the scope lock Nearest holds. A denial
+// names the task, the queue, or the location for queue create and list
+// (recording cloudtasks-dispatch-retry).
 func (p *Provider) authorize(call gateway.Call, request *gateway.RESTRequest) (iam.Decision, iam.Target, error) {
-	project := iam.Target{Name: provider.ProjectResource(request.Path["project"])}
-	target := project
-	if queue := request.Path["queue"]; queue != "" {
-		target = iam.Target{Name: queueResource(request.Path["project"], request.Path["location"], queue)}
+	project, location, queue := request.Path["project"], request.Path["location"], request.Path["queue"]
+	candidates := []string{provider.ProjectResource(project)}
+	resource := "projects/" + project
+	switch {
+	case queue != "":
+		candidates = []string{queueResource(project, location, queue), candidates[0]}
+		resource = queueName(project, location, queue)
+		if task := request.Path["task"]; task != "" {
+			resource = taskName(project, location, queue, task)
+		}
+	case location != "":
+		resource = locationName(project, location)
 	}
-	decision, err := p.engine.Authorize(call, target, nil)
-	if target != project && status.Code(err) == codes.Unimplemented {
-		target = project
-		decision, err = p.engine.Authorize(call, target, nil)
-	}
-	return decision, target, err //nolint:wrapcheck // callers read the IAM status code
+	return provider.Nearest(p.gate, p.scopes, provider.ProjectScope(project), call, resource, candidates...)
 }
 
 // authorizeActAs requires iam.serviceAccounts.actAs on the OIDC service
@@ -291,13 +324,4 @@ func (p *Provider) authorizeActAs(call gateway.Call, project, email string) erro
 	default:
 		return fmt.Errorf("authorize the OIDC service account: %w", err)
 	}
-}
-
-// denied renders the Cloud Tasks denial shape.
-func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.Target) *gateway.RESTResponse {
-	permission := provider.DeniedPermission(decision)
-	if call.Principal.State != gateway.Authenticated {
-		return provider.WireError(401, "UNAUTHENTICATED", "Request had invalid authentication credentials.")
-	}
-	return provider.WireError(403, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", call.Principal.Subject, permission, target.Name))
 }

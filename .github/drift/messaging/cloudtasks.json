@@ -9,7 +9,7 @@
   "location": "global",
   "limits": {
     "max_queues": 1,
-    "max_tasks": 4,
+    "max_tasks": 8,
     "max_attempts": 2,
     "max_run_seconds": 600
   },

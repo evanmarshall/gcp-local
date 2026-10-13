@@ -1,6 +1,6 @@
 {
   "cloudtasks-dispatch-retry": {
-    "recorded-date": "12-10-2026, 17:47:34",
+    "recorded-date": "13-10-2026, 02:35:42",
     "recorded-content": {
       "queue-created": {
         "fields": [
@@ -16,15 +16,17 @@
         "name": "projects/<project>/locations/us-central1/queues/<queue>",
         "retryConfig": {
           "maxAttempts": 2,
-          "maxBackoff": "1s",
+          "maxBackoff": "10s",
           "maxDoublings": 16,
-          "minBackoff": "1s"
+          "minBackoff": "10s"
         },
         "state": "RUNNING"
       },
       "denied-enqueue": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "The principal (user or service account) lacks IAM permission \"cloudtasks.tasks.create\" for the resource \"projects/<project>/locations/us-central1/queues/<queue>\" (or the resource may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "policy-read": {
@@ -72,7 +74,16 @@
       },
       "enqueuer-cannot-list": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "The principal (user or service account) lacks IAM permission \"cloudtasks.tasks.list\" for the resource \"projects/<project>/locations/us-central1/queues/<queue>\" (or the resource may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-task-get": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "The principal (user or service account) lacks IAM permission \"cloudtasks.tasks.get\" for the resource \"projects/<project>/locations/us-central1/queues/<queue>/tasks/<task>\" (or the resource may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "first-attempt": {
@@ -121,6 +132,100 @@
         ],
         "http_status": 200,
         "state": "PAUSED"
+      },
+      "deadline-echoed": {
+        "dispatchDeadline": "20s",
+        "fields": [
+          "createTime",
+          "dispatchDeadline",
+          "httpRequest",
+          "name",
+          "scheduleTime",
+          "view"
+        ],
+        "http_status": 200
+      },
+      "tasks-paged": {
+        "first": [
+          "t-a"
+        ],
+        "first_has_next": true,
+        "second": [
+          "t-b"
+        ],
+        "second_has_next": true
+      },
+      "tasks-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page_token",
+        "status": "INVALID_ARGUMENT"
+      },
+      "tasks-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "ListTasksRequest.pageSize cannot be negative.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "queues-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page_token",
+        "status": "INVALID_ARGUMENT"
+      },
+      "queues-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "ListQueuesRequest.pageSize cannot be negative.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "task-deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "tombstoned": {
+        "code": 409,
+        "details": [],
+        "http_status": 409,
+        "message": "The task cannot be created because a task with this name existed too recently. For more information about task de-duplication see https://cloud.google.com/tasks/docs/reference/rest/v2beta3/projects.locations.queues.tasks/create#body.request_body.FIELDS.task.",
+        "status": "ALREADY_EXISTS"
+      },
+      "deadline-too-short": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Task.dispatchDeadline must be between [15s, 30m].",
+        "status": "INVALID_ARGUMENT"
+      },
+      "update-masked": {
+        "fields": [
+          "name",
+          "rateLimits",
+          "retryConfig",
+          "state",
+          "taskTtl",
+          "tombstoneTtl",
+          "type"
+        ],
+        "http_status": 200,
+        "retryConfig": {
+          "maxAttempts": 3,
+          "maxBackoff": "10s",
+          "maxDoublings": 16,
+          "maxRetryDuration": "30s",
+          "minBackoff": "10s"
+        }
+      },
+      "conditional-policy": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Can't set conditional policy on this resource",
+        "status": "INVALID_ARGUMENT"
       },
       "resumed": {
         "fields": [
