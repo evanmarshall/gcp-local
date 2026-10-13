@@ -10,7 +10,7 @@
 1	ANN204	gcp_validation/services/databases/bigquery.py
 1	ANN204	gcp_validation/services/messaging/cloudtasks.py
 1	ANN204	gcp_validation/services/security/cloudkms.py
-1	ANN204	gcp_validation/services/security/projectiam.py
+1	ANN204	gcp_validation/services/security/resourcemanager/projectiam.py
 1	ANN204	gcp_validation/services/security/serviceaccounts.py
 1	ANN204	gcp_validation/services/storage/authorization.py
 1	ANN204	gcp_validation/services/storage/normalization.py
@@ -41,7 +41,7 @@
 1	D107	gcp_validation/services/databases/bigquery.py
 1	D107	gcp_validation/services/messaging/cloudtasks.py
 1	D107	gcp_validation/services/security/cloudkms.py
-1	D107	gcp_validation/services/security/projectiam.py
+1	D107	gcp_validation/services/security/resourcemanager/projectiam.py
 1	D107	gcp_validation/services/security/serviceaccounts.py
 1	D107	gcp_validation/services/storage/authorization.py
 1	D107	gcp_validation/services/storage/normalization.py
@@ -57,7 +57,7 @@
 1	D401	gcp_validation/services/messaging/cloudtasks.py
 1	D401	gcp_validation/services/messaging/pubsub.py
 1	D401	gcp_validation/services/security/cloudkms.py
-1	D401	gcp_validation/services/security/projectiam.py
+1	D401	gcp_validation/services/security/resourcemanager/projectiam.py
 1	D401	gcp_validation/services/security/secretmanager/secrets.py
 1	D401	gcp_validation/services/security/serviceaccounts.py
 1	D401	gcp_validation/services/storage/conditions.py
@@ -112,7 +112,7 @@
 1	T201	gcp_validation/services/messaging/cloudtasks.py
 1	T201	gcp_validation/services/messaging/pubsub.py
 1	T201	gcp_validation/services/security/cloudkms.py
-1	T201	gcp_validation/services/security/projectiam.py
+1	T201	gcp_validation/services/security/resourcemanager/projectiam.py
 1	T201	gcp_validation/services/security/secretmanager/secrets.py
 1	T201	gcp_validation/services/security/serviceaccounts.py
 1	T201	gcp_validation/services/storage/client.py
@@ -120,7 +120,7 @@
 1	TRY004	gcp_validation/live_rest.py
 1	TRY004	gcp_validation/services/security/secretmanager/secrets.py
 1	TRY004	gcp_validation/services/storage/normalization.py
-10	ANN201	gcp_validation/services/security/projectiam.py
+10	ANN201	gcp_validation/services/security/resourcemanager/projectiam.py
 10	ANN201	gcp_validation/services/security/secretmanager/secrets.py
 11	ANN201	gcp_validation/services/databases/bigquery.py
 11	ANN201	gcp_validation/services/security/cloudkms.py
@@ -136,7 +136,7 @@
 17	E501	gcp_validation/services/storage/client.py
 19	ANN001	gcp_validation/services/compute/vm_connectivity.py
 19	ANN001	gcp_validation/services/messaging/cloudtasks.py
-19	ANN001	gcp_validation/services/security/projectiam.py
+19	ANN001	gcp_validation/services/security/resourcemanager/projectiam.py
 2	ANN002	gcp_validation/services/storage/sdk_slice.py
 2	ANN003	gcp_validation/services/storage/sdk_slice.py
 2	ANN201	gcp_validation/services/messaging/pubsub_scope.py
@@ -149,7 +149,7 @@
 2	D102	gcp_validation/services/storage/conditions.py
 2	D103	gcp_validation/services/compute/vm_connectivity.py
 2	D103	gcp_validation/services/messaging/cloudtasks.py
-2	D103	gcp_validation/services/security/projectiam.py
+2	D103	gcp_validation/services/security/resourcemanager/projectiam.py
 2	D103	gcp_validation/services/security/secretmanager/secrets.py
 2	D103	gcp_validation/services/security/serviceaccounts.py
 2	D103	gcp_validation/services/storage/client.py
@@ -203,7 +203,7 @@
 4	E501	gcp_validation/federation.py
 4	E501	tests/conformance/storage/clients/test_storage_multipart.py
 4	E501	tests/conformance/storage/clients/test_storage_sdk.py
-4	FBT003	gcp_validation/services/security/projectiam.py
+4	FBT003	gcp_validation/services/security/resourcemanager/projectiam.py
 4	PLC0415	tests/conformance/storage/conftest.py
 5	ANN201	gcp_validation/sandbox.py
 5	ANN201	gcp_validation/services/security/serviceaccounts.py
@@ -211,7 +211,7 @@
 5	ANN201	gcp_validation/services/storage/normalization.py
 5	D102	gcp_validation/services/compute/networking.py
 5	D102	gcp_validation/services/security/cloudkms.py
-5	D102	gcp_validation/services/security/projectiam.py
+5	D102	gcp_validation/services/security/resourcemanager/projectiam.py
 5	E501	tests/conformance/storage/test_storage_conditions.py
 5	E501	tests/conformance/storage/test_storage_replacement.py
 5	PLC0415	gcp_validation/sandbox.py
@@ -234,4 +234,4 @@
 8	D102	gcp_validation/services/security/secretmanager/secrets.py
 9	ANN001	gcp_validation/services/security/serviceaccounts.py
 9	E501	gcp_validation/live_rest.py
-9	E501	gcp_validation/services/security/projectiam.py
+9	E501	gcp_validation/services/security/resourcemanager/projectiam.py

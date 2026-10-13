@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:55:32.233911+00:00",
+  "recorded_at": "2026-10-13T22:40:12.721713+00:00",
   "scenario": {
     "id": "project-iam-policy-binding",
     "service": "resourcemanager",
     "transport": "rest-v1",
-    "revision": "47eee149fb57473d24f161c5e8b759e8a61d39624340c3e04bcbe4bc0b466c91",
+    "revision": "37aa7a12375497aa5507a0325863f4730fe5eca4df6dcfa604229a27dfc55bae",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "265678c309702524dfc4adec2d9dd916c594349b32c5045e7df6fd0322ecdd20",
+  "snapshot_sha256": "0e4b1cbbbd0ca6f8c1670014af68aa193d8551072922a909e40eb129fba7647f",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,10 +22,10 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/security/projectiam.py": "6c3d2b38a8b8e209d908690a282aa90a74853acac465c1525436ba0107d78049",
+      "gcp_validation/services/security/resourcemanager/projectiam.py": "6c3d2b38a8b8e209d908690a282aa90a74853acac465c1525436ba0107d78049",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "tests/conformance/security/resourcemanager/conftest.py": "1b7d1bfedf6ffb73aec4806a58026b1e424e86db8042c10a965c7ead4af21bba"
+      "tests/conformance/security/resourcemanager/conftest.py": "623268337a6bae11ebdf25af9a97fb95274d8aeb36531694033c8c42b6aacc1b"
     },
     "scope": {
       "services": [

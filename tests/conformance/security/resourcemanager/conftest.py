@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from gcp_validation.live_rest import RestClient
-from gcp_validation.services.security.projectiam import (
+from gcp_validation.services.security.resourcemanager.projectiam import (
     LIVE_ENDPOINT,
     SERVICE,
     ProjectPolicyFixture,

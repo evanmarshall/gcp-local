@@ -33,7 +33,7 @@ sh scripts/check/recordings.sh
 
 `TestLocalProjectIamPolicy` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
-To re-record, get approved scopes (`LIMITS` in `gcp_validation/services/security/projectiam.py` and `projectiam_versions.py`) and a temporary `roles/resourcemanager.projectIamAdmin` on the fixture identity. That role can change any binding: back up the policy first and remove the grant afterwards. `project-iam-policy-versions` refuses to start while the project policy holds conditions or audit configs, and removes only its own binding and audit config.
+To re-record, get approved scopes (`LIMITS` in `gcp_validation/services/security/resourcemanager/projectiam.py` and `projectiam_versions.py`) and a temporary `roles/resourcemanager.projectIamAdmin` on the fixture identity. That role can change any binding: back up the policy first and remove the grant afterwards. `project-iam-policy-versions` refuses to start while the project policy holds conditions or audit configs, and removes only its own binding and audit config.
 
 ```sh
 .venv-tools/bin/python -m pytest tests/conformance/security/resourcemanager -q \
