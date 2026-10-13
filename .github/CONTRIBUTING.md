@@ -30,7 +30,7 @@ Run the checks for every area you change; CI runs all of them. "Linux" means CI 
 | --- | --- | --- | --- |
 | `scripts/check/repo.py` | Links, YAML, skill metadata, `docs/coverage.md`, this page naming every script and requirements file, the [layout rules](../.agents/skills/repo-layout/SKILL.md) (`check/layout.py`), and that every recording has a scenario the `recordings` CI job replays | Any | `requirements/tools.txt` |
 | `scripts/check/history.py HEAD` | Linear history | Host (needs `.git`) | None |
-| `sh scripts/check/go.sh` | gofmt, `genapi -check`, vet, race tests (BigQuery's in parallel shards, `check/shards.py`, because its GoogleSQL module serializes one process), built-binary smoke (`smoke/runtime.py`) | Any | `install/go.py` |
+| `sh scripts/check/go.sh` | gofmt, `genapi -check`, vet, race tests (`check/race.py`, BigQuery's in parallel shards because its GoogleSQL module serializes one process), built-binary smoke (`smoke/runtime.py`) | Any | `install/go.py` |
 | `scripts/check/quality.py` | Go/Python lint and dead code against `quality/` | Any | `install/go.py`, `install/quality_tools.py`, `requirements/tools.txt` |
 | `python -m pytest` | Offline validation harness | Any | `requirements/sdk.txt`, `requirements/tools.txt` |
 | `sh scripts/check/recordings.sh` | Replays every GCP recording against the local providers; fails unless each one is verified (`run/recordings.py`). CI job `recordings` | Linux | Java 17, every backend, `requirements/services.txt` |

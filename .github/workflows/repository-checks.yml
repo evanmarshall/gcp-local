@@ -318,7 +318,7 @@ jobs:
         run: |
           sudo env GOMODCACHE="$(sh scripts/go.sh env GOMODCACHE)" GOCACHE="$(sh scripts/go.sh env GOCACHE)" \
             "$(command -v python)" scripts/run/isolated.py -- \
-            sh scripts/go.sh test -race -count=1 -timeout 60s ./internal/...
+            python3 scripts/check/race.py -count=1 ./internal/...
 
   repository-checks:
     runs-on: ubuntu-latest
