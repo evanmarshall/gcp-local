@@ -113,7 +113,21 @@ def run_storage():
         project=PROJECT, credentials=credentials(denied=True), client_options={"api_endpoint": HTTP}
     )
     expect_denied("ungranted object get", other.bucket(bucket.name).blob("hello.txt").reload)
-    blob.delete()
+    # Versioning: an overwrite keeps the old generation as noncurrent.
+    bucket.versioning_enabled = True
+    bucket.patch()
+    blob.upload_from_string(b"second")
+    versions = list(client.list_blobs(bucket, versions=True))
+    generations = [version.generation for version in versions]
+    assert generations == sorted(generations), "version order"
+    assert len(versions) == 2 and versions[0].time_deleted is not None, "noncurrent generation"
+    old = bucket.blob("hello.txt", generation=versions[0].generation)
+    assert old.download_as_bytes() == PAYLOAD, "noncurrent download"
+    bucket.delete_blob("hello.txt")
+    remaining = list(client.list_blobs(bucket, versions=True))
+    assert len(remaining) == 2, "a plain delete keeps the generation"
+    for version in versions:
+        bucket.blob(version.name, generation=version.generation).delete()
     bucket.delete()
 
 

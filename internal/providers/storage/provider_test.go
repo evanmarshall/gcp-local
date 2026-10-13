@@ -60,7 +60,7 @@ func setup(t *testing.T) *fixture {
 	}
 	registry := gateway.NewRegistry()
 	manager := backend.NewManager(time.Second, time.Second)
-	p, err := New(registry, manager, index, engine)
+	p, err := New(t.Context(), Config{}, registry, manager, index, engine)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestBucketPatchIsAtomic(t *testing.T) {
 	f := setup(t)
 	f.bucket(testProject, "atomic-bucket", 200)
 	f.request(admin, "PATCH", "/storage/v1/b/atomic-bucket", []byte(`{"labels":{"a":"before"}}`), 200)
-	f.request(admin, "PATCH", "/storage/v1/b/atomic-bucket", []byte(`{"labels":{"a":"after"},"versioning":{"enabled":true}}`), 400)
+	f.request(admin, "PATCH", "/storage/v1/b/atomic-bucket", []byte(`{"labels":{"a":"after"},"versioning":{"enabled":"yes"}}`), 400)
 	f.request(admin, "PATCH", "/storage/v1/b/atomic-bucket", []byte(`{"labels":{"a":7}}`), 400)
 	if body := f.request(admin, "GET", "/storage/v1/b/atomic-bucket", nil, 200).Body.String(); !strings.Contains(body, `"a":"before"`) {
 		t.Fatalf("a rejected patch changed the bucket: %s", body)

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -270,18 +271,23 @@ func (c *Catalog) forgetUpload(scope state.Scope, id string) {
 // Manager.Use owns access and serializes Stop/Reset with every request.
 type memoryBackend struct {
 	server *fakestorage.Server
-	// metagenerations holds the metageneration of each patched object, keyed
-	// by bucket and name. Upstream reports every object at metageneration 1;
-	// GCP advances it on each metadata update. An entry applies only to the
-	// generation it names, so a replaced object starts again at 1. Manager.Use
-	// serializes access, and Stop clears it with the objects.
-	metagenerations map[string]objectVersion
+	// overlays holds the object metadata this provider owns, per object
+	// generation (overlayKey), for fields upstream does not model. Upstream
+	// reports every object at metageneration 1; GCP advances it on each
+	// metadata update. Manager.Use serializes access, and Stop clears it with
+	// the objects.
+	overlays map[string]objectOverlay
 }
 
-// objectVersion is one object generation's provider-owned metageneration.
-type objectVersion struct {
-	generation     string
+// objectOverlay is one object generation's provider-owned metadata.
+type objectOverlay struct {
+	// metageneration is 0 until a patch, which reports as 1.
 	metageneration int64
+}
+
+// overlayKey names one object generation in memoryBackend.overlays.
+func overlayKey(bucket, name, generation string) string {
+	return bucket + "\x00" + name + "\x00" + generation
 }
 
 func (b *memoryBackend) Start(ctx context.Context) error {
@@ -292,7 +298,7 @@ func (b *memoryBackend) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("start the storage backend: %w", err)
 	}
-	b.server, b.metagenerations = server, map[string]objectVersion{}
+	b.server, b.overlays = server, map[string]objectOverlay{}
 	return nil
 }
 
@@ -311,7 +317,7 @@ func (b *memoryBackend) Ready(ctx context.Context) error {
 func (b *memoryBackend) Stop(ctx context.Context) error {
 	if b.server != nil {
 		b.server.Stop()
-		b.server, b.metagenerations = nil, nil
+		b.server, b.overlays = nil, nil
 	}
 	return ctx.Err()
 }
@@ -330,17 +336,27 @@ func (b *memoryBackend) request(r *http.Request) (*http.Response, error) {
 // metageneration returns an object generation's metageneration: 1 until a
 // patch advances it.
 func (b *memoryBackend) metageneration(bucket, name, generation string) string {
-	if version, ok := b.metagenerations[bucket+"/"+name]; ok && version.generation == generation {
-		return strconv.FormatInt(version.metageneration, 10)
-	}
-	return "1"
+	return strconv.FormatInt(max(b.overlays[overlayKey(bucket, name, generation)].metageneration, 1), 10)
 }
 
 // advanceMetageneration records a successful metadata update of one object
 // generation. It runs only after the backend accepted the update.
 func (b *memoryBackend) advanceMetageneration(bucket, name, generation string) {
-	current, _ := strconv.ParseInt(b.metageneration(bucket, name, generation), 10, 64)
-	b.metagenerations[bucket+"/"+name] = objectVersion{generation: generation, metageneration: current + 1}
+	key := overlayKey(bucket, name, generation)
+	overlay := b.overlays[key]
+	overlay.metageneration = max(overlay.metageneration, 1) + 1
+	b.overlays[key] = overlay
+}
+
+// forgetGeneration drops the overlay of a generation the backend no longer
+// holds, live or noncurrent.
+func (b *memoryBackend) forgetGeneration(bucket, name, generation string) {
+	delete(b.overlays, overlayKey(bucket, name, generation))
+}
+
+// forgetBucket drops the overlays of a deleted bucket's objects.
+func (b *memoryBackend) forgetBucket(bucket string) {
+	maps.DeleteFunc(b.overlays, func(key string, _ objectOverlay) bool { return strings.HasPrefix(key, bucket+"\x00") })
 }
 
 // errBackendType reports a backend that this provider did not register.

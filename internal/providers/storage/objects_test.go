@@ -6,9 +6,11 @@ import (
 	"crypto/md5" //nolint:gosec // GCS reports and checks MD5 content hashes
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -686,4 +688,106 @@ func TestRewriteCopiesWithBothSidesAuthorized(t *testing.T) {
 	f.t = t
 	f.request(admin, "GET", "/storage/v1/b/rw-other/o/denied.txt", nil, 404)
 	f.request(admin, "GET", "/storage/v1/b/rw-other/o/x.txt", nil, 404)
+}
+
+// versionedObject uploads one generation of doc to the versioning fixture
+// bucket with the given precondition and returns its generation.
+func versionedObject(t *testing.T, f *fixture, body, precondition string, expected int) string {
+	t.Helper()
+	response := f.request(admin, "POST", "/upload/storage/v1/b/versioned/o?uploadType=media&name=doc&ifGenerationMatch="+precondition, []byte(body), expected)
+	if expected != 200 {
+		return ""
+	}
+	generation, _ := decodeBody(t, response.Body.Bytes())[keyGeneration].(string)
+	return generation
+}
+
+// listedVersions lists doc's generations, paged by size, as "generation:noncurrent".
+func listedVersions(t *testing.T, f *fixture, size string) []string {
+	t.Helper()
+	var found []string
+	token := ""
+	for range 8 {
+		page := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/versioned/o?versions=True&maxResults="+size+"&pageToken="+url.QueryEscape(token), nil, 200).Body.Bytes())
+		for _, item := range itemList(page["items"]) {
+			_, noncurrent := item["timeDeleted"]
+			found = append(found, fmt.Sprintf("%s:%t", item[keyGeneration], noncurrent))
+		}
+		token, _ = page["nextPageToken"].(string)
+		if token == "" {
+			return found
+		}
+	}
+	t.Fatal("versions listing did not end")
+	return nil
+}
+
+// TestObjectVersioning follows storage-object-versioning: overwrites and plain
+// deletes keep noncurrent generations, generation-addressed reads and
+// deletes evaluate preconditions against that generation, noncurrent
+// generations keep the bucket from deleting, and suspending versioning keeps
+// the existing ones.
+func TestObjectVersioning(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "versioned", 200)
+	enabled := decodeBody(t, f.request(admin, "PATCH", "/storage/v1/b/versioned", []byte(`{"versioning":{"enabled":true}}`), 200).Body.Bytes())
+	expectf(t, fmt.Sprint(enabled["versioning"]) == "map[enabled:true]", "versioning not enabled: %v", enabled["versioning"])
+	first := versionedObject(t, f, "one", "0", 200)
+	second := versionedObject(t, f, "two", first, 200)
+	versionedObject(t, f, "x", "0", 412)
+	doc := "/storage/v1/b/versioned/o/doc"
+	live := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/versioned/o", nil, 200).Body.Bytes())
+	expectf(t, len(itemList(live["items"])) == 1, "live listing shows noncurrent generations: %v", live)
+	want := []string{first + ":true", second + ":false"}
+	expectf(t, slices.Equal(listedVersions(t, f, "1000"), want), "versions: %v", listedVersions(t, f, "1000"))
+	expectf(t, slices.Equal(listedVersions(t, f, "1"), want), "paged versions: %v", listedVersions(t, f, "1"))
+	if body := f.request(admin, "GET", doc+"?alt=media&generation="+first, nil, 200).Body.String(); body != "one" {
+		t.Fatalf("noncurrent media = %q", body)
+	}
+	f.request(admin, "GET", doc+"?generation="+first+"&ifGenerationMatch="+second, nil, 412)
+	f.request(admin, "GET", doc+"?generation="+first+"&ifGenerationMatch="+first, nil, 200)
+
+	f.request(admin, "DELETE", doc+"?ifGenerationMatch="+second, nil, 204)
+	f.request(admin, "GET", doc, nil, 404)
+	expectf(t, slices.Equal(listedVersions(t, f, "1000"), []string{first + ":true", second + ":true"}), "after delete: %v", listedVersions(t, f, "1000"))
+	third := versionedObject(t, f, "three", "0", 200)
+	f.request(admin, "DELETE", doc+"?generation="+first+"&ifGenerationMatch="+third, nil, 412)
+	f.request(admin, "DELETE", doc+"?generation="+first, nil, 204)
+	f.request(admin, "GET", doc+"?generation="+first, nil, 404)
+	f.request(admin, "DELETE", doc+"?generation="+first, nil, 404)
+	f.request(admin, "DELETE", doc, nil, 204)
+	refused(t, f.request(admin, "DELETE", "/storage/v1/b/versioned", nil, 409).Body.String(), "The bucket you tried to delete is not empty.")
+	refused(t, f.request(admin, "PATCH", doc+"?generation="+second, []byte(`{"metadata":{"k":"v"}}`), 400).Body.String(),
+		"Storage coverage gap: patching a noncurrent object generation")
+
+	f.request(admin, "PATCH", "/storage/v1/b/versioned", []byte(`{"versioning":{"enabled":false}}`), 200)
+	fourth := versionedObject(t, f, "four", "0", 200)
+	fifth := versionedObject(t, f, "five", fourth, 200)
+	want = []string{second + ":true", third + ":true", fifth + ":false"}
+	expectf(t, slices.Equal(listedVersions(t, f, "1000"), want), "after suspend: %v", listedVersions(t, f, "1000"))
+	for _, generation := range []string{second, third, fifth} {
+		f.request(admin, "DELETE", doc+"?generation="+generation, nil, 204)
+	}
+	f.request(admin, "DELETE", "/storage/v1/b/versioned", nil, 204)
+}
+
+// TestVersioningWithSoftDelete keeps a generation in soft delete only when it
+// leaves the bucket: a deleted noncurrent generation, not a live one that
+// becomes noncurrent.
+func TestVersioningWithSoftDelete(t *testing.T) {
+	f := setup(t)
+	f.request(admin, "POST", "/storage/v1/b?project=project-a", rcloneBucket("soft-versioned"), 200)
+	f.request(admin, "PATCH", "/storage/v1/b/soft-versioned", []byte(`{"versioning":{"enabled":true}}`), 200)
+	upload := "/upload/storage/v1/b/soft-versioned/o?uploadType=media&name=doc"
+	first, _ := decodeBody(t, f.request(admin, "POST", upload, []byte("one"), 200).Body.Bytes())[keyGeneration].(string)
+	f.request(admin, "POST", upload, []byte("two"), 200)
+	soft := func() int {
+		listing := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/soft-versioned/o?softDeleted=true", nil, 200).Body.Bytes())
+		return len(itemList(listing["items"]))
+	}
+	expectf(t, soft() == 0, "an overwrite in a versioned bucket soft-deleted the noncurrent generation")
+	f.request(admin, "DELETE", "/storage/v1/b/soft-versioned/o/doc", nil, 204)
+	expectf(t, soft() == 0, "a plain delete in a versioned bucket soft-deleted the live generation")
+	f.request(admin, "DELETE", "/storage/v1/b/soft-versioned/o/doc?generation="+first, nil, 204)
+	expectf(t, soft() == 1, "a deleted noncurrent generation was not soft-deleted")
 }

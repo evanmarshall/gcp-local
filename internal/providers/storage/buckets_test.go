@@ -61,7 +61,7 @@ func TestBucketLabelPatchAndPreconditions(t *testing.T) {
 	if labels, _ := got["labels"].(map[string]any); labels["team"] != "a" || got["metageneration"] != "3" {
 		t.Fatalf("patch did not persist: %v", got)
 	}
-	f.request(admin, "PATCH", "/storage/v1/b/meta-bucket", []byte(`{"versioning":{"enabled":true}}`), 400)
+	f.request(admin, "PATCH", "/storage/v1/b/meta-bucket", []byte(`{"billing":{"requesterPays":true}}`), 400)
 	f.request(admin, "PATCH", "/storage/v1/b/meta-bucket", []byte(`[]`), 400)
 	f.request(admin, "PATCH", "/storage/v1/b/meta-bucket", []byte(`{"labels":{"a":1}}`), 400)
 	f.request("stranger@project-a.test", "PATCH", "/storage/v1/b/meta-bucket", []byte(`{"labels":{}}`), 403)
@@ -116,7 +116,6 @@ func TestBucketCreateRejectsUnsupportedConfiguration(t *testing.T) {
 		{"unknown field", `{"name":"b-unknown",` + base + `,"website":{}}`, 400},
 		{"malformed", `{"name":`, 400},
 		{"no uniform access", `{"name":"b-acl","location":"US","softDeletePolicy":{"retentionDurationSeconds":"0"}}`, 400},
-		{"versioning", `{"name":"b-ver",` + base + `,"versioning":{"enabled":true}}`, 400},
 		{"default hold", `{"name":"b-hold",` + base + `,"defaultEventBasedHold":true}`, 400},
 		{"soft delete effective time", `{"name":"b-soft","location":"US","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0","effectiveTime":"2020-01-01T00:00:00Z"}}`, 400},
 		{"lifecycle rules", `{"name":"b-life",` + base + `,"lifecycle":{"rule":[{}]}}`, 400},
@@ -428,8 +427,8 @@ func TestSoftDeletePolicyPatch(t *testing.T) {
 		"Soft delete policy must have a retention duration between 7 days and 90 days.")
 	refused(t, f.request(admin, "PATCH", base, []byte(`{"softDeletePolicy":{"effectiveTime":"2020-01-01T00:00:00Z"}}`), 400).Body.String(),
 		"Storage coverage gap: softDeletePolicy updates set retentionDurationSeconds only")
-	refused(t, f.request(admin, "PATCH", base, []byte(`{"versioning":{"enabled":true}}`), 400).Body.String(),
-		"Storage coverage gap: bucket updates currently support labels and softDeletePolicy only")
+	refused(t, f.request(admin, "PATCH", base, []byte(`{"billing":{"requesterPays":true}}`), 400).Body.String(),
+		"Storage coverage gap: bucket updates of billing")
 	first := decodeBody(t, f.request(admin, "POST", upload+"kept.txt", []byte("kept"), 200).Body.Bytes())
 	generation, _ := first["generation"].(string)
 	f.request(admin, "DELETE", base+"/o/kept.txt", nil, 204)

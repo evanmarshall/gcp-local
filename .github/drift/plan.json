@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "comment": "Cheap scenarios the weekly drift job revalidates. Each entry runs one pytest invocation with its own scheduled scope. Excluded: Spanner, Bigtable, Cloud SQL, Memorystore, networking, VM connectivity and VM service-account firewalls (instance cost and long runs), project IAM (writes the project policy), Storage bucket defaults (leaves soft-deleted buckets), Storage isolation (needs the peer project), and scenarios without a committed scope.",
+  "comment": "Cheap scenarios the weekly drift job revalidates. Each entry runs one pytest invocation with its own scheduled scope. Excluded: Spanner, Bigtable, Cloud SQL, Memorystore, networking, VM connectivity and VM service-account firewalls (instance cost and long runs), project IAM (writes the project policy), Storage bucket defaults and versioning with soft delete (leave soft-deleted buckets), Storage isolation (needs the peer project), and scenarios without a committed scope.",
   "entries": [
     {"name": "storage", "tests": [
       "tests/conformance/storage/test_storage.py",
@@ -11,7 +11,8 @@
       "tests/conformance/storage/test_storage_replacement.py",
       "tests/conformance/storage/buckets/test_storage_bucket_updates.py",
       "tests/conformance/storage/buckets/test_storage_bucket_policy_only.py",
-      "tests/conformance/storage/clients/test_storage_rclone_objects.py"]},
+      "tests/conformance/storage/clients/test_storage_rclone_objects.py",
+      "tests/conformance/storage/protection/test_storage_versioning.py"]},
     {"name": "artifactregistry", "tests": ["tests/conformance/artifactregistry/test_artifactregistry.py"],
      "option": "--gcp-live-scope-file", "scope": "artifactregistry.json"},
     {"name": "logging", "tests": ["tests/conformance/logging/test_cloudlogging.py"],

@@ -1,0 +1,252 @@
+{
+  "storage-object-versioning": {
+    "recorded-date": "13-10-2026, 04:06:36",
+    "recorded-content": {
+      "versioning-enabled": {
+        "status": 200,
+        "versioning": {
+          "enabled": true
+        }
+      },
+      "overwritten": {
+        "first": {
+          "generation": "<generation-1>",
+          "metageneration": "1",
+          "name": "doc",
+          "noncurrent": false
+        },
+        "second": {
+          "generation": "<generation-2>",
+          "metageneration": "1",
+          "name": "doc",
+          "noncurrent": false
+        }
+      },
+      "create-only-refused": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "At least one of the pre-conditions you specified did not hold.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "live-listing": [
+        [
+          {
+            "name": "doc",
+            "generation": "<generation-2>",
+            "metageneration": "1",
+            "noncurrent": false
+          }
+        ]
+      ],
+      "versions-listing": [
+        [
+          {
+            "name": "doc",
+            "generation": "<generation-1>",
+            "metageneration": "1",
+            "noncurrent": true
+          },
+          {
+            "name": "doc",
+            "generation": "<generation-2>",
+            "metageneration": "1",
+            "noncurrent": false
+          }
+        ]
+      ],
+      "versions-pages": [
+        [
+          {
+            "name": "doc",
+            "generation": "<generation-1>",
+            "metageneration": "1",
+            "noncurrent": true
+          }
+        ],
+        [
+          {
+            "name": "doc",
+            "generation": "<generation-2>",
+            "metageneration": "1",
+            "noncurrent": false
+          }
+        ]
+      ],
+      "noncurrent-read": {
+        "generation": "<generation-1>",
+        "metageneration": "1",
+        "name": "doc",
+        "noncurrent": true,
+        "status": 200
+      },
+      "noncurrent-media": {
+        "bytes": 3,
+        "sha256": "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
+        "status": 200
+      },
+      "live-read": {
+        "generation": "<generation-2>",
+        "metageneration": "1",
+        "name": "doc",
+        "noncurrent": false,
+        "status": 200
+      },
+      "noncurrent-read-precondition": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "At least one of the pre-conditions you specified did not hold.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "noncurrent-read-own-precondition": {
+        "generation": "<generation-1>",
+        "metageneration": "1",
+        "name": "doc",
+        "noncurrent": true,
+        "status": 200
+      },
+      "live-delete": {
+        "status": 204
+      },
+      "read-after-delete": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "No such object: <bucket>/doc",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "versions-after-delete": [
+        [
+          {
+            "name": "doc",
+            "generation": "<generation-1>",
+            "metageneration": "1",
+            "noncurrent": true
+          },
+          {
+            "name": "doc",
+            "generation": "<generation-2>",
+            "metageneration": "1",
+            "noncurrent": true
+          }
+        ]
+      ],
+      "noncurrent-read-after-delete": {
+        "generation": "<generation-2>",
+        "metageneration": "1",
+        "name": "doc",
+        "noncurrent": true,
+        "status": 200
+      },
+      "recreated": {
+        "generation": "<generation-3>",
+        "metageneration": "1",
+        "name": "doc",
+        "noncurrent": false
+      },
+      "noncurrent-delete-precondition": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "At least one of the pre-conditions you specified did not hold.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "noncurrent-delete": {
+        "status": 204
+      },
+      "deleted-generation-read": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "No such object: <bucket>/doc",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "deleted-generation-delete": {
+        "code": 404,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "No such object: <bucket>/doc",
+        "reasons": [
+          "notFound"
+        ],
+        "status": 404
+      },
+      "versions-after-generation-delete": [
+        [
+          {
+            "name": "doc",
+            "generation": "<generation-2>",
+            "metageneration": "1",
+            "noncurrent": true
+          },
+          {
+            "name": "doc",
+            "generation": "<generation-3>",
+            "metageneration": "1",
+            "noncurrent": false
+          }
+        ]
+      ],
+      "live-delete-again": {
+        "status": 204
+      },
+      "bucket-delete-with-noncurrent": {
+        "code": 409,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "The bucket you tried to delete is not empty.",
+        "reasons": [
+          "conflict"
+        ],
+        "status": 409
+      },
+      "versioning-suspended": {
+        "status": 200,
+        "versioning": {
+          "enabled": false
+        }
+      },
+      "versions-after-suspend": [
+        [
+          {
+            "name": "doc",
+            "generation": "<generation-2>",
+            "metageneration": "1",
+            "noncurrent": true
+          },
+          {
+            "name": "doc",
+            "generation": "<generation-3>",
+            "metageneration": "1",
+            "noncurrent": true
+          },
+          {
+            "name": "doc",
+            "generation": "<generation-4>",
+            "metageneration": "1",
+            "noncurrent": false
+          }
+        ]
+      ],
+      "cleanup": {
+        "bucket_absent": true
+      }
+    }
+  }
+}

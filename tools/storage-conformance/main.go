@@ -179,7 +179,7 @@ func main() {
 	registry := gateway.NewRegistry()
 	server := core.WithGateway("conformance", 5*time.Second, gateway.New(registry, resolver))
 	server.IAM = engine
-	_, err = storage.New(registry, server.Backends, index, engine)
+	_, err = storage.New(context.Background(), storage.Config{}, registry, server.Backends, index, engine)
 	must(err)
 	_, err = cloudkms.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)

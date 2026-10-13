@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	storageapi "github.com/evanmarshall/gcp-local/api/generated/storage"
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -28,10 +29,20 @@ import (
 )
 
 type Provider struct {
-	index   *state.Index
-	catalog *Catalog
-	iam     *iam.Engine
-	manager *backend.Manager
+	index    *state.Index
+	catalog  *Catalog
+	iam      *iam.Engine
+	manager  *backend.Manager
+	registry *gateway.Registry
+	// now is the clock lifecycle conditions, retention, and holds read.
+	now func() time.Time
+}
+
+// Config carries the provider's injectable dependencies. A nil Now is wall
+// time; tests substitute a manual clock to evaluate lifecycle rules
+// deterministically.
+type Config struct {
+	Now func() time.Time
 }
 
 // errProviderShape rejects an incomplete provider construction.
@@ -47,11 +58,15 @@ var registeredMethods = []string{
 	MethodXMLGet, MethodXMLPut, MethodObjectsRewrite, MethodObjectsPatch, MethodObjectsRestore,
 }
 
-func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
+// New registers the Storage provider. Its background work stops when ctx ends.
+func New(ctx context.Context, config Config, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	p := &Provider{index: index, catalog: NewCatalog(index), iam: engine, manager: manager}
+	p := &Provider{index: index, catalog: NewCatalog(index), iam: engine, manager: manager, registry: registry, now: config.Now}
+	if p.now == nil {
+		p.now = time.Now
+	}
 	if err := RegisterPermissions(engine); err != nil {
 		return nil, err
 	}
@@ -71,6 +86,7 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 	if err := p.registerRoutes(registry); err != nil {
 		return nil, err
 	}
+	_ = ctx
 	return p, nil
 }
 
@@ -408,7 +424,7 @@ func publishLinks(value map[string]any, origin string) {
 		generation, _ := value[keyGeneration].(string)
 		// GCP orders the query generation first (storage-rclone-object-requests).
 		value["mediaLink"] = origin + "/download" + self + "?" + keyGeneration + "=" + url.QueryEscape(generation) + "&" + queryAlt + "=" + altMedia
-	case "storage#bucket":
+	case kindBucketDocument:
 		value["selfLink"] = origin + "/storage/v1/b/" + url.PathEscape(name)
 	}
 	for _, key := range []string{"items", "resource"} {
@@ -533,7 +549,10 @@ func (b *memoryBackend) decodeBackendJSON(payload []byte, response *gateway.REST
 	// echoes the create body, so null the field here: the Terraform provider
 	// treats an explicit null as unset, while an absent key coerces to "".
 	// The multi-region shape is an explicit gap until it has its own recording.
-	value["rpo"] = nil
+	// Objects and lists have no rpo.
+	if value[keyKind] == kindBucketDocument {
+		value["rpo"] = nil
+	}
 	if etag, ok := value["etag"].(string); ok {
 		response.Headers.Set("ETag", `"`+etag+`"`)
 	}
@@ -565,7 +584,7 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 	}
 	response := &gateway.RESTResponse{Status: result.StatusCode, Headers: result.Header.Clone()}
 	response.Headers.Del("Content-Length")
-	if strings.Contains(result.Header.Get(headerContentType), "application/json") && (result.StatusCode >= 300 || query.Get(queryAlt) != altMedia) {
+	if strings.Contains(result.Header.Get(headerContentType), contentJSON) && (result.StatusCode >= 300 || query.Get(queryAlt) != altMedia) {
 		b.decodeBackendJSON(payload, response)
 		return response, nil
 	}
@@ -693,11 +712,20 @@ func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, req requ
 	return p.writeObject(ctx, b, req, current)
 }
 
-// writeObject serves inserts (JSON, XML, and a resumable commit) and deletes,
-// which remove the live generation that a bucket with a soft-delete policy
-// keeps.
+// writeObject serves inserts (JSON, XML, and a resumable commit) and deletes.
+// Each may remove a generation, which a bucket with a soft-delete policy
+// keeps: the live one an overwrite or delete replaces, unless versioning
+// keeps it as noncurrent, or the generation a delete names.
 func (p *Provider) writeObject(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
-	keep, err := p.retainLive(ctx, b, req.scope, req.bucket, req.object)
+	versioned, err := b.versioned(ctx, req.bucket)
+	if err != nil {
+		return nil, err
+	}
+	generation := ""
+	if req.call.Method == MethodObjectsDelete {
+		generation = req.rest.Query.Get(keyGeneration)
+	}
+	keep, err := p.retainRemoved(ctx, b, req.scope, req.bucket, req.object, generation, generation != "" || !versioned)
 	if err != nil {
 		return nil, err
 	}
@@ -726,33 +754,45 @@ func insertObject(ctx context.Context, b *memoryBackend, req request, current ma
 	return b.forward(ctx, "POST", "/upload/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", upload.query, upload.headers, upload.body)
 }
 
-// readOrDeleteObject serves object get and delete, which share one
-// precondition pass over the current object.
+// readOrDeleteObject serves object get and delete. Both address the live
+// generation, or the generation the request names, live or noncurrent, and
+// evaluate the preconditions against it (recorded: storage-object-versioning
+// "noncurrent-read-precondition", "noncurrent-delete-precondition").
 func readOrDeleteObject(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
-	current, refused, err := currentObject(ctx, b, req.bucket, req.object)
+	generation := req.rest.Query.Get(keyGeneration)
+	current, refused, err := currentObject(ctx, b, req.bucket, req.object, generation)
 	if refused != nil || err != nil {
 		return refused, err
 	}
 	if response, err := preconditions(req.rest, current, req.call.Method); response != nil || err != nil {
 		return response, err
 	}
-	if generation := req.rest.Query.Get(keyGeneration); generation != "" && current[keyGeneration] != generation {
-		return notFound(req.bucket, req.object), nil
-	}
 	if req.call.Method == MethodObjectsGet {
 		return b.forward(ctx, "GET", objectPath(req.bucket, req.object), req.rest.Query, req.rest.Headers, nil)
 	}
 	response, err := b.forward(ctx, "DELETE", objectPath(req.bucket, req.object), req.rest.Query, nil, nil)
-	if err == nil {
-		noContentOnSuccess(response)
+	if err != nil {
+		return response, err
 	}
-	return response, err
+	noContentOnSuccess(response)
+	if removed, _ := current[keyGeneration].(string); response.Status == http.StatusNoContent {
+		return response, b.prune(ctx, req.bucket, req.object, removed)
+	}
+	return response, nil
 }
 
-// currentObject reads an object's metadata. A missing object becomes a notFound
+// currentObject reads the metadata of an object's live generation, or of the
+// named generation, live or noncurrent. A missing one becomes a notFound
 // refusal and any other non-200 backend response is returned as is.
-func currentObject(ctx context.Context, b *memoryBackend, bucket, object string) (map[string]any, *gateway.RESTResponse, error) {
-	response, err := b.forward(ctx, "GET", objectPath(bucket, object), nil, nil, nil)
+func currentObject(ctx context.Context, b *memoryBackend, bucket, object, generation string) (map[string]any, *gateway.RESTResponse, error) {
+	var query url.Values
+	if generation != "" {
+		if !positiveInteger(generation) {
+			return nil, notFound(bucket, object), nil
+		}
+		query = url.Values{keyGeneration: {generation}}
+	}
+	response, err := b.forward(ctx, "GET", objectPath(bucket, object), query, nil, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -768,6 +808,12 @@ func currentObject(ctx context.Context, b *memoryBackend, bucket, object string)
 		return nil, nil, err
 	}
 	return body, nil, nil
+}
+
+// positiveInteger reports whether text is a generation number.
+func positiveInteger(text string) bool {
+	value, err := strconv.ParseInt(text, 10, 64)
+	return err == nil && value > 0
 }
 
 // noContentOnSuccess turns the backend's 200 delete reply into Storage's empty 204.
@@ -914,13 +960,24 @@ func (p *Provider) storageLayout(ctx context.Context, b *memoryBackend, r *gatew
 }
 
 // deleteBucket deletes one bucket, then releases its catalog and IAM state.
+// Live and noncurrent generations both keep a bucket from deleting; the
+// backend counts only live ones, so the provider checks (recorded:
+// storage-object-versioning "bucket-delete-with-noncurrent").
 func (p *Provider) deleteBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, path, bucket string) (*gateway.RESTResponse, error) {
+	listed, err := b.forward(ctx, http.MethodGet, path+"/o", url.Values{queryVersions: {"true"}, queryMaxResults: {"1"}}, nil, nil)
+	if err != nil || listed.Status != http.StatusOK {
+		return listed, err
+	}
+	if body, err := jsonObject(listed.JSON); err != nil || len(itemList(body["items"])) > 0 {
+		return wireError(409, "conflict", "The bucket you tried to delete is not empty."), err
+	}
 	response, err := b.forward(ctx, "DELETE", path, r.Query, nil, nil)
 	if err != nil {
 		return response, err
 	}
 	noContentOnSuccess(response)
 	if response.Status == 204 {
+		b.forgetBucket(bucket)
 		// Unindexing the bucket also drops its policy.
 		err = p.catalog.ForgetBucket(scope, bucket)
 	}
@@ -1033,3 +1090,124 @@ func (p *Provider) deleteFolder(scope state.Scope, bucket, id string) (*gateway.
 	}
 	return &gateway.RESTResponse{Status: 204}, nil
 }
+
+// RegisterPermissions describes the initial UBLA permission plans. Registering
+// these rules does not register API providers or claim service conformance.
+func RegisterPermissions(engine *iam.Engine) error {
+	rules := map[string]iam.Rule{
+		MethodFoldersInsert:       {Baseline: []string{MethodFoldersCreate}},
+		MethodFoldersCreate:       {Baseline: []string{MethodFoldersCreate}},
+		MethodFoldersGet:          {Baseline: []string{"storage.folders.get"}},
+		MethodFoldersList:         {Baseline: []string{"storage.folders.list"}},
+		MethodFoldersDelete:       {Baseline: []string{"storage.folders.delete"}},
+		MethodBucketsList:         {Baseline: []string{MethodBucketsList}},
+		MethodBucketsInsert:       {Baseline: []string{permissionBucketsCreate}},
+		MethodBucketsGet:          {Baseline: []string{MethodBucketsGet}},
+		MethodBucketsDelete:       {Baseline: []string{MethodBucketsDelete}},
+		MethodBucketsPatch:        {Baseline: []string{permissionBucketsUpdate}},
+		MethodBucketsGetIamPolicy: {Baseline: []string{MethodBucketsGetIamPolicy}},
+		MethodBucketsSetIamPolicy: {Baseline: []string{MethodBucketsSetIamPolicy}},
+		// buckets/getStorageLayout requires storage.objects.list.
+		MethodBucketsGetLayout: {Baseline: []string{permissionObjectsList}},
+		MethodObjectsList:      {Baseline: []string{MethodObjectsList}},
+		MethodObjectsGet:       {Baseline: []string{MethodObjectsGet}},
+		MethodObjectsDelete:    {Baseline: []string{MethodObjectsDelete}},
+		MethodObjectsPatch:     {Baseline: []string{permissionObjectsUpdate}},
+		MethodObjectsInsert:    {Baseline: []string{"storage.objects.create"}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
+		// objects/restore: restore and create, plus delete when a live object
+		// is overwritten. The recorded denial names storage.objects.restore
+		// first (storage-bucket-defaults "restore-denied").
+		MethodObjectsRestore: {Baseline: []string{permissionObjectsRestore, permissionObjectsCreate}, When: map[string][]string{objectExistsCondition: {MethodObjectsDelete}}},
+	}
+	for method, rule := range rules {
+		if err := engine.Register(method, rule); err != nil {
+			return fmt.Errorf("register %s: %w", method, err)
+		}
+	}
+	return nil
+}
+
+// serviceName is the registered service key for Storage backends and index entries.
+const serviceName = "storage"
+
+// Storage JSON API method names. Naming them keeps the dispatch table,
+// validation, and permission rules from drifting apart; a typo in any one
+// place used to disable a method silently.
+const (
+	MethodBucketsInsert       = "storage.buckets.insert"
+	MethodBucketsList         = "storage.buckets.list"
+	MethodBucketsGet          = "storage.buckets.get"
+	MethodBucketsPatch        = "storage.buckets.patch"
+	MethodBucketsDelete       = "storage.buckets.delete"
+	MethodBucketsGetIamPolicy = "storage.buckets.getIamPolicy"
+	MethodBucketsSetIamPolicy = "storage.buckets.setIamPolicy"
+	MethodBucketsGetLayout    = "storage.buckets.getStorageLayout"
+	MethodFoldersCreate       = "storage.folders.create"
+	MethodFoldersInsert       = "storage.folders.insert"
+	MethodFoldersGet          = "storage.folders.get"
+	MethodFoldersList         = "storage.folders.list"
+	MethodFoldersDelete       = "storage.folders.delete"
+	MethodObjectsInsert       = "storage.objects.insert"
+	MethodObjectsList         = "storage.objects.list"
+	MethodObjectsGet          = "storage.objects.get"
+	MethodObjectsDelete       = "storage.objects.delete"
+	MethodObjectsRewrite      = "storage.objects.rewrite"
+	MethodObjectsPatch        = "storage.objects.patch"
+	MethodObjectsRestore      = "storage.objects.restore"
+	// MethodXMLGet and MethodXMLPut are the XML API object methods; they
+	// authorize as objects.get and objects.insert.
+	MethodXMLGet = "storage.xml.objects.get"
+	MethodXMLPut = "storage.xml.objects.put"
+)
+
+// Permission names used by the UBLA baseline plans.
+const (
+	permissionBucketsCreate       = "storage.buckets.create"
+	permissionBucketsDelete       = "storage.buckets.delete"
+	permissionBucketsGet          = "storage.buckets.get"
+	permissionBucketsGetIamPolicy = "storage.buckets.getIamPolicy"
+	permissionBucketsList         = "storage.buckets.list"
+	permissionBucketsSetIamPolicy = "storage.buckets.setIamPolicy"
+	permissionBucketsUpdate       = "storage.buckets.update"
+	permissionObjectsCreate       = "storage.objects.create"
+	permissionObjectsDelete       = "storage.objects.delete"
+	permissionObjectsGet          = "storage.objects.get"
+	permissionObjectsList         = "storage.objects.list"
+	permissionObjectsRestore      = "storage.objects.restore"
+	permissionObjectsUpdate       = "storage.objects.update"
+)
+
+// Query and payload literals that repeat across validation and dispatch.
+const (
+	objectExistsCondition = "object_exists"
+	kindBucket            = "bucket"
+	altMedia              = "media"
+	uploadResumable       = "resumable"
+	keyBucket             = "bucket"
+	keyGeneration         = "generation"
+	keyCacheControl       = "cacheControl"
+	keyDisposition        = "contentDisposition"
+	keyContentType        = "contentType"
+	keyLanguage           = "contentLanguage"
+	keyMetadata           = "metadata"
+	queryAlt              = "alt"
+	queryUploadType       = "uploadType"
+	querySoftDeleted      = "softDeleted"
+	queryMaxResults       = "maxResults"
+	queryPrefix           = "prefix"
+	queryVersions         = "versions"
+	keyKind               = "kind"
+	// queryFoldersAsPrefixes is objects.list includeFoldersAsPrefixes, which
+	// gcloud storage ls sends as True.
+	queryFoldersAsPrefixes = "includeFoldersAsPrefixes"
+	valueFalse             = "false"
+	headerContentType      = "Content-Type"
+	headerPayloadHash      = "x-goog-content-sha256"
+	storageClassStandard   = "STANDARD"
+	// keyName is the name key shared by query options, upload metadata, and
+	// bucket/folder documents.
+	keyName            = "name"
+	keyEnabled         = "enabled"
+	kindBucketDocument = "storage#bucket"
+	contentJSON        = "application/json"
+)

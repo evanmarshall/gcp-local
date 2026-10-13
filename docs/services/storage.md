@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Nineteen scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
+Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-one scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -16,7 +16,7 @@ Point each client at the emulator and keep its normal credential loading:
 
 | Client | Setting | Tested |
 | --- | --- | --- |
-| Python `google-cloud-storage` | `Client(client_options={"api_endpoint": "http://127.0.0.1:4566"})` | Yes ([`scripts/smoke/storage.py`](../../scripts/smoke/storage.py)) |
+| Python `google-cloud-storage` | `Client(client_options={"api_endpoint": "http://127.0.0.1:4566"})` | Yes ([`scripts/smoke/storage.py`](../../scripts/smoke/storage.py); versioning in the [client matrix](../contributing/clients.md)) |
 | Go `cloud.google.com/go/storage` | `storage.NewClient(ctx, option.WithEndpoint("http://127.0.0.1:4566/storage/v1/"))` | Yes ([`sdk_test.go`](../../internal/providers/storage/sdk_test.go)) |
 | Node `@google-cloud/storage` | `new Storage({apiEndpoint: "http://127.0.0.1:4566", useAuthWithCustomEndpoint: true})`; upload with `save(data, {resumable: false})` | Yes ([client matrix](../contributing/clients.md)) |
 | rclone | `endpoint = http://127.0.0.1:4566/storage/v1/` in the `google cloud storage` remote, with `bucket_policy_only = true` | Yes ([client matrix](../contributing/clients.md)) |
@@ -36,7 +36,7 @@ Bucket create must set `location` and `iamConfiguration.uniformBucketLevelAccess
 | `enableObjectRetention` query option | `false` | `false` in any case (gcloud sends `False`) |
 | `storageClass` | `STANDARD` | `STANDARD` |
 
-Versioning and default holds must stay off. Buckets report uniform access under both names, each with a `lockedTime` 90 days after creation.
+Default holds must stay off. Buckets report uniform access under both names, each with a `lockedTime` 90 days after creation.
 
 ## Methods
 
@@ -46,12 +46,12 @@ Versioning and default holds must stay off. Buckets report uniform access under 
 | --- | --- | --- |
 | Buckets | `insert`, `get`, `delete` | Global name uniqueness across projects; a bucket holding only soft-deleted objects deletes |
 | Buckets | `list` | `prefix`, [paging](#lists), `returnPartialSuccess` (every bucket is reachable, so `unreachable` is omitted) |
-| Buckets | `patch` | `labels` (merges keys, null removes a key) and `softDeletePolicy.retentionDurationSeconds`; advances metageneration and etag |
+| Buckets | `patch` | `labels` (merges keys, null removes a key), `softDeletePolicy.retentionDurationSeconds`, and `versioning.enabled`; advances metageneration and etag |
 | Buckets | `getIamPolicy`, `setIamPolicy` | Version-3 conditions on `resource.name`; public members per [public access prevention](#public-access-prevention) |
 | Buckets | `getStorageLayout` | `locationType` and no `hierarchicalNamespace`, as gcloud reads them |
 | Objects | `insert` | Media, multipart, and resumable uploads, up to 128 MiB per object (larger is the 400 gap) |
-| Objects | `list` | `prefix`, `delimiter`, `startOffset`, `endOffset`, `versions`, [paging](#lists); `softDeleted=true` per [soft delete](#soft-delete) |
-| Objects | `get` (metadata and `alt=media`), `delete` | Generation, metageneration, and etag preconditions; `softDeleted=true` per [soft delete](#soft-delete) |
+| Objects | `list` | `prefix`, `delimiter`, `startOffset`, `endOffset`, `versions` per [versioning](#versioning), [paging](#lists); `softDeleted=true` per [soft delete](#soft-delete) |
+| Objects | `get` (metadata and `alt=media`), `delete` | `generation` names a live or noncurrent generation; generation, metageneration, and etag preconditions; `softDeleted=true` per [soft delete](#soft-delete) |
 | Objects | `restore` | `generation`, preconditions on the live object |
 | Objects | `patch` | `contentType`, `cacheControl`, `contentDisposition`, `contentEncoding`, `contentLanguage`, `metadata` (merges keys, null removes a key, null removes all); `generation` and the four precondition options; advances metageneration and etag |
 | Objects | `rewrite` | Single call within one project; source metadata copied, body metadata replaces it. A JSON `null` body (rclone `moveto`) copies the source unchanged |
@@ -73,6 +73,17 @@ Versioning and default holds must stay off. Buckets report uniform access under 
 - Entries are in name order. With a `delimiter`, each prefix is one entry toward `maxResults`, in name order among the objects, and no later page repeats it. `startOffset` and `endOffset` select objects before they collapse into prefixes.
 - `maxResults` (`pageSize` for folders) is an unsigned integer, capped at 1000. A negative or non-integer value is 400 `Invalid unsigned integer value: '-1'.` (reason `invalidParameter`). `maxResults=0` lists no objects but a full page of buckets.
 - A page token resumes after the previous page's last entry, so entries added or removed between pages are neither repeated nor skipped. An object listing refuses a token it did not issue with 400 `Next page token not valid: TOKEN`; a bucket listing lists nothing after one.
+
+## Versioning
+
+A bucket with `versioning.enabled` keeps every live generation that an overwrite, rewrite, restore, or plain delete replaces, as noncurrent (recorded: `storage-object-versioning`):
+
+- A noncurrent generation has `timeDeleted`. `objects.list` shows it only with `versions=true`, which lists each name's generations oldest first; a page can end between two generations of one name.
+- `get` and `delete` with `generation` address that generation, live or noncurrent, and evaluate `ifGenerationMatch` and the other preconditions against it. Deleting a generation removes it permanently. A plain delete makes the live generation noncurrent.
+- `ifGenerationMatch=0` on an insert checks only the live generation, so it succeeds once the live one is deleted.
+- Noncurrent generations keep the bucket from deleting: 409 `The bucket you tried to delete is not empty.`
+- Turning versioning off keeps the existing noncurrent generations; later overwrites replace the live one.
+- With soft delete, only a generation that leaves the bucket is soft-deleted: a deleted noncurrent generation, never a live one that becomes noncurrent. Restoring one makes the live generation noncurrent (recorded: `storage-versioning-soft-delete`).
 
 ## Soft delete
 
@@ -105,7 +116,7 @@ A bucket with a soft-delete policy keeps every object generation that a delete, 
 
 ## Verification
 
-All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/recordings/storage/clients/)):
+All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/recordings/storage/)):
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
@@ -122,6 +133,8 @@ All recorded against GCP in `us-central1` ([recordings](../../tests/conformance/
 | `storage-resumable-signed-url` | 2026-10-12 | Resumable session, status query, cancel and a request after it, signed PUT and GET, tampered, expired, and wrong-method URLs |
 | `storage-bucket-policy-only` | 2026-10-12 | Bucket create with only `bucketPolicyOnly`; both names and their `lockedTime` on create and read |
 | `storage-go-client-projection` | 2026-10-13 | The Go client's `projection=full` bucket and object calls, a bucket list with `returnPartialSuccess=true`, object `patch`, an undefined query option, an XML read from a missing bucket, an invalid projection |
+| `storage-object-versioning` | 2026-10-13 | Versioning on and off, noncurrent generations in listings and pages, reads, media, and deletes by generation with preconditions, create-only uploads, bucket delete refused while noncurrent generations remain |
+| `storage-versioning-soft-delete` | 2026-10-13 | Soft delete in a versioned bucket: overwrites and plain deletes keep no soft-deleted copy, a deleted noncurrent generation is soft-deleted, restore makes the live generation noncurrent |
 | `storage-list-paging` | 2026-10-13 | Delimiter pages (prefixes count toward `maxResults`, none repeated), flat pages, prefix and offset selection, invalid page tokens and `maxResults` values for objects and buckets |
 | `storage-bucket-defaults` | 2026-10-12 | rclone's bucket insert: inherited prevention, 7-day soft delete; soft-deleted list, read, restore, denied restore, overwrite; bucket delete with only soft-deleted objects |
 | `storage-gcloud-bucket-defaults` | 2026-10-12 | gcloud's bucket insert with `enableObjectRetention=False`; a below-minimum retention refused; disabling soft delete; soft-deleted listing refused without a policy |
@@ -138,7 +151,7 @@ sh scripts/check/recordings.sh  # every recording
 
 The smoke covers a 9 MiB resumable upload and signed URLs from a created key and from signBlob. Both run with no egress. Three adapted Terraform acceptance cases also pass ([Terraform](../contributing/terraform-compatibility.md)).
 
-Scenarios that send real-client request shapes, including `storage-gcloud-object-requests`, live in `tests/conformance/storage/clients/`; bucket scenarios, including the other bucket defaults, are in `tests/conformance/storage/buckets/`. Each run of `storage-bucket-defaults`, `storage-gcloud-bucket-defaults`, or `storage-public-access-enforced` leaves its bucket soft-deleted in the sandbox for seven days: GCP soft-deletes a bucket created under a 7-day policy even after the policy is set to 0, and offers no way to purge it sooner. Re-recording `storage-resumable-signed-url` needs the allowed identity to hold `roles/iam.serviceAccountTokenCreator` on itself.
+Scenarios that send real-client request shapes, including `storage-gcloud-object-requests`, live in `tests/conformance/storage/clients/`; bucket scenarios, including the other bucket defaults, are in `tests/conformance/storage/buckets/`; versioning, retention, and hold scenarios are in `tests/conformance/storage/protection/`. Each run of `storage-bucket-defaults`, `storage-gcloud-bucket-defaults`, `storage-public-access-enforced`, or `storage-versioning-soft-delete` leaves its bucket soft-deleted in the sandbox for seven days: GCP soft-deletes a bucket created under a 7-day policy even after the policy is set to 0, and offers no way to purge it sooner. Re-recording `storage-resumable-signed-url` needs the allowed identity to hold `roles/iam.serviceAccountTokenCreator` on itself.
 
 Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PROJECT_ID`, `GCP_TEST_PEER_SERVICE_ACCOUNT`, and an absolute `GCP_TEST_PEER_CREDENTIALS_FILE` in the sandbox profile ([sandbox](../contributing/gcp-sandbox.md)). The peer account needs Service Usage Consumer on the primary project and no Storage roles; the setup user needs Token Creator on it. Grant/revoke polling waits up to seven minutes. See [validation](../contributing/validation.md) for the commands.
 
@@ -150,7 +163,8 @@ Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PR
 - 128 MiB per object; uploads are buffered whole in memory, and a larger upload is the 400 gap. Chunk sizes are not checked against 256 KiB multiples.
 - Hierarchical namespace is not modeled. Bucket insert refuses `hierarchicalNamespace`, but folders are served in every bucket; GCP answers `folders.list` on a bucket without hierarchical namespace with 409 `The bucket does not support hierarchical namespace.` (observed 2026-10-13 in a `storage-list-paging` draft, not in its recording). The Terraform case `TestAccStorageBucket_basic` creates a folder in such a bucket.
 - `folders.list` refuses `delimiter`, `startOffset`, and `endOffset`; `includeTrailingDelimiter=true` and `matchGlob` on `objects.list` return the gap.
-- No ACLs, versioning, object retention (`enableObjectRetention=true` returns the 400 gap) or holds, lifecycle rules, requester pays, encryption keys, notifications, or compose.
+- Patching a noncurrent generation returns the gap.
+- No ACLs, object retention (`enableObjectRetention=true` returns the 400 gap) or holds, lifecycle rules, requester pays, encryption keys, notifications, or compose.
 - Bucket soft delete is not modeled: a deleted bucket and its soft-deleted objects are gone at once. `softDeleted` on `buckets.list` and `buckets.get`, and `buckets.restore`, return the 400 gap. `objects.restore` in a bucket whose policy is `0` returns the gap.
 - Soft-deleted media (`alt=media`), preconditions on a soft-deleted read, soft-deleted listings longer than one page or with other options, and `restoreToken` return the gap.
 - Organization policies are not modeled ([public access prevention](#public-access-prevention)). `publicAccessPrevention: unspecified` returns the gap.

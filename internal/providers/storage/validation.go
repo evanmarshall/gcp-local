@@ -549,7 +549,7 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	if err != nil {
 		return nil, status.Error(codes.Internal, "Unable to encode the bucket request")
 	}
-	response, err := b.forward(ctx, "POST", "/storage/v1/b", r.Query, http.Header{headerContentType: {"application/json"}}, payload)
+	response, err := b.forward(ctx, "POST", "/storage/v1/b", r.Query, http.Header{headerContentType: {contentJSON}}, payload)
 	if err != nil || response.Status != 200 {
 		return response, err
 	}
@@ -654,8 +654,8 @@ func unsupportedBucketPolicy(request *bucketRequest) error {
 	if err := publicAccessPrevention(request); err != nil {
 		return err
 	}
-	if request.Versioning.Enabled || request.Hold {
-		return gap("explicitly disable versioning and default holds")
+	if request.Hold {
+		return gap("explicitly disable default holds")
 	}
 	if request.SoftDelete.EffectiveTime != nil {
 		return gap("soft-delete effective time is server-owned")
@@ -707,10 +707,12 @@ func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketReques
 	metadata["softDeletePolicy"] = softDeletePolicy(seconds, timeCreated)
 	// GCP reports the same lockedTime under both names: the deadline, 90 days
 	// out, for disabling uniform access (recorded: storage-bucket-policy-only).
-	access := map[string]any{"enabled": true, "lockedTime": storageTime(time.Now().Add(90 * 24 * time.Hour))}
+	access := map[string]any{keyEnabled: true, "lockedTime": storageTime(time.Now().Add(90 * 24 * time.Hour))}
 	metadata["iamConfiguration"] = map[string]any{
 		"uniformBucketLevelAccess": access, "bucketPolicyOnly": access, "publicAccessPrevention": request.IAM.Public,
 	}
+	// The backend owns versioning: it keeps the noncurrent generations.
+	delete(metadata, "versioning")
 	project, _ := p.index.Get(provider.ProjectResource(scope.Project))
 	metadata["projectNumber"] = project.Number
 	metadata["metageneration"] = "1"
@@ -749,5 +751,5 @@ func (p *Provider) bucketMetadata(scope state.Scope, value map[string]any) {
 	_ = json.Unmarshal([]byte(bucket.Metadata), &metadata)
 	maps.Copy(value, metadata)
 	value["id"] = name
-	value[keyKind] = "storage#bucket"
+	value[keyKind] = kindBucketDocument
 }

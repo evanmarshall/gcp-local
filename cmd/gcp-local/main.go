@@ -269,7 +269,7 @@ func assembleIAM(ctx context.Context, options serveOptions, registry *gateway.Re
 // assembleServices registers each selected provider with its dependencies.
 func assembleServices(ctx context.Context, options serveOptions, selected map[string]bool, registry *gateway.Registry, server *core.Server, index *state.Index, engine *iam.Engine, identities *identity.Service) error {
 	if selected["storage"] {
-		if _, err := storage.New(registry, server.Backends, index, engine); err != nil {
+		if _, err := storage.New(ctx, storage.Config{}, registry, server.Backends, index, engine); err != nil {
 			return fmt.Errorf("register the Storage provider: %w", err)
 		}
 	}

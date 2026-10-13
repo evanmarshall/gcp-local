@@ -126,17 +126,17 @@ func patchObject(ctx context.Context, b *memoryBackend, req request) (*gateway.R
 	if err != nil {
 		return nil, err
 	}
-	current, refused, err := currentObject(ctx, b, req.bucket, req.object)
+	current, refused, err := currentObject(ctx, b, req.bucket, req.object, req.rest.Query.Get(keyGeneration))
 	if refused != nil || err != nil {
 		return refused, err
 	}
 	if response, err := preconditions(req.rest, current, MethodObjectsPatch); response != nil || err != nil {
 		return response, err
 	}
-	generation, _ := current[keyGeneration].(string)
-	if wanted := req.rest.Query.Get(keyGeneration); wanted != "" && wanted != generation {
-		return notFound(req.bucket, req.object), nil
+	if _, noncurrent := current["timeDeleted"]; noncurrent {
+		return nil, gap("patching a noncurrent object generation")
 	}
+	generation, _ := current[keyGeneration].(string)
 	if response, err := writeObjectPatch(ctx, b, req, patch, current); response != nil || err != nil {
 		return response, err
 	}
@@ -165,7 +165,7 @@ func writeObjectPatch(ctx context.Context, b *memoryBackend, req request, patch 
 		if err != nil {
 			return nil, provider.Invalid("Unable to encode the object patch")
 		}
-		response, err := b.forward(ctx, write.verb, objectPath(req.bucket, req.object), nil, http.Header{headerContentType: {"application/json"}}, payload)
+		response, err := b.forward(ctx, write.verb, objectPath(req.bucket, req.object), nil, http.Header{headerContentType: {contentJSON}}, payload)
 		if err != nil || response.Status != http.StatusOK {
 			return response, err
 		}
@@ -305,7 +305,11 @@ func (p *Provider) serveRewrite(ctx context.Context, b *memoryBackend, req rewri
 // copyRetaining copies the source over the destination, soft-deleting the
 // destination generation it replaces when the bucket keeps them.
 func (p *Provider) copyRetaining(ctx context.Context, b *memoryBackend, req rewriteRequest, source map[string]any) (*gateway.RESTResponse, error) {
-	keep, err := p.retainLive(ctx, b, req.scope, req.bucket, req.object)
+	versioned, err := b.versioned(ctx, req.bucket)
+	if err != nil {
+		return nil, err
+	}
+	keep, err := p.retainRemoved(ctx, b, req.scope, req.bucket, req.object, "", !versioned)
 	if err != nil {
 		return nil, err
 	}
@@ -334,12 +338,9 @@ func (p *Provider) authorizeSource(ctx context.Context, b *memoryBackend, req re
 	if denied, _, err := p.authorize(read, req.source, nil, true); denied != nil || err != nil {
 		return nil, denied, err
 	}
-	source, refused, err := currentObject(ctx, b, req.sourceBucket, req.sourceKey)
+	source, refused, err := currentObject(ctx, b, req.sourceBucket, req.sourceKey, req.rest.Query.Get("sourceGeneration"))
 	if refused != nil || err != nil {
 		return nil, refused, err
-	}
-	if generation := req.rest.Query.Get("sourceGeneration"); generation != "" && source[keyGeneration] != generation {
-		return nil, notFound(req.sourceBucket, req.sourceKey), nil
 	}
 	return source, nil, nil
 }
@@ -564,15 +565,12 @@ func executeXML(ctx context.Context, b *memoryBackend, req request, current map[
 
 // xmlGet reads an object's media with the response-header overrides applied.
 func xmlGet(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
-	current, refused, err := currentObject(ctx, b, req.bucket, req.object)
-	if refused != nil || err != nil {
+	generation := req.rest.Query.Get(keyGeneration)
+	if _, refused, err := currentObject(ctx, b, req.bucket, req.object, generation); refused != nil || err != nil {
 		return refused, err
 	}
 	query := url.Values{queryAlt: {altMedia}}
-	if generation := req.rest.Query.Get(keyGeneration); generation != "" {
-		if current[keyGeneration] != generation {
-			return notFound(req.bucket, req.object), nil
-		}
+	if generation != "" {
 		query.Set(keyGeneration, generation)
 	}
 	response, err := b.forward(ctx, http.MethodGet, objectPath(req.bucket, req.object), query, req.rest.Headers, nil)
@@ -682,24 +680,27 @@ func (p *Provider) bucketSettings(scope state.Scope, bucket string) (int64, stri
 	return seconds, metadata.IAM.Public
 }
 
-// retainLive snapshots the live object a mutation may remove when the bucket
-// keeps soft-deleted objects. The returned keep records the snapshot once the
-// mutation has succeeded; it does nothing for a failed mutation, a bucket
-// without a policy, or an object that did not exist.
-func (p *Provider) retainLive(ctx context.Context, b *memoryBackend, scope state.Scope, bucket, name string) (func(*gateway.RESTResponse) error, error) {
+// retainRemoved snapshots the generation a mutation may remove (the named
+// one, or the live one when generation is empty) when the bucket keeps
+// soft-deleted objects and the mutation removes it permanently: a versioned
+// bucket keeps an overwritten or deleted live generation as noncurrent
+// instead. The returned keep records the snapshot once the mutation has
+// succeeded; it does nothing for a failed mutation, a bucket without a
+// policy, a generation that stays, or an object that did not exist.
+func (p *Provider) retainRemoved(ctx context.Context, b *memoryBackend, scope state.Scope, bucket, name, generation string, permanent bool) (func(*gateway.RESTResponse) error, error) {
 	skip := func(*gateway.RESTResponse) error { return nil }
 	retention, _ := p.bucketSettings(scope, bucket)
-	if retention == 0 {
+	if retention == 0 || !permanent {
 		return skip, nil
 	}
-	current, missing, err := currentObject(ctx, b, bucket, name)
+	current, missing, err := currentObject(ctx, b, bucket, name, generation)
 	if err != nil {
 		return nil, err
 	}
 	if missing != nil {
 		return skip, nil
 	}
-	generation, _ := current[keyGeneration].(string)
+	generation, _ = current[keyGeneration].(string)
 	data, err := readSource(ctx, b, bucket, name, generation)
 	if err != nil {
 		return nil, err
@@ -709,12 +710,46 @@ func (p *Provider) retainLive(ctx context.Context, b *memoryBackend, scope state
 		if response == nil || (response.Status != 0 && (response.Status < 200 || response.Status >= 300)) {
 			return nil
 		}
-		now := time.Now()
+		now := p.now()
 		hard := now.Add(time.Duration(retention) * time.Second)
 		current["softDeleteTime"], current["hardDeleteTime"] = storageTime(now), storageTime(hard)
 		return p.catalog.retainObject(scope, softObject{Bucket: bucket, Name: name, Generation: generation,
 			Object: current, Data: data, Hard: hard})
 	}, nil
+}
+
+// versioned reports whether a bucket keeps noncurrent generations. The
+// backend owns the setting, as it owns the generations it keeps.
+func (b *memoryBackend) versioned(ctx context.Context, bucket string) (bool, error) {
+	response, err := b.forward(ctx, http.MethodGet, "/storage/v1/b/"+url.PathEscape(bucket), nil, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	if response.Status != http.StatusOK {
+		return false, fault("Unable to read the bucket's versioning")
+	}
+	body, err := jsonObject(response.JSON)
+	if err != nil {
+		return false, err
+	}
+	versioning, _ := body["versioning"].(map[string]any)
+	enabled, _ := versioning[keyEnabled].(bool)
+	return enabled, nil
+}
+
+// prune forgets the overlay of a generation the backend no longer holds.
+func (b *memoryBackend) prune(ctx context.Context, bucket, name, generation string) error {
+	if generation == "" {
+		return nil
+	}
+	response, err := b.forward(ctx, http.MethodGet, objectPath(bucket, name), url.Values{keyGeneration: {generation}}, nil, nil)
+	if err != nil {
+		return err
+	}
+	if response.Status == http.StatusNotFound {
+		b.forgetGeneration(bucket, name, generation)
+	}
+	return nil
 }
 
 // listObjects serves objects.list, live or soft-deleted.
@@ -739,7 +774,7 @@ func (p *Provider) listObjects(ctx context.Context, b *memoryBackend, req reques
 	if refused != nil || err != nil {
 		return refused, err
 	}
-	page, next := pageAfter(objectEntries(objects, query), func(entry listEntry) string { return entry.name }, after, limit, objectPages)
+	page, next := pageAfter(objectEntries(objects, query), func(entry listEntry) string { return entry.key }, after, limit, objectPages)
 	items, prefixes := []map[string]any{}, []string{}
 	for _, entry := range page {
 		if entry.object == nil {
@@ -777,10 +812,19 @@ func listedObjects(ctx context.Context, b *memoryBackend, bucket string, query u
 		return nil, nil, err
 	}
 	objects := itemList(body["items"])
+	// GCP lists versions of one name oldest first (recorded:
+	// storage-object-versioning "versions-listing").
 	slices.SortStableFunc(objects, func(left, right map[string]any) int {
-		return cmp.Compare(documentName(left), documentName(right))
+		return cmp.Or(cmp.Compare(documentName(left), documentName(right)), cmp.Compare(generationOf(left), generationOf(right)))
 	})
 	return objects, nil, nil
+}
+
+// generationOf is an object document's generation number.
+func generationOf(document map[string]any) int64 {
+	text, _ := document[keyGeneration].(string)
+	generation, _ := strconv.ParseInt(text, 10, 64)
+	return generation
 }
 
 // documentName is the name of a bucket or object document.
@@ -790,10 +834,13 @@ func documentName(document map[string]any) string {
 }
 
 // listEntry is one objects.list entry: an object, or a prefix that stands for
-// every object under it when the listing has a delimiter.
+// every object under it when the listing has a delimiter. key orders entries
+// and resumes a page: the name, plus, in a versions=true listing, the
+// zero-padded generation, so a page token can resume between two versions of
+// one name (recorded: storage-object-versioning "versions-pages").
 type listEntry struct {
-	name   string
-	object map[string]any
+	name, key string
+	object    map[string]any
 }
 
 // objectEntries applies startOffset, endOffset, and the delimiter to a
@@ -804,6 +851,7 @@ type listEntry struct {
 func objectEntries(objects []map[string]any, query url.Values) []listEntry {
 	prefix, delimiter := query.Get(queryPrefix), query.Get("delimiter")
 	start, end := query.Get("startOffset"), query.Get("endOffset")
+	versions, _ := booleanOption(query, queryVersions)
 	entries := make([]listEntry, 0, len(objects))
 	for _, object := range objects {
 		name := documentName(object)
@@ -815,13 +863,21 @@ func objectEntries(objects []map[string]any, query url.Values) []listEntry {
 			// Objects under one prefix are adjacent in name order.
 			collapsed := name[:len(prefix)+index+len(delimiter)]
 			if len(entries) == 0 || entries[len(entries)-1].name != collapsed {
-				entries = append(entries, listEntry{name: collapsed})
+				entries = append(entries, listEntry{name: collapsed, key: collapsed})
 			}
 			continue
 		}
-		entries = append(entries, listEntry{name: name, object: object})
+		entries = append(entries, listEntry{name: name, key: entryKey(object, versions), object: object})
 	}
 	return entries
+}
+
+// entryKey is an object entry's listEntry key.
+func entryKey(object map[string]any, versions bool) string {
+	if !versions {
+		return documentName(object)
+	}
+	return fmt.Sprintf("%s\x00%020d", documentName(object), generationOf(object))
 }
 
 // softDeletedOptions are the objects.list options served with
@@ -841,7 +897,7 @@ func (p *Provider) listSoftDeleted(req request) (*gateway.RESTResponse, error) {
 	}
 	prefix := req.rest.Query.Get(queryPrefix)
 	items := []any{}
-	for _, object := range p.catalog.softDeletedObjects(req.scope, req.bucket, time.Now()) {
+	for _, object := range p.catalog.softDeletedObjects(req.scope, req.bucket, p.now()) {
 		if strings.HasPrefix(object.Name, prefix) {
 			items = append(items, maps.Clone(object.Object))
 		}
@@ -907,7 +963,7 @@ func (p *Provider) softDeletedGeneration(req request, missing *gateway.RESTRespo
 	if generation == "" {
 		return softObject{}, missing
 	}
-	object, found := p.catalog.softDeletedObject(req.scope, req.bucket, req.object, generation, time.Now())
+	object, found := p.catalog.softDeletedObject(req.scope, req.bucket, req.object, generation, p.now())
 	if !found {
 		return softObject{}, notFound(req.bucket, req.object)
 	}
@@ -929,7 +985,11 @@ func (p *Provider) restoreObject(ctx context.Context, b *memoryBackend, req requ
 	if response, err := preconditions(req.rest, current, req.call.Method); response != nil || err != nil {
 		return response, err
 	}
-	keep, err := p.retainLive(ctx, b, req.scope, req.bucket, req.object)
+	versioned, err := b.versioned(ctx, req.bucket)
+	if err != nil {
+		return nil, err
+	}
+	keep, err := p.retainRemoved(ctx, b, req.scope, req.bucket, req.object, "", !versioned)
 	if err != nil {
 		return nil, err
 	}

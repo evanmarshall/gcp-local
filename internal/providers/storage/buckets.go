@@ -28,18 +28,37 @@ func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway
 	if refused != nil || err != nil {
 		return refused, err
 	}
-	bucket, found, err := p.catalog.Bucket(scope, name)
-	if err != nil {
-		return nil, err
+	metadata, refused, err := p.catalogMetadata(scope, name)
+	if refused != nil || err != nil {
+		return refused, err
 	}
-	if !found {
-		return notFound(name, ""), nil
-	}
-	var metadata map[string]any
-	_ = json.Unmarshal([]byte(bucket.Metadata), &metadata)
 	if refused, err := applyBucketPatch(metadata, patch); refused != nil || err != nil {
 		return refused, err
 	}
+	// The backend change comes last: every catalog field is validated by now.
+	if refused, err := patchVersioning(ctx, b, name, patch["versioning"], current); refused != nil || err != nil {
+		return refused, err
+	}
+	return p.storeBucketPatch(scope, name, metadata, current)
+}
+
+// catalogMetadata returns a copy of a bucket's provider-owned metadata.
+func (p *Provider) catalogMetadata(scope state.Scope, name string) (map[string]any, *gateway.RESTResponse, error) {
+	bucket, found, err := p.catalog.Bucket(scope, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !found {
+		return nil, notFound(name, ""), nil
+	}
+	var metadata map[string]any
+	_ = json.Unmarshal([]byte(bucket.Metadata), &metadata)
+	return metadata, nil, nil
+}
+
+// storeBucketPatch advances the metageneration of patched metadata, stores it,
+// and renders the patched bucket.
+func (p *Provider) storeBucketPatch(scope state.Scope, name string, metadata, current map[string]any) (*gateway.RESTResponse, error) {
 	nextMetageneration(metadata, current, name)
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
@@ -91,11 +110,44 @@ func decodeBucketPatch(body []byte) (map[string]json.RawMessage, error) {
 		return nil, provider.Invalid("Expected a bucket patch")
 	}
 	for key := range patch {
-		if key != "labels" && key != "softDeletePolicy" {
-			return nil, gap("bucket updates currently support labels and softDeletePolicy only")
+		if !slices.Contains(patchedBucketFields, key) {
+			return nil, gap("bucket updates of " + key)
 		}
 	}
 	return patch, nil
+}
+
+// patchedBucketFields are the bucket fields a patch may change.
+var patchedBucketFields = []string{"labels", "softDeletePolicy", "versioning"}
+
+// patchVersioning turns versioning on or off in the backend, which keeps the
+// noncurrent generations, when the patch names it (raw is nil otherwise).
+// Turning it off keeps the existing ones (recorded: storage-object-versioning
+// "versions-after-suspend"). The backend's update sets both fields it models,
+// so the backend's default event-based hold, which this provider does not
+// read, stays false.
+func patchVersioning(ctx context.Context, b *memoryBackend, name string, raw json.RawMessage, current map[string]any) (*gateway.RESTResponse, error) {
+	if raw == nil {
+		return nil, nil //nolint:nilnil // the patch leaves versioning alone
+	}
+	var versioning struct {
+		Enabled *bool `json:"enabled"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&versioning) != nil || versioning.Enabled == nil {
+		return nil, gap("versioning updates set enabled only")
+	}
+	payload, err := json.Marshal(map[string]any{"versioning": map[string]bool{keyEnabled: *versioning.Enabled}, "defaultEventBasedHold": false})
+	if err != nil {
+		return nil, provider.Invalid("Unable to encode the versioning update")
+	}
+	response, err := b.forward(ctx, http.MethodPatch, "/storage/v1/b/"+url.PathEscape(name), nil, http.Header{headerContentType: {contentJSON}}, payload)
+	if err != nil || response.Status != http.StatusOK {
+		return response, err
+	}
+	current["versioning"] = map[string]any{keyEnabled: *versioning.Enabled}
+	return nil, nil //nolint:nilnil // a nil response with a nil error means the update applied
 }
 
 // patchSoftDelete sets a new soft-delete retention, which takes effect now
