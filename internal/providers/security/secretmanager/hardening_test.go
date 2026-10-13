@@ -281,15 +281,17 @@ func (c *testClock) Now() time.Time {
 	return c.now
 }
 
-func (c *testClock) After(d time.Duration) <-chan time.Time {
+// Until fires once the clock reaches at, at once if it already has. Being
+// absolute, a wait registered after an Advance still fires.
+func (c *testClock) Until(at time.Time) <-chan time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ch := make(chan time.Time, 1)
-	if d <= 0 {
+	if !at.After(c.now) {
 		ch <- c.now
 		return ch
 	}
-	c.waiters = append(c.waiters, testWaiter{c.now.Add(d), ch})
+	c.waiters = append(c.waiters, testWaiter{at, ch})
 	return ch
 }
 
@@ -323,6 +325,8 @@ type lifecycleHarness struct {
 	clock *testClock
 	mu    sync.Mutex
 	sent  []published
+	// published wakes events on every capture.
+	published chan struct{}
 }
 
 const (
@@ -332,8 +336,8 @@ const (
 
 func newLifecycleHarness(t *testing.T, grant bool) *lifecycleHarness {
 	t.Helper()
-	h := &lifecycleHarness{harness: newHarness(t), clock: &testClock{now: time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)}}
-	h.provider.clock, h.provider.after = h.clock.Now, h.clock.After
+	h := &lifecycleHarness{harness: newHarness(t), published: make(chan struct{}, 1), clock: &testClock{now: time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)}}
+	h.provider.clock, h.provider.until = h.clock.Now, h.clock.Until
 	topic := "//pubsub.googleapis.com/" + testTopic
 	if err := h.provider.index.Put("pubsub", state.Resource{Name: topic, Service: "pubsub", Kind: "topic",
 		Parent: "//cloudresourcemanager.googleapis.com/projects/" + testProject, Scope: state.Scope{Project: testProject, Location: state.Global}}); err != nil {
@@ -352,6 +356,10 @@ func newLifecycleHarness(t *testing.T, grant bool) *lifecycleHarness {
 		h.mu.Lock()
 		h.sent = append(h.sent, published{call.Principal.Subject, request.GetTopic(), message.GetAttributes(), data})
 		h.mu.Unlock()
+		select {
+		case h.published <- struct{}{}:
+		default:
+		}
 		return &pubsubpb.PublishResponse{MessageIds: []string{"1"}}, nil
 	}); err != nil {
 		t.Fatalf("register the publish handler: %v", err)
@@ -359,30 +367,28 @@ func newLifecycleHarness(t *testing.T, grant bool) *lifecycleHarness {
 	return h
 }
 
-// events waits until n notifications were published and returns their types.
+// events waits until n notifications were published and returns them. A
+// worker publishes after it applies its change under the scope lock, so
+// once its notification arrives the change is visible. The wait ends on a
+// publish, never on elapsed time; the 30-second guard only reports a
+// worker that never acted.
 func (h *lifecycleHarness) events(n int) []published {
 	h.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	guard := time.After(30 * time.Second)
 	for {
 		h.mu.Lock()
 		sent := slices.Clone(h.sent)
 		h.mu.Unlock()
-		if len(sent) >= n || time.Now().After(deadline) {
-			if len(sent) != n {
-				h.t.Fatalf("published %d notifications, want %d: %+v", len(sent), n, sent)
-			}
+		if len(sent) > n {
+			h.t.Fatalf("published %d notifications, want %d: %+v", len(sent), n, sent)
+		}
+		if len(sent) == n {
 			return sent
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
-// eventually polls a request until check passes.
-func (h *lifecycleHarness) eventually(step string, check func() bool) {
-	h.t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); !check(); time.Sleep(5 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			h.t.Fatalf("%s did not happen", step)
+		select {
+		case <-h.published:
+		case <-guard:
+			h.t.Fatalf("published %d notifications, want %d: %+v", len(sent), n, sent)
 		}
 	}
 }
@@ -439,17 +445,22 @@ func TestRotationNotifiesTopics(t *testing.T) {
 	if sent[2].attributes["versionId"] != "projects/123456/secrets/"+testSecret+"/versions/1" || rotated["nextRotationTime"] != "2026-10-13T13:10:00Z" {
 		t.Fatalf("notifications = %+v", sent)
 	}
-	h.eventually("next rotation advanced", func() bool {
-		rotated := document(t, "get", h.invoke(http.MethodGet, secretPath, nil, "actor"))
-		value, _ := rotated["rotation"].(map[string]any)
-		return value["nextRotationTime"] == "2026-10-13T13:10:00Z"
-	})
+	requireNextRotation(t, h.harness, "2026-10-13T13:10:00Z")
 	payload := h.invoke(http.MethodGet, secretPath+"/versions/latest:access", nil, "actor")
 	if !strings.Contains(payload.Body.String(), `"name":"projects/123456/secrets/`+testSecret+`/versions/1"`) {
 		t.Fatalf("rotation changed the value: %s", payload.Body.String())
 	}
 	if cleared := document(t, "clear", h.invoke(http.MethodPatch, secretPath+"?updateMask=rotation", map[string]any{}, "actor")); cleared["rotation"] != nil {
 		t.Fatalf("cleared = %v", cleared)
+	}
+}
+
+// requireNextRotation reads the secret's nextRotationTime.
+func requireNextRotation(t *testing.T, h *harness, want string) {
+	t.Helper()
+	rotation, _ := document(t, "get", h.invoke(http.MethodGet, secretPath, nil, "actor"))["rotation"].(map[string]any)
+	if rotation["nextRotationTime"] != want {
+		t.Fatalf("rotation = %v, want nextRotationTime %s", rotation, want)
 	}
 }
 
@@ -507,8 +518,10 @@ func TestExpirationDeletesTheSecret(t *testing.T) {
 		t.Fatalf("the secret expired early: %d", code)
 	}
 	h.clock.Advance(3 * time.Minute)
-	h.eventually("expiry", func() bool { return h.invoke(http.MethodGet, secretPath, nil, "actor").Code == 404 })
 	sent := h.events(4)
+	if code := h.invoke(http.MethodGet, secretPath, nil, "actor").Code; code != 404 {
+		t.Fatalf("expired secret = %d", code)
+	}
 	if sent[3].attributes["eventType"] != eventDelete || sent[3].attributes["deleteType"] != "EXPIRATION" {
 		t.Fatalf("delete notification = %+v", sent[3])
 	}
@@ -593,12 +606,12 @@ func TestDelayedDestruction(t *testing.T) {
 	}
 	document(t, "destroy again", h.invoke(http.MethodPost, secretPath+"/versions/1:destroy", map[string]any{}, "actor"))
 	h.clock.Advance(24 * time.Hour)
-	h.eventually("destruction", func() bool {
-		version := document(t, "get", h.invoke(http.MethodGet, secretPath+"/versions/1", nil, "actor"))
-		return version["state"] == stateDestroyed && version["destroyTime"] != nil
-	})
+	all := h.events(7)
+	if version := document(t, "get", h.invoke(http.MethodGet, secretPath+"/versions/1", nil, "actor")); version["state"] != stateDestroyed || version["destroyTime"] == nil {
+		t.Fatalf("version = %v", version)
+	}
 	kinds := make([]string, 0, 7)
-	for _, sent := range h.events(7) {
+	for _, sent := range all {
 		kinds = append(kinds, sent.attributes["eventType"])
 	}
 	want := []string{eventConfigured, eventCreate, eventVersionAdd, eventVersionScheduled, eventVersionEnable, eventVersionScheduled, eventVersionDestroy}

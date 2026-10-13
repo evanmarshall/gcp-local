@@ -396,7 +396,7 @@ func (p *Provider) stopScope(scope state.Scope) {
 // is left or the worker is cancelled.
 func (p *Provider) work(ctx context.Context, scope state.Scope, id string) {
 	for {
-		wait, events, more := p.tick(scope, id)
+		due, events, more := p.tick(scope, id)
 		p.publish(ctx, scope.Project, events)
 		if !more {
 			return
@@ -404,7 +404,7 @@ func (p *Provider) work(ctx context.Context, scope state.Scope, id string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-p.after(wait):
+		case <-p.until(due):
 		}
 	}
 }
@@ -426,11 +426,11 @@ func dueAt(record *secretRecord) time.Time {
 }
 
 // tick applies every pending action that is due under the scope lock and
-// returns the wait until the next one, the notifications to publish, and
+// returns when the next one is due, the notifications to publish, and
 // whether the worker continues.
-func (p *Provider) tick(scope state.Scope, id string) (time.Duration, []event, bool) {
+func (p *Provider) tick(scope state.Scope, id string) (time.Time, []event, bool) {
 	var (
-		wait   time.Duration
+		next   time.Time
 		events []event
 		more   bool
 	)
@@ -452,11 +452,11 @@ func (p *Provider) tick(scope state.Scope, id string) (time.Duration, []event, b
 		}
 		events = s.drain()
 		if due := dueAt(record); !due.IsZero() {
-			wait, more = due.Sub(now), true
+			next, more = due, true
 		}
 		return nil
 	})
-	return wait, events, more
+	return next, events, more
 }
 
 // destroyDue completes the delayed destructions whose time has come.

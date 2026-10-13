@@ -60,7 +60,9 @@ var permissions = map[string]string{
 }
 
 // Provider owns the Secret Manager control plane and payload state. clock
-// and after are the time source of the lifecycle workers; tests replace them.
+// and until are the time source of the lifecycle workers; tests replace them.
+// until fires at an absolute instant, so a clock that moves between a
+// worker's tick and its wait can't lose the wake-up.
 type Provider struct {
 	index    *state.Index
 	engine   *iam.Engine
@@ -70,7 +72,7 @@ type Provider struct {
 	lifetime context.Context //nolint:containedctx // the lifecycle workers' process lifetime
 	scopes   *state.Store[scopeState]
 	clock    func() time.Time
-	after    func(time.Duration) <-chan time.Time
+	until    func(time.Time) <-chan time.Time
 	mu       sync.Mutex
 	workers  map[string]context.CancelFunc
 }
@@ -89,7 +91,7 @@ func New(ctx context.Context, registry *gateway.Registry, manager *backend.Manag
 	}
 	p := &Provider{
 		index: index, engine: engine, manager: manager, registry: registry, lifetime: context.WithoutCancel(ctx),
-		after: time.After, workers: map[string]context.CancelFunc{},
+		until: func(at time.Time) <-chan time.Time { return time.After(time.Until(at)) }, workers: map[string]context.CancelFunc{},
 		// Recorded: secretmanager-access-lifecycle "denied-access".
 		gate: provider.Gate{Engine: engine, Index: index, Message: provider.PermissionDeniedUnnamed,
 			Domain: "iam.googleapis.com", OmitResource: true},
