@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -174,6 +175,9 @@ func count(body map[string]any) int {
 	return len(items)
 }
 
+// flags is a non-empty databaseFlags value, which is a gap.
+var flags = []any{map[string]any{"name": "max_connections", "value": "20"}}
+
 // settingsBodyOf wraps settings fields in a patch body.
 func settingsBodyOf(fields map[string]any) map[string]any {
 	return map[string]any{keySettings: fields}
@@ -189,7 +193,8 @@ func insertBody() map[string]any {
 func (h *harness) createInstance() {
 	h.t.Helper()
 	operation := h.expect(h.invoke(adminToken, http.MethodPost, testInstances, insertBody()), http.StatusOK)
-	if operation[keyKind] != "sql#operation" || operation["status"] != statusDone || operation["operationType"] != "CREATE" ||
+	// The integration harness keeps the production latency, so the operation may still be PENDING.
+	if operation[keyKind] != "sql#operation" || (operation["status"] != statusDone && operation["status"] != statusPending) || operation["operationType"] != "CREATE" ||
 		operation["targetId"] != testInstance || operation["user"] != "admin@demo-sql.iam.gserviceaccount.com" {
 		h.t.Fatalf("operation = %v", operation)
 	}
@@ -233,7 +238,7 @@ func TestInstancePatch(t *testing.T) {
 	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{
 		keyDeletionProtection: true, "userLabels": map[string]string{"team": "data"}, keySettingsVersion: "1"})), http.StatusOK)
 	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier, keySettingsVersion: "1"})), http.StatusPreconditionFailed)
-	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"databaseFlags": []any{}})), http.StatusNotImplemented)
+	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"databaseFlags": flags})), http.StatusNotImplemented)
 	settings := object(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings])
 	if settings[keyDeletionProtection] != true || settings[keySettingsVersion] != "2" || object(t, settings["userLabels"])["team"] != "data" {
 		t.Fatalf("settings = %v", settings)
@@ -323,7 +328,7 @@ func TestProjectIsolationAndReset(t *testing.T) {
 func TestPatchIsAtomic(t *testing.T) {
 	h := newHarness(t)
 	h.createInstance()
-	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier, "databaseFlags": []any{}})), http.StatusNotImplemented)
+	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier, "databaseFlags": flags})), http.StatusNotImplemented)
 	settings := object(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings])
 	if settings["tier"] != "db-f1-micro" || settings[keySettingsVersion] != "1" {
 		t.Fatalf("a rejected patch changed the instance: %v", settings)
@@ -420,7 +425,7 @@ func TestMySQLInstance(t *testing.T) {
 	h.expect(h.invoke(viewerToken, http.MethodPost, testInstances, mysqlInsertBody()), http.StatusForbidden)
 	flagged := mysqlInsertBody()
 	object(t, flagged[keySettings])["databaseFlags"] = []any{map[string]any{"name": "max_connections", "value": "20"}}
-	h.expectError(http.MethodPost, testInstances, flagged, http.StatusNotImplemented, "Cloud SQL coverage gap: settings.databaseFlags")
+	h.expectError(http.MethodPost, testInstances, flagged, http.StatusNotImplemented, "Cloud SQL coverage gap: settings.databaseFlags is not modeled")
 	if h.fleet() != nil {
 		t.Fatal("a refused insert started a backend")
 	}
@@ -482,9 +487,9 @@ func TestUserFieldGaps(t *testing.T) {
 	h := newHarness(t)
 	h.createInstance()
 	h.expectError(http.MethodPost, testPath+"/users", map[string]any{keyName: "app", "passwordPolicy": map[string]any{"allowedFailedAttempts": 3}},
-		http.StatusNotImplemented, "Cloud SQL coverage gap: users.insert passwordPolicy")
+		http.StatusNotImplemented, "Cloud SQL coverage gap: passwordPolicy is not modeled")
 	h.expectError(http.MethodPost, testPath+"/users", map[string]any{keyName: "app", "dualPasswordType": "DUAL_PASSWORD"},
-		http.StatusNotImplemented, "Cloud SQL coverage gap: users.insert dualPasswordType")
+		http.StatusNotImplemented, "Cloud SQL coverage gap: dualPasswordType is not modeled")
 }
 
 // mysqlHandshakeResponse builds a 4.1 HandshakeResponse for user.
@@ -498,3 +503,154 @@ func TestUserFieldGaps(t *testing.T) {
 // greeting returns the ERR payload as the greeting.
 
 // expectForwarded waits for the fake server to receive one packet.
+
+// withSettings is the test insert body with extra settings fields.
+func withSettings(extra map[string]any) map[string]any {
+	body := insertBody()
+	settings, _ := body[keySettings].(map[string]any)
+	maps.Copy(settings, extra)
+	return body
+}
+
+// TestSettingsAreModeledOrRefused covers every setting the audit found
+// accepted and ignored: each is now a gap naming its field, and the default
+// that matches the local server is accepted.
+func TestSettingsAreModeledOrRefused(t *testing.T) {
+	h := newHarness(t)
+	gaps := map[string]map[string]any{
+		"Cloud SQL coverage gap: settings.backupConfiguration.enabled (backups are not modeled)": {"backupConfiguration": map[string]any{"enabled": true}},
+		"Cloud SQL coverage gap: settings.backupConfiguration.pointInTimeRecoveryEnabled (backups are not modeled)": {
+			"backupConfiguration": map[string]any{"pointInTimeRecoveryEnabled": true}},
+		"Cloud SQL coverage gap: settings.backupConfiguration.startTime is not modeled": {"backupConfiguration": map[string]any{"startTime": "03:00"}},
+		"Cloud SQL coverage gap: settings.availabilityType REGIONAL":                    {"availabilityType": "REGIONAL"},
+		"Cloud SQL coverage gap: settings.ipConfiguration.requireSsl is not modeled":    {"ipConfiguration": map[string]any{"requireSsl": true}},
+		"Cloud SQL coverage gap: settings.ipConfiguration.sslMode ENCRYPTED_ONLY (TLS is not served)": {
+			"ipConfiguration": map[string]any{"sslMode": "ENCRYPTED_ONLY"}},
+		"Cloud SQL coverage gap: settings.ipConfiguration.authorizedNetworks is not modeled": {
+			"ipConfiguration": map[string]any{"authorizedNetworks": []any{map[string]any{"value": "10.0.0.0/8"}}}},
+		"Cloud SQL coverage gap: settings.maintenanceWindow is not modeled": {"maintenanceWindow": map[string]any{"day": 1, "hour": 3}},
+	}
+	for message, extra := range gaps {
+		h.expectError(http.MethodPost, testInstances, withSettings(extra), http.StatusNotImplemented, message)
+	}
+	cmek := insertBody()
+	cmek["diskEncryptionConfiguration"] = map[string]any{"kmsKeyName": "projects/demo-sql/locations/us-central1/keyRings/r/cryptoKeys/k"}
+	h.expectError(http.MethodPost, testInstances, cmek, http.StatusNotImplemented, "Cloud SQL coverage gap: diskEncryptionConfiguration is not modeled")
+	// GCP drops names outside the schema and then checks the tier first (recorded).
+	h.expectError(http.MethodPost, testInstances, map[string]any{keyName: testInstance, "bogus": true}, http.StatusBadRequest, "Missing parameter: Tier.")
+	if h.fleet() != nil {
+		t.Fatal("a refused insert started a backend")
+	}
+	// The defaults the local server has are accepted and reported as requested.
+	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, withSettings(map[string]any{
+		"availabilityType": "ZONAL", "activationPolicy": "ALWAYS", "pricingPlan": "PER_USE",
+		"backupConfiguration": map[string]any{"enabled": false, "binaryLogEnabled": false},
+		"ipConfiguration":     map[string]any{"ipv4Enabled": true, "requireSsl": false, "authorizedNetworks": []any{}, "sslMode": "ALLOW_UNENCRYPTED_AND_ENCRYPTED"},
+	})), http.StatusOK)
+	settings := object(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings])
+	if settings["availabilityType"] != "ZONAL" || settings["activationPolicy"] != "ALWAYS" || settings["pricingPlan"] != "PER_USE" {
+		t.Fatalf("settings = %v", settings)
+	}
+	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"availabilityType": "REGIONAL"}), http.StatusNotImplemented,
+		"Cloud SQL coverage gap: settings.availabilityType REGIONAL")
+	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"backupConfiguration": map[string]any{"enabled": true}}),
+		http.StatusNotImplemented, "Cloud SQL coverage gap: settings.backupConfiguration.enabled (backups are not modeled)")
+	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"ipConfiguration": map[string]any{"ipv4Enabled": true}}),
+		http.StatusNotImplemented, "Cloud SQL coverage gap: instances.patch field settings.ipConfiguration")
+	h.expectError(http.MethodGet, testPath+"?location=us-central1", nil, http.StatusNotImplemented, "Cloud SQL coverage gap: the location query parameter")
+}
+
+// TestListsPage covers instances.list and operations.list paging.
+func TestListsPage(t *testing.T) {
+	h := newHarness(t)
+	for _, name := range []string{"pg-c", "pg-a", "pg-b"} {
+		body := insertBody()
+		body[keyName] = name
+		h.expect(h.invoke(adminToken, http.MethodPost, testInstances, body), http.StatusOK)
+	}
+	first := h.expect(h.invoke(viewerToken, http.MethodGet, testInstances+"?maxResults=2", nil), http.StatusOK)
+	next, _ := first["nextPageToken"].(string)
+	if names := listNames(t, first); len(names) != 2 || names[0] != "pg-a" || names[1] != "pg-b" || next == "" || first[keyKind] != nil {
+		t.Fatalf("first page = %v", first)
+	}
+	second := h.expect(h.invoke(viewerToken, http.MethodGet, testInstances+"?maxResults=2&pageToken="+next, nil), http.StatusOK)
+	if names := listNames(t, second); len(names) != 1 || names[0] != "pg-c" || second["nextPageToken"] != nil {
+		t.Fatalf("second page = %v", second)
+	}
+	h.expectError(http.MethodGet, testInstances+"?pageToken=bogus", nil, http.StatusBadRequest, "Invalid request: Invalid page token.")
+	h.expectError(http.MethodGet, testInstances+"?maxResults=-1", nil, http.StatusBadRequest, `Invalid value at 'max_results' (TYPE_UINT32), "-1"`)
+	h.expectError(http.MethodGet, testInstances+"?filter=state:RUNNABLE", nil, http.StatusNotImplemented, "Cloud SQL coverage gap: list filter is not implemented")
+}
+
+// TestOperationsPage covers operations.list paging, newest first.
+func TestOperationsPage(t *testing.T) {
+	h := newHarness(t)
+	for _, name := range []string{"pg-c", "pg-a", "pg-b"} {
+		body := insertBody()
+		body[keyName] = name
+		h.expect(h.invoke(adminToken, http.MethodPost, testInstances, body), http.StatusOK)
+	}
+	operations := h.expect(h.invoke(viewerToken, http.MethodGet, testOperations+"?maxResults=1", nil), http.StatusOK)
+	token, _ := operations["nextPageToken"].(string)
+	if items := items(t, operations); len(items) != 1 || object(t, items[0])["targetId"] != "pg-b" || token == "" {
+		t.Fatalf("operations page = %v", operations)
+	}
+	rest := h.expect(h.invoke(viewerToken, http.MethodGet, testOperations+"?pageToken="+token, nil), http.StatusOK)
+	if items := items(t, rest); len(items) != 2 || object(t, items[1])["targetId"] != "pg-c" {
+		t.Fatalf("operations rest = %v", rest)
+	}
+}
+
+// listNames returns a list response's item names in order.
+func listNames(t *testing.T, body map[string]any) []string {
+	t.Helper()
+	list := items(t, body)
+	names := make([]string, 0, len(list))
+	for _, item := range list {
+		name, _ := object(t, item)[keyName].(string)
+		names = append(names, name)
+	}
+	return names
+}
+
+// TestOperationsReportPending covers the operation latency and cancel.
+func TestOperationsReportPending(t *testing.T) {
+	h := newHarness(t)
+	h.provider.latency = 50 * time.Millisecond
+	created := h.expect(h.invoke(adminToken, http.MethodPost, testInstances, insertBody()), http.StatusOK)
+	name, _ := created[keyName].(string)
+	if created["status"] != statusPending || created["endTime"] != nil {
+		t.Fatalf("a fresh operation reported done: %v", created)
+	}
+	h.expect(h.invoke(viewerToken, http.MethodPost, testOperations+"/"+name+"/cancel", nil), http.StatusForbidden)
+	h.expectError(http.MethodPost, testOperations+"/missing/cancel", nil, http.StatusBadRequest, "Request contains an invalid argument.")
+	h.expect(h.invoke(adminToken, http.MethodPost, testOperations+"/00000000-0000-4000-8000-000000000000/cancel", nil), http.StatusNotFound)
+	time.Sleep(60 * time.Millisecond)
+	if done := h.expect(h.invoke(viewerToken, http.MethodGet, testOperations+"/"+name, nil), http.StatusOK); done["status"] != statusDone || done["endTime"] == nil {
+		t.Fatalf("operation = %v", done)
+	}
+	h.expectError(http.MethodPost, testOperations+"/"+name+"/cancel", nil, http.StatusBadRequest,
+		"Invalid request: You can't cancel operation "+name+" because Cloud SQL doesn't support the cancellation of the CREATE operation.")
+}
+
+// TestConditionsSeeTheInstance grants roles/cloudsql.viewer on one instance
+// through a project binding conditioned on resource.name, resource.type, and
+// resource.service.
+func TestConditionsSeeTheInstance(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	other := insertBody()
+	other[keyName] = "other-pg"
+	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, other), http.StatusOK)
+	policy, err := h.engine.GetPolicy(provider.ProjectResource(testProject))
+	must(t, err)
+	policy.Version = 3
+	policy.Bindings = append(policy.Bindings, iam.Binding{Role: "roles/cloudsql.viewer", Members: []string{principal("reader")},
+		Condition: []byte(`{"title":"one instance","expression":"resource.service == 'sqladmin.googleapis.com' && ` +
+			`resource.type == 'sqladmin.googleapis.com/Instance' && resource.name == 'projects/demo-sql/instances/demo-pg'"}`)})
+	_, err = h.engine.SetPolicy(provider.ProjectResource(testProject), policy)
+	must(t, err)
+	h.expect(h.invoke("reader", http.MethodGet, testPath, nil), http.StatusOK)
+	h.expect(h.invoke("reader", http.MethodGet, testInstances+"/other-pg", nil), http.StatusForbidden)
+	h.expect(h.invoke("reader", http.MethodGet, testInstances, nil), http.StatusForbidden)
+}

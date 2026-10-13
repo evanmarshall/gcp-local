@@ -11,6 +11,7 @@ from gcp_validation.services.databases.cloudsql import run_scenario
               'backend': 'not-applicable'},
     contract_files=(
         'gcp_validation/services/databases/cloudsql.py',
+        'gcp_validation/services/databases/projectgrant.py',
         'gcp_validation/live_rest.py',
         'gcp_validation/sandbox.py',
         'tests/conformance/databases/cloudsql/conftest.py',

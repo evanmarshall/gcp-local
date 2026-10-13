@@ -29,10 +29,15 @@ import (
 // owns instance metadata, operations, and index references; the servers own
 // databases, roles, and data.
 type Provider struct {
-	manager  *backend.Manager
-	index    *state.Index
-	engine   *iam.Engine
-	catalog  *state.Store[catalog]
+	manager *backend.Manager
+	index   *state.Index
+	engine  *iam.Engine
+	gate    provider.Gate
+	catalog *state.Store[catalog]
+	// latency is the minimum time from a request to its operation reporting
+	// DONE: local work finishes before the response, and the latency makes
+	// clients poll, as they do against GCP.
+	latency  time.Duration
 	releases map[string]string
 	pool     *dataplane.Pool
 	publicMu sync.Mutex
@@ -59,7 +64,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	if err != nil {
 		return nil, err
 	}
-	provider.pool = config.Publish
+	provider.pool, provider.latency = config.Publish, operationLatency
 	return provider, nil
 }
 
@@ -72,6 +77,7 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		return nil, err
 	}
 	p := &Provider{manager: manager, index: index, engine: engine, releases: releases, clock: time.Now,
+		gate:    provider.Gate{Engine: engine, Index: index, Message: provider.LacksPermission, Attributes: attributes},
 		catalog: state.NewStore(newCatalog, state.GlobalScope), public: map[string]*dataplane.Listener{}}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
@@ -79,12 +85,16 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		// The manager stops every server of the project (discarding its data
 		// directories) before this hook closes its published ports and clears
 		// metadata and references.
+		// References go first, under the project lock authorization holds.
 		AfterReset: func(scope state.Scope) error {
 			p.closeProjectPublic(scope.Project)
-			if err := p.catalog.Reset(scope); err != nil {
+			unindex := p.catalog.With(scope, func(*catalog) error {
+				index.RemoveScope(serviceName, scope)
+				return nil
+			})
+			if err := errors.Join(unindex, p.catalog.Reset(scope)); err != nil {
 				return fmt.Errorf("clear the Cloud SQL scope: %w", err)
 			}
-			index.RemoveScope(serviceName, scope)
 			return nil
 		},
 	}); err != nil {
@@ -141,7 +151,7 @@ func (p *Provider) handlers() map[string]handler {
 		methodDatabasesInsert: p.insertDatabase, methodDatabasesGet: p.getDatabase, methodDatabasesList: p.listDatabases,
 		methodDatabasesDelete: p.deleteDatabase,
 		methodUsersInsert:     p.insertUser, methodUsersList: p.listUsers, methodUsersDelete: p.deleteUser,
-		methodOperationsGet: p.getOperation, methodOperationsList: p.listOperations,
+		methodOperationsGet: p.getOperation, methodOperationsList: p.listOperations, methodOperationsCancel: p.cancelOperation,
 	}
 }
 
@@ -156,30 +166,25 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if provider.ProjectScope(project).Validate() != nil {
 		return nil, provider.Invalid("Invalid project.")
 	}
-	target := p.target(project, p.addressed(call.Method, request, project))
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
-	if provider.Unverified(authorizeErr) {
-		// A concurrent delete can unindex the instance after target chose it.
-		target = p.target(project, p.addressed(call.Method, request, project))
-		decision, authorizeErr = p.engine.Authorize(call, target, nil)
+	decision, target, err := provider.Nearest(p.gate, p.catalog, provider.ProjectScope(project), call, "",
+		p.candidates(project, p.addressed(call.Method, request, project))...)
+	if err != nil {
+		return refusal(call.Method, err)
 	}
-	if authorizeErr != nil {
-		return refusal(call.Method, authorizeErr)
+	if request.Query.Get("location") != "" {
+		return nil, gap("the location query parameter")
 	}
 	call.Resource = target.Name
 	response, err := p.handlers()[call.Method](call, request, project)
 	if err != nil {
-		return nil, err
+		return wireFailure(err)
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
-// refusal renders a denied decision in the Cloud SQL shape; coverage gaps
-// and other failures stay errors.
+// refusal renders a denied decision in the Cloud SQL shape (recorded,
+// cloudsql-postgres-instance-admin); coverage gaps and other failures stay
+// errors.
 func refusal(method string, err error) (any, error) {
 	switch status.Code(err) {
 	case codes.PermissionDenied:
@@ -198,13 +203,11 @@ func (p *Provider) addressed(method string, request *gateway.RESTRequest, projec
 		return ""
 	case methodOperationsList:
 		return request.Query.Get("instance")
-	case methodOperationsGet:
+	case methodOperationsGet, methodOperationsCancel:
 		var instance string
 		_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
-			for _, operation := range c.operations {
-				if operation.Name == request.Path[pathOperation] {
-					instance = operation.Instance
-				}
+			if operation := c.operation(request.Path[pathOperation]); operation != nil {
+				instance = operation.Instance
 			}
 			return nil
 		})
@@ -214,19 +217,26 @@ func (p *Provider) addressed(method string, request *gateway.RESTRequest, projec
 	}
 }
 
-// target selects the IAM resource: the instance when indexed, else its
-// project, so a missing instance is authorized at the project and then
-// reported as missing. Cloud SQL has no instance-level IAM policies; the
-// instance node only carries its project ancestry and condition attributes.
-func (p *Provider) target(project, instance string) iam.Target {
-	if instance != "" {
-		name := instanceResource(project, instance)
-		if resource, ok := p.index.Get(name); ok && resource.Service == serviceName && resource.Scope == provider.ProjectScope(project) {
-			return iam.Target{Name: name, Attributes: iam.ResourceAttributes{
-				Name: "projects/" + project + "/instances/" + instance, Type: "sqladmin.googleapis.com/Instance", Service: "sqladmin.googleapis.com"}}
-		}
+// candidates lists the IAM targets of a request, most specific first: the
+// instance while it is indexed, then its project, so a missing instance is
+// authorized at the project and then reported as missing. Cloud SQL has no
+// instance-level IAM policies; the instance node carries its project
+// ancestry and, through attributes, the condition attributes.
+func (p *Provider) candidates(project, instance string) []string {
+	if instance == "" {
+		return []string{provider.ProjectResource(project)}
 	}
-	return iam.Target{Name: provider.ProjectResource(project)}
+	return []string{instanceResource(project, instance), provider.ProjectResource(project)}
+}
+
+// attributes are an instance's IAM Conditions attributes (recorded,
+// cloudsql-postgres-instance-admin); a project carries none.
+func attributes(target string) iam.ResourceAttributes {
+	name, isInstance := strings.CutPrefix(target, "//cloudsql.googleapis.com/")
+	if !isInstance {
+		return iam.ResourceAttributes{}
+	}
+	return iam.ResourceAttributes{Name: name, Type: "sqladmin.googleapis.com/Instance", Service: "sqladmin.googleapis.com"}
 }
 
 // use runs one backend operation for a project after authorization.
@@ -259,11 +269,11 @@ func (p *Provider) lookup(project, instance string) (instanceRecord, bool) {
 
 // complete records a finished operation and returns its wire form.
 func (p *Provider) complete(call gateway.Call, project, kind, instance string, started time.Time) (*gateway.RESTResponse, error) {
-	operation := newOperation(kind, instance, subject(call.Principal), started, p.clock())
+	operation := newOperation(kind, instance, subject(call.Principal), started, p.clock(), p.latency)
 	if err := p.catalog.With(provider.ProjectScope(project), func(c *catalog) error { c.record(operation); return nil }); err != nil {
 		return nil, fmt.Errorf("record the operation: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: operation.wire(project)}, nil
+	return &gateway.RESTResponse{JSON: operation.wire(project, p.clock())}, nil
 }
 
 // subject renders the operation user as GCP does: the caller's email.
@@ -316,6 +326,9 @@ func mysqlFailure(my *mysqlwire.Error) *gateway.RESTResponse {
 // maxOperations bounds the retained operation history per project.
 const maxOperations = 1000
 
+// operationLatency is the production minimum from request to DONE.
+const operationLatency = 500 * time.Millisecond
+
 // instanceRecord is the provider-owned instance metadata. The server itself,
 // its databases, and its users are owned by the backend.
 type instanceRecord struct {
@@ -328,10 +341,11 @@ type instanceRecord struct {
 	Port int
 }
 
-// operationRecord is one completed sql#operation.
+// operationRecord is one sql#operation. Its work finished before it was
+// recorded; it reports PENDING until Done, as GCP's do while they run.
 type operationRecord struct {
 	Name, Type, Instance, User string
-	Inserted, Ended            time.Time
+	Inserted, Done             time.Time
 }
 
 // catalog is one project's provider state.
@@ -348,7 +362,7 @@ func (r instanceRecord) clone() instanceRecord {
 	return r
 }
 
-// record appends a completed operation, dropping the oldest beyond the bound.
+// record appends an operation, dropping the oldest beyond the bound.
 func (c *catalog) record(operation operationRecord) {
 	c.operations = append(c.operations, operation)
 	if len(c.operations) > maxOperations {
@@ -356,20 +370,38 @@ func (c *catalog) record(operation operationRecord) {
 	}
 }
 
-// newOperation builds a completed operation. Every supported mutation runs to
-// completion before its response, so operations are returned DONE.
-func newOperation(kind, instance, user string, started, ended time.Time) operationRecord {
-	return operationRecord{Name: operationID(), Type: kind, Instance: instance, User: user, Inserted: started, Ended: ended}
+// operation finds one operation by name, or nil.
+func (c *catalog) operation(name string) *operationRecord {
+	for i := range c.operations {
+		if c.operations[i].Name == name {
+			return &c.operations[i]
+		}
+	}
+	return nil
 }
 
-// wire renders the sql#operation resource.
-func (o operationRecord) wire(project string) map[string]any {
-	inserted, ended := o.Inserted.UTC().Format(time.RFC3339Nano), o.Ended.UTC().Format(time.RFC3339Nano)
+// newOperation builds the operation of finished work: DONE once latency has
+// passed since the request started.
+func newOperation(kind, instance, user string, started, ended time.Time, latency time.Duration) operationRecord {
+	done := started.Add(latency)
+	if ended.After(done) {
+		done = ended
+	}
+	return operationRecord{Name: operationID(), Type: kind, Instance: instance, User: user, Inserted: started, Done: done}
+}
+
+// wire renders the sql#operation resource at now: PENDING without endTime
+// until the operation is done (recorded: an insert first reports PENDING).
+func (o operationRecord) wire(project string, now time.Time) map[string]any {
+	inserted := o.Inserted.UTC().Format(time.RFC3339Nano)
 	value := map[string]any{
-		keyKind: "sql#operation", keyName: o.Name, "operationType": o.Type, "status": statusDone,
-		"insertTime": inserted, "startTime": inserted, "endTime": ended,
+		keyKind: "sql#operation", keyName: o.Name, "operationType": o.Type, "status": statusPending,
+		"insertTime": inserted, "startTime": inserted,
 		"targetId": o.Instance, "targetProject": project, "targetLink": instanceLink(project, o.Instance),
 		keySelfLink: apiBase + "projects/" + project + "/operations/" + o.Name,
+	}
+	if !now.Before(o.Done) {
+		value["status"], value["endTime"] = statusDone, o.Done.UTC().Format(time.RFC3339Nano)
 	}
 	if o.User != "" {
 		value["user"] = o.User
@@ -413,7 +445,7 @@ func (r instanceRecord) wire(project string, release string) map[string]any {
 		keyKind: "sql#instance", keyName: r.Name, pathProject: project, "region": r.Region, "databaseVersion": r.Version,
 		"state": statusRunnable, "backendType": "SECOND_GEN", "instanceType": "CLOUD_SQL_INSTANCE",
 		"connectionName": project + ":" + r.Region + ":" + r.Name, keySelfLink: instanceLink(project, r.Name),
-		"createTime": r.Created.UTC().Format(time.RFC3339Nano), "etag": r.etag(),
+		"createTime": r.Created.UTC().Format(time.RFC3339Nano), keyETag: r.etag(),
 		"ipAddresses": addresses, keySettings: settings,
 		// Recorded (cloudsql-postgres-instance-admin): GCP always returns these
 		// service-managed fields; the values are local stand-ins, only presence is compared.

@@ -2,9 +2,9 @@
 
 The instance bills while it exists, so the scenario deletes it at the end. Cloud SQL
 has no instance-level IAM policy: every permission is evaluated on the project. The
-scenario therefore observes the sandbox's ``denied`` identity (no Cloud SQL role in the
-project) and never edits project IAM; whatever project role the ``allowed`` identity
-holds is a sandbox precondition and is not asserted.
+scenario observes the sandbox's ``denied`` identity (no Cloud SQL role in the project),
+then grants the ``allowed`` identity ``roles/cloudsql.viewer`` on the owned instance only,
+through one conditional project binding that cleanup removes.
 """
 
 import argparse
@@ -21,9 +21,11 @@ from gcp_validation.config import Target
 from gcp_validation.evidence import Inconclusive, SnapshotCase, now
 from gcp_validation.live_rest import ACTORS, LiveScope, Observations, OwnedRun, Response, RestClient
 from gcp_validation.sandbox import Sandbox
+from gcp_validation.services.databases.projectgrant import ConditionalGrant
 
 SERVICE = 'cloudsql'
-LIMITS = {'max_instances': 1, 'max_databases': 1, 'max_users': 1, 'max_run_seconds': 2700}
+LIMITS = {'max_instances': 1, 'max_databases': 1, 'max_users': 1, 'max_conditional_grants': 1,
+          'max_run_seconds': 3300}
 LIVE_ENDPOINT = 'https://sqladmin.googleapis.com'
 API_PREFIX = '/sql/v1beta4'
 REGION = 'us-central1'
@@ -91,6 +93,10 @@ class InstanceFixture(OwnedRun):
         self.instance = self.manifest['instance']
         self.base = f'{API_PREFIX}/projects/{self.project}/instances'
         self.labels = {'managed-by': 'gcp-local', 'gcp-local-run': self.manifest['run_id']}
+        self.grant = ConditionalGrant(self, 'roles/cloudsql.viewer', (
+            "resource.service == 'sqladmin.googleapis.com' && "
+            "resource.type == 'sqladmin.googleapis.com/Instance' && "
+            f"resource.name == 'projects/{self.project}/instances/{self.instance}'"))
 
     def call(self, method: str, suffix: str = '', *, actor: str = 'fixture',
              body: dict | None = None, query: dict | None = None) -> Response:
@@ -142,6 +148,7 @@ class InstanceFixture(OwnedRun):
         self.acquire()
         try:
             self.client.verify_project()
+            self.grant.remove()
             current = self.call('GET')
             if current.status == 200:
                 self.delete_owned(current.json())
@@ -190,25 +197,106 @@ def names(response: Response) -> dict:
     return {'http_status': response.status, 'names': sorted(item['name'] for item in items)}
 
 
+def sql_error(observe: Observations, response: Response) -> dict:
+    """Select a v1beta4 error: code, status, message, ``errors[]`` reasons, and detail types."""
+    error = response.json().get('error', {})
+    reasons = [[item.get('domain'), item.get('reason')] for item in error.get('errors') or ()]
+    details = [detail.get('@type') for detail in error.get('details') or ()]
+    return {**observe.error(response), 'message': observe.text(error.get('message', '')),
+            'errors': reasons, 'details': details}
+
+
+def outcome(observe: Observations, response: Response) -> dict:
+    """Select an error, or only the status of a success."""
+    if response.status >= 400:
+        return sql_error(observe, response)
+    return {'http_status': response.status}
+
+
 def run_scenario(fixture: InstanceFixture, snapshot: SnapshotCase, created: Response) -> None:
     """Make the same selected observations in local, recording, and revalidation runs."""
     client = fixture.client
-    observe = Observations({fixture.instance: '<instance>', fixture.manifest['run_id']: '<run>',
+    observe = Observations({created.json().get('name', '<operation>'): '<operation>',
+                            fixture.instance: '<instance>', fixture.manifest['run_id']: '<run>',
                             fixture.project: '<project>', client.number: '<project-number>',
                             **{email: '<' + actor + '>' for actor, email in client.emails.items()}})
+    snapshot.match('instance-insert-status', {'status': created.json().get('status')})
     snapshot.match('instance-operation', operation(fixture.finish(created)))
     snapshot.match('instance-read', instance_view(observe, fixture.call('GET')))
-    snapshot.match('denied-read', observe.error(fixture.call('GET', actor='denied')))
-    snapshot.match('denied-create-database', observe.error(fixture.call(
+    snapshot.match('denied-read', sql_error(observe, fixture.call('GET', actor='denied')))
+    snapshot.match('denied-create-database', sql_error(observe, fixture.call(
         'POST', '/databases', actor='denied', body={'name': DATABASE})))
     snapshot.match('protect-operation', operation(fixture.protect(enabled=True)))
     snapshot.match('instance-protected', instance_view(observe, fixture.call('GET')))
-    snapshot.match('protected-delete', observe.error(fixture.call('DELETE')))
+    snapshot.match('protected-delete', sql_error(observe, fixture.call('DELETE')))
     snapshot.match('unprotect-operation', operation(fixture.protect(enabled=False)))
-    snapshot.match('duplicate-instance', observe.error(fixture.create_instance()))
+    snapshot.match('duplicate-instance', sql_error(observe, fixture.create_instance()))
+    snapshot.match('unknown-field', sql_error(observe, client.request(
+        'fixture', 'POST', fixture.base, body={'name': fixture.instance, 'bogus': True},
+        timeout=fixture.remaining())))
+    run_lists(fixture, snapshot, observe)
     run_children(fixture, snapshot, observe)
+    run_operations(fixture, snapshot, observe, created.json()['name'])
     snapshot.match('instance-deleted', operation(fixture.finish(fixture.call('DELETE'))))
-    snapshot.match('instance-absent', observe.error(fixture.call('GET')))
+    snapshot.match('instance-absent', sql_error(observe, fixture.call('GET')))
+
+
+def run_lists(fixture: InstanceFixture, snapshot: SnapshotCase, observe: Observations) -> None:
+    """Page instances.list and refuse a page token the service didn't issue."""
+    client = fixture.client
+    for label, query in (('list-page', {'maxResults': '1'}),
+                         ('list-invalid-token', {'pageToken': 'not-a-page-token'}),
+                         ('list-negative-size', {'maxResults': '-1'})):
+        listing = client.request('fixture', 'GET', fixture.base, query=query,
+                                 timeout=fixture.remaining())
+        if listing.status >= 400:
+            snapshot.match(label, sql_error(observe, listing))
+            continue
+        value = listing.json()
+        snapshot.match(label, {'http_status': listing.status, 'kind': value.get('kind'),
+                               'items': len(value.get('items', [])),
+                               'next': bool(value.get('nextPageToken'))})
+
+
+def run_operations(fixture: InstanceFixture, snapshot: SnapshotCase, observe: Observations,
+                   name: str) -> None:
+    """Page operations, cancel a finished one, and read it through a conditional grant.
+
+    The grant is roles/cloudsql.viewer on the owned instance alone.
+    """
+    client = fixture.client
+    path = f'{API_PREFIX}/projects/{fixture.project}/operations'
+    pages, token = [], None
+    while len(pages) < 4:
+        query = {'instance': fixture.instance, 'maxResults': '2'}
+        if token:
+            query['pageToken'] = token
+        page = client.request('fixture', 'GET', path, query=query,
+                              timeout=fixture.remaining()).json()
+        pages.append([item.get('operationType') for item in page.get('items', [])])
+        token = page.get('nextPageToken')
+        if not token:
+            break
+    snapshot.match('operations-pages', {'pages': pages})
+    cancel = client.request('fixture', 'POST', f'{path}/{name}/cancel',
+                            timeout=fixture.remaining())
+    snapshot.match('operation-cancel', outcome(observe, cancel))
+    snapshot.match('operation-cancel-missing', outcome(observe, client.request(
+        'fixture', 'POST', f'{path}/{fixture.instance}-missing/cancel',
+        timeout=fixture.remaining())))
+    fixture.grant.add()
+    allowed = fixture.grant.wait(lambda: fixture.call('GET', actor='allowed'))
+    snapshot.match('condition-read', {'http_status': allowed.status})
+    snapshot.match('condition-operation-read', outcome(observe, client.request(
+        'allowed', 'GET', f'{path}/{name}', timeout=fixture.remaining())))
+    snapshot.match('condition-operation-cancel', outcome(observe, client.request(
+        'allowed', 'POST', f'{path}/{name}/cancel', timeout=fixture.remaining())))
+    other = client.request('allowed', 'GET', f'{fixture.base}/{fixture.instance}-other',
+                           timeout=fixture.remaining())
+    snapshot.match('condition-other-instance', outcome(observe, other))
+    snapshot.match('condition-list', outcome(observe, client.request(
+        'allowed', 'GET', fixture.base, timeout=fixture.remaining())))
+    fixture.grant.remove()
 
 
 def run_children(fixture: InstanceFixture, snapshot: SnapshotCase, observe: Observations) -> None:

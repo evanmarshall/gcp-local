@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -82,7 +81,7 @@ func (p *Provider) sqlOn(ctx context.Context, project, instance string, mysql bo
 // databaseWire renders one sql#database row.
 func databaseWire(project, instance string, row []string) map[string]any {
 	return map[string]any{keyKind: "sql#database", keyName: row[0], "charset": row[1], "collation": row[2],
-		pathInstance: instance, pathProject: project, "etag": databaseETag(instance, row[0]),
+		pathInstance: instance, pathProject: project, keyETag: databaseETag(instance, row[0]),
 		keySelfLink: instanceLink(project, instance) + "/databases/" + row[0]}
 }
 
@@ -94,9 +93,29 @@ func databaseETag(instance, name string) string {
 
 // databaseBody is the databases.insert subset the provider models.
 type databaseBody struct {
+	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	Charset   string `json:"charset"`
 	Collation string `json:"collation"`
+	Instance  string `json:"instance"`
+	Project   string `json:"project"`
+}
+
+// databaseFields lists the v1beta4 Database fields databaseBody lacks.
+var databaseFields = provider.Fields{Unmodeled: []string{"sqlserverDatabaseDetails"}, OutputOnly: []string{keyETag, keySelfLink},
+	IgnoreUnknown: true}
+
+// decodeChild strictly decodes a database or user body and refuses one that
+// names another project or instance.
+func decodeChild[T any](raw []byte, fields provider.Fields, project, instance string, names func(T) (string, string)) (T, error) {
+	var body T
+	if err := provider.DecodeJSON(raw, "body", &body, gap, fields); err != nil {
+		return body, err
+	}
+	if named, in := names(body); (named != "" && named != project) || (in != "" && in != instance) {
+		return body, provider.Invalid("Invalid request: the body names another project or instance.")
+	}
+	return body, nil
 }
 
 // createDatabase renders the CREATE DATABASE statement for a validated body.
@@ -143,11 +162,11 @@ func (body databaseBody) createMySQLDatabase() (string, error) {
 // insertDatabase creates a real database: owned by cloudsqlsuperuser on
 // PostgreSQL, a schema on MySQL.
 func (p *Provider) insertDatabase(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
-	var body databaseBody
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, provider.Invalid("Invalid JSON payload.")
-	}
 	instance, started := request.Path[pathInstance], p.clock()
+	body, err := decodeChild(request.JSON, databaseFields, project, instance, func(b databaseBody) (string, string) { return b.Project, b.Instance })
+	if err != nil {
+		return nil, err
+	}
 	mysql, ok := p.engineOf(project, instance)
 	if !ok {
 		return notFound(), nil
@@ -256,12 +275,20 @@ func (p *Provider) deleteDatabase(call gateway.Call, request *gateway.RESTReques
 // userBody is the users.insert subset the provider models. host applies to
 // MySQL only; Cloud SQL ignores it for PostgreSQL.
 type userBody struct {
-	Name             string          `json:"name"`
-	Host             string          `json:"host"`
-	Password         string          `json:"password"`
-	Type             string          `json:"type"`
-	PasswordPolicy   json.RawMessage `json:"passwordPolicy"`
-	DualPasswordType string          `json:"dualPasswordType"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Password string `json:"password"`
+	Type     string `json:"type"`
+	Instance string `json:"instance"`
+	Project  string `json:"project"`
+}
+
+// userFields lists the v1beta4 User fields userBody lacks.
+var userFields = provider.Fields{
+	Unmodeled:     []string{"databaseRoles", "dualPasswordType", "iamEmail", "passwordPolicy", "serverRoles", "sqlserverUserDetails"},
+	OutputOnly:    []string{keyETag, "iamStatus"},
+	IgnoreUnknown: true,
 }
 
 // check refuses a users.insert body the provider cannot honor.
@@ -269,10 +296,6 @@ func (body userBody) check(mysql bool) error {
 	switch {
 	case body.Type != "" && body.Type != "BUILT_IN":
 		return gap(fmt.Sprintf("user type %s (IAM database authentication)", body.Type))
-	case len(body.PasswordPolicy) > 0 && string(body.PasswordPolicy) != "null":
-		return gap("users.insert passwordPolicy")
-	case body.DualPasswordType != "":
-		return gap("users.insert dualPasswordType")
 	case strings.ContainsRune(body.Password, 0) || !body.named(mysql):
 		return provider.Invalid("Invalid user.")
 	default:
@@ -291,11 +314,11 @@ func (body userBody) named(mysql bool) bool {
 // insertUser creates a built-in login user in cloudsqlsuperuser, as Cloud SQL
 // does for users created through the API.
 func (p *Provider) insertUser(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
-	var body userBody
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, provider.Invalid("Invalid user.")
-	}
 	instance, started := request.Path[pathInstance], p.clock()
+	body, err := decodeChild(request.JSON, userFields, project, instance, func(b userBody) (string, string) { return b.Project, b.Instance })
+	if err != nil {
+		return nil, err
+	}
 	mysql, ok := p.engineOf(project, instance)
 	if !ok {
 		return notFound(), nil
@@ -346,7 +369,7 @@ func (p *Provider) listUsers(call gateway.Call, request *gateway.RESTRequest, pr
 			// Recorded (cloudsql-mysql-instance-admin): MySQL users also carry
 			// etag, iamStatus, and passwordPolicy; only their presence is
 			// recorded, so the values are local stand-ins.
-			item["host"], item["etag"] = row[1], databaseETag(instance, row[0]+"@"+row[1])
+			item["host"], item[keyETag] = row[1], databaseETag(instance, row[0]+"@"+row[1])
 			item["iamStatus"], item["passwordPolicy"] = "IAM_STATUS_UNSPECIFIED", map[string]any{}
 		}
 		items = append(items, item)
@@ -384,39 +407,76 @@ func (p *Provider) deleteUser(call gateway.Call, request *gateway.RESTRequest, p
 // getOperation renders one recorded operation.
 func (p *Provider) getOperation(_ gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	var found map[string]any
+	now := p.clock()
 	_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
-		for _, operation := range c.operations {
-			if operation.Name == request.Path[pathOperation] {
-				found = operation.wire(project)
-			}
+		if operation := c.operation(request.Path[pathOperation]); operation != nil {
+			found = operation.wire(project, now)
 		}
 		return nil
 	})
 	if found == nil {
-		return apiError(http.StatusNotFound, "NOT_FOUND", "", "The Cloud SQL operation does not exist."), nil
+		return operationNotFound(), nil
 	}
 	return &gateway.RESTResponse{JSON: found}, nil
 }
 
-// listOperations renders the project's operations, newest first, optionally
-// for one instance.
+// operationPaging is operations.list's page sizes; the service documents
+// none, so the default is every retained operation.
+var operationPaging = provider.Paging{Default: maxOperations, Max: maxOperations, InvalidToken: errInvalidPageToken}
+
+// listOperations renders one page of the project's operations, newest first
+// (the method's documented order), optionally for one instance.
 func (p *Provider) listOperations(_ gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
-	if request.Query.Get("pageToken") != "" {
-		return nil, gap("operations.list pageToken")
+	query, err := pageQuery(request.Query)
+	if err != nil {
+		return nil, err
 	}
 	instance := request.Query.Get("instance")
-	var items []any
+	var matched []operationRecord
 	_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 		for _, operation := range slices.Backward(c.operations) {
 			if instance == "" || operation.Instance == instance {
-				items = append(items, operation.wire(project))
+				matched = append(matched, operation)
 			}
 		}
 		return nil
 	})
-	response := map[string]any{keyKind: "sql#operationsList"}
-	if len(items) > 0 {
-		response["items"] = items
+	page, next, err := provider.Page(matched, query, operationPaging, gap)
+	if err != nil {
+		return nil, err
 	}
-	return &gateway.RESTResponse{JSON: response}, nil
+	now := p.clock()
+	items := make([]map[string]any, 0, len(page))
+	for _, operation := range page {
+		items = append(items, operation.wire(project, now))
+	}
+	return &gateway.RESTResponse{JSON: listBody("sql#operationsList", items, next)}, nil
 }
+
+// cancelOperation answers operations.cancel. No served operation type can
+// be cancelled, so an existing operation is refused as GCP refuses a CREATE
+// (recorded, cloudsql-postgres-instance-admin; the other types are
+// inferred); a name that isn't an operation ID is GCP's generic 400
+// (recorded).
+func (p *Provider) cancelOperation(_ gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
+	name := request.Path[pathOperation]
+	if !operationIDPattern.MatchString(name) {
+		return failure{code: http.StatusBadRequest, reason: "badRequest", domain: domainGlobal, status: statusInvalid,
+			message: "Request contains an invalid argument."}.render(), nil
+	}
+	var kind string
+	_ = p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
+		if operation := c.operation(name); operation != nil {
+			kind = operation.Type
+		}
+		return nil
+	})
+	if kind == "" {
+		return operationNotFound(), nil
+	}
+	return failure{code: http.StatusBadRequest, reason: reasonInvalid, domain: domainGlobal, message: "Invalid request: You can't cancel operation " +
+		name + " because Cloud SQL doesn't support the cancellation of the " + kind + " operation."}.render(), nil
+}
+
+// operationIDPattern is the UUID shape of Cloud SQL operation names.
+var operationIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

@@ -1141,7 +1141,7 @@ var cloudSQLMethods = []string{
 	"sql.instances.insert", "sql.instances.get", "sql.instances.list", "sql.instances.patch", "sql.instances.delete",
 	"sql.databases.insert", "sql.databases.get", "sql.databases.list", "sql.databases.delete",
 	"sql.users.insert", "sql.users.list", "sql.users.delete",
-	"sql.operations.get", "sql.operations.list",
+	"sql.operations.get", "sql.operations.list", "sql.operations.cancel",
 }
 
 // cloudSQLRoutes generates the Cloud SQL Admin v1beta4 route slice from the

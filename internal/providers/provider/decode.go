@@ -209,6 +209,10 @@ func wellKnown(descriptor protoreflect.MessageDescriptor) bool {
 // the method's discovery schema that the struct doesn't have.
 type Fields struct {
 	Unmodeled, OutputOnly []string
+	// IgnoreUnknown drops names the schema doesn't have instead of refusing
+	// them, as Cloud SQL Admin v1beta4 does (recorded,
+	// cloudsql-postgres-instance-admin). Schema fields stay strict.
+	IgnoreUnknown bool
 }
 
 // DecodeJSON strictly decodes a JSON object request body into into, a
@@ -219,7 +223,7 @@ type Fields struct {
 //     its value is null or the type's default ("", 0, false, {}, []), which
 //     proto3 treats as unset. A field in fields.OutputOnly is dropped.
 //   - Any other name the struct doesn't have is GCP's 400 for an unknown
-//     name, with a BadRequest violation.
+//     name, with a BadRequest violation, or dropped with IgnoreUnknown.
 //   - A value of the wrong JSON type is INVALID_ARGUMENT with a BadRequest
 //     violation on its JSON path.
 //
@@ -229,7 +233,7 @@ func DecodeJSON(body []byte, root string, into any, gap func(string) error, fiel
 	if len(bytes.TrimSpace(body)) == 0 {
 		body = []byte("{}")
 	}
-	walk := jsonWalk{gap: gap, unmodeled: names(fields.Unmodeled), output: names(fields.OutputOnly)}
+	walk := jsonWalk{gap: gap, unmodeled: names(fields.Unmodeled), output: names(fields.OutputOnly), ignore: fields.IgnoreUnknown}
 	if err := walk.value(body, reflect.TypeOf(into).Elem(), root, ""); err != nil {
 		return err
 	}
@@ -243,6 +247,7 @@ func DecodeJSON(body []byte, root string, into any, gap func(string) error, fiel
 type jsonWalk struct {
 	gap               func(string) error
 	unmodeled, output map[string]bool
+	ignore            bool
 }
 
 // Types that decode JSON values themselves.
@@ -307,25 +312,30 @@ func (w jsonWalk) object(raw json.RawMessage, kind reflect.Type, path, jsonPath 
 	}
 	known := jsonFields(kind)
 	for _, key := range sortedKeys(fields) {
-		child := join(jsonPath, key)
-		field, found := known[key]
-		var err error
-		switch {
-		case found && !tagged(field, "string"): // a ",string" number reports its own errors
-			err = w.value(fields[key], field.Type, join(path, key), child)
-		case found, w.output[child]:
-		case w.unmodeled[child]:
-			if !emptyJSON(fields[key]) {
-				err = w.gap(child + " is not modeled")
-			}
-		default:
-			err = unknownName(key, path)
-		}
-		if err != nil {
+		if err := w.member(key, fields[key], known, path, jsonPath); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// member checks one key of a JSON object against the struct's fields.
+func (w jsonWalk) member(key string, raw json.RawMessage, known map[string]reflect.StructField, path, jsonPath string) error {
+	child := join(jsonPath, key)
+	field, found := known[key]
+	switch {
+	case found && !tagged(field, "string"): // a ",string" number reports its own errors
+		return w.value(raw, field.Type, join(path, key), child)
+	case found, w.output[child], w.ignore && !w.unmodeled[child]:
+		return nil
+	case w.unmodeled[child]:
+		if !emptyJSON(raw) {
+			return w.gap(child + " is not modeled")
+		}
+		return nil
+	default:
+		return unknownName(key, path)
+	}
 }
 
 // jsonFields maps each JSON name to its struct field, as encoding/json

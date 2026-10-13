@@ -32,7 +32,7 @@ A resource that leaves the index takes its policy with it, whichever provider de
 
 Only allow-binding conditions on Storage are recorded against GCP (`storage-iam-conditions`). Deny rules and principal access boundaries are enforced locally and not recorded.
 
-**Conditions (CEL).** Expressions see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers supply the `resource.*` values through `iam.Target.Attributes` (or `provider.Gate.Attributes`); Storage, Cloud SQL, Spanner, and Firestore do. An attribute the provider didn't supply is absent, so reading it is an evaluation error, not `""`. An allow binding grants only when its condition returns `true`; `false`, an error, or a non-boolean grants nothing. So `!resource.name.startsWith("x")` grants nothing on a service without `resource.name`. GCP documents the same outcome: a condition part that reads an attribute the resource doesn't provide "is never interpreted as granting access" ([attribute reference](https://cloud.google.com/iam/docs/conditions-attribute-reference)).
+**Conditions (CEL).** Expressions see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers supply the `resource.*` values through `iam.Target.Attributes` (or `provider.Gate.Attributes`); Storage, Cloud SQL, Spanner, Firestore, and Memorystore do (Memorystore supplies `resource.name` and `resource.service`). An attribute the provider didn't supply is absent, so reading it is an evaluation error, not `""`. An allow binding grants only when its condition returns `true`; `false`, an error, or a non-boolean grants nothing. So `!resource.name.startsWith("x")` grants nothing on a service without `resource.name`. GCP documents the same outcome: a condition part that reads an attribute the resource doesn't provide "is never interpreted as granting access" ([attribute reference](https://cloud.google.com/iam/docs/conditions-attribute-reference)).
 
 **Deny rules** (`denyRules` on a v3 policy) are checked at every node of the target's ancestry, each rule independently:
 
@@ -48,7 +48,7 @@ Only allow-binding conditions on Storage are recorded against GCP (`storage-iam-
 - An enrolled caller may reach only targets inside the union of its boundaries' `boundCloudResources` (by resource name or `projects/NUMBER`) and their descendants. Anything else is 403 before allow or deny evaluation.
 - Not enrolled: users (Workspace domains aren't modeled), Google-managed service agents, workload and workforce pools, and anonymous callers. Boundary conditions and enforcement versions aren't modeled.
 
-Not recorded: deny rules and boundaries need organization-level setup (`roles/iam.denyAdmin` and principal access boundary admin are grantable only at an organization), which the sandbox doesn't allow ([#33](https://github.com/evanmarshall/gcp-local/issues/33), [#18](https://github.com/evanmarshall/gcp-local/issues/18)). Conditions on Cloud SQL are not recorded.
+Not recorded: deny rules and boundaries need organization-level setup (`roles/iam.denyAdmin` and principal access boundary admin are grantable only at an organization), which the sandbox doesn't allow ([#33](https://github.com/evanmarshall/gcp-local/issues/33), [#18](https://github.com/evanmarshall/gcp-local/issues/18)). Conditions on Cloud SQL and Memorystore are recorded for one conditional project grant each (`cloudsql-postgres-instance-admin`, `memorystore-redis-instance-admin`).
 
 ## Groups and domains
 

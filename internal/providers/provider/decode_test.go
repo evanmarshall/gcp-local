@@ -132,3 +132,15 @@ func TestDecodeJSONAcceptsDefaultsAndOutputFields(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDecodeJSONCanIgnoreUnknownNames(t *testing.T) {
+	fields := testFields
+	fields.IgnoreUnknown = true
+	var body testBody
+	if err := DecodeJSON([]byte(`{"name":"a","bogus":1,"settings":{"other":true}}`), "thing", &body, testGap, fields); err != nil || body.Name != "a" {
+		t.Fatalf("unknown names: %v %+v", err, body)
+	}
+	if code, _, _ := violation(t, DecodeJSON([]byte(`{"replicas":2,"bogus":1}`), "thing", &body, testGap, fields)); code != codes.Unimplemented {
+		t.Fatalf("an unmodeled field must stay a gap: %v", code)
+	}
+}

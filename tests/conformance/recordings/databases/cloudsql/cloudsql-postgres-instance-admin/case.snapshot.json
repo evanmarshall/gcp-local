@@ -1,7 +1,10 @@
 {
   "cloudsql-postgres-instance-admin": {
-    "recorded-date": "12-10-2026, 18:19:29",
+    "recorded-date": "13-10-2026, 02:45:41",
     "recorded-content": {
+      "instance-insert-status": {
+        "status": "PENDING"
+      },
       "instance-operation": {
         "error": false,
         "fields": [
@@ -75,12 +78,28 @@
       },
       "denied-read": {
         "code": 403,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "notAuthorized"
+          ]
+        ],
         "http_status": 403,
+        "message": "The client is not authorized to make this request.",
         "status": null
       },
       "denied-create-database": {
         "code": 403,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "notAuthorized"
+          ]
+        ],
         "http_status": 403,
+        "message": "The client is not authorized to make this request.",
         "status": null
       },
       "protect-operation": {
@@ -156,7 +175,15 @@
       },
       "protected-delete": {
         "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "badRequest"
+          ]
+        ],
         "http_status": 400,
+        "message": "The instance is protected. Please disable the deletion protection and try again. To disable deletion protection, update the instance settings with deletionProtectionEnabled set to false.",
         "status": null
       },
       "unprotect-operation": {
@@ -182,8 +209,63 @@
       },
       "duplicate-instance": {
         "code": 409,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "instanceAlreadyExists"
+          ]
+        ],
         "http_status": 409,
+        "message": "The Cloud SQL instance already exists.",
         "status": null
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "required"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Missing parameter: Tier.",
+        "status": null
+      },
+      "list-page": {
+        "http_status": 200,
+        "items": 1,
+        "kind": null,
+        "next": false
+      },
+      "list-invalid-token": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: Invalid page token.",
+        "status": null
+      },
+      "list-negative-size": {
+        "code": 400,
+        "details": [
+          "type.googleapis.com/google.rpc.BadRequest"
+        ],
+        "errors": [
+          [
+            null,
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'max_results' (TYPE_UINT32), \"-1\"",
+        "status": "INVALID_ARGUMENT"
       },
       "database-operation": {
         "error": false,
@@ -314,6 +396,96 @@
       "database-absent": {
         "http_status": 404
       },
+      "operations-pages": {
+        "pages": [
+          [
+            "DELETE_DATABASE",
+            "DELETE_USER"
+          ],
+          [
+            "CREATE_USER",
+            "CREATE_DATABASE"
+          ],
+          [
+            "UPDATE",
+            "UPDATE"
+          ],
+          [
+            "CREATE"
+          ]
+        ]
+      },
+      "operation-cancel": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: You can't cancel operation <operation> because Cloud SQL doesn't support the cancellation of the CREATE operation.",
+        "status": null
+      },
+      "operation-cancel-missing": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "badRequest"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "condition-read": {
+        "http_status": 200
+      },
+      "condition-operation-read": {
+        "http_status": 200
+      },
+      "condition-operation-cancel": {
+        "code": 403,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "notAuthorized"
+          ]
+        ],
+        "http_status": 403,
+        "message": "The client is not authorized to make this request.",
+        "status": null
+      },
+      "condition-other-instance": {
+        "code": 403,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "notAuthorized"
+          ]
+        ],
+        "http_status": 403,
+        "message": "The client is not authorized to make this request.",
+        "status": null
+      },
+      "condition-list": {
+        "code": 403,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "notAuthorized"
+          ]
+        ],
+        "http_status": 403,
+        "message": "The client is not authorized to make this request.",
+        "status": null
+      },
       "instance-deleted": {
         "error": false,
         "fields": [
@@ -337,7 +509,15 @@
       },
       "instance-absent": {
         "code": 404,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "instanceDoesNotExist"
+          ]
+        ],
         "http_status": 404,
+        "message": "The Cloud SQL instance does not exist.",
         "status": null
       },
       "cleanup": {

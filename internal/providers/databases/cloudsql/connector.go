@@ -15,6 +15,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/mysqlwire"
 	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/pgwire"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
@@ -246,7 +247,23 @@ func mysqlRefusal(state string) uint16 {
 func (p *Provider) admit(ctx context.Context, target connectorTarget, user string) (string, string) {
 	call := gateway.Call{Context: ctx, Method: methodConnect, Project: target.project, Location: target.region,
 		Principal: target.principal, TraceID: hex.EncodeToString(randomBytes(16))}
-	decision, err := p.engine.Authorize(call, p.target(target.project, target.instance), nil)
+	// The connector reports the engine's own reason, so it picks the target
+	// as provider.Nearest does, under the project lock, and asks the engine
+	// directly.
+	var decision iam.Decision
+	var err error
+	scopeErr := p.catalog.With(provider.ProjectScope(target.project), func(*catalog) error {
+		candidates := p.candidates(target.project, target.instance)
+		chosen := iam.Target{Name: candidates[len(candidates)-1]}
+		if _, indexed := p.index.Get(candidates[0]); indexed {
+			chosen = iam.Target{Name: candidates[0], Attributes: attributes(candidates[0])}
+		}
+		decision, err = p.engine.Authorize(call, chosen, nil)
+		return nil
+	})
+	if err == nil {
+		err = scopeErr
+	}
 	if err != nil {
 		return "28000", "gcp-local: " + target.principal.Subject + " is not authorized to connect (decision " + decision.ID + "): " + iamReason(err)
 	}

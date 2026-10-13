@@ -11,10 +11,15 @@ package cloudsql
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // serviceName owns the backend registration and index entries.
@@ -22,20 +27,21 @@ const serviceName = "cloudsql"
 
 // Method names; the generated route table uses the same identifiers.
 const (
-	methodInstancesInsert = "sql.instances.insert"
-	methodInstancesGet    = "sql.instances.get"
-	methodInstancesList   = "sql.instances.list"
-	methodInstancesPatch  = "sql.instances.patch"
-	methodInstancesDelete = "sql.instances.delete"
-	methodDatabasesInsert = "sql.databases.insert"
-	methodDatabasesGet    = "sql.databases.get"
-	methodDatabasesList   = "sql.databases.list"
-	methodDatabasesDelete = "sql.databases.delete"
-	methodUsersInsert     = "sql.users.insert"
-	methodUsersList       = "sql.users.list"
-	methodUsersDelete     = "sql.users.delete"
-	methodOperationsGet   = "sql.operations.get"
-	methodOperationsList  = "sql.operations.list"
+	methodInstancesInsert  = "sql.instances.insert"
+	methodInstancesGet     = "sql.instances.get"
+	methodInstancesList    = "sql.instances.list"
+	methodInstancesPatch   = "sql.instances.patch"
+	methodInstancesDelete  = "sql.instances.delete"
+	methodDatabasesInsert  = "sql.databases.insert"
+	methodDatabasesGet     = "sql.databases.get"
+	methodDatabasesList    = "sql.databases.list"
+	methodDatabasesDelete  = "sql.databases.delete"
+	methodUsersInsert      = "sql.users.insert"
+	methodUsersList        = "sql.users.list"
+	methodUsersDelete      = "sql.users.delete"
+	methodOperationsGet    = "sql.operations.get"
+	methodOperationsList   = "sql.operations.list"
+	methodOperationsCancel = "sql.operations.cancel"
 	// methodConnect is the connector's plan. It is not an API route: the real
 	// Cloud SQL Auth Proxy obtains the same permission check through
 	// connectSettings/generateEphemeralCert, which are not served here.
@@ -47,21 +53,22 @@ const permInstancesGet = "cloudsql.instances.get"
 
 // permissions follows the Cloud SQL Admin API access-control table.
 var permissions = map[string]string{
-	methodInstancesInsert: "cloudsql.instances.create",
-	methodInstancesGet:    permInstancesGet,
-	methodInstancesList:   "cloudsql.instances.list",
-	methodInstancesPatch:  "cloudsql.instances.update",
-	methodInstancesDelete: "cloudsql.instances.delete",
-	methodDatabasesInsert: "cloudsql.databases.create",
-	methodDatabasesGet:    "cloudsql.databases.get",
-	methodDatabasesList:   "cloudsql.databases.list",
-	methodDatabasesDelete: "cloudsql.databases.delete",
-	methodUsersInsert:     "cloudsql.users.create",
-	methodUsersList:       "cloudsql.users.list",
-	methodUsersDelete:     "cloudsql.users.delete",
-	methodOperationsGet:   permInstancesGet,
-	methodOperationsList:  permInstancesGet,
-	methodConnect:         "cloudsql.instances.connect",
+	methodInstancesInsert:  "cloudsql.instances.create",
+	methodInstancesGet:     permInstancesGet,
+	methodInstancesList:    "cloudsql.instances.list",
+	methodInstancesPatch:   "cloudsql.instances.update",
+	methodInstancesDelete:  "cloudsql.instances.delete",
+	methodDatabasesInsert:  "cloudsql.databases.create",
+	methodDatabasesGet:     "cloudsql.databases.get",
+	methodDatabasesList:    "cloudsql.databases.list",
+	methodDatabasesDelete:  "cloudsql.databases.delete",
+	methodUsersInsert:      "cloudsql.users.create",
+	methodUsersList:        "cloudsql.users.list",
+	methodUsersDelete:      "cloudsql.users.delete",
+	methodOperationsGet:    permInstancesGet,
+	methodOperationsList:   permInstancesGet,
+	methodOperationsCancel: "cloudsql.instances.update",
+	methodConnect:          "cloudsql.instances.connect",
 }
 
 // Path variables, resource kinds, and wire constants.
@@ -81,6 +88,7 @@ const (
 	defaultUser    = "postgres"
 	loopbackIPv4   = "127.0.0.1"
 	statusDone     = "DONE"
+	statusPending  = "PENDING"
 	statusRunnable = "RUNNABLE"
 )
 
@@ -92,6 +100,11 @@ const (
 	keySettings           = "settings"
 	keySettingsVersion    = "settingsVersion"
 	keyDeletionProtection = "deletionProtectionEnabled"
+	keyETag               = "etag"
+	keyMessage            = "message"
+	domainGlobal          = "global"
+	reasonInvalid         = "invalid"
+	statusInvalid         = "INVALID_ARGUMENT"
 )
 
 // Errors returned by provider construction.
@@ -119,11 +132,7 @@ func instanceLink(project, instance string) string {
 // v1beta4 errors carry no status field, so statusText documents intent only.
 func apiError(code int, statusText, reason, message string) *gateway.RESTResponse {
 	_ = statusText
-	body := map[string]any{"code": code, "message": message}
-	if reason != "" {
-		body["errors"] = []any{map[string]any{"domain": "global", "reason": reason, "message": message}}
-	}
-	return &gateway.RESTResponse{Status: code, JSON: map[string]any{"error": body}}
+	return failure{code: code, reason: reason, domain: domainGlobal, message: message}.render()
 }
 
 // notFound renders Cloud SQL's instanceDoesNotExist body, which has its own reason field.
@@ -133,6 +142,91 @@ func notFound() *gateway.RESTResponse {
 
 // gap reports an unsupported request shape explicitly.
 var gap = provider.CoverageGap("Cloud SQL")
+
+// operationNotFound is the missing-operation error.
+func operationNotFound() *gateway.RESTResponse {
+	return apiError(http.StatusNotFound, "NOT_FOUND", "", "The Cloud SQL operation does not exist.")
+}
+
+// failure is a handler refusal in the v1beta4 error shape; wireFailure
+// renders it. Most recorded refusals have an errors[] entry in domain
+// "global" and no status; a few also carry a status, and the transcoder's
+// also a BadRequest on field, with no domain.
+type failure struct {
+	code                    int
+	reason, message, domain string
+	status, field           string
+}
+
+func (f failure) Error() string { return f.message }
+
+// Recorded refusals (cloudsql-postgres-instance-admin).
+var (
+	errInvalidPageToken = failure{code: http.StatusBadRequest, reason: reasonInvalid, domain: domainGlobal, message: "Invalid request: Invalid page token."}
+	errMissingTier      = failure{code: http.StatusBadRequest, reason: "required", domain: domainGlobal, message: "Missing parameter: Tier."}
+)
+
+// render builds the error body.
+func (f failure) render() *gateway.RESTResponse {
+	body := map[string]any{"code": f.code, keyMessage: f.message}
+	if f.reason != "" {
+		entry := map[string]any{"reason": f.reason, keyMessage: f.message}
+		if f.domain != "" {
+			entry["domain"] = f.domain
+		}
+		body["errors"] = []any{entry}
+	}
+	if f.status != "" {
+		body["status"] = f.status
+	}
+	if f.field != "" {
+		body["details"] = []any{map[string]any{"@type": "type.googleapis.com/google.rpc.BadRequest",
+			"fieldViolations": []any{map[string]any{"field": f.field, "description": f.message}}}}
+	}
+	return &gateway.RESTResponse{Status: f.code, JSON: map[string]any{"error": body}}
+}
+
+// pageQuery maps v1beta4's maxResults (uint32) onto the shared pager's
+// pageSize; a value that isn't one is the transcoder's refusal (recorded).
+func pageQuery(query url.Values) (url.Values, error) {
+	paged := url.Values{"pageToken": query["pageToken"], "filter": query["filter"]}
+	if text := query.Get("maxResults"); text != "" {
+		if _, err := strconv.ParseUint(text, 10, 32); err != nil {
+			return nil, failure{code: http.StatusBadRequest, reason: reasonInvalid, status: statusInvalid, field: "max_results",
+				message: fmt.Sprintf("Invalid value at 'max_results' (TYPE_UINT32), %q", text)}
+		}
+		paged.Set("pageSize", text)
+	}
+	return paged, nil
+}
+
+// listBody renders a v1beta4 list: the items and the next page's token,
+// with kind when the method returns one.
+func listBody(kind string, items []map[string]any, next string) map[string]any {
+	body := provider.ListBody("items", items, next)
+	if kind != "" {
+		body[keyKind] = kind
+	}
+	return body
+}
+
+// wireFailure renders a handler's error. v1beta4 errors carry no status
+// field (recorded); a coverage gap stays UNIMPLEMENTED.
+func wireFailure(err error) (*gateway.RESTResponse, error) {
+	if refused, ok := errors.AsType[failure](err); ok {
+		return refused.render(), nil
+	}
+	wire, ok := status.FromError(err)
+	code, mapped := httpCodes[wire.Code()]
+	if !ok || !mapped {
+		return nil, err
+	}
+	return apiError(code, wire.Code().String(), "", wire.Message()), nil
+}
+
+// httpCodes maps the statuses a handler returns onto HTTP codes.
+var httpCodes = map[codes.Code]int{codes.InvalidArgument: http.StatusBadRequest, codes.FailedPrecondition: http.StatusBadRequest,
+	codes.NotFound: http.StatusNotFound, codes.AlreadyExists: http.StatusConflict}
 
 func randomBytes(n int) []byte {
 	value := make([]byte, n)

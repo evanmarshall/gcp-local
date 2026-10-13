@@ -19,4 +19,5 @@ var CloudSQLRoutes = []contract.Route{
 	{Method: "sql.users.delete", Verb: "DELETE", Path: "/sql/v1beta4/projects/{project}/instances/{instance}/users", JSONBody: false, Media: false},
 	{Method: "sql.operations.get", Verb: "GET", Path: "/sql/v1beta4/projects/{project}/operations/{operation}", JSONBody: false, Media: false},
 	{Method: "sql.operations.list", Verb: "GET", Path: "/sql/v1beta4/projects/{project}/operations", JSONBody: false, Media: false},
+	{Method: "sql.operations.cancel", Verb: "POST", Path: "/sql/v1beta4/projects/{project}/operations/{operation}/cancel", JSONBody: false, Media: false},
 }

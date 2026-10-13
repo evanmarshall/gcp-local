@@ -48,25 +48,29 @@ Each new connection checks `cloudsql.instances.connect` for the bound principal,
 
 | Resource | Methods | Notes |
 | --- | --- | --- |
-| Instances | `insert`, `get`, `list`, `patch`, `delete` | `POSTGRES_16`, `POSTGRES_15`, `MYSQL_8_4`, or `MYSQL_8_0`; `settings.tier` required. `patch` changes tier, `userLabels`, and `deletionProtectionEnabled`; stale `settingsVersion` returns 412. Protected delete returns 400 |
+| Instances | `insert`, `get`, `list`, `patch`, `delete` | `POSTGRES_16`, `POSTGRES_15`, `MYSQL_8_4`, or `MYSQL_8_0`; `settings.tier` required (400 `Missing parameter: Tier.`, checked first). `patch` changes tier, `userLabels`, and `deletionProtectionEnabled`; stale `settingsVersion` returns 412. Protected delete returns 400. `list` takes `maxResults` (default 500, at most 1,000) and opaque `pageToken`, ordered by name, and has no `kind` |
 | Databases | `insert`, `get`, `list`, `delete` | Optional `charset` and `collation`. MySQL defaults to `utf8mb4` and `utf8mb4_0900_ai_ci`; unknown or mismatched names return 400. MySQL lists the system schemas; deleting one returns 400. A duplicate MySQL database returns 400, as recorded |
 | Users | `insert`, `list`, `delete` | `BUILT_IN` only. MySQL users have a `host` (default `%`) and `delete` takes `host`; users get the `cloudsqlsuperuser` role. A user without a password can't log in |
-| Operations | `get`, `list` | Filter by `instance`; 1,000 kept per project |
+| Operations | `get`, `list`, `cancel` | `list` filters by `instance`, newest first, with `maxResults` and `pageToken`; 1,000 kept per project. `cancel` refuses every served operation type with GCP's 400 (recorded for `CREATE`); `cancel` needs `cloudsql.instances.update` (`roles/cloudsql.viewer` is denied, recorded; the exact permission is inferred) |
 
-Every operation returns `DONE`; GCP returns `PENDING` first. Instances report `state: RUNNABLE` and one `127.0.0.1` address, `PRIMARY`, or `PRIVATE` when `ipv4Enabled` is false. A `PRIVATE` address is not reachable from the host.
+Operations report `PENDING` for 500 ms, then `DONE`, as GCP reports `PENDING` first; the work itself is finished when the response is sent. Instances report `state: RUNNABLE` and one `127.0.0.1` address, `PRIMARY`, or `PRIVATE` when `ipv4Enabled` is false. A `PRIVATE` address is not reachable from the host.
 
 On MySQL, `cloudsqlsuperuser` holds every static privilege except `SUPER`, `FILE`, and `SHUTDOWN`, and no dynamic administrative privilege, so its members can't alter the internal administrative account (`SYSTEM_USER`). The real role's grants are not recorded.
 
 ## IAM
 
-Permissions follow the [Cloud SQL access-control table](https://cloud.google.com/sql/docs/postgres/iam-permissions), the same for both engines: `cloudsql.instances.*`, `cloudsql.databases.*`, `cloudsql.users.*`; operations need `cloudsql.instances.get`; the connector needs `cloudsql.instances.connect`. Cloud SQL has no instance-level policy; grants come from the project. Denials return 403 `notAuthorized`. Roles: `roles/cloudsql.admin`, `.editor`, `.viewer`, `.client`.
+Permissions follow the [Cloud SQL access-control table](https://cloud.google.com/sql/docs/postgres/iam-permissions), the same for both engines: `cloudsql.instances.*`, `cloudsql.databases.*`, `cloudsql.users.*`; operations `get` and `list` need `cloudsql.instances.get`; the connector needs `cloudsql.instances.connect`. Cloud SQL has no instance-level policy; grants come from the project. Denials return 403 `The client is not authorized to make this request.` with `errors[].reason` `notAuthorized` and no `status`, as recorded.
+
+IAM Conditions see `resource.name` `projects/P/instances/I`, `resource.type` `sqladmin.googleapis.com/Instance`, and `resource.service` `sqladmin.googleapis.com` for an existing instance (recorded). A missing instance, `insert`, and `list` carry no attributes, so a condition grants nothing there; GCP denied both in the recording.
+
+Errors use the v1beta4 shape: `errors[]` with `domain` `global` and a `reason` (`notAuthorized`, `instanceAlreadyExists`, `instanceDoesNotExist`, `badRequest`, `invalid`, `required`), no `status`, no `details`. A non-numeric or negative `maxResults` is the transcoder's 400 with `status` and a `BadRequest`. Names outside the schema are dropped, as GCP does. Roles: `roles/cloudsql.admin`, `.editor`, `.viewer`, `.client`.
 
 ## Verification
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `cloudsql-postgres-instance-admin` | 2026-10-12 | Operation envelopes, instance and database fields, deletion protection, default `postgres` database and user, denied read and database create, 409 duplicate, 404 after delete |
-| `cloudsql-mysql-instance-admin` | 2026-10-12 | `MYSQL_8_0` instance fields (no `OUTGOING` address), the four system schemas and `root@%`, denied read and database create, a database with `utf8mb4_unicode_ci` and one with the defaults, 400 duplicate database, user fields and a user with host `%`, 404 after delete |
+| `cloudsql-postgres-instance-admin` | 2026-10-13 | Operation envelopes (`PENDING` first), instance and database fields, deletion protection, default `postgres` database and user, denied read and database create with their messages and reasons, 409 duplicate, an unknown field dropped (400 for the missing tier), `maxResults` paging, an invalid page token, a negative `maxResults`, operations newest first across pages, cancel of a finished and of a malformed operation, a `roles/cloudsql.viewer` grant conditioned on `resource.name`, `resource.type`, and `resource.service` (allowed on the instance and its operation; denied on cancel, another name, and list), 404 after delete |
+| `cloudsql-mysql-instance-admin` | 2026-10-13 | `MYSQL_8_0` instance fields (no `OUTGOING` address), the four system schemas and `root@%`, denied read and database create, a database with `utf8mb4_unicode_ci` and one with the defaults, 400 duplicate database, user fields and a user with host `%`, 404 after delete |
 
 Service-managed fields such as `gceZone`, `serverCaCert`, and `serviceAccountEmailAddress`, and MySQL users' `etag`, `iamStatus`, and `passwordPolicy`, have stand-in values; only their presence is recorded.
 
@@ -80,7 +84,8 @@ sh scripts/check/backend/cloudsql.sh          # real PostgreSQL and MySQL: conne
 ## Gaps
 
 - The connector and published-port paths are not recorded. `MYSQL_8_4` is not recorded.
-- 501 for other engines, replicas, `settings.databaseFlags`, other patch fields, list `filter`/`pageToken`, IAM database users, and `users.insert` `passwordPolicy` and `dualPasswordType`.
+- 501 naming the field for every request field that isn't modeled: other engines, replicas, `settings.databaseFlags`, `settings.availabilityType` `REGIONAL`, `activationPolicy` other than `ALWAYS`, `pricingPlan` `PACKAGE`, enabled backups or point-in-time recovery and any other `backupConfiguration` field, `requireSsl`, `sslMode` other than `ALLOW_UNENCRYPTED_AND_ENCRYPTED`, `authorizedNetworks`, `maintenanceWindow`, `diskEncryptionConfiguration` (CMEK), disk settings, other patch fields, list `filter`, the `location` query parameter, IAM database users, and `users.insert` `passwordPolicy` and `dualPasswordType`. An empty or `false` value of such a field is accepted. Backups, HA, TLS, and authorized networks are [#91](https://github.com/evanmarshall/gcp-local/issues/91).
+- No operation can be cancelled; `operations.wait` doesn't exist in v1beta4.
 - No TLS, Auth Proxy certificates, `connectSettings`, `generateEphemeralCert`, authorized networks, or private-IP networking.
 - Every MySQL connection arrives over the server's local socket, so a user whose `host` excludes `localhost` can't log in.
 - A connector bound to a MySQL instance that doesn't exist yet answers in the PostgreSQL protocol.

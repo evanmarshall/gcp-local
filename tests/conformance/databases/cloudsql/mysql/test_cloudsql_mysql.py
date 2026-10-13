@@ -12,6 +12,7 @@ from gcp_validation.services.databases.cloudsql_mysql import run_scenario
     contract_files=(
         'gcp_validation/services/databases/cloudsql_mysql.py',
         'gcp_validation/services/databases/cloudsql.py',
+        'gcp_validation/services/databases/projectgrant.py',
         'gcp_validation/live_rest.py',
         'gcp_validation/sandbox.py',
         'tests/conformance/databases/cloudsql/mysql/conftest.py',

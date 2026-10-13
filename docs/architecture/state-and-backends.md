@@ -27,7 +27,7 @@ The index exists for IAM ancestry and cross-service references. It never copies 
 
 ## Provider helpers
 
-New and changed provider code uses the helpers in `internal/providers/provider`. Cloud Scheduler uses `Nearest`, `DecodeProto`, and `Page`; Memorystore uses `Gate`, `DecodeJSON`, `Page`, and `Operations`; Bigtable's admin methods use `Nearest`; Spanner admin and Pub/Sub use `Nearest`, `DecodeProto`, and `Page`; Firestore uses `Gate`, `DecodeProto`, and `Operations`.
+New and changed provider code uses the helpers in `internal/providers/provider`. Cloud Scheduler uses `Nearest`, `DecodeProto`, and `Page`; Memorystore uses `Gate`, `DecodeJSON`, `Page`, and `Operations`; Cloud SQL uses `Nearest` with `Attributes`, `DecodeJSON`, and `Page`; Bigtable's admin methods use `Nearest`; Spanner admin and Pub/Sub use `Nearest`, `DecodeProto`, and `Page`; Firestore uses `Gate`, `DecodeProto`, and `Operations`.
 
 | Helper | Use |
 | --- | --- |
@@ -40,7 +40,7 @@ New and changed provider code uses the helpers in `internal/providers/provider`.
 | `Page(items, query, Paging{Default, Max, InvalidToken, NegativeSize}, gap, handled...)` | One page of already ordered items and the next token. Opaque tokens; a bad token or negative size returns the service's recorded refusal; `filter`/`orderBy` is a gap unless named in `handled`. |
 | `ListBody(field, items, next)` | The list response, omitting empty fields. |
 | `NewOperations(validate, latency, metadata)` | A scoped `google.longrunning` store: `Start`, `Finish`, `Get`, `List`, `Cancel`, `Delete`, `Wait`, `Reset`. `done` is false until `Finish` and `latency` have both passed. |
-| `ErrorInfo`, `FieldViolation`, `BadRequest` | Status errors with details; the gateway renders them in the REST `details` array and gRPC carries them natively. |
+| `ErrorInfo`, `FieldViolation`, `BadRequest`, `ResourceInfo` | Status errors with details; the gateway renders them in the REST `details` array and gRPC carries them natively. |
 
 Authorize and execute:
 
@@ -66,6 +66,7 @@ Limits:
 
 - Recorded denials of Cloud Scheduler, Memorystore, and Firestore carry no `details`, and their wording differs (`cloudscheduler-job-lifecycle`, `memorystore-redis-instance-admin`, `firestore-document-lifecycle`). Pub/Sub's and Spanner's carry ErrorInfo domain `iam.googleapis.com` (`pubsub-rest-data-plane`, `spanner-instance-database-admin`); Pub/Sub's also has per-request `error_info_id` and `troubleshooter_url` metadata, not modeled. Record a denial before setting `Domain`.
 - Page-token and page-size refusals differ per service; set `Paging` from the service's recording. A refusal that quotes the request (Pub/Sub's and Spanner's name the token) uses a sentinel `InvalidToken` the provider replaces. Spanner treats a negative size as the maximum.
+- `Operations` renders `google.longrunning` operations only. Cloud SQL's `sql#operation` (a `status` of `PENDING` or `DONE`, UUID names, no location) keeps its own records, `PENDING` for 500 ms after the work ends.
 - Page tokens aren't bound to the other list parameters.
 - Storage's JSON API doesn't fit `Gate`, `Nearest`, or `Page`. Its recorded denials are wire bodies with an `errors[]` list, actor-specific wording, and `text/html` on uploads; `authorize` in the Storage provider renders them. Its list tokens resume after the last entry's name and it pages by `maxResults`; `Page`'s offset tokens would shift when entries change between pages (`storage-list-paging`). It uses `ListBody` and `DecodeJSON` (folders).
 
