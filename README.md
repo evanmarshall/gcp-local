@@ -62,7 +62,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Vertex AI](docs/services/vertexai.md) | Deterministic stub or Ollama | Generate, stream, count tokens, embed; answers are not from Gemini |
 | [Firestore](docs/services/databases/firestore.md) | Official Google emulator | Documents, subcollections, queries, transactions, batch writes, listeners |
 | [BigQuery](docs/services/databases/bigquery.md) | GoogleSQL engine | GoogleSQL queries, DML, DDL, parameters, streaming inserts, partitioned and clustered tables, dataset access and authorized views |
-| [Cloud SQL for PostgreSQL and MySQL](docs/services/databases/cloudsql.md) | Real PostgreSQL or MySQL | PostgreSQL and MySQL clients on `127.0.0.1` with a user password |
+| [Cloud SQL for PostgreSQL and MySQL](docs/services/databases/cloudsql.md) | Real PostgreSQL or MySQL | PostgreSQL and MySQL clients on `127.0.0.1` with a user password, TLS, and client certificates; backups and restore |
 | [Memorystore for Redis](docs/services/databases/memorystore.md) | Real Redis | Redis clients on the reported port, with AUTH |
 | [Cloud Run](docs/services/cloudrun.md) | Local processes or Docker | Your own images with `--cloud-run-docker`; ID-token invocation; traffic splits, tag URLs, internal ingress; admin API over REST and gRPC |
 | [Spanner](docs/services/databases/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions |
@@ -86,7 +86,7 @@ Scenarios are recorded once against a sandbox Google Cloud project and replayed 
 - State is in memory; `reset` and `down` discard it.
 - Storage buckets need uniform bucket-level access; ACLs, versioning, and object retention are not modeled. Public access prevention and soft delete work, but deleted buckets are not soft-deleted and organization policies are not applied ([Storage](docs/services/storage.md#gaps)).
 - Packaged Cloud Run runs your own images only with `gcp-local --cloud-run-docker up`, which mounts the Docker socket (root-equivalent on the host). Revisions have no internet access ([Cloud Run](docs/services/cloudrun.md)).
-- Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379, 5432, or 3306; read the port from the API. Neither accepts TLS.
+- Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379, 5432, or 3306; read the port from the API. Redis doesn't accept TLS; Cloud SQL serves TLS with the instance's own CA ([Cloud SQL](docs/services/databases/cloudsql.md#tls)).
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.
 - Networking verdicts are analytical, not packet routing.
 - Vertex AI answers come from a stub or local Ollama, not Gemini.
