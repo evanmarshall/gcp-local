@@ -38,13 +38,12 @@ const (
 )
 
 // unmodeled are the Secret fields a create or update refuses when set.
-// Rotation, expiration, aliases, delayed destruction, topics, and
-// customer-managed encryption all change behavior later (#93); none is
-// stored and ignored. User-managed replication is refused on create; an
-// update names it in the recorded refusal of a replication change.
+// Customer-managed encryption would need payloads sealed with the named KMS
+// key as the service agent; typed secrets enforce payload structure. Neither
+// is stored and ignored.
 var unmodeled = []string{
-	"topics", "expireTime", "ttl", "rotation", "versionAliases", "versionDestroyTtl",
 	"customerManagedEncryption", "replication.automatic.customerManagedEncryption",
+	"replication.userManaged.replicas.customerManagedEncryption", "secretType",
 }
 
 // Recorded refusals (secretmanager-access-lifecycle).
@@ -57,6 +56,10 @@ var (
 	// "update-replication", from automatic to user-managed.
 	errReplicationChange = status.Error(codes.InvalidArgument, "Existing secret has automatic replication, but requested secret does not. "+
 		"Updating secret replication is not supported.")
+	// The converse and a replica change are modeled on it, not recorded.
+	errUserManagedChange = status.Error(codes.InvalidArgument, "Existing secret has user managed replication, but requested secret does not. "+
+		"Updating secret replication is not supported.")
+	errReplicasChange = status.Error(codes.InvalidArgument, "Updating secret replication is not supported.")
 	// "add-checksum-mismatch".
 	errChecksum = status.Error(codes.InvalidArgument, "Provided SecretPayload.data crc32c does not match calculated crc32c.")
 	// errBadToken marks Page's refusal, which invalidToken words with the token.
@@ -113,7 +116,7 @@ func checkAnnotations(annotations map[string]string) error {
 func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, s *scopeState, record *secretRecord) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodSecretsCreate:
-		return p.create(request, scope, s)
+		return p.create(call, request, scope, s)
 	case methodSecretsList:
 		return p.list(request, scope, s)
 	case methodLocationsList:
@@ -127,7 +130,7 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodSecretsGet, methodSecretsUpdate, methodSecretsDelete, methodSecretsGetIam, methodSecretsSetIam:
 		return p.executeSecret(call, request, scope, s, record)
 	default:
-		return p.executeVersion(call, request, scope, record)
+		return p.executeVersion(call, request, scope, s, record)
 	}
 }
 
@@ -137,7 +140,7 @@ func (p *Provider) executeSecret(call gateway.Call, request *gateway.RESTRequest
 	case methodSecretsGet:
 		return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}, nil
 	case methodSecretsUpdate:
-		return p.update(request, scope, record)
+		return p.update(call, request, scope, s, record)
 	case methodSecretsDelete:
 		return p.delete(request, scope, s, record)
 	case methodSecretsGetIam:
@@ -148,10 +151,10 @@ func (p *Provider) executeSecret(call gateway.Call, request *gateway.RESTRequest
 }
 
 // executeVersion dispatches the version-level methods on a locked record.
-func (p *Provider) executeVersion(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
+func (p *Provider) executeVersion(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, s *scopeState, record *secretRecord) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodVersionsAdd:
-		return p.addVersion(request, scope, record)
+		return p.addVersion(request, scope, s, record)
 	case methodVersionsList:
 		project := p.wireProject(scope.Project)
 		body, err := page(sortedVersions(record), request.Query, "versions", func(version *versionRecord) any {
@@ -166,22 +169,22 @@ func (p *Provider) executeVersion(call gateway.Call, request *gateway.RESTReques
 	case methodVersionsAccess:
 		return p.versionAccess(request, scope, record)
 	case methodVersionsDestroy:
-		return p.versionDestroy(request, scope, record)
+		return p.versionDestroy(request, scope, s, record)
 	case methodVersionsDisable:
-		return p.versionSetState(request, scope, record, stateDisabled, &secretmanagerpb.DisableSecretVersionRequest{})
+		return p.versionSetState(request, scope, s, record, stateDisabled, &secretmanagerpb.DisableSecretVersionRequest{})
 	case methodVersionsEnable:
-		return p.versionSetState(request, scope, record, stateEnabled, &secretmanagerpb.EnableSecretVersionRequest{})
+		return p.versionSetState(request, scope, s, record, stateEnabled, &secretmanagerpb.EnableSecretVersionRequest{})
 	default:
 		return nil, gap("this method is not implemented")
 	}
 }
 
-// secretDocument renders the secret wire shape. Replication is always
-// automatic: user-managed replication is refused, not echoed.
+// secretDocument renders the secret wire shape with its set lifecycle
+// policies.
 func secretDocument(project string, record *secretRecord) map[string]any {
 	document := map[string]any{
 		keyName:          secretWireName(project, record.Name),
-		fieldReplication: map[string]any{"automatic": map[string]any{}},
+		fieldReplication: replicationDocument(record.Replicas),
 		"createTime":     provider.Stamp(record.CreatedAt),
 		"etag":           etag(record.CreatedAt, record.Revision),
 	}
@@ -191,6 +194,7 @@ func secretDocument(project string, record *secretRecord) map[string]any {
 	if len(record.Annotations) > 0 {
 		document["annotations"] = maps.Clone(record.Annotations)
 	}
+	addPolicies(document, record.policies)
 	return document
 }
 
@@ -199,12 +203,15 @@ func versionDocument(project string, record *secretRecord, version *versionRecor
 	document := map[string]any{
 		"name":              versionWireName(project, record.Name, version.Number),
 		"state":             version.State,
-		"replicationStatus": map[string]any{"automatic": map[string]any{}},
+		"replicationStatus": replicationDocument(record.Replicas),
 		"createTime":        provider.Stamp(version.CreatedAt),
 		"etag":              etag(version.CreatedAt, version.Revision),
 	}
 	if version.State == stateDestroyed {
 		document["destroyTime"] = provider.Stamp(version.DestroyedAt)
+	}
+	if !version.ScheduledDestroy.IsZero() {
+		document["scheduledDestroyTime"] = provider.Stamp(version.ScheduledDestroy)
 	}
 	if version.ClientChecksum {
 		document["clientSpecifiedPayloadChecksum"] = true
@@ -226,8 +233,13 @@ func checkETag(given, current string) error {
 	return nil
 }
 
-// versionOf resolves a version number or the "latest" alias (newest enabled).
-func versionOf(record *secretRecord, id string) *versionRecord {
+// versionOf resolves a version number or the "latest" alias (newest
+// enabled), and with aliases a version alias, which GCP resolves only for get
+// and access.
+func versionOf(record *secretRecord, id string, aliases bool) *versionRecord {
+	if number, ok := record.Aliases[id]; ok && aliases {
+		return record.Versions[strconv.FormatInt(number, 10)]
+	}
 	if id != "latest" {
 		return record.Versions[id]
 	}
@@ -256,23 +268,18 @@ func versionNumber(id string) int {
 	return number
 }
 
-// decodeSecret strictly decodes a create or update body. A create also
-// refuses user-managed replication.
-func decodeSecret(raw []byte, create bool) (*secretmanagerpb.Secret, error) {
-	refused := unmodeled
-	if create {
-		refused = append(slices.Clone(unmodeled), "replication.userManaged")
-	}
+// decodeSecret strictly decodes a create or update body.
+func decodeSecret(raw []byte) (*secretmanagerpb.Secret, error) {
 	secret := &secretmanagerpb.Secret{}
-	if err := provider.DecodeProto(raw, "secret", secret, gap, refused...); err != nil {
+	if err := provider.DecodeProto(raw, "secret", secret, gap, unmodeled...); err != nil {
 		return nil, err
 	}
 	return secret, checkAnnotations(secret.GetAnnotations())
 }
 
 // create stores one secret in the locked scope state.
-func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope, s *scopeState) (*gateway.RESTResponse, error) {
-	body, err := decodeSecret(request.JSON, true)
+func (p *Provider) create(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, s *scopeState) (*gateway.RESTResponse, error) {
+	body, err := decodeSecret(request.JSON)
 	if err != nil {
 		return nil, err
 	}
@@ -280,8 +287,13 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope, s *sc
 	if idErr != nil {
 		return nil, idErr
 	}
-	if body.GetReplication().GetAutomatic() == nil {
+	if body.GetReplication().GetAutomatic() == nil && body.GetReplication().GetUserManaged() == nil {
 		return nil, status.Error(codes.InvalidArgument, "A secret requires a replication policy")
+	}
+	now := p.clock()
+	settings, err := p.newPolicies(call, scope, body, now)
+	if err != nil {
+		return nil, err
 	}
 	if s.secrets[id] != nil {
 		return provider.WireError(409, "ALREADY_EXISTS", "secret "+id+" already exists"), nil
@@ -293,11 +305,30 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope, s *sc
 		return nil, fmt.Errorf("index the secret: %w", err)
 	}
 	record := &secretRecord{
-		Name: id, Labels: maps.Clone(body.GetLabels()), Annotations: maps.Clone(body.GetAnnotations()),
-		Versions: map[string]*versionRecord{}, CreatedAt: p.clock(),
+		policies: settings, Name: id, Labels: maps.Clone(body.GetLabels()), Annotations: maps.Clone(body.GetAnnotations()),
+		Versions: map[string]*versionRecord{}, CreatedAt: now,
 	}
 	s.secrets[id] = record
-	return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}, nil
+	p.launch(scope, record)
+	project := p.wireProject(scope.Project)
+	document := secretDocument(project, record)
+	s.notify(project, record, eventCreate, document, "")
+	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// newPolicies reads and checks a created secret's lifecycle settings.
+func (p *Provider) newPolicies(call gateway.Call, scope state.Scope, body *secretmanagerpb.Secret, now time.Time) (policies, error) {
+	settings, err := readPolicies(body, now)
+	if err == nil {
+		err = checkNext(settings.Next, now)
+	}
+	if err == nil {
+		err = checkPolicies(settings, nil)
+	}
+	if err == nil && len(settings.Topics) > 0 {
+		err = p.checkTopics(call.Context, scope.Project, settings.Topics)
+	}
+	return settings, err
 }
 
 // list returns one page of the project's secrets in name order. Recorded
@@ -318,14 +349,25 @@ const (
 	fieldLabels      = "labels"
 	fieldAnnotations = "annotations"
 	fieldReplication = "replication"
+	fieldTopics      = "topics"
+	fieldExpireTime  = "expireTime"
+	fieldTTL         = "ttl"
+	fieldRotation    = "rotation"
+	fieldNext        = "rotation.nextRotationTime"
+	fieldPeriod      = "rotation.rotationPeriod"
+	fieldAliases     = "versionAliases"
+	fieldDestroyTTL  = "versionDestroyTtl"
 )
 
 // maskFields maps each update mask path, camelCase or snake_case, to the
-// field it names: the modeled ones and every top-level unmodeled one.
+// field it names: the modeled ones and every top-level unmodeled one, whose
+// clearing is a no-op since none is ever set.
 var maskFields = func() map[string]string {
 	fields := map[string]string{}
-	for _, field := range append([]string{fieldLabels, fieldAnnotations, fieldReplication}, unmodeled...) {
-		if !strings.Contains(field, ".") {
+	modeled := []string{fieldLabels, fieldAnnotations, fieldReplication, fieldTopics, fieldExpireTime, fieldTTL,
+		fieldRotation, fieldNext, fieldPeriod, fieldAliases, fieldDestroyTTL}
+	for _, field := range append(modeled, unmodeled...) {
+		if !strings.Contains(field, ".") || strings.HasPrefix(field, fieldRotation+".") {
 			fields[field], fields[snake(field)] = field, field
 		}
 	}
@@ -346,14 +388,50 @@ func snake(name string) string {
 }
 
 // update applies the masked fields of one locked secret. The whole request
-// is validated before anything changes. Clearing an unmodeled field is a
-// no-op, since none is ever set.
-func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	body, err := decodeSecret(request.JSON, false)
+// is validated before anything changes.
+func (p *Provider) update(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, s *scopeState, record *secretRecord) (*gateway.RESTResponse, error) {
+	body, err := decodeSecret(request.JSON)
 	if err != nil {
 		return nil, err
 	}
-	mask := request.Query.Get("updateMask")
+	fields, err := maskOf(request.Query.Get("updateMask"))
+	if err != nil {
+		return nil, err
+	}
+	now := p.clock()
+	parsed, err := readPolicies(body, now)
+	if err != nil {
+		return nil, err
+	}
+	if fields[fieldReplication] {
+		if err := replicationChange(record.Replicas, body.GetReplication(), parsed.Replicas); err != nil {
+			return nil, err
+		}
+	}
+	if err := checkETag(body.GetEtag(), etag(record.CreatedAt, record.Revision)); err != nil {
+		return nil, err
+	}
+	settings, err := p.patchPolicies(call, scope, record, fields, parsed, now)
+	if err != nil {
+		return nil, err
+	}
+	if fields[fieldLabels] {
+		record.Labels = maps.Clone(body.GetLabels())
+	}
+	if fields[fieldAnnotations] {
+		record.Annotations = maps.Clone(body.GetAnnotations())
+	}
+	record.policies = settings
+	record.Revision++
+	p.launch(scope, record)
+	project := p.wireProject(scope.Project)
+	document := secretDocument(project, record)
+	s.notify(project, record, eventUpdate, document, "")
+	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// maskOf reads an update mask into the fields it names.
+func maskOf(mask string) (map[string]bool, error) {
 	if mask == "" {
 		return nil, errNoMask
 	}
@@ -365,20 +443,57 @@ func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, recor
 		}
 		fields[field] = true
 	}
-	if fields[fieldReplication] && body.GetReplication().GetAutomatic() == nil {
-		return nil, errReplicationChange
+	return fields, nil
+}
+
+// replicationChange refuses a masked replication that differs from the
+// stored one; replication is immutable.
+func replicationChange(stored []string, requested *secretmanagerpb.Replication, replicas []string) error {
+	switch {
+	case stored == nil && requested.GetAutomatic() == nil:
+		return errReplicationChange
+	case stored != nil && requested.GetUserManaged() == nil:
+		return errUserManagedChange
+	case !slices.Equal(stored, replicas):
+		return errReplicasChange
 	}
-	if err := checkETag(body.GetEtag(), etag(record.CreatedAt, record.Revision)); err != nil {
-		return nil, err
+	return nil
+}
+
+// policyFields copies each masked lifecycle field from a parsed body.
+var policyFields = []struct {
+	fields []string
+	copy   func(settings *policies, parsed policies)
+}{
+	{[]string{fieldTopics}, func(s *policies, from policies) { s.Topics = from.Topics }},
+	{[]string{fieldExpireTime, fieldTTL}, func(s *policies, from policies) { s.Expire = from.Expire }},
+	{[]string{fieldRotation, fieldNext}, func(s *policies, from policies) { s.Next = from.Next }},
+	{[]string{fieldRotation, fieldPeriod}, func(s *policies, from policies) { s.Period = from.Period }},
+	{[]string{fieldAliases}, func(s *policies, from policies) { s.Aliases = from.Aliases }},
+	{[]string{fieldDestroyTTL}, func(s *policies, from policies) { s.DestroyTTL = from.DestroyTTL }},
+}
+
+// patchPolicies returns the secret's settings with the masked lifecycle
+// fields replaced, after checking the result. A newly set next rotation time
+// must fall in the documented window; changed topics must be publishable.
+func (p *Provider) patchPolicies(call gateway.Call, scope state.Scope, record *secretRecord, fields map[string]bool, parsed policies, now time.Time) (policies, error) {
+	settings := record.clone()
+	for _, field := range policyFields {
+		if slices.ContainsFunc(field.fields, func(name string) bool { return fields[name] }) {
+			field.copy(&settings, parsed)
+		}
 	}
-	if fields[fieldLabels] {
-		record.Labels = maps.Clone(body.GetLabels())
+	var err error
+	if fields[fieldRotation] || fields[fieldNext] {
+		err = checkNext(settings.Next, now)
 	}
-	if fields[fieldAnnotations] {
-		record.Annotations = maps.Clone(body.GetAnnotations())
+	if err == nil {
+		err = checkPolicies(settings, record.Versions)
 	}
-	record.Revision++
-	return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}, nil
+	if err == nil && fields[fieldTopics] {
+		err = p.checkTopics(call.Context, scope.Project, settings.Topics)
+	}
+	return settings, err
 }
 
 // delete removes one locked secret, its versions, and its index entry. A
@@ -390,6 +505,8 @@ func (p *Provider) delete(request *gateway.RESTRequest, scope state.Scope, s *sc
 	if err := p.index.Remove(serviceName, scope, secretResource(scope.Project, record.Name)); err != nil {
 		return nil, fmt.Errorf("unindex the secret: %w", err)
 	}
+	p.stop(scope, record.Name)
+	s.deleted(p.wireProject(scope.Project), record, "REQUESTED")
 	delete(s.secrets, record.Name)
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
@@ -418,7 +535,7 @@ func (p *Provider) setIam(request *gateway.RESTRequest, scope state.Scope, recor
 
 // addVersion stores one payload as the next version. A supplied CRC32C must
 // match the payload, and the version then reports it.
-func (p *Provider) addVersion(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
+func (p *Provider) addVersion(request *gateway.RESTRequest, scope state.Scope, s *scopeState, record *secretRecord) (*gateway.RESTResponse, error) {
 	var body secretmanagerpb.AddSecretVersionRequest
 	if err := provider.DecodeProto(request.JSON, "", &body, gap); err != nil {
 		return nil, err
@@ -435,11 +552,19 @@ func (p *Provider) addVersion(request *gateway.RESTRequest, scope state.Scope, r
 		Number: nextVersion(record), Payload: payload, State: stateEnabled, CreatedAt: p.clock(), ClientChecksum: given != nil,
 	}
 	record.Versions[version.Number] = version
-	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
+	return p.versionChanged(scope, s, record, version, eventVersionAdd)
+}
+
+// versionChanged notifies one version event and renders the version.
+func (p *Provider) versionChanged(scope state.Scope, s *scopeState, record *secretRecord, version *versionRecord, kind string) (*gateway.RESTResponse, error) {
+	project := p.wireProject(scope.Project)
+	document := versionDocument(project, record, version)
+	s.notify(project, record, kind, document, version.Number)
+	return &gateway.RESTResponse{JSON: document}, nil
 }
 
 func (p *Provider) versionGet(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	version := versionOf(record, request.Path["version"])
+	version := versionOf(record, request.Path["version"], true)
 	if version == nil {
 		return nil, provider.NotFound("versions", request.Path["version"])
 	}
@@ -448,7 +573,7 @@ func (p *Provider) versionGet(request *gateway.RESTRequest, scope state.Scope, r
 
 // versionAccess returns one version's payload to a granted accessor.
 func (p *Provider) versionAccess(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	version := versionOf(record, request.Path["version"])
+	version := versionOf(record, request.Path["version"], true)
 	if version == nil {
 		return nil, provider.NotFound("versions", request.Path["version"])
 	}
@@ -473,13 +598,14 @@ type etagged interface {
 	GetEtag() string
 }
 
-// versionDestroy permanently destroys one version's payload.
-func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
+// versionDestroy permanently destroys one version's payload, or with a
+// versionDestroyTtl disables it and schedules the destruction.
+func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scope, s *scopeState, record *secretRecord) (*gateway.RESTResponse, error) {
 	var body secretmanagerpb.DestroySecretVersionRequest
 	if err := provider.DecodeProto(request.JSON, "", &body, gap); err != nil {
 		return nil, err
 	}
-	version := versionOf(record, request.Path["version"])
+	version := versionOf(record, request.Path["version"], false)
 	if version == nil {
 		return nil, provider.NotFound("versions", request.Path["version"])
 	}
@@ -489,11 +615,19 @@ func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scop
 	if version.State == stateDestroyed {
 		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is already destroyed", version.Number)
 	}
+	version.Revision++
+	if record.DestroyTTL > 0 {
+		if !version.ScheduledDestroy.IsZero() {
+			return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is already scheduled for destruction", version.Number)
+		}
+		version.State, version.ScheduledDestroy = stateDisabled, p.clock().Add(record.DestroyTTL)
+		p.launch(scope, record)
+		return p.versionChanged(scope, s, record, version, eventVersionScheduled)
+	}
 	version.State = stateDestroyed
 	version.Payload = nil
 	version.DestroyedAt = p.clock()
-	version.Revision++
-	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
+	return p.versionChanged(scope, s, record, version, eventVersionDestroy)
 }
 
 // nextVersion allocates the next version number of a secret.
@@ -506,12 +640,13 @@ func nextVersion(record *secretRecord) string {
 }
 
 // versionSetState disables or re-enables one version; body is the method's
-// request message, whose etag must be current when set.
-func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Scope, record *secretRecord, state string, body etagged) (*gateway.RESTResponse, error) {
+// request message, whose etag must be current when set. Enabling a version
+// scheduled for destruction cancels the destruction.
+func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Scope, s *scopeState, record *secretRecord, state string, body etagged) (*gateway.RESTResponse, error) {
 	if err := provider.DecodeProto(request.JSON, "", body, gap); err != nil {
 		return nil, err
 	}
-	version := versionOf(record, request.Path["version"])
+	version := versionOf(record, request.Path["version"], false)
 	if version == nil {
 		return nil, provider.NotFound("versions", request.Path["version"])
 	}
@@ -523,7 +658,12 @@ func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Sco
 	}
 	version.State = state
 	version.Revision++
-	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
+	if state == stateEnabled {
+		version.ScheduledDestroy = time.Time{}
+		p.launch(scope, record)
+		return p.versionChanged(scope, s, record, version, eventVersionEnable)
+	}
+	return p.versionChanged(scope, s, record, version, eventVersionDisable)
 }
 
 // secretID resolves the secret id from the path, the body name, or the query.

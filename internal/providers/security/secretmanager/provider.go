@@ -1,7 +1,7 @@
 // Package secretmanager implements the Secret Manager v1 control plane:
 // secrets, versions, payload access, and per-secret IAM policy. Payloads stay
-// in provider state and reset with the scope. No cloud recording covers these
-// methods yet; issue #37 tracks the recording and the Terraform workflow pin.
+// in provider state and reset with the scope. Lifecycle policies and event
+// notifications are in lifecycle.go.
 package secretmanager
 
 import (
@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -58,29 +59,37 @@ var permissions = map[string]string{
 	methodLocationsList:   "secretmanager.locations.list",
 }
 
-// Provider owns the Secret Manager control plane and payload state.
+// Provider owns the Secret Manager control plane and payload state. clock
+// and after are the time source of the lifecycle workers; tests replace them.
 type Provider struct {
-	index   *state.Index
-	engine  *iam.Engine
-	gate    provider.Gate
-	manager *backend.Manager
-	scopes  *state.Store[scopeState]
-	clock   func() time.Time
+	index    *state.Index
+	engine   *iam.Engine
+	gate     provider.Gate
+	manager  *backend.Manager
+	registry *gateway.Registry
+	lifetime context.Context //nolint:containedctx // the lifecycle workers' process lifetime
+	scopes   *state.Store[scopeState]
+	clock    func() time.Time
+	after    func(time.Duration) <-chan time.Time
+	mu       sync.Mutex
+	workers  map[string]context.CancelFunc
 }
 
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("secretmanager requires registry, manager, index, and iam")
 
 // New registers the Secret Manager provider.
-func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
+func New(ctx context.Context, registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine) (*Provider, error) {
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	if err := provider.RegisterPermissions(engine, permissions); err != nil {
+	if err := errors.Join(provider.RegisterPermissions(engine, permissions),
+		provider.RegisterPermissions(engine, map[string]string{methodTopicPublish: "pubsub.topics.publish"})); err != nil {
 		return nil, fmt.Errorf("secretmanager permissions: %w", err)
 	}
 	p := &Provider{
-		index: index, engine: engine, manager: manager,
+		index: index, engine: engine, manager: manager, registry: registry, lifetime: context.WithoutCancel(ctx),
+		after: time.After, workers: map[string]context.CancelFunc{},
 		// Recorded: secretmanager-access-lifecycle "denied-access".
 		gate: provider.Gate{Engine: engine, Index: index, Message: provider.PermissionDeniedUnnamed,
 			Domain: "iam.googleapis.com", OmitResource: true},
@@ -109,8 +118,10 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	return p, nil
 }
 
-// Reset clears the scope's secrets, versions, and payloads.
+// Reset stops the scope's workers and clears its secrets, versions, and
+// payloads.
 func (p *Provider) Reset(scope state.Scope) error {
+	p.stopScope(scope)
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		s.reset()
 		return nil
@@ -120,9 +131,11 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// secretRecord is one stored secret and its versions. Replication is
-// always automatic.
+// secretRecord is one stored secret, its lifecycle policies, and its
+// versions.
 type secretRecord struct {
+	policies
+
 	Name        string
 	Versions    map[string]*versionRecord
 	Labels      map[string]string
@@ -132,25 +145,29 @@ type secretRecord struct {
 }
 
 // versionRecord is one stored secret version. ClientChecksum records that
-// the add request carried a verified CRC32C.
+// the add request carried a verified CRC32C; ScheduledDestroy is set while a
+// delayed destruction is pending.
 type versionRecord struct {
-	Number         string
-	Payload        []byte
-	State          string // ENABLED, DISABLED, DESTROYED
-	CreatedAt      time.Time
-	DestroyedAt    time.Time
-	Revision       int
-	ClientChecksum bool
+	Number           string
+	Payload          []byte
+	State            string // ENABLED, DISABLED, DESTROYED
+	CreatedAt        time.Time
+	DestroyedAt      time.Time
+	ScheduledDestroy time.Time
+	Revision         int
+	ClientChecksum   bool
 }
 
-// scopeState is one project slice of provider state.
+// scopeState is one project slice of provider state. outbox holds the
+// notifications of the current mutation until they publish outside the lock.
 type scopeState struct {
 	secrets map[string]*secretRecord
+	outbox  []event
 }
 
 func newScopeState() scopeState { return scopeState{secrets: map[string]*secretRecord{}} }
 
-func (s *scopeState) reset() { s.secrets = map[string]*secretRecord{} }
+func (s *scopeState) reset() { s.secrets, s.outbox = map[string]*secretRecord{}, nil }
 
 // gap reports an unimplemented slice boundary.
 var gap = provider.CoverageGap("Secret Manager")
@@ -205,17 +222,20 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, err
 	}
 	var response *gateway.RESTResponse
+	var events []event
 	err = p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(ctx context.Context, _ backend.Backend) error {
-		call.Context = ctx //nolint:fatcontext // one request-scoped handoff of the manager session
-		return p.scopes.With(scope, func(s *scopeState) error {
+		call.Context = ctx                                      //nolint:fatcontext // one request-scoped handoff of the manager session
+		return p.scopes.With(scope, func(s *scopeState) error { //nolint:contextcheck // lifecycle workers outlive the request by design
 			var serveErr error
 			response, serveErr = p.serve(call, request, scope, target, id, s)
+			events = s.drain()
 			return serveErr
 		})
 	})
 	if err != nil {
 		return nil, err //nolint:wrapcheck // wire statuses pass through
 	}
+	p.publish(call.Context, scope.Project, events)
 	return response, nil
 }
 

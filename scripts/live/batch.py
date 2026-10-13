@@ -140,6 +140,9 @@ def lane(entry: Entry, scopes: Path) -> str:
     """Return the sandbox lock an entry takes; entries sharing one must not overlap."""
     if entry.option is None:
         return "storage"
+    # The Secret Manager scenarios share the project's secrets and one lock.
+    if entry.option == "--gcp-secretmanager-scope":
+        return "secretmanager"
     if entry.option == "--gcp-live-scope-file":
         service = json.loads(scope_file(entry, scopes).read_text())["services"][0]
         # The compute scenarios create VPC networks; together they'd exceed the quota.

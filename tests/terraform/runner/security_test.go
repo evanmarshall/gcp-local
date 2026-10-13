@@ -144,11 +144,12 @@ func localSecretCase(t *testing.T, test resource.TestCase) {
  project = %q
  access_token = %q
  secret_manager_custom_endpoint = %q
+ pubsub_custom_endpoint = %q
  universe_domain = "gcp-local.invalid"
  request_timeout = "2s"
  add_terraform_attribution_label = false
 }
-`, projectID, fixtureToken, endpoint+"/v1/") + step.Config
+`, projectID, fixtureToken, endpoint+"/v1/", endpoint+"/v1/") + step.Config
 		test.Steps[i] = step
 	}
 	resource.Test(t, test)
@@ -160,9 +161,14 @@ func secretName() string {
 }
 
 // TestLocalSecretManagerSecretAndVersion creates a secret with a replication
-// policy, adds a version, reads it back, and destroys both.
+// policy, a rotation schedule notifying a Pub/Sub topic the Secret Manager
+// service agent may publish to, and a version, and a second secret with a
+// ttl; then adds a version alias, and destroys everything. The ttl secret is
+// never updated: the provider's update body carries both ttl and the
+// returned expire_time, which the expiration oneof refuses.
 func TestLocalSecretManagerSecretAndVersion(t *testing.T) {
 	name := secretName()
+	next := time.Now().UTC().Add(time.Hour).Truncate(time.Second).Format(time.RFC3339)
 
 	localSecretCase(t, resource.TestCase{
 		PreCheck:          func() { preCheck(t) },
@@ -170,32 +176,68 @@ func TestLocalSecretManagerSecretAndVersion(t *testing.T) {
 		CheckDestroy:      testAccSecretDestroy(t, name),
 		Steps: []resource.TestStep{
 			{
-				Config: testSecretConfig(name),
+				Config: testSecretConfig(name, next, ""),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("google_secret_manager_secret.secret", "secret_id", name),
 					resource.TestCheckResourceAttrSet("google_secret_manager_secret.secret", "create_time"),
+					resource.TestCheckResourceAttrSet("google_secret_manager_secret.expiring", "expire_time"),
+					resource.TestCheckResourceAttr("google_secret_manager_secret.secret", "rotation.0.next_rotation_time", next),
+					resource.TestCheckResourceAttr("google_secret_manager_secret.secret", "rotation.0.rotation_period", "3600s"),
+					resource.TestCheckResourceAttr("google_secret_manager_secret.secret", "topics.#", "1"),
 					resource.TestCheckResourceAttr("google_secret_manager_secret_version.version", "secret_data", "payload-value"),
 				),
+			},
+			{
+				Config: testSecretConfig(name, next, `version_aliases = { current = "1" }`),
+				Check:  resource.TestCheckResourceAttr("google_secret_manager_secret.secret", "version_aliases.current", "1"),
 			},
 		},
 	})
 }
 
-// testSecretConfig renders one replicated secret with one version.
-func testSecretConfig(name string) string {
+// testSecretConfig renders one replicated secret with a topic, rotation, and
+// one version, and a secret with a ttl; extra adds secret arguments.
+func testSecretConfig(name, next, extra string) string {
 	return fmt.Sprintf(`
+resource "google_pubsub_topic" "topic" {
+ name = "%[1]s"
+}
+
+resource "google_pubsub_topic_iam_member" "agent" {
+ topic  = google_pubsub_topic.topic.id
+ role   = "roles/pubsub.publisher"
+ member = "serviceAccount:service-000000000001@gcp-sa-secretmanager.iam.gserviceaccount.com"
+}
+
 resource "google_secret_manager_secret" "secret" {
- secret_id = "%s"
+ secret_id = "%[1]s"
  replication {
   auto {}
  }
+ topics {
+  name = google_pubsub_topic.topic.id
+ }
+ rotation {
+  next_rotation_time = "%[2]s"
+  rotation_period    = "3600s"
+ }
+ %[3]s
+ depends_on = [google_pubsub_topic_iam_member.agent]
 }
 
 resource "google_secret_manager_secret_version" "version" {
  secret = google_secret_manager_secret.secret.id
  secret_data = "payload-value"
 }
-`, name)
+
+resource "google_secret_manager_secret" "expiring" {
+ secret_id = "%[1]s-ttl"
+ replication {
+  auto {}
+ }
+ ttl = "86400s"
+}
+`, name, next, extra)
 }
 
 // secretAPI reads one local Secret Manager path as the fixture principal.

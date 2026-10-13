@@ -19,7 +19,7 @@ These have no upstream counterpart. Their configurations and assertions are gcp-
 | Test ID | What passes locally |
 | --- | --- |
 | `TestLocalKMSKeyRingCryptoKey` | Key ring; crypto key with primary version (no rotation: a coverage gap); key ring and key IAM members; versions destroyed with the key |
-| `TestLocalSecretManagerSecretAndVersion` | Secret with replication policy, version with payload, enable/destroy, 404 after destroy |
+| `TestLocalSecretManagerSecretAndVersion` | Pub/Sub topic with the Secret Manager service agent as publisher; secret with replication policy, `topics`, and `rotation`; version with payload; a second secret with `ttl`; `version_aliases` added in a second step; 404 after destroy |
 | `TestLocalCloudTasksQueueLifecycle` | Queue with rate limits, PATCH update, delete, 404 after destroy |
 | `TestLocalCloudSchedulerJob` | Pub/Sub target job with a time zone and retry config, PATCH of description and schedule, pause, empty plan, 404 after destroy |
 | `TestLocalFirestoreDocument` | Document create, refresh, empty plan, 404 after destroy |
