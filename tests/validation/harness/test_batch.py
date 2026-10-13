@@ -23,6 +23,16 @@ def scope_tree(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def test_only_plans_a_named_scenario_without_a_recording(tmp_path: Path) -> None:
+    """--only reaches a declared scenario that has no recording yet."""
+    module = tmp_path / "tests/conformance/compute/fresh/test_fresh.py"
+    module.parent.mkdir(parents=True)
+    module.write_text('@pytest.mark.gcp_scenario(id="fresh-scenario")\n')
+    assert batch["declared"](tmp_path, {"fresh-scenario", "other"}) == {
+        "fresh-scenario": "compute/fresh"
+    }
+
+
 def test_plan_covers_every_recording_once() -> None:
     """Each recording belongs to exactly one planned module."""
     planned = [scenario for entry in batch["plan"]() for scenario in entry.scenarios]

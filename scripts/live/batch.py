@@ -2,11 +2,12 @@
 """Record or revalidate many scenarios against the sandbox in parallel.
 
 Plans one pytest invocation per scenario module from the recordings tree (the
-same mapping the replay check uses). Modules that take the same sandbox lock
-(one per service) share a lane and run in order; up to --jobs lanes run at once,
-and the modules in EXCLUSIVE run alone afterwards. Each run gets its own
-artifacts directory and log under --artifacts. Slow scenarios are bound by GCP
-creating instances, so overlapping lanes cuts wall time without changing cost.
+same mapping the replay check uses), plus any new scenario --only names.
+Modules that take the same sandbox lock (one per service) share a lane and
+run in order; up to --jobs lanes run at once, and the modules in EXCLUSIVE
+run alone afterwards. Each run gets its own artifacts directory and log under
+--artifacts. Slow scenarios are bound by GCP creating instances, so
+overlapping lanes cuts wall time without changing cost.
 
 Scope files mirror the module path under --scopes: the scope for
 tests/conformance/databases/bigquery/test_bigquery_sql.py is
@@ -38,9 +39,10 @@ _spec.loader.exec_module(replay)
 EXCLUSIVE = frozenset({
     "tests/conformance/security/resourcemanager/test_policy.py",
     "tests/conformance/logging/test_cloudlogging_conditions.py",
+    "tests/conformance/security/resourcemanager/versions/test_versions.py",
 })
 # Scope services of the compute scenarios, which share one lane.
-COMPUTE_SCOPES = frozenset({"networking", "vmconnectivity", "vmserviceaccounts"})
+COMPUTE_SCOPES = frozenset({"networking", "vmconnectivity", "vmserviceaccounts", "computelists"})
 # The scope option each scenario directory's conftest reads, most specific first.
 OPTIONS = ("gcp_pubsub_scope", "gcp_secretmanager_scope", "gcp_live_scope_file")
 
@@ -77,10 +79,24 @@ def scope_option(module: Path) -> str | None:
     return next(("--" + o.replace("_", "-") for o in OPTIONS if o in text), None)
 
 
+def declared(root: Path, only: set[str]) -> dict[str, str]:
+    """Map each named scenario ID without a recording to its service path."""
+    found = {}
+    for module in sorted((root / replay.CONFORMANCE).rglob("test_*.py")):
+        for scenario in re.findall(r"""\bid\s*=\s*["']([a-z0-9-]+)["']""", module.read_text()):
+            if scenario in only:
+                service = module.parent.relative_to(root / replay.CONFORMANCE)
+                found[scenario] = service.as_posix()
+    return found
+
+
 def plan(root: Path = ROOT, only: set[str] | None = None) -> list[Entry]:
-    """Group every recording by its scenario module."""
+    """Group every recording, and each new scenario --only names, by its scenario module."""
     modules: dict[str, list[str]] = {}
-    for scenario, service in replay.recordings(root).items():
+    scenarios = replay.recordings(root)
+    if only:
+        scenarios = {**declared(root, only - set(scenarios)), **scenarios}
+    for scenario, service in scenarios.items():
         module = replay.scenario_module(root, scenario, service)
         if module is None:
             raise SystemExit(f"recording {scenario} has no scenario module under {service}")
