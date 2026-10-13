@@ -1,6 +1,6 @@
 # Secret Manager
 
-Secret Manager v1 over REST and gRPC: secrets, versions, payload access, per-secret IAM, location listing (REST only), and the secret lifecycle policies: user-managed replication, rotation with Pub/Sub notifications, expiration, version aliases, and delayed destruction. Modeled locally in provider state. The scenario `secretmanager-access-lifecycle` is recorded against GCP over REST; the lifecycle policies and gRPC are not recorded.
+Secret Manager v1 over REST and gRPC: secrets, versions, payload access, per-secret IAM, location listing (REST only), and the secret lifecycle policies: user-managed replication, rotation with Pub/Sub notifications, expiration, version aliases, and delayed destruction. Modeled locally in provider state. Three scenarios are recorded against GCP over REST (`secretmanager-access-lifecycle`, `secretmanager-secret-policies`, `secretmanager-rotation-events`); gRPC is not recorded.
 
 ## Use
 
@@ -42,18 +42,18 @@ gRPC `TestIamPermissions`, `RotateSecret`, `EnableManagedRotation`, and every re
 
 ## Lifecycle
 
-Each policy is a `Secret` field, set on `create` or by `patch` with its mask path (camelCase or snake_case). Time-driven actions run in one worker per secret on the process clock.
+Each policy is a `Secret` field, set on `create` or by `patch` with its mask path (camelCase or snake_case). Time-driven actions run in one worker per secret on the process clock. Refusals below are recorded unless marked modeled.
 
 | Field | Behavior |
 | --- | --- |
-| `replication.userManaged.replicas[].location` | Stored and reported in request order, on the secret and in each version's `replicationStatus.userManaged.replicas`. At least one replica, no duplicates. Replication is immutable: a masked change is 400 |
-| `topics[].name` | Up to 10 `projects/*/topics/*`. Each must exist, and the project's Secret Manager service agent (`service-NUMBER@gcp-sa-secretmanager.iam.gserviceaccount.com`) must hold `pubsub.topics.publish` on it (`roles/pubsub.publisher`), or the create or patch is 400 |
-| `rotation.nextRotationTime`, `rotation.rotationPeriod` | Needs a topic. The next time is 300 s to 100 years ahead; the period is whole seconds from 3600 s to 3153600000 s and needs a next time. At the next time the service agent publishes `SECRET_ROTATE`, and the time advances by the period; without one the schedule ends. Nothing changes the secret's value, as in GCP |
-| `expireTime`, `ttl` | Must be in the future. `ttl` is input only and reads back as `expireTime`. At that time the secret, its versions, and its policy are deleted, and `SECRET_DELETE` is published with `deleteType` `EXPIRATION` |
-| `versionAliases` | Up to 50 names (`[a-zA-Z][a-zA-Z0-9_-]{0,62}`, not `latest` or `NEW`), each naming an existing version; reads back as strings (`{"current": "1"}`). `versions.get` and `versions.access` resolve an alias; other version methods read it as a missing version |
-| `versionDestroyTtl` | 1 day to 1000 days. `destroy` disables the version and sets `scheduledDestroyTime`; a second `destroy` is 400 `FAILED_PRECONDITION`; `enable` cancels; at the scheduled time the version is destroyed |
+| `replication.userManaged.replicas[].location` | Stored and reported in request order, on the secret and in each version's `replicationStatus.userManaged.replicas`. At least one replica. Replication is immutable: a masked change is 400, and a replica count change names both counts |
+| `topics[].name` | Up to 10 `projects/*/topics/*`. Each must exist, and the project's Secret Manager service agent (`service-NUMBER@gcp-sa-secretmanager.iam.gserviceaccount.com`) must hold `pubsub.topics.publish` on it (`roles/pubsub.publisher`), A missing topic is 404 `Topic [NAME] not found.`; a topic the agent can't publish to is 400 `FAILED_PRECONDITION` naming the agent |
+| `rotation.nextRotationTime`, `rotation.rotationPeriod` | Needs a topic. The next time is at least 5 minutes ahead; the period is at least 1 hour and needs a next time (400 `FAILED_PRECONDITION`). The 100-year maximums are modeled. At the next time the service agent publishes `SECRET_ROTATE` with the secret after the time advances by the period; without a period the schedule ends, as recorded. Nothing changes the secret's value, as in GCP |
+| `expireTime`, `ttl` | At least 1 minute ahead. `ttl` is input only and reads back as `expireTime`. At that time the secret, its versions, and its policy are deleted, and `SECRET_DELETE` is published with `deleteType` `EXPIRATION` |
+| `versionAliases` | Up to 50 names (`[a-zA-Z][a-zA-Z0-9_-]{0,62}`, not `latest` or `NEW`), each naming an existing version; reads back as strings (`{"current": "1"}`). `versions.get` and `versions.access` resolve an alias; `disable`, `enable`, and `destroy` refuse any non-numeric id but `latest` as a malformed version id |
+| `versionDestroyTtl` | At least 1 day (the 1000-day maximum is modeled). `destroy` disables the version and sets `scheduledDestroyTime`; a second `destroy` is 400 `FAILED_PRECONDITION`; `enable` cancels; at the scheduled time the version is destroyed |
 
-With `topics` set, every change publishes a notification as the service agent through the Pub/Sub provider (select `pubsub`): `SECRET_CREATE`, `SECRET_UPDATE`, `SECRET_DELETE` (`deleteType` `REQUESTED` or `EXPIRATION`), `SECRET_ROTATE`, `SECRET_VERSION_ADD`, `SECRET_VERSION_ENABLE`, `SECRET_VERSION_DISABLE`, `SECRET_VERSION_DESTROY`, and `SECRET_VERSION_DESTROY_SCHEDULED`. Attributes are `eventType`, `dataFormat` (`JSON_API_V1`), `secretId`, and `versionId` for version events, with names in the project-number form; `data` is the secret or version as the API returns it. Delivery is best effort: a publish the agent is denied, or a deleted topic, drops the notification and changes nothing else.
+With `topics` set, every change publishes a notification as the service agent through the Pub/Sub provider (select `pubsub`). Each newly configured topic first gets `TOPIC_CONFIGURED`, with no data and only an `eventType` attribute. Then: `SECRET_CREATE`, `SECRET_UPDATE`, `SECRET_DELETE` (`deleteType` `REQUESTED` or `EXPIRATION`), `SECRET_ROTATE`, `SECRET_VERSION_ADD`, `SECRET_VERSION_ENABLE`, `SECRET_VERSION_DISABLE`, `SECRET_VERSION_DESTROY`, and `SECRET_VERSION_DESTROY_SCHEDULED`. Attributes are `eventType`, `dataFormat` (`JSON_API_V1`), `secretId`, `timestamp`, and `versionId` for version events, with names in the project-number form; `data` is the secret or version as the API returns it. Delivery is best effort: a publish the agent is denied, or a deleted topic, drops the notification and changes nothing else.
 
 ## IAM
 
@@ -86,19 +86,19 @@ To re-record, get an approved scope (see `LiveScope` in `gcp_validation/services
 
 After an interrupted run, `python -m gcp_validation.services.security.secretmanager cleanup --profile ... --scope ... --manifest ... --allow-live` deletes only the secrets in the manifest.
 
-Not recorded: the lifecycle scenarios in `tests/conformance/security/secretmanager/policies/` are written and run locally, and wait for a recording.
+The lifecycle scenarios are in `tests/conformance/security/secretmanager/policies/`, recorded and revalidated 2026-10-13, and in the weekly drift job:
 
-| Scenario | Observes |
+| Recording | Observes |
 | --- | --- |
 | `secretmanager-secret-policies` | Topics without the agent's grant and a missing topic; rotation, expiration, alias, destroy-TTL, and replica refusals; user-managed replicas, topics, rotation, `ttl`, and `versionDestroyTtl` on create, get, and each version; alias set, get, access, and refusals; replication, expiration, topic, and rotation patches; delayed destroy, a second destroy, and cancel |
-| `secretmanager-rotation-events` | A `ttl` secret's expiry and a rotation 310 s ahead; every notification on one subscription (types, attributes, data fields); `nextRotationTime` after `SECRET_ROTATE` |
+| `secretmanager-rotation-events` | A 120 s `ttl` secret's deletion and a rotation 310 s ahead; every notification on one subscription (types, attribute names, data fields); the rotation schedule after `SECRET_ROTATE` |
 
-They need the sandbox's Secret Manager service agent (`gcloud beta services identity create --service=secretmanager.googleapis.com`); the run grants it `roles/pubsub.publisher` on its own topic only. `secretmanager-rotation-events` takes about 6 minutes. Record with a `--gcp-live-scope-file` scope for service `secretmanager` (`LIMITS` in `gcp_validation/services/security/secretmanager_policies.py`).
+They need the sandbox's Secret Manager service agent (`gcloud beta services identity create --service=secretmanager.googleapis.com`); the run grants it `roles/pubsub.publisher` on its own topic only. Both run in about 6 minutes. Record with a `--gcp-live-scope-file` scope for service `secretmanager` (`LIMITS` in `gcp_validation/services/security/secretmanager_policies.py`).
 
 ## Gaps
 
 - Not modeled, refused with `UNIMPLEMENTED` naming the field: CMEK (`customerManagedEncryption`, `replication.automatic.customerManagedEncryption`, `replication.userManaged.replicas.customerManagedEncryption`), because payloads are not sealed with a Cloud KMS key; and typed secrets (`secretType`). Clearing one in a `patch` is a no-op. Resource Manager `tags` are an unknown field.
-- The lifecycle refusal messages, notification shapes, and timings are modeled on the API reference, not recorded. GCP may also publish a `TOPIC_CONFIGURED` notification; gcp-local doesn't.
+- Not recorded: the maximums, a same-count replica change, `SECRET_UPDATE` and the version state-change notifications, delayed destruction completing, and the `timestamp` value's format. GCP delivers notifications seconds to minutes late; gcp-local publishes at once.
 - A body with both `expireTime` and `ttl` is 400, from the `expiration` oneof. The Terraform provider 8.5.0 sends both when it updates a secret created with `ttl`, so that update fails here; GCP's answer is not recorded.
 - Expiry, rotation, and scheduled destruction run on the process clock; restarting gcp-local loses them with the rest of the state.
 - No regional secrets: `projects/*/locations/*/secrets` routes are `UNIMPLEMENTED`. Replica locations are checked only for a region-shaped name.

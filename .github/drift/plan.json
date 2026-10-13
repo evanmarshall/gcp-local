@@ -48,6 +48,8 @@
      "option": "--gcp-live-scope-file", "scope": "security/cloudkms-asymmetric.json"},
     {"name": "secretmanager", "tests": ["tests/conformance/security/secretmanager/test_secrets.py"],
      "option": "--gcp-secretmanager-scope", "scope": "security/secretmanager.json"},
+    {"name": "secretmanager-policies", "tests": ["tests/conformance/security/secretmanager/policies/test_policies.py"],
+     "option": "--gcp-live-scope-file", "scope": "security/secretmanager-policies.json"},
     {"name": "serviceaccounts", "tests": ["tests/conformance/security/iam/test_accounts.py"],
      "option": "--gcp-live-scope-file", "scope": "security/serviceaccounts.json"},
     {"name": "iamcredentials", "tests": ["tests/conformance/security/iam/test_credentials.py"],

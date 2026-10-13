@@ -8,6 +8,9 @@ import (
 // Wire document keys shared by the response shapes.
 const keyName = "name"
 
+// versionLatest names the newest enabled version; no alias may take it.
+const versionLatest = "latest"
+
 // serviceName is the provider and backend registry name.
 const serviceName = "secretmanager"
 

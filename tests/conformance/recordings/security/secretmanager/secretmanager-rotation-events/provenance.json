@@ -1,0 +1,52 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-13T20:33:27.618273+00:00",
+  "scenario": {
+    "id": "secretmanager-rotation-events",
+    "service": "secretmanager",
+    "transport": "rest-v1",
+    "revision": "6a33fe5fe20b568433dcc3fbd822629bb48096d16b9e5b7ec4737e8bca23560c",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "1f8d679d0957b25181dcc62993d5710ffe46846d535e7d0b7d3f5bff04dfe7a0",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/security/secretmanager_policies.py": "393efff73de00f56a0fc7c0ddca58d6d3f206e48d55db6b00ee18ba2d5360d56",
+      "gcp_validation/services/security/refusals.py": "7e5c208b9472d70b50966390e74a6cea0d0f34de2ae5eb01121bf4ef526a8f7e",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/secretmanager/policies/conftest.py": "48a36eb96668f9d9ca725db1539eea64e426b53f477dd5ad39e0cfb18a6600e6"
+    },
+    "scope": {
+      "services": [
+        "secretmanager"
+      ],
+      "location": "global",
+      "limits": {
+        "max_secrets": 4,
+        "max_versions": 4,
+        "max_topics": 1,
+        "max_subscriptions": 1,
+        "max_run_seconds": 1200
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

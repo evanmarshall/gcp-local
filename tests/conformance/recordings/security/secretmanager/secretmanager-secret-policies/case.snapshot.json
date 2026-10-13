@@ -1,0 +1,494 @@
+{
+  "secretmanager-secret-policies": {
+    "recorded-date": "13-10-2026, 20:28:04",
+    "recorded-content": {
+      "topics-without-publisher": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Permission 'pubsub.topics.publish' denied for service-<project-number>@gcp-sa-secretmanager.iam.gserviceaccount.com for pubsub topic: <topic> or the topic doesn't exist. Grant the 'pubsub.topic.publish' permission (or 'roles/pubsub.publisher') on this topic to service-<project-number>@gcp-sa-secretmanager.iam.gserviceaccount.com.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "missing-topic": {
+        "code": 404,
+        "details": [],
+        "http_status": 404,
+        "message": "Topic [<topic>-missing] not found.",
+        "status": "NOT_FOUND"
+      },
+      "agent-granted": {
+        "bindings": [
+          {
+            "members": [
+              "<agent>"
+            ],
+            "role": "roles/pubsub.publisher"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "rotation-without-topics": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "There must be at least one topic configured when a Rotation policy is set.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "rotation-too-soon": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Next rotation time must be at least [5m] in the future.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "rotation-short-period": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Rotation period cannot be shorter than [1h].",
+        "status": "INVALID_ARGUMENT"
+      },
+      "rotation-period-alone": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Next rotation time must be set while the rotation period is set.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "expire-in-past": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Expiration time must be at least [1m] in the future.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "destroy-ttl-short": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Version destroy TTL must be at least [24h].",
+        "status": "INVALID_ARGUMENT"
+      },
+      "aliases-without-versions": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Aliases cannot be assigned to versions that don't exist",
+        "status": "INVALID_ARGUMENT"
+      },
+      "empty-replicas": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "At least one location must be provided for a user_managed policy.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "policies-created": {
+        "expire_after_create": true,
+        "expire_is_ttl": true,
+        "fields": [
+          "createTime",
+          "etag",
+          "expireTime",
+          "labels",
+          "name",
+          "replication",
+          "rotation",
+          "topics",
+          "versionDestroyTtl"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": true,
+        "replication": {
+          "userManaged": {
+            "replicas": [
+              {
+                "location": "us-east1"
+              },
+              {
+                "location": "us-central1"
+              }
+            ]
+          }
+        },
+        "rotation_fields": [
+          "nextRotationTime",
+          "rotationPeriod"
+        ],
+        "rotation_period": "3600s",
+        "topics": [
+          {
+            "name": "<topic>"
+          }
+        ],
+        "versionAliases": null,
+        "versionDestroyTtl": "86400s"
+      },
+      "policies-read": {
+        "expire_after_create": true,
+        "fields": [
+          "createTime",
+          "etag",
+          "expireTime",
+          "labels",
+          "name",
+          "replication",
+          "rotation",
+          "topics",
+          "versionDestroyTtl"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": true,
+        "replication": {
+          "userManaged": {
+            "replicas": [
+              {
+                "location": "us-east1"
+              },
+              {
+                "location": "us-central1"
+              }
+            ]
+          }
+        },
+        "rotation_fields": [
+          "nextRotationTime",
+          "rotationPeriod"
+        ],
+        "rotation_period": "3600s",
+        "topics": [
+          {
+            "name": "<topic>"
+          }
+        ],
+        "versionAliases": null,
+        "versionDestroyTtl": "86400s"
+      },
+      "version-replication": [
+        {
+          "http_status": 200,
+          "fields": [
+            "createTime",
+            "etag",
+            "name",
+            "replicationStatus",
+            "state"
+          ],
+          "replicationStatus": {
+            "userManaged": {
+              "replicas": [
+                {
+                  "location": "us-east1"
+                },
+                {
+                  "location": "us-central1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "http_status": 200,
+          "fields": [
+            "createTime",
+            "etag",
+            "name",
+            "replicationStatus",
+            "state"
+          ],
+          "replicationStatus": {
+            "userManaged": {
+              "replicas": [
+                {
+                  "location": "us-east1"
+                },
+                {
+                  "location": "us-central1"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "alias-set": {
+        "expire_after_create": true,
+        "fields": [
+          "createTime",
+          "etag",
+          "expireTime",
+          "labels",
+          "name",
+          "replication",
+          "rotation",
+          "topics",
+          "versionAliases",
+          "versionDestroyTtl"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": null,
+        "replication": {
+          "userManaged": {
+            "replicas": [
+              {
+                "location": "us-east1"
+              },
+              {
+                "location": "us-central1"
+              }
+            ]
+          }
+        },
+        "rotation_fields": [
+          "nextRotationTime",
+          "rotationPeriod"
+        ],
+        "rotation_period": "3600s",
+        "topics": [
+          {
+            "name": "<topic>"
+          }
+        ],
+        "versionAliases": {
+          "current": "1"
+        },
+        "versionDestroyTtl": "86400s"
+      },
+      "alias-access": {
+        "http_status": 200,
+        "name": "<secret-0-by-number>/versions/1"
+      },
+      "alias-get": {
+        "fields": [
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "name": "<secret-0-by-number>/versions/1",
+        "state": "ENABLED"
+      },
+      "alias-disable": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "The provided Secret Version ID [<secret-0-by-number>/versions/current] does not match the expected format [projects/*/secrets/*/versions*]",
+        "status": "INVALID_ARGUMENT"
+      },
+      "alias-reserved": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "[latest] must follow pattern [a-zA-Z][a-Aa-Z0-9_-]+, be less than 64 characters and cannot be \"latest\" or \"NEW\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "alias-missing-version": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Aliases cannot be assigned to versions that don't exist",
+        "status": "INVALID_ARGUMENT"
+      },
+      "replication-to-automatic": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Existing secret has user-managed replication, but requested secret does not. Updating secret replication is not supported.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "replication-same": {
+        "fields": [
+          "createTime",
+          "etag",
+          "expireTime",
+          "labels",
+          "name",
+          "replication",
+          "rotation",
+          "topics",
+          "versionAliases",
+          "versionDestroyTtl"
+        ],
+        "http_status": 200
+      },
+      "replication-fewer-replicas": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Adding or removing replicas from Secret user-managed replication is not supported. Number of replicas requested: [1], number of existing replicas: [2]",
+        "status": "INVALID_ARGUMENT"
+      },
+      "expire-time-set": {
+        "expire_after_create": true,
+        "expire_echoed": true,
+        "fields": [
+          "createTime",
+          "etag",
+          "expireTime",
+          "labels",
+          "name",
+          "replication",
+          "rotation",
+          "topics",
+          "versionAliases",
+          "versionDestroyTtl"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": null,
+        "replication": {
+          "userManaged": {
+            "replicas": [
+              {
+                "location": "us-east1"
+              },
+              {
+                "location": "us-central1"
+              }
+            ]
+          }
+        },
+        "rotation_fields": [
+          "nextRotationTime",
+          "rotationPeriod"
+        ],
+        "rotation_period": "3600s",
+        "topics": [
+          {
+            "name": "<topic>"
+          }
+        ],
+        "versionAliases": {
+          "current": "1"
+        },
+        "versionDestroyTtl": "86400s"
+      },
+      "expiration-cleared": {
+        "expire_after_create": false,
+        "fields": [
+          "createTime",
+          "etag",
+          "labels",
+          "name",
+          "replication",
+          "rotation",
+          "topics",
+          "versionAliases",
+          "versionDestroyTtl"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": null,
+        "replication": {
+          "userManaged": {
+            "replicas": [
+              {
+                "location": "us-east1"
+              },
+              {
+                "location": "us-central1"
+              }
+            ]
+          }
+        },
+        "rotation_fields": [
+          "nextRotationTime",
+          "rotationPeriod"
+        ],
+        "rotation_period": "3600s",
+        "topics": [
+          {
+            "name": "<topic>"
+          }
+        ],
+        "versionAliases": {
+          "current": "1"
+        },
+        "versionDestroyTtl": "86400s"
+      },
+      "topics-removed-with-rotation": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "There must be at least one topic configured when a Rotation policy is set.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "rotation-cleared": {
+        "expire_after_create": false,
+        "fields": [
+          "createTime",
+          "etag",
+          "labels",
+          "name",
+          "replication",
+          "topics",
+          "versionAliases",
+          "versionDestroyTtl"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": null,
+        "replication": {
+          "userManaged": {
+            "replicas": [
+              {
+                "location": "us-east1"
+              },
+              {
+                "location": "us-central1"
+              }
+            ]
+          }
+        },
+        "rotation_fields": [],
+        "rotation_period": null,
+        "topics": [
+          {
+            "name": "<topic>"
+          }
+        ],
+        "versionAliases": {
+          "current": "1"
+        },
+        "versionDestroyTtl": "86400s"
+      },
+      "destroy-scheduled": {
+        "fields": [
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "scheduledDestroyTime",
+          "state"
+        ],
+        "http_status": 200,
+        "scheduled_in_a_day": true,
+        "state": "DISABLED"
+      },
+      "destroy-scheduled-again": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "SecretVersion is already scheduled for DESTRUCTION.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "destroy-cancelled": {
+        "fields": [
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "ENABLED"
+      },
+      "cleanup": {
+        "secrets_topic_and_subscription_absent": true
+      }
+    }
+  }
+}

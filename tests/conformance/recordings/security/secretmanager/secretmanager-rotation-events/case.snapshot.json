@@ -1,0 +1,235 @@
+{
+  "secretmanager-rotation-events": {
+    "recorded-date": "13-10-2026, 20:33:27",
+    "recorded-content": {
+      "agent-granted": {
+        "bindings": [
+          {
+            "members": [
+              "<agent>"
+            ],
+            "role": "roles/pubsub.publisher"
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200
+      },
+      "expiring-created": {
+        "expire_after_create": true,
+        "fields": [
+          "createTime",
+          "etag",
+          "expireTime",
+          "labels",
+          "name",
+          "replication",
+          "topics"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": null,
+        "replication": {
+          "automatic": {}
+        },
+        "rotation_fields": [],
+        "rotation_period": null,
+        "topics": [
+          {
+            "name": "<topic>"
+          }
+        ],
+        "versionAliases": null,
+        "versionDestroyTtl": null
+      },
+      "rotating-created": {
+        "expire_after_create": false,
+        "fields": [
+          "createTime",
+          "etag",
+          "labels",
+          "name",
+          "replication",
+          "rotation",
+          "topics"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": true,
+        "replication": {
+          "automatic": {}
+        },
+        "rotation_fields": [
+          "nextRotationTime"
+        ],
+        "rotation_period": null,
+        "topics": [
+          {
+            "name": "<topic>"
+          }
+        ],
+        "versionAliases": null,
+        "versionDestroyTtl": null
+      },
+      "version-added": {
+        "fields": [
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "ENABLED"
+      },
+      "expired": {
+        "http_status": 404
+      },
+      "rotation-after-notification": {
+        "fields": []
+      },
+      "notifications": [
+        {
+          "event_type": "TOPIC_CONFIGURED",
+          "attributes": {
+            "eventType": "TOPIC_CONFIGURED"
+          },
+          "attribute_names": [
+            "eventType"
+          ],
+          "data_fields": []
+        },
+        {
+          "event_type": "TOPIC_CONFIGURED",
+          "attributes": {
+            "eventType": "TOPIC_CONFIGURED"
+          },
+          "attribute_names": [
+            "eventType"
+          ],
+          "data_fields": []
+        },
+        {
+          "event_type": "SECRET_CREATE",
+          "attributes": {
+            "dataFormat": "JSON_API_V1",
+            "eventType": "SECRET_CREATE",
+            "secretId": "<secret-1-by-number>"
+          },
+          "attribute_names": [
+            "dataFormat",
+            "eventType",
+            "secretId",
+            "timestamp"
+          ],
+          "data_fields": [
+            "createTime",
+            "etag",
+            "expireTime",
+            "labels",
+            "name",
+            "replication",
+            "topics"
+          ]
+        },
+        {
+          "event_type": "SECRET_DELETE",
+          "attributes": {
+            "dataFormat": "JSON_API_V1",
+            "deleteType": "EXPIRATION",
+            "eventType": "SECRET_DELETE",
+            "secretId": "<secret-1-by-number>"
+          },
+          "attribute_names": [
+            "dataFormat",
+            "deleteType",
+            "eventType",
+            "secretId",
+            "timestamp"
+          ],
+          "data_fields": [
+            "createTime",
+            "etag",
+            "expireTime",
+            "labels",
+            "name",
+            "replication",
+            "topics"
+          ]
+        },
+        {
+          "event_type": "SECRET_CREATE",
+          "attributes": {
+            "dataFormat": "JSON_API_V1",
+            "eventType": "SECRET_CREATE",
+            "secretId": "<secret-2-by-number>"
+          },
+          "attribute_names": [
+            "dataFormat",
+            "eventType",
+            "secretId",
+            "timestamp"
+          ],
+          "data_fields": [
+            "createTime",
+            "etag",
+            "labels",
+            "name",
+            "replication",
+            "rotation",
+            "topics"
+          ]
+        },
+        {
+          "event_type": "SECRET_ROTATE",
+          "attributes": {
+            "dataFormat": "JSON_API_V1",
+            "eventType": "SECRET_ROTATE",
+            "secretId": "<secret-2-by-number>"
+          },
+          "attribute_names": [
+            "dataFormat",
+            "eventType",
+            "secretId",
+            "timestamp"
+          ],
+          "data_fields": [
+            "createTime",
+            "etag",
+            "labels",
+            "name",
+            "replication",
+            "topics"
+          ]
+        },
+        {
+          "event_type": "SECRET_VERSION_ADD",
+          "attributes": {
+            "dataFormat": "JSON_API_V1",
+            "eventType": "SECRET_VERSION_ADD",
+            "secretId": "<secret-2-by-number>",
+            "versionId": "<secret-2-by-number>/versions/1"
+          },
+          "attribute_names": [
+            "dataFormat",
+            "eventType",
+            "secretId",
+            "timestamp",
+            "versionId"
+          ],
+          "data_fields": [
+            "createTime",
+            "etag",
+            "name",
+            "replicationStatus",
+            "state"
+          ]
+        }
+      ],
+      "cleanup": {
+        "secrets_topic_and_subscription_absent": true
+      }
+    }
+  }
+}

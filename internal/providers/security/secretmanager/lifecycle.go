@@ -44,6 +44,7 @@ const (
 	maxTopics      = 10
 	maxAliases     = 50
 	minRotationLag = 300 * time.Second
+	minExpiryLead  = time.Minute
 	minPeriod      = time.Hour
 	maxSpan        = 3153600000 * time.Second // 100 years
 	minDestroyTTL  = 24 * time.Hour
@@ -62,13 +63,18 @@ const (
 	eventVersionDisable   = "SECRET_VERSION_DISABLE"
 	eventVersionDestroy   = "SECRET_VERSION_DESTROY"
 	eventVersionScheduled = "SECRET_VERSION_DESTROY_SCHEDULED"
+	eventConfigured       = "TOPIC_CONFIGURED"
 )
 
 var (
-	topicName   = regexp.MustCompile(`^projects/([^/]+)/topics/([^/]+)$`)
-	aliasName   = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,62}$`)
-	regionName  = regexp.MustCompile(`^[a-z]+(-[a-z]+)+[0-9]+$`)
-	errRotation = status.Error(codes.InvalidArgument, "A secret with a rotation policy must have at least one topic.")
+	topicName  = regexp.MustCompile(`^projects/([^/]+)/topics/([^/]+)$`)
+	aliasName  = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,62}$`)
+	regionName = regexp.MustCompile(`^[a-z]+(-[a-z]+)+[0-9]+$`)
+	// Recorded refusals (secretmanager-secret-policies), with the maximums'
+	// wording modeled on the minimums'.
+	errRotation  = status.Error(codes.InvalidArgument, "There must be at least one topic configured when a Rotation policy is set.")
+	errNoNext    = status.Error(codes.FailedPrecondition, "Next rotation time must be set while the rotation period is set.")
+	errNoVersion = status.Error(codes.InvalidArgument, "Aliases cannot be assigned to versions that don't exist")
 )
 
 // policies are a secret's lifecycle settings. Zero values mean unset;
@@ -115,7 +121,8 @@ func readPolicies(body *secretmanagerpb.Secret, now time.Time) (policies, error)
 	if ttl := body.GetVersionDestroyTtl(); ttl != nil {
 		read.DestroyTTL = ttl.AsDuration()
 		if read.DestroyTTL < minDestroyTTL || read.DestroyTTL > maxDestroyTTL {
-			return read, status.Error(codes.InvalidArgument, "The version destroy TTL must be between 1 day and 1000 days.")
+			return read, status.Errorf(codes.InvalidArgument, "Version destroy TTL must be at %s.",
+				map[bool]string{true: "least [24h]", false: "most [1000d]"}[read.DestroyTTL < minDestroyTTL])
 		}
 	}
 	return read, nil
@@ -128,7 +135,7 @@ func readReplicas(replication *secretmanagerpb.Replication) ([]string, error) {
 		return nil, nil
 	}
 	if len(managed.GetReplicas()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "A user-managed replication policy requires at least one replica.")
+		return nil, status.Error(codes.InvalidArgument, "At least one location must be provided for a user_managed policy.")
 	}
 	var replicas []string
 	for _, replica := range managed.GetReplicas() {
@@ -156,8 +163,8 @@ func readExpiration(body *secretmanagerpb.Secret, now time.Time) (time.Time, err
 	default:
 		return time.Time{}, nil
 	}
-	if !expire.After(now) {
-		return time.Time{}, status.Error(codes.InvalidArgument, "The expiration must be in the future.")
+	if expire.Before(now.Add(minExpiryLead)) {
+		return time.Time{}, status.Error(codes.InvalidArgument, "Expiration time must be at least [1m] in the future.")
 	}
 	return expire, nil
 }
@@ -171,8 +178,13 @@ func readRotation(rotation *secretmanagerpb.Rotation) (time.Time, time.Duration,
 	}
 	if rotation.GetRotationPeriod() != nil {
 		period = rotation.GetRotationPeriod().AsDuration()
-		if period < minPeriod || period > maxSpan || period%time.Second != 0 {
-			return next, period, status.Error(codes.InvalidArgument, "The rotation period must be a whole number of seconds between 3600s and 3153600000s.")
+		switch {
+		case period < minPeriod:
+			return next, period, status.Error(codes.InvalidArgument, "Rotation period cannot be shorter than [1h].")
+		case period > maxSpan:
+			return next, period, status.Error(codes.InvalidArgument, "Rotation period cannot be longer than [100y].")
+		case period%time.Second != 0:
+			return next, period, status.Error(codes.InvalidArgument, "Rotation period must be a whole number of seconds.")
 		}
 	}
 	return next, period, nil
@@ -180,8 +192,11 @@ func readRotation(rotation *secretmanagerpb.Rotation) (time.Time, time.Duration,
 
 // checkNext applies the documented window to a newly set next rotation time.
 func checkNext(next, now time.Time) error {
-	if !next.IsZero() && (next.Before(now.Add(minRotationLag)) || next.After(now.Add(maxSpan))) {
-		return status.Error(codes.InvalidArgument, "The next rotation time must be at least 300s and at most 100 years in the future.")
+	if !next.IsZero() && next.Before(now.Add(minRotationLag)) {
+		return status.Error(codes.InvalidArgument, "Next rotation time must be at least [5m] in the future.")
+	}
+	if !next.IsZero() && next.After(now.Add(maxSpan)) {
+		return status.Error(codes.InvalidArgument, "Next rotation time must be at most [100y] in the future.")
 	}
 	return nil
 }
@@ -192,8 +207,9 @@ func readAliases(aliases map[string]int64) (map[string]int64, error) {
 		return nil, status.Errorf(codes.InvalidArgument, "A secret can have at most %d version aliases.", maxAliases)
 	}
 	for _, alias := range slices.Sorted(maps.Keys(aliases)) {
-		if !aliasName.MatchString(alias) || alias == "latest" || alias == "NEW" {
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid version alias %q.", alias)
+		if !aliasName.MatchString(alias) || alias == versionLatest || alias == "NEW" {
+			return nil, status.Errorf(codes.InvalidArgument, "[%s] must follow pattern [a-zA-Z][a-Aa-Z0-9_-]+, "+
+				"be less than 64 characters and cannot be \"latest\" or \"NEW\"", alias)
 		}
 	}
 	return maps.Clone(aliases), nil
@@ -204,14 +220,14 @@ func readAliases(aliases map[string]int64) (map[string]int64, error) {
 // topic, and each alias names an existing version.
 func checkPolicies(settings policies, versions map[string]*versionRecord) error {
 	if settings.Period > 0 && settings.Next.IsZero() {
-		return status.Error(codes.InvalidArgument, "A rotation period requires a next rotation time.")
+		return errNoNext
 	}
 	if !settings.Next.IsZero() && len(settings.Topics) == 0 {
 		return errRotation
 	}
 	for _, alias := range slices.Sorted(maps.Keys(settings.Aliases)) {
 		if versions[strconv.FormatInt(settings.Aliases[alias], 10)] == nil {
-			return status.Errorf(codes.InvalidArgument, "Version alias %q refers to version %d, which does not exist.", alias, settings.Aliases[alias])
+			return errNoVersion
 		}
 	}
 	return nil
@@ -226,14 +242,24 @@ func (p *Provider) checkTopics(ctx context.Context, project string, topics []str
 		if match == nil {
 			return status.Errorf(codes.InvalidArgument, "Invalid Pub/Sub topic name %q.", topic)
 		}
-		agent, ok := p.serviceAgent(ctx, project)
 		resource := "//pubsub.googleapis.com/" + topic
-		if _, indexed := p.index.Get(resource); !indexed || !ok {
-			return status.Errorf(codes.InvalidArgument, "Pub/Sub topic %s does not exist or the Secret Manager service agent cannot publish to it.", topic)
+		if _, indexed := p.index.Get(resource); !indexed {
+			// Recorded "missing-topic".
+			return status.Errorf(codes.NotFound, "Topic [%s] not found.", topic)
 		}
-		agent.Method, agent.Resource, agent.Project = methodTopicPublish, topic, match[1]
-		if _, err := p.engine.Authorize(agent, iam.Target{Name: resource}, nil); err != nil {
-			return status.Errorf(codes.InvalidArgument, "Pub/Sub topic %s does not exist or the Secret Manager service agent cannot publish to it.", topic)
+		agent, ok := p.serviceAgent(ctx, project)
+		denied := !ok
+		if ok {
+			agent.Method, agent.Resource, agent.Project = methodTopicPublish, topic, match[1]
+			_, err := p.engine.Authorize(agent, iam.Target{Name: resource}, nil)
+			denied = err != nil
+		}
+		if denied {
+			// Recorded "topics-without-publisher".
+			member := strings.TrimPrefix(agent.Principal.Subject, "serviceAccount:")
+			return status.Errorf(codes.FailedPrecondition, "Permission 'pubsub.topics.publish' denied for %s for pubsub topic: %s "+
+				"or the topic doesn't exist. Grant the 'pubsub.topic.publish' permission (or 'roles/pubsub.publisher') on this topic to %s.",
+				member, topic, member)
 		}
 	}
 	return nil
@@ -261,13 +287,14 @@ type event struct {
 
 // notify queues one notification for the secret's topics; version is ""
 // for a secret event.
-func (s *scopeState) notify(project string, record *secretRecord, kind string, document map[string]any, version string) {
+func (s *scopeState) notify(project string, record *secretRecord, kind string, document map[string]any, version string, now time.Time) {
 	if len(record.Topics) == 0 {
 		return
 	}
 	data, _ := json.Marshal(document) //nolint:errchkjson // plain wire documents
 	attributes := map[string]string{
 		"eventType": kind, "dataFormat": "JSON_API_V1", "secretId": secretWireName(project, record.Name),
+		"timestamp": provider.Stamp(now),
 	}
 	if version != "" {
 		attributes["versionId"] = versionWireName(project, record.Name, version)
@@ -276,11 +303,20 @@ func (s *scopeState) notify(project string, record *secretRecord, kind string, d
 }
 
 // deleted queues the SECRET_DELETE notification; how is REQUESTED or EXPIRATION.
-func (s *scopeState) deleted(project string, record *secretRecord, how string) {
+func (s *scopeState) deleted(project string, record *secretRecord, how string, now time.Time) {
 	before := len(s.outbox)
-	s.notify(project, record, eventDelete, secretDocument(project, record), "")
+	s.notify(project, record, eventDelete, secretDocument(project, record), "", now)
 	if len(s.outbox) > before {
 		s.outbox[before].attributes["deleteType"] = how
+	}
+}
+
+// configured queues the TOPIC_CONFIGURED test message GCP sends each newly
+// configured topic: no data and no attribute but eventType (recorded
+// "notifications").
+func (s *scopeState) configured(topics []string) {
+	if len(topics) > 0 {
+		s.outbox = append(s.outbox, event{topics: slices.Clone(topics), attributes: map[string]string{"eventType": eventConfigured}})
 	}
 }
 
@@ -407,7 +443,7 @@ func (p *Provider) tick(scope state.Scope, id string) (time.Duration, []event, b
 		s.destroyDue(project, record, now)
 		s.rotateDue(project, record, now)
 		if !record.Expire.IsZero() && !now.Before(record.Expire) {
-			s.deleted(project, record, "EXPIRATION")
+			s.deleted(project, record, "EXPIRATION", now)
 			if p.index.Remove(serviceName, scope, secretResource(scope.Project, id)) == nil {
 				delete(s.secrets, id)
 			}
@@ -432,7 +468,7 @@ func (s *scopeState) destroyDue(project string, record *secretRecord, now time.T
 		version.State, version.Payload, version.DestroyedAt = stateDestroyed, nil, version.ScheduledDestroy
 		version.ScheduledDestroy = time.Time{}
 		version.Revision++
-		s.notify(project, record, eventVersionDestroy, versionDocument(project, record, version), version.Number)
+		s.notify(project, record, eventVersionDestroy, versionDocument(project, record, version), version.Number, now)
 	}
 }
 
@@ -443,7 +479,6 @@ func (s *scopeState) rotateDue(project string, record *secretRecord, now time.Ti
 	if record.Next.IsZero() || now.Before(record.Next) {
 		return
 	}
-	s.notify(project, record, eventRotate, secretDocument(project, record), "")
 	for record.Period > 0 && !now.Before(record.Next) {
 		record.Next = record.Next.Add(record.Period)
 	}
@@ -451,6 +486,8 @@ func (s *scopeState) rotateDue(project string, record *secretRecord, now time.Ti
 		record.Next = time.Time{}
 	}
 	record.Revision++
+	// Recorded "notifications": the data is the secret after the schedule moved.
+	s.notify(project, record, eventRotate, secretDocument(project, record), "", now)
 }
 
 // Wire renderings of the lifecycle settings.

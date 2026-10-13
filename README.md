@@ -54,7 +54,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | --- | --- | --- |
 | [Cloud Storage](docs/services/storage.md) | fake-gcs-server | Objects: read, write, list, delete, copy, metadata updates; resumable uploads; V4 signed URLs |
 | [Pub/Sub](docs/services/messaging/pubsub.md) | Official Google emulator | Publish, pull, streaming pull, push, ordering, filters, dead-letter topics, retry backoff, exactly-once, snapshots and seek, Avro and Protocol Buffer schemas |
-| [Secret Manager](docs/services/security/secretmanager.md) | gcp-local | Secret versions and access over REST and gRPC; rotation notifications, expiration, aliases, and delayed destruction (not recorded) |
+| [Secret Manager](docs/services/security/secretmanager.md) | gcp-local | Secret versions and access over REST and gRPC; rotation notifications, expiration, aliases, and delayed destruction |
 | [Cloud KMS](docs/services/security/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt, asymmetric sign and decrypt, HMAC, and scheduled rotation (not recorded) over REST and gRPC |
 | [Cloud Tasks](docs/services/messaging/cloudtasks.md) | gcp-local | HTTP dispatch with OIDC and retries over REST and gRPC |
 | [Cloud Scheduler](docs/services/messaging/cloudscheduler.md) | gcp-local | Cron jobs that call HTTP targets or publish to Pub/Sub, over REST and gRPC |

@@ -77,7 +77,7 @@ PROVIDERS = {"cloud-run": "run", "secret-manager": "secretmanager"}
 LOCAL_SUPPORT = {
     "storage": "partial-recorded-slice",
     "pubsub": "partial-recorded-slice",
-    "secret-manager": "single-recorded-scenario",
+    "secret-manager": "partial-recorded-slice",
     "bigquery": "partial-recorded-slice",
     "firestore": "single-recorded-scenario",
     "cloud-run": "partial-recorded-slice",

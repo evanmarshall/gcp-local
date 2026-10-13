@@ -400,18 +400,18 @@ func TestRotationRefusals(t *testing.T) {
 	rotation := map[string]any{"nextRotationTime": next.Format(time.RFC3339), "rotationPeriod": "3600s"}
 	auto := replicationAuto()
 	refused(t, "no topic", h.createSecret(map[string]any{"replication": auto, "rotation": rotation}), 400, "INVALID_ARGUMENT",
-		"A secret with a rotation policy must have at least one topic.")
+		"There must be at least one topic configured when a Rotation policy is set.")
 	refused(t, "too soon", h.createSecret(map[string]any{"replication": auto, "topics": topics,
 		"rotation": map[string]any{"nextRotationTime": h.clock.Now().Add(time.Minute).Format(time.RFC3339)}}), 400, "INVALID_ARGUMENT",
-		"The next rotation time must be at least 300s and at most 100 years in the future.")
+		"Next rotation time must be at least [5m] in the future.")
 	refused(t, "short period", h.createSecret(map[string]any{"replication": auto, "topics": topics,
 		"rotation": map[string]any{"nextRotationTime": next.Format(time.RFC3339), "rotationPeriod": "60s"}}), 400, "INVALID_ARGUMENT",
-		"The rotation period must be a whole number of seconds between 3600s and 3153600000s.")
+		"Rotation period cannot be shorter than [1h].")
 	refused(t, "period alone", h.createSecret(map[string]any{"replication": auto, "topics": topics,
-		"rotation": map[string]any{"rotationPeriod": "3600s"}}), 400, "INVALID_ARGUMENT", "A rotation period requires a next rotation time.")
+		"rotation": map[string]any{"rotationPeriod": "3600s"}}), 400, "FAILED_PRECONDITION", "Next rotation time must be set while the rotation period is set.")
 	document(t, "create", h.createSecret(map[string]any{"replication": auto, "topics": topics, "rotation": rotation}))
 	refused(t, "drop topics", h.invoke(http.MethodPatch, secretPath+"?updateMask=topics", map[string]any{}, "actor"),
-		400, "INVALID_ARGUMENT", "A secret with a rotation policy must have at least one topic.")
+		400, "INVALID_ARGUMENT", "There must be at least one topic configured when a Rotation policy is set.")
 }
 
 // TestRotationNotifiesTopics: at nextRotationTime the service agent
@@ -428,11 +428,15 @@ func TestRotationNotifiesTopics(t *testing.T) {
 	}
 	h.addVersion(t, "one")
 	h.clock.Advance(10 * time.Minute)
-	sent := h.events(3)
-	for i, kind := range []string{eventCreate, eventVersionAdd, eventRotate} {
-		requireNotification(t, sent[i], kind)
+	sent := h.events(4)
+	if !reflect.DeepEqual(sent[0].attributes, map[string]string{"eventType": eventConfigured}) || sent[0].data != nil {
+		t.Fatalf("topic configured = %+v", sent[0])
 	}
-	if sent[1].attributes["versionId"] != "projects/123456/secrets/"+testSecret+"/versions/1" || sent[2].data["name"] != "projects/123456/secrets/"+testSecret {
+	for i, kind := range []string{eventCreate, eventVersionAdd, eventRotate} {
+		requireNotification(t, sent[i+1], kind)
+	}
+	rotated, _ := sent[3].data["rotation"].(map[string]any)
+	if sent[2].attributes["versionId"] != "projects/123456/secrets/"+testSecret+"/versions/1" || rotated["nextRotationTime"] != "2026-10-13T13:10:00Z" {
 		t.Fatalf("notifications = %+v", sent)
 	}
 	h.eventually("next rotation advanced", func() bool {
@@ -468,10 +472,15 @@ func requireNotification(t *testing.T, sent published, kind string) {
 // service agent, or for a topic that doesn't exist, topics are refused.
 func TestTopicsNeedThePublisherGrant(t *testing.T) {
 	h := newLifecycleHarness(t, false)
-	for _, topic := range []string{testTopic, "projects/" + testProject + "/topics/missing"} {
-		refused(t, topic, h.createSecret(map[string]any{"replication": replicationAuto(), "topics": []any{map[string]any{"name": topic}}}),
-			400, "INVALID_ARGUMENT", "Pub/Sub topic "+topic+" does not exist or the Secret Manager service agent cannot publish to it.")
+	topics := func(topic string) map[string]any {
+		return map[string]any{"replication": replicationAuto(), "topics": []any{map[string]any{"name": topic}}}
 	}
+	agent := strings.TrimPrefix(testAgent, "serviceAccount:")
+	refused(t, "no grant", h.createSecret(topics(testTopic)), 400, "FAILED_PRECONDITION", "Permission 'pubsub.topics.publish' denied for "+
+		agent+" for pubsub topic: "+testTopic+" or the topic doesn't exist. Grant the 'pubsub.topic.publish' permission "+
+		"(or 'roles/pubsub.publisher') on this topic to "+agent+".")
+	missing := "projects/" + testProject + "/topics/missing"
+	refused(t, "missing", h.createSecret(topics(missing)), 404, "NOT_FOUND", "Topic ["+missing+"] not found.")
 	refused(t, "bad name", h.createSecret(map[string]any{"replication": replicationAuto(), "topics": []any{map[string]any{"name": "rotations"}}}),
 		400, "INVALID_ARGUMENT", `Invalid Pub/Sub topic name "rotations".`)
 }
@@ -482,7 +491,7 @@ func TestTopicsNeedThePublisherGrant(t *testing.T) {
 func TestExpirationDeletesTheSecret(t *testing.T) {
 	h := newLifecycleHarness(t, true)
 	refused(t, "past", h.createSecret(map[string]any{"replication": replicationAuto(), "expireTime": "2020-01-01T00:00:00Z"}),
-		400, "INVALID_ARGUMENT", "The expiration must be in the future.")
+		400, "INVALID_ARGUMENT", "Expiration time must be at least [1m] in the future.")
 	created := document(t, "create", h.createSecret(map[string]any{"replication": replicationAuto(), "ttl": "120s",
 		"topics": []any{map[string]any{"name": testTopic}}}))
 	if created["expireTime"] != "2026-10-13T12:02:00Z" || created["ttl"] != nil {
@@ -499,9 +508,9 @@ func TestExpirationDeletesTheSecret(t *testing.T) {
 	}
 	h.clock.Advance(3 * time.Minute)
 	h.eventually("expiry", func() bool { return h.invoke(http.MethodGet, secretPath, nil, "actor").Code == 404 })
-	sent := h.events(3)
-	if sent[2].attributes["eventType"] != eventDelete || sent[2].attributes["deleteType"] != "EXPIRATION" {
-		t.Fatalf("delete notification = %+v", sent[2])
+	sent := h.events(4)
+	if sent[3].attributes["eventType"] != eventDelete || sent[3].attributes["deleteType"] != "EXPIRATION" {
+		t.Fatalf("delete notification = %+v", sent[3])
 	}
 	if _, ok := h.provider.index.Get(secretResource(testProject, testSecret)); ok {
 		t.Fatal("the expired secret stayed indexed")
@@ -513,12 +522,12 @@ func TestExpirationDeletesTheSecret(t *testing.T) {
 func TestVersionAliases(t *testing.T) {
 	h := newLifecycleHarness(t, true)
 	refused(t, "no version", h.createSecret(map[string]any{"replication": replicationAuto(), "versionAliases": map[string]any{"current": "1"}}),
-		400, "INVALID_ARGUMENT", `Version alias "current" refers to version 1, which does not exist.`)
+		400, "INVALID_ARGUMENT", "Aliases cannot be assigned to versions that don't exist")
 	h.create(replicationAuto())
 	h.addVersion(t, "one")
 	h.addVersion(t, "two")
 	refused(t, "reserved", h.invoke(http.MethodPatch, secretPath+"?updateMask=version_aliases",
-		map[string]any{"versionAliases": map[string]any{"latest": "1"}}, "actor"), 400, "INVALID_ARGUMENT", `Invalid version alias "latest".`)
+		map[string]any{"versionAliases": map[string]any{"latest": "1"}}, "actor"), 400, "INVALID_ARGUMENT", `[latest] must follow pattern [a-zA-Z][a-Aa-Z0-9_-]+, be less than 64 characters and cannot be "latest" or "NEW"`)
 	updated := document(t, "alias", h.invoke(http.MethodPatch, secretPath+"?updateMask=versionAliases",
 		map[string]any{"versionAliases": map[string]any{"current": "1"}}, "actor"))
 	if !reflect.DeepEqual(updated["versionAliases"], map[string]any{"current": "1"}) {
@@ -529,9 +538,9 @@ func TestVersionAliases(t *testing.T) {
 		t.Fatalf("accessed = %v", accessed)
 	}
 	document(t, "get", h.invoke(http.MethodGet, secretPath+"/versions/current", nil, "actor"))
-	if code := h.invoke(http.MethodPost, secretPath+"/versions/current:disable", map[string]any{}, "actor").Code; code != 404 {
-		t.Fatalf("disable by alias = %d", code)
-	}
+	refused(t, "disable by alias", h.invoke(http.MethodPost, secretPath+"/versions/current:disable", map[string]any{}, "actor"),
+		400, "INVALID_ARGUMENT", "The provided Secret Version ID [projects/123456/secrets/"+testSecret+"/versions/current] "+
+			"does not match the expected format [projects/*/secrets/*/versions*]")
 }
 
 // TestUserManagedReplication: replicas are stored and reported in request
@@ -541,7 +550,7 @@ func TestUserManagedReplication(t *testing.T) {
 	managed := map[string]any{"userManaged": map[string]any{"replicas": []any{
 		map[string]any{"location": "us-east1"}, map[string]any{"location": "us-central1"}}}}
 	refused(t, "empty", h.createSecret(map[string]any{"replication": map[string]any{"userManaged": map[string]any{}}}),
-		400, "INVALID_ARGUMENT", "A user-managed replication policy requires at least one replica.")
+		400, "INVALID_ARGUMENT", "At least one location must be provided for a user_managed policy.")
 	created := document(t, "create", h.createSecret(map[string]any{"replication": managed}))
 	if !reflect.DeepEqual(created["replication"], managed) {
 		t.Fatalf("created = %v", created)
@@ -553,10 +562,11 @@ func TestUserManagedReplication(t *testing.T) {
 	}
 	document(t, "same", h.invoke(http.MethodPatch, secretPath+"?updateMask=replication", map[string]any{"replication": managed}, "actor"))
 	refused(t, "automatic", h.invoke(http.MethodPatch, secretPath+"?updateMask=replication", map[string]any{"replication": replicationAuto()}, "actor"),
-		400, "INVALID_ARGUMENT", "Existing secret has user managed replication, but requested secret does not. Updating secret replication is not supported.")
+		400, "INVALID_ARGUMENT", "Existing secret has user-managed replication, but requested secret does not. Updating secret replication is not supported.")
 	refused(t, "replicas", h.invoke(http.MethodPatch, secretPath+"?updateMask=replication", map[string]any{"replication": map[string]any{
 		"userManaged": map[string]any{"replicas": []any{map[string]any{"location": "us-east1"}}}}}, "actor"),
-		400, "INVALID_ARGUMENT", "Updating secret replication is not supported.")
+		400, "INVALID_ARGUMENT", "Adding or removing replicas from Secret user-managed replication is not supported. "+
+			"Number of replicas requested: [1], number of existing replicas: [2]")
 }
 
 // TestDelayedDestruction: with versionDestroyTtl, destroy disables the
@@ -565,7 +575,7 @@ func TestUserManagedReplication(t *testing.T) {
 func TestDelayedDestruction(t *testing.T) {
 	h := newLifecycleHarness(t, true)
 	refused(t, "short", h.createSecret(map[string]any{"replication": replicationAuto(), "versionDestroyTtl": "60s"}),
-		400, "INVALID_ARGUMENT", "The version destroy TTL must be between 1 day and 1000 days.")
+		400, "INVALID_ARGUMENT", "Version destroy TTL must be at least [24h].")
 	created := document(t, "create", h.createSecret(map[string]any{"replication": replicationAuto(), "versionDestroyTtl": "86400s",
 		"topics": []any{map[string]any{"name": testTopic}}}))
 	if created["versionDestroyTtl"] != "86400s" {
@@ -577,7 +587,7 @@ func TestDelayedDestruction(t *testing.T) {
 		t.Fatalf("scheduled = %v", scheduled)
 	}
 	refused(t, "again", h.invoke(http.MethodPost, secretPath+"/versions/1:destroy", map[string]any{}, "actor"),
-		400, "FAILED_PRECONDITION", "Version 1 of the secret is already scheduled for destruction")
+		400, "FAILED_PRECONDITION", "SecretVersion is already scheduled for DESTRUCTION.")
 	if enabled := document(t, "enable", h.invoke(http.MethodPost, secretPath+"/versions/1:enable", map[string]any{}, "actor")); enabled["scheduledDestroyTime"] != nil {
 		t.Fatalf("enabled = %v", enabled)
 	}
@@ -587,11 +597,11 @@ func TestDelayedDestruction(t *testing.T) {
 		version := document(t, "get", h.invoke(http.MethodGet, secretPath+"/versions/1", nil, "actor"))
 		return version["state"] == stateDestroyed && version["destroyTime"] != nil
 	})
-	kinds := make([]string, 0, 6)
-	for _, sent := range h.events(6) {
+	kinds := make([]string, 0, 7)
+	for _, sent := range h.events(7) {
 		kinds = append(kinds, sent.attributes["eventType"])
 	}
-	want := []string{eventCreate, eventVersionAdd, eventVersionScheduled, eventVersionEnable, eventVersionScheduled, eventVersionDestroy}
+	want := []string{eventConfigured, eventCreate, eventVersionAdd, eventVersionScheduled, eventVersionEnable, eventVersionScheduled, eventVersionDestroy}
 	if !slices.Equal(kinds, want) {
 		t.Fatalf("notifications = %v, want %v", kinds, want)
 	}

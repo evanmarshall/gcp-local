@@ -56,8 +56,8 @@ var (
 	// "update-replication", from automatic to user-managed.
 	errReplicationChange = status.Error(codes.InvalidArgument, "Existing secret has automatic replication, but requested secret does not. "+
 		"Updating secret replication is not supported.")
-	// The converse and a replica change are modeled on it, not recorded.
-	errUserManagedChange = status.Error(codes.InvalidArgument, "Existing secret has user managed replication, but requested secret does not. "+
+	// "replication-to-automatic"; a same-count replica change is modeled.
+	errUserManagedChange = status.Error(codes.InvalidArgument, "Existing secret has user-managed replication, but requested secret does not. "+
 		"Updating secret replication is not supported.")
 	errReplicasChange = status.Error(codes.InvalidArgument, "Updating secret replication is not supported.")
 	// "add-checksum-mismatch".
@@ -240,7 +240,7 @@ func versionOf(record *secretRecord, id string, aliases bool) *versionRecord {
 	if number, ok := record.Aliases[id]; ok && aliases {
 		return record.Versions[strconv.FormatInt(number, 10)]
 	}
-	if id != "latest" {
+	if id != versionLatest {
 		return record.Versions[id]
 	}
 	for _, version := range sortedVersions(record) {
@@ -249,6 +249,21 @@ func versionOf(record *secretRecord, id string, aliases bool) *versionRecord {
 		}
 	}
 	return nil
+}
+
+// stateVersion resolves the version a state change names: a number or
+// "latest". Any other id, an alias included, is refused by its format
+// (recorded: secretmanager-secret-policies "alias-disable").
+func (p *Provider) stateVersion(scope state.Scope, record *secretRecord, id string) (*versionRecord, error) {
+	if _, err := strconv.ParseUint(id, 10, 63); err != nil && id != versionLatest {
+		return nil, status.Errorf(codes.InvalidArgument, "The provided Secret Version ID [%s] does not match the expected format "+
+			"[projects/*/secrets/*/versions*]", versionWireName(p.wireProject(scope.Project), record.Name, id))
+	}
+	version := versionOf(record, id, false)
+	if version == nil {
+		return nil, provider.NotFound("versions", id)
+	}
+	return version, nil
 }
 
 // sortedVersions returns the secret's versions newest-first (recorded
@@ -312,7 +327,8 @@ func (p *Provider) create(call gateway.Call, request *gateway.RESTRequest, scope
 	p.launch(scope, record)
 	project := p.wireProject(scope.Project)
 	document := secretDocument(project, record)
-	s.notify(project, record, eventCreate, document, "")
+	s.configured(record.Topics)
+	s.notify(project, record, eventCreate, document, "", now)
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
@@ -421,12 +437,13 @@ func (p *Provider) update(call gateway.Call, request *gateway.RESTRequest, scope
 	if fields[fieldAnnotations] {
 		record.Annotations = maps.Clone(body.GetAnnotations())
 	}
+	s.configured(slices.DeleteFunc(slices.Clone(settings.Topics), func(topic string) bool { return slices.Contains(record.Topics, topic) }))
 	record.policies = settings
 	record.Revision++
 	p.launch(scope, record)
 	project := p.wireProject(scope.Project)
 	document := secretDocument(project, record)
-	s.notify(project, record, eventUpdate, document, "")
+	s.notify(project, record, eventUpdate, document, "", now)
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
@@ -454,6 +471,10 @@ func replicationChange(stored []string, requested *secretmanagerpb.Replication, 
 		return errReplicationChange
 	case stored != nil && requested.GetUserManaged() == nil:
 		return errUserManagedChange
+	case len(stored) != len(replicas):
+		// Recorded "replication-fewer-replicas".
+		return status.Errorf(codes.InvalidArgument, "Adding or removing replicas from Secret user-managed replication is not supported. "+
+			"Number of replicas requested: [%d], number of existing replicas: [%d]", len(replicas), len(stored))
 	case !slices.Equal(stored, replicas):
 		return errReplicasChange
 	}
@@ -506,7 +527,7 @@ func (p *Provider) delete(request *gateway.RESTRequest, scope state.Scope, s *sc
 		return nil, fmt.Errorf("unindex the secret: %w", err)
 	}
 	p.stop(scope, record.Name)
-	s.deleted(p.wireProject(scope.Project), record, "REQUESTED")
+	s.deleted(p.wireProject(scope.Project), record, "REQUESTED", p.clock())
 	delete(s.secrets, record.Name)
 	return &gateway.RESTResponse{JSON: map[string]any{}}, nil
 }
@@ -559,7 +580,7 @@ func (p *Provider) addVersion(request *gateway.RESTRequest, scope state.Scope, s
 func (p *Provider) versionChanged(scope state.Scope, s *scopeState, record *secretRecord, version *versionRecord, kind string) (*gateway.RESTResponse, error) {
 	project := p.wireProject(scope.Project)
 	document := versionDocument(project, record, version)
-	s.notify(project, record, kind, document, version.Number)
+	s.notify(project, record, kind, document, version.Number, p.clock())
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
@@ -605,9 +626,9 @@ func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scop
 	if err := provider.DecodeProto(request.JSON, "", &body, gap); err != nil {
 		return nil, err
 	}
-	version := versionOf(record, request.Path["version"], false)
-	if version == nil {
-		return nil, provider.NotFound("versions", request.Path["version"])
+	version, err := p.stateVersion(scope, record, request.Path["version"])
+	if err != nil {
+		return nil, err
 	}
 	if err := checkETag(body.GetEtag(), etag(version.CreatedAt, version.Revision)); err != nil {
 		return nil, err
@@ -618,7 +639,8 @@ func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scop
 	version.Revision++
 	if record.DestroyTTL > 0 {
 		if !version.ScheduledDestroy.IsZero() {
-			return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is already scheduled for destruction", version.Number)
+			// Recorded "destroy-scheduled-again".
+			return nil, status.Error(codes.FailedPrecondition, "SecretVersion is already scheduled for DESTRUCTION.")
 		}
 		version.State, version.ScheduledDestroy = stateDisabled, p.clock().Add(record.DestroyTTL)
 		p.launch(scope, record)
@@ -646,9 +668,9 @@ func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Sco
 	if err := provider.DecodeProto(request.JSON, "", body, gap); err != nil {
 		return nil, err
 	}
-	version := versionOf(record, request.Path["version"], false)
-	if version == nil {
-		return nil, provider.NotFound("versions", request.Path["version"])
+	version, err := p.stateVersion(scope, record, request.Path["version"])
+	if err != nil {
+		return nil, err
 	}
 	if err := checkETag(body.GetEtag(), etag(version.CreatedAt, version.Revision)); err != nil {
 		return nil, err
