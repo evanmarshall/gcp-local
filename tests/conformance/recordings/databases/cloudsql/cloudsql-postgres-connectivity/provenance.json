@@ -1,0 +1,49 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-13T20:28:11.642915+00:00",
+  "scenario": {
+    "id": "cloudsql-postgres-connectivity",
+    "service": "cloudsql",
+    "transport": "rest-v1beta4",
+    "revision": "f8a0675b216ceeb4598d570dfe2b8556e0e0517c718547a1f548355f86a4fa33",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "6d0892224d5f61f5121666fca77800d9615a88ba0fd18ca8a2f47514150d13f7",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/databases/cloudsql_depth.py": "8c8bd3fdb19a6b2507c56b4ef47a09ffcabe90581143cda3d92c27ea5a6c2b67",
+      "gcp_validation/services/databases/cloudsql.py": "d422305d14ffd42e7e4bfd5622c34712ec1626d47c7e779ef9d5dd97558633b5",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/databases/cloudsql/connectivity/conftest.py": "fb6fb506b9129246da70b522f4b2c439bdccaa8a0e233cae2c017cd13abb3c92"
+    },
+    "scope": {
+      "services": [
+        "cloudsql"
+      ],
+      "location": "global",
+      "limits": {
+        "max_instances": 1,
+        "max_ssl_certs": 1,
+        "max_run_seconds": 4500
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

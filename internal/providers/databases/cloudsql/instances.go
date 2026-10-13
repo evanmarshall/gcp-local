@@ -73,7 +73,7 @@ type backupBody struct {
 	BinaryLogEnabled            *bool   `json:"binaryLogEnabled"`
 	TransactionLogRetentionDays *int    `json:"transactionLogRetentionDays"`
 	// ReplicationLogArchivingEnabled is reported with PostgreSQL point-in-time
-	// recovery (observed live) and accepted only as that.
+	// recovery (recorded) and accepted only as that.
 	ReplicationLogArchivingEnabled *bool          `json:"replicationLogArchivingEnabled"`
 	BackupRetentionSettings        *retentionBody `json:"backupRetentionSettings"`
 }
@@ -85,7 +85,7 @@ type retentionBody struct {
 }
 
 // ipBody is the IP configuration subset the provider models. Patch merges
-// the named fields and replaces authorizedNetworks whole (observed live).
+// the named fields and replaces authorizedNetworks whole (recorded).
 type ipBody struct {
 	IPv4Enabled                   *bool       `json:"ipv4Enabled"`
 	PrivateNetwork                *string     `json:"privateNetwork"`
@@ -171,7 +171,7 @@ func decodeInstance(raw []byte, project string) (instanceBody, error) {
 }
 
 // settingsEnums are the modeled values of the plain settings enums, with the
-// transcoder's field path and enum type for an unknown value (observed live
+// transcoder's field path and enum type for an unknown value (recorded
 // shape: cloudsql-postgres-connectivity). Every other documented value is a gap.
 var settingsEnums = []struct {
 	field, path, enum string
@@ -283,7 +283,7 @@ func (p *Provider) record(body instanceBody) (instanceRecord, error) {
 		}
 		record.PrivateNetwork = deref(ip.PrivateNetwork)
 	}
-	if err := applySettings(&record, body.Settings, p.clock()); err != nil {
+	if err := applySettings(&record, body.Settings); err != nil {
 		return instanceRecord{}, err
 	}
 	if !record.IPv4 && record.PrivateNetwork == "" {
@@ -295,8 +295,8 @@ func (p *Provider) record(body instanceBody) (instanceRecord, error) {
 // applySettings validates settings against record and applies them, as an
 // insert does over the defaults and a patch over the stored instance.
 // Named fields replace stored ones; databaseFlags and authorizedNetworks
-// replace the whole list (observed live).
-func applySettings(record *instanceRecord, settings *settingsBody, now time.Time) error {
+// replace the whole list (recorded).
+func applySettings(record *instanceRecord, settings *settingsBody) error {
 	if settings == nil {
 		return nil
 	}
@@ -304,7 +304,7 @@ func applySettings(record *instanceRecord, settings *settingsBody, now time.Time
 	if err := checkEdition(*record); err != nil {
 		return err
 	}
-	if err := applyIP(record, settings.IPConfiguration, now); err != nil {
+	if err := applyIP(record, settings.IPConfiguration); err != nil {
 		return err
 	}
 	if err := applyBackup(record, settings.BackupConfiguration); err != nil {
@@ -339,7 +339,7 @@ func applyScalars(record *instanceRecord, settings *settingsBody) {
 	}
 }
 
-// checkEdition refuses an Enterprise Plus instance without a performance-optimized tier (observed live).
+// checkEdition refuses an Enterprise Plus instance without a performance-optimized tier (recorded).
 func checkEdition(record instanceRecord) error {
 	if record.Edition != "ENTERPRISE_PLUS" || strings.HasPrefix(record.Tier, "db-perf-optimized-N-") {
 		return nil
@@ -355,15 +355,18 @@ func checkEdition(record instanceRecord) error {
 // applyIP applies settings.ipConfiguration: the TLS mode, the legacy
 // requireSsl, and authorized networks. The CA mode and certificate rotation
 // accept only the served values.
-func applyIP(record *instanceRecord, ip *ipBody, now time.Time) error {
+func applyIP(record *instanceRecord, ip *ipBody) error {
 	if ip == nil {
 		return nil
 	}
 	if err := checkCAModes(ip); err != nil {
 		return err
 	}
+	if err := checkSSLPair(ip, record.Version); err != nil {
+		return err
+	}
 	if ip.AuthorizedNetworks != nil {
-		networks, err := checkNetworks(*ip.AuthorizedNetworks, now)
+		networks, err := checkNetworks(*ip.AuthorizedNetworks, record.Networks)
 		if err != nil {
 			return err
 		}
@@ -382,6 +385,22 @@ func checkCAModes(ip *ipBody) error {
 		return gap("settings.ipConfiguration.serverCertificateRotationMode " + mode)
 	}
 	return nil
+}
+
+// checkSSLPair refuses an sslMode and requireSsl named together that
+// disagree (recorded: cloudsql-postgres-connectivity).
+func checkSSLPair(ip *ipBody, version string) error {
+	mode := deref(ip.SSLMode)
+	if ip.RequireSSL == nil || mode == "" || mode == sslUnspecified || *ip.RequireSSL == (mode == sslTrustedCerts) {
+		return nil
+	}
+	engine := "Postgres"
+	if isMySQL(version) {
+		engine = "MySQL"
+	}
+	return invalid(fmt.Sprintf("Invalid request: For a %s instance, sslMode value %s and requireSsl value %t are conflicting. "+
+		"When sslMode=ENCRYPTED_ONLY, requireSsl must be false. When requireSsl=true, sslMode must be TRUSTED_CLIENT_CERTIFICATE_REQUIRED. "+
+		"It's recommended that you only set sslMode.", engine, mode, *ip.RequireSSL))
 }
 
 // applySSL applies sslMode and the legacy requireSsl; sslMode wins (Cloud
@@ -431,8 +450,8 @@ func (a aclEntry) admits(address netip.Addr, now time.Time) bool {
 }
 
 // checkNetworks parses authorized networks: an IPv4 CIDR with no host bits
-// set, or one address. Anything else is GCP's refusal (observed live).
-func checkNetworks(entries []aclEntry, _ time.Time) ([]aclEntry, error) {
+// set, or one address. Anything else is GCP's refusal (recorded).
+func checkNetworks(entries []aclEntry, current []aclEntry) ([]aclEntry, error) {
 	parsed := make([]aclEntry, 0, len(entries))
 	for _, entry := range entries {
 		refused := invalid("Invalid request: Network (" + entry.Value + ")..")
@@ -458,12 +477,26 @@ func checkNetworks(entries []aclEntry, _ time.Time) ([]aclEntry, error) {
 		entry.Kind = ""
 		parsed = append(parsed, entry)
 	}
-	// Observed live: GCP returns the entries ordered by value.
-	slices.SortStableFunc(parsed, func(a, b aclEntry) int { return strings.Compare(a.Value, b.Value) })
-	return parsed, nil
+	return reorder(parsed, current), nil
 }
 
-// errFlagName is GCP's refusal of a flag it doesn't support (observed live:
+// reorder puts entries the instance didn't have first, in request order,
+// then the ones it kept, in their stored order (recorded:
+// cloudsql-postgres-connectivity).
+func reorder(entries, current []aclEntry) []aclEntry {
+	kept := func(entry aclEntry) bool {
+		return slices.ContainsFunc(current, func(c aclEntry) bool { return c.Value == entry.Value })
+	}
+	ordered := slices.DeleteFunc(slices.Clone(entries), kept)
+	for _, previous := range current {
+		if index := slices.IndexFunc(entries, func(e aclEntry) bool { return e.Value == previous.Value }); index >= 0 {
+			ordered = append(ordered, entries[index])
+		}
+	}
+	return ordered
+}
+
+// errFlagName is GCP's refusal of a flag it doesn't support (recorded:
 // cloudsql-mysql-backups-flags), a 404.
 var errFlagName = failure{code: http.StatusNotFound, reason: "invalidFlagName", domain: domainGlobal,
 	message: "The requested flag is either misspelled or unsupported by Cloud SQL."}
@@ -475,7 +508,7 @@ func checkFlags(version string, flags []flagBody) ([]server.Flag, error) {
 	for _, flag := range flags {
 		candidate := server.Flag{Name: flag.Name, Value: flag.Value}
 		if slices.ContainsFunc(checked, func(f server.Flag) bool { return f.Name == flag.Name }) {
-			return nil, invalid("Invalid request: Duplicate flag (" + flag.Name + ").")
+			return nil, invalid("Invalid request: Duplicate flags.")
 		}
 		check, reason := server.CheckFlag(version, candidate)
 		switch check {
@@ -667,7 +700,7 @@ func (p *Provider) patched(record instanceRecord, body instanceBody, replace boo
 			updated.Networks = nil
 		}
 	}
-	if err := applySettings(&updated, settings, p.clock()); err != nil {
+	if err := applySettings(&updated, settings); err != nil {
 		return instanceRecord{}, err
 	}
 	updated.SettingsVersion++

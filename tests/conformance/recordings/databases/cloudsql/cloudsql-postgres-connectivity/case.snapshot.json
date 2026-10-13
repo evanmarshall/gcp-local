@@ -1,0 +1,1172 @@
+{
+  "cloudsql-postgres-connectivity": {
+    "recorded-date": "13-10-2026, 20:28:11",
+    "recorded-content": {
+      "instance-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "CREATE",
+        "status": "DONE"
+      },
+      "instance-read": {
+        "availabilityType": "REGIONAL",
+        "backupConfiguration": {
+          "backupRetentionSettings": {
+            "retainedBackups": 7,
+            "retentionUnit": "COUNT"
+          },
+          "backupTier": "STANDARD",
+          "enabled": false,
+          "kind": "sql#backupConfiguration",
+          "startTime": "<assigned>",
+          "transactionLogRetentionDays": 7,
+          "transactionalLogStorageState": "TRANSACTIONAL_LOG_STORAGE_STATE_UNSPECIFIED"
+        },
+        "databaseFlags": [
+          {
+            "name": "max_connections",
+            "value": "60"
+          },
+          {
+            "name": "log_min_duration_statement",
+            "value": "250"
+          }
+        ],
+        "edition": "ENTERPRISE",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "failoverReplica",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "secondaryGceZone",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "ipConfiguration": {
+          "authorizedNetworks": [
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-docs",
+              "value": "203.0.113.0/24"
+            }
+          ],
+          "ipv4Enabled": true,
+          "requireSsl": false,
+          "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED",
+          "sslMode": "ENCRYPTED_ONLY"
+        },
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "settings_fields": [
+          "activationPolicy",
+          "authorizedGaeApplications",
+          "availabilityType",
+          "backupConfiguration",
+          "connectorEnforcement",
+          "dataDiskSizeGb",
+          "dataDiskType",
+          "databaseFlags",
+          "deletionProtectionEnabled",
+          "edition",
+          "enableDataplexIntegration",
+          "ipConfiguration",
+          "kind",
+          "locationPreference",
+          "pricingPlan",
+          "replicationLagMaxSeconds",
+          "replicationType",
+          "settingsVersion",
+          "storageAutoResize",
+          "storageAutoResizeLimit",
+          "tier",
+          "userLabels"
+        ],
+        "state": "RUNNABLE",
+        "tier": "db-custom-1-3840"
+      },
+      "invalid-edition-tier": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: Invalid Tier (db-f1-micro) for (ENTERPRISE_PLUS) Edition. Use a predefined Tier like db-perf-optimized-N-* instead. Learn more at https://cloud.google.com/sql/docs/postgres/create-instance#machine-types.",
+        "status": null
+      },
+      "invalid-availability": {
+        "code": 400,
+        "details": [
+          "type.googleapis.com/google.rpc.BadRequest"
+        ],
+        "errors": [
+          [
+            null,
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'body.settings.availability_type' (type.googleapis.com/google.cloud.sql.v1beta4.SqlAvailabilityType), \"BOGUS\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "invalid-ssl-mode": {
+        "code": 400,
+        "details": [
+          "type.googleapis.com/google.rpc.BadRequest"
+        ],
+        "errors": [
+          [
+            null,
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'body.settings.ip_configuration.ssl_mode' (type.googleapis.com/google.cloud.sql.v1beta4.IpConfiguration.SslMode), \"BOGUS\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "invalid-network": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: Network (not-a-cidr)..",
+        "status": null
+      },
+      "invalid-network-host-bits": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: Network (203.0.113.7/24)..",
+        "status": null
+      },
+      "patch-unknown-flag": {
+        "code": 404,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalidFlagName"
+          ]
+        ],
+        "http_status": 404,
+        "message": "The requested flag is either misspelled or unsupported by Cloud SQL.",
+        "status": null
+      },
+      "patch-flag-value": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalidFlagValue"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Value requested is not valid. Failed to set max_connections: 1 is not between 14 and 262143.",
+        "status": null
+      },
+      "patch-flag-type": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalidFlagValue"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Value requested is not valid. Failed to set log_min_duration_statement: soon is not a number.",
+        "status": null
+      },
+      "patch-flag-duplicate": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: Duplicate flags.",
+        "status": null
+      },
+      "patch-ssl-pair": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: For a Postgres instance, sslMode value ENCRYPTED_ONLY and requireSsl value true are conflicting. When sslMode=ENCRYPTED_ONLY, requireSsl must be false. When requireSsl=true, sslMode must be TRUSTED_CLIENT_CERTIFICATE_REQUIRED. It's recommended that you only set sslMode.",
+        "status": null
+      },
+      "connect-settings": {
+        "backendType": "SECOND_GEN",
+        "databaseVersion": "POSTGRES_16",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "databaseVersion",
+          "ipAddresses",
+          "kind",
+          "region",
+          "serverCaCert",
+          "serverCaMode"
+        ],
+        "http_status": 200,
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "kind": "sql#connectSettings",
+        "region": "us-central1",
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA"
+      },
+      "require-ssl-patch-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "UPDATE",
+        "status": "DONE"
+      },
+      "require-ssl-patched-read": {
+        "availabilityType": "REGIONAL",
+        "backupConfiguration": {
+          "backupRetentionSettings": {
+            "retainedBackups": 7,
+            "retentionUnit": "COUNT"
+          },
+          "backupTier": "STANDARD",
+          "enabled": false,
+          "kind": "sql#backupConfiguration",
+          "startTime": "<assigned>",
+          "transactionLogRetentionDays": 7,
+          "transactionalLogStorageState": "TRANSACTIONAL_LOG_STORAGE_STATE_UNSPECIFIED"
+        },
+        "databaseFlags": [
+          {
+            "name": "max_connections",
+            "value": "60"
+          },
+          {
+            "name": "log_min_duration_statement",
+            "value": "250"
+          }
+        ],
+        "edition": "ENTERPRISE",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "failoverReplica",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "secondaryGceZone",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "ipConfiguration": {
+          "authorizedNetworks": [
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-docs",
+              "value": "203.0.113.0/24"
+            }
+          ],
+          "ipv4Enabled": true,
+          "requireSsl": true,
+          "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED",
+          "sslMode": "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+        },
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "settings_fields": [
+          "activationPolicy",
+          "authorizedGaeApplications",
+          "availabilityType",
+          "backupConfiguration",
+          "connectorEnforcement",
+          "dataDiskSizeGb",
+          "dataDiskType",
+          "databaseFlags",
+          "deletionProtectionEnabled",
+          "edition",
+          "enableDataplexIntegration",
+          "ipConfiguration",
+          "kind",
+          "locationPreference",
+          "pricingPlan",
+          "replicationLagMaxSeconds",
+          "replicationType",
+          "settingsVersion",
+          "storageAutoResize",
+          "storageAutoResizeLimit",
+          "tier",
+          "userLabels"
+        ],
+        "state": "RUNNABLE",
+        "tier": "db-custom-1-3840"
+      },
+      "allow-ssl-patch-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "UPDATE",
+        "status": "DONE"
+      },
+      "allow-ssl-patched-read": {
+        "availabilityType": "REGIONAL",
+        "backupConfiguration": {
+          "backupRetentionSettings": {
+            "retainedBackups": 7,
+            "retentionUnit": "COUNT"
+          },
+          "backupTier": "STANDARD",
+          "enabled": false,
+          "kind": "sql#backupConfiguration",
+          "startTime": "<assigned>",
+          "transactionLogRetentionDays": 7,
+          "transactionalLogStorageState": "TRANSACTIONAL_LOG_STORAGE_STATE_UNSPECIFIED"
+        },
+        "databaseFlags": [
+          {
+            "name": "max_connections",
+            "value": "60"
+          },
+          {
+            "name": "log_min_duration_statement",
+            "value": "250"
+          }
+        ],
+        "edition": "ENTERPRISE",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "failoverReplica",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "secondaryGceZone",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "ipConfiguration": {
+          "authorizedNetworks": [
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-docs",
+              "value": "203.0.113.0/24"
+            }
+          ],
+          "ipv4Enabled": true,
+          "requireSsl": false,
+          "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED",
+          "sslMode": "ALLOW_UNENCRYPTED_AND_ENCRYPTED"
+        },
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "settings_fields": [
+          "activationPolicy",
+          "authorizedGaeApplications",
+          "availabilityType",
+          "backupConfiguration",
+          "connectorEnforcement",
+          "dataDiskSizeGb",
+          "dataDiskType",
+          "databaseFlags",
+          "deletionProtectionEnabled",
+          "edition",
+          "enableDataplexIntegration",
+          "ipConfiguration",
+          "kind",
+          "locationPreference",
+          "pricingPlan",
+          "replicationLagMaxSeconds",
+          "replicationType",
+          "settingsVersion",
+          "storageAutoResize",
+          "storageAutoResizeLimit",
+          "tier",
+          "userLabels"
+        ],
+        "state": "RUNNABLE",
+        "tier": "db-custom-1-3840"
+      },
+      "ssl-patch-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "UPDATE",
+        "status": "DONE"
+      },
+      "ssl-patched-read": {
+        "availabilityType": "REGIONAL",
+        "backupConfiguration": {
+          "backupRetentionSettings": {
+            "retainedBackups": 7,
+            "retentionUnit": "COUNT"
+          },
+          "backupTier": "STANDARD",
+          "enabled": false,
+          "kind": "sql#backupConfiguration",
+          "startTime": "<assigned>",
+          "transactionLogRetentionDays": 7,
+          "transactionalLogStorageState": "TRANSACTIONAL_LOG_STORAGE_STATE_UNSPECIFIED"
+        },
+        "databaseFlags": [
+          {
+            "name": "max_connections",
+            "value": "60"
+          },
+          {
+            "name": "log_min_duration_statement",
+            "value": "250"
+          }
+        ],
+        "edition": "ENTERPRISE",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "failoverReplica",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "secondaryGceZone",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "ipConfiguration": {
+          "authorizedNetworks": [
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-docs",
+              "value": "203.0.113.0/24"
+            }
+          ],
+          "ipv4Enabled": true,
+          "requireSsl": true,
+          "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED",
+          "sslMode": "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+        },
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "settings_fields": [
+          "activationPolicy",
+          "authorizedGaeApplications",
+          "availabilityType",
+          "backupConfiguration",
+          "connectorEnforcement",
+          "dataDiskSizeGb",
+          "dataDiskType",
+          "databaseFlags",
+          "deletionProtectionEnabled",
+          "edition",
+          "enableDataplexIntegration",
+          "ipConfiguration",
+          "kind",
+          "locationPreference",
+          "pricingPlan",
+          "replicationLagMaxSeconds",
+          "replicationType",
+          "settingsVersion",
+          "storageAutoResize",
+          "storageAutoResizeLimit",
+          "tier",
+          "userLabels"
+        ],
+        "state": "RUNNABLE",
+        "tier": "db-custom-1-3840"
+      },
+      "network-patch-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "UPDATE",
+        "status": "DONE"
+      },
+      "network-patched-read": {
+        "availabilityType": "REGIONAL",
+        "backupConfiguration": {
+          "backupRetentionSettings": {
+            "retainedBackups": 7,
+            "retentionUnit": "COUNT"
+          },
+          "backupTier": "STANDARD",
+          "enabled": false,
+          "kind": "sql#backupConfiguration",
+          "startTime": "<assigned>",
+          "transactionLogRetentionDays": 7,
+          "transactionalLogStorageState": "TRANSACTIONAL_LOG_STORAGE_STATE_UNSPECIFIED"
+        },
+        "databaseFlags": [
+          {
+            "name": "max_connections",
+            "value": "60"
+          },
+          {
+            "name": "log_min_duration_statement",
+            "value": "250"
+          }
+        ],
+        "edition": "ENTERPRISE",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "failoverReplica",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "secondaryGceZone",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "ipConfiguration": {
+          "authorizedNetworks": [
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-host",
+              "value": "198.51.100.17/32"
+            },
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-test",
+              "value": "192.0.2.0/28"
+            },
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-docs",
+              "value": "203.0.113.0/24"
+            }
+          ],
+          "ipv4Enabled": true,
+          "requireSsl": true,
+          "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED",
+          "sslMode": "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+        },
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "settings_fields": [
+          "activationPolicy",
+          "authorizedGaeApplications",
+          "availabilityType",
+          "backupConfiguration",
+          "connectorEnforcement",
+          "dataDiskSizeGb",
+          "dataDiskType",
+          "databaseFlags",
+          "deletionProtectionEnabled",
+          "edition",
+          "enableDataplexIntegration",
+          "ipConfiguration",
+          "kind",
+          "locationPreference",
+          "pricingPlan",
+          "replicationLagMaxSeconds",
+          "replicationType",
+          "settingsVersion",
+          "storageAutoResize",
+          "storageAutoResizeLimit",
+          "tier",
+          "userLabels"
+        ],
+        "state": "RUNNABLE",
+        "tier": "db-custom-1-3840"
+      },
+      "ssl-cert-insert": {
+        "certInfo": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "selfLink",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "client_fields": [
+          "certInfo",
+          "certPrivateKey"
+        ],
+        "commonName": "gl-client",
+        "fields": [
+          "clientCert",
+          "kind",
+          "operation",
+          "serverCaCert"
+        ],
+        "http_status": 200,
+        "instance": "<instance>",
+        "key_label": "RSA PRIVATE KEY",
+        "kind": "sql#sslCertsInsert",
+        "operation": {
+          "error": false,
+          "fields": [
+            "endTime",
+            "insertTime",
+            "kind",
+            "name",
+            "operationType",
+            "selfLink",
+            "startTime",
+            "status",
+            "targetId",
+            "targetLink",
+            "targetProject",
+            "user"
+          ],
+          "http_status": 200,
+          "kind": "sql#operation",
+          "operationType": "UPDATE",
+          "status": "DONE"
+        },
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "selfLink",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        }
+      },
+      "ssl-certs-list": {
+        "fields": [
+          "items",
+          "kind"
+        ],
+        "http_status": 200,
+        "items": [
+          {
+            "commonName": "gl-client",
+            "fields": [
+              "cert",
+              "certSerialNumber",
+              "commonName",
+              "createTime",
+              "expirationTime",
+              "instance",
+              "kind",
+              "selfLink",
+              "sha1Fingerprint"
+            ],
+            "kind": "sql#sslCert",
+            "pem": true
+          }
+        ],
+        "kind": "sql#sslCertsList"
+      },
+      "ssl-cert-read": {
+        "commonName": "gl-client",
+        "fields": [
+          "cert",
+          "certSerialNumber",
+          "commonName",
+          "createTime",
+          "expirationTime",
+          "instance",
+          "kind",
+          "selfLink",
+          "sha1Fingerprint"
+        ],
+        "http_status": 200,
+        "kind": "sql#sslCert",
+        "pem": true
+      },
+      "ssl-cert-duplicate": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: Common name already exists: gl-client.",
+        "status": null
+      },
+      "ssl-cert-deleted": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "UPDATE",
+        "status": "DONE"
+      },
+      "ssl-cert-after-delete": {
+        "code": 404,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "sslCertificateDoesNotExist"
+          ]
+        ],
+        "http_status": 404,
+        "message": "The SSL certificate does not exist.",
+        "status": null
+      },
+      "flags-patch-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "UPDATE",
+        "status": "DONE"
+      },
+      "flags-patched-read": {
+        "availabilityType": "REGIONAL",
+        "backupConfiguration": {
+          "backupRetentionSettings": {
+            "retainedBackups": 7,
+            "retentionUnit": "COUNT"
+          },
+          "backupTier": "STANDARD",
+          "enabled": false,
+          "kind": "sql#backupConfiguration",
+          "startTime": "<assigned>",
+          "transactionLogRetentionDays": 7,
+          "transactionalLogStorageState": "TRANSACTIONAL_LOG_STORAGE_STATE_UNSPECIFIED"
+        },
+        "databaseFlags": [
+          {
+            "name": "log_min_duration_statement",
+            "value": "500"
+          }
+        ],
+        "edition": "ENTERPRISE",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "failoverReplica",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "secondaryGceZone",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "ipConfiguration": {
+          "authorizedNetworks": [
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-host",
+              "value": "198.51.100.17/32"
+            },
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-test",
+              "value": "192.0.2.0/28"
+            },
+            {
+              "kind": "sql#aclEntry",
+              "name": "gl-docs",
+              "value": "203.0.113.0/24"
+            }
+          ],
+          "ipv4Enabled": true,
+          "requireSsl": true,
+          "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED",
+          "sslMode": "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+        },
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "settings_fields": [
+          "activationPolicy",
+          "authorizedGaeApplications",
+          "availabilityType",
+          "backupConfiguration",
+          "connectorEnforcement",
+          "dataDiskSizeGb",
+          "dataDiskType",
+          "databaseFlags",
+          "deletionProtectionEnabled",
+          "edition",
+          "enableDataplexIntegration",
+          "ipConfiguration",
+          "kind",
+          "locationPreference",
+          "pricingPlan",
+          "replicationLagMaxSeconds",
+          "replicationType",
+          "settingsVersion",
+          "storageAutoResize",
+          "storageAutoResizeLimit",
+          "tier",
+          "userLabels"
+        ],
+        "state": "RUNNABLE",
+        "tier": "db-custom-1-3840"
+      },
+      "instance-deleted": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "DELETE",
+        "status": "DONE"
+      },
+      "cleanup": {
+        "instances_absent": true
+      }
+    }
+  }
+}

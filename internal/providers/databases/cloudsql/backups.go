@@ -25,7 +25,7 @@ type backupConfig struct {
 	LogDays, Retained        int
 }
 
-// Backup configuration defaults (observed live: an instance created without one).
+// Backup configuration defaults (recorded: an instance created without one).
 const (
 	defaultLogDays  = 7
 	defaultRetained = 7
@@ -51,12 +51,12 @@ func (b backupConfig) wire(mysql bool) map[string]any {
 		value["pointInTimeRecoveryEnabled"] = true
 	}
 	if b.PITR && !mysql {
-		// Observed live (cloudsql-postgres-backups): PostgreSQL point-in-time
+		// Recorded (cloudsql-postgres-backups): PostgreSQL point-in-time
 		// recovery archives its logs to Cloud Storage.
 		value["replicationLogArchivingEnabled"], value["transactionalLogStorageState"] = true, "CLOUD_STORAGE"
 	}
 	if b.BinaryLog {
-		// Observed live: MySQL binary logs are stored in Cloud Storage.
+		// Recorded: MySQL binary logs are stored in Cloud Storage.
 		value["binaryLogEnabled"], value["transactionalLogStorageState"] = true, "CLOUD_STORAGE"
 	}
 	return value
@@ -118,7 +118,9 @@ func applyRetention(b *backupConfig, body *retentionBody) error {
 		return enumInvalid("body.settings.backup_configuration.backup_retention_settings.retention_unit",
 			"BackupRetentionSettings.RetentionUnit", unit)
 	}
-	if body.RetainedBackups != nil {
+	// Recorded (cloudsql-postgres-backups): GCP accepts 0, the unset value;
+	// it leaves the count as it was.
+	if body.RetainedBackups != nil && *body.RetainedBackups != 0 {
 		b.Retained = *body.RetainedBackups
 	}
 	return nil
@@ -126,7 +128,7 @@ func applyRetention(b *backupConfig, body *retentionBody) error {
 
 // check validates a backup configuration.
 func (b backupConfig) check(mysql bool) error {
-	// Observed live (cloudsql-postgres-backups): the start time and binary logging
+	// Recorded (cloudsql-postgres-backups): the start time and binary logging
 	// are checked before the instance exists.
 	switch {
 	case !startTimePattern.MatchString(b.StartTime):
@@ -141,14 +143,14 @@ func (b backupConfig) check(mysql bool) error {
 func (b backupConfig) checkRetention() error {
 	switch {
 	case b.LogDays < 1 || b.LogDays > 7:
-		return invalid("Invalid request: Invalid transaction log retention days (" + strconv.Itoa(b.LogDays) + ").")
-	case b.Retained < 1 || b.Retained > 365:
+		return invalid("Invalid request: The number of transaction log retention days must be between 1 and 7.")
+	case b.Retained > 365:
 		return invalid("Invalid request: Invalid retained backups (" + strconv.Itoa(b.Retained) + ").")
 	case b.BinaryLog && !b.Enabled:
-		// Observed live (cloudsql-mysql-backups-flags), before the instance exists.
+		// Recorded (cloudsql-mysql-backups-flags), before the instance exists.
 		return invalid("Invalid request: Binary log must be disabled when backup is disabled or the instance must be a replica instance with a MySQL 5.7 or above version.")
 	case b.PITR && !b.Enabled:
-		return invalid("Invalid request: Point in time recovery requires backups to be enabled.")
+		return invalid("Invalid request: Point in time recovery must be disabled when backup is disabled.")
 	}
 	return nil
 }
@@ -168,7 +170,7 @@ func (b backupRun) wire(project, instance string) map[string]any {
 		keyType: b.Type, "backupKind": "SNAPSHOT", keyDatabaseVersion: b.Version, "enqueuedTime": rfc3339(b.Enqueued),
 		"windowStartTime": rfc3339(cmp.Or(b.Window, b.Enqueued)), keySelfLink: instanceLink(project, instance) + "/backupRuns/" + b.ID}
 	if b.Deleted {
-		// Observed live: a deleted run stays readable without its run times.
+		// Recorded: a deleted run stays readable without its run times.
 		value[keyStatus] = "DELETED"
 	} else {
 		value[keyStartTime], value["endTime"] = rfc3339(b.Enqueued), rfc3339(b.Ended)
@@ -198,7 +200,7 @@ var backupRunFields = provider.Fields{
 	IgnoreUnknown: true,
 }
 
-// Refusals observed live (cloudsql-postgres-backups).
+// Recorded refusals (cloudsql-postgres-backups).
 var (
 	errBackupRunMissing = failure{code: http.StatusNotFound, reason: "backupRunDoesNotExist", domain: domainGlobal,
 		message: "The backup run does not exist."}
@@ -303,7 +305,7 @@ func (p *Provider) getBackupRun(_ gateway.Call, request *gateway.RESTRequest, pr
 		if run.ID == request.Path["id"] {
 			value := run.wire(project, name)
 			if !run.Deleted {
-				// Observed live: get, not list, reports the chargeable size; a stand-in.
+				// Recorded: get, not list, reports the chargeable size; a stand-in.
 				value["maxChargeableBytes"] = "0"
 			}
 			return &gateway.RESTResponse{JSON: value}, nil
@@ -338,7 +340,7 @@ func (p *Provider) deleteBackupRun(call gateway.Call, request *gateway.RESTReque
 	if err != nil {
 		return nil, err
 	}
-	return p.completeBackup(call, project, "DELETE_BACKUP", name, id, started)
+	return p.complete(call, project, "DELETE_BACKUP", name, started) // recorded: no backupContext
 }
 
 // restoreRun restores one backup run of source over target.
@@ -506,7 +508,7 @@ func retain(runs []backupRun, retained int) ([]backupRun, []string) {
 }
 
 // multiRegion is the default backup location of a region: its multi-region
-// (observed live: "us" for us-central1 without a configured location).
+// (recorded: "us" for us-central1 without a configured location).
 func multiRegion(region string) string {
 	prefix, _, _ := strings.Cut(region, "-")
 	switch prefix {

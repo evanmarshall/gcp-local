@@ -339,12 +339,12 @@ func sortedKeys[V any](values map[string]V) []string {
 func isMySQL(version string) bool { return server.IsMySQL(version) }
 
 // invalid is the v1beta4 400 with reason invalid in domain global, the shape
-// of GCP's request validation errors (observed live).
+// of GCP's request validation errors (recorded).
 func invalid(message string) failure {
 	return failure{code: http.StatusBadRequest, reason: reasonInvalid, domain: domainGlobal, message: message}
 }
 
-// enumInvalid is the transcoder's refusal of an unknown enum value (observed live:
+// enumInvalid is the transcoder's refusal of an unknown enum value (recorded:
 // cloudsql-postgres-connectivity): INVALID_ARGUMENT with a BadRequest and an
 // errors[] entry without a domain.
 func enumInvalid(field, enum, value string) failure {

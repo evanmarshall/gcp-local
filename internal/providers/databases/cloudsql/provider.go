@@ -477,10 +477,10 @@ func (o operationRecord) wire(project string, now time.Time) map[string]any {
 	return value
 }
 
-// serverCaMode is the only CA mode served: a per-instance CA (GCP's default, observed live).
+// serverCaMode is the only CA mode served: a per-instance CA (GCP's default, recorded).
 const serverCaMode = "GOOGLE_MANAGED_INTERNAL_CA"
 
-// rotationUnspecified is the observed default serverCertificateRotationMode.
+// rotationUnspecified is the recorded default serverCertificateRotationMode.
 const rotationUnspecified = "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED"
 
 // ipWire renders settings.ipConfiguration.
@@ -490,7 +490,7 @@ func (r instanceRecord) ipWire() map[string]any {
 	if r.PrivateNetwork != "" {
 		value["privateNetwork"] = r.PrivateNetwork
 	}
-	// Observed live: authorizedNetworks is present, empty, when nothing is authorized.
+	// Recorded: authorizedNetworks is present, empty, when nothing is authorized.
 	entries := make([]any, 0, len(r.Networks))
 	for _, entry := range r.Networks {
 		entries = append(entries, entry.wire())
@@ -513,15 +513,16 @@ func (r instanceRecord) addresses() []any {
 		address["port"] = r.Port
 	}
 	addresses := []any{address}
-	if !isMySQL(r.Version) {
-		// Recorded: PostgreSQL instances list an OUTGOING address; MySQL instances do not.
+	if !isMySQL(r.Version) && r.Availability != availabilityRegional {
+		// Recorded: ZONAL PostgreSQL instances list an OUTGOING address; MySQL
+		// and REGIONAL PostgreSQL instances (cloudsql-postgres-connectivity) do not.
 		addresses = append(addresses, map[string]any{keyType: "OUTGOING", "ipAddress": loopbackIPv4})
 	}
 	return addresses
 }
 
 // settingsWire renders sql#settings. The disk, location, and replication
-// fields are stand-ins GCP always returns (observed live: their presence only).
+// fields are stand-ins GCP always returns (recorded: their presence only).
 func (r instanceRecord) settingsWire() map[string]any {
 	settings := map[string]any{
 		keyKind: "sql#settings", "tier": r.Tier, keySettingsVersion: strconv.FormatInt(r.SettingsVersion, 10),
@@ -566,7 +567,7 @@ func (r instanceRecord) wire(project string, release string) map[string]any {
 		value[keyServerCaCert] = r.TLS.caWire(project, r.Name, false)
 	}
 	if r.Availability == availabilityRegional {
-		// Observed live (cloudsql-postgres-connectivity): a REGIONAL instance names a
+		// Recorded (cloudsql-postgres-connectivity): a REGIONAL instance names a
 		// secondary zone and a failover replica; locally neither exists.
 		value["secondaryGceZone"] = r.Region + "-b"
 		value["failoverReplica"] = map[string]any{"available": true}

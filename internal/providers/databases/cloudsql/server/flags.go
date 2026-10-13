@@ -75,7 +75,7 @@ var mysqlFlags = map[string]flagKind{
 }
 
 // CheckFlag classifies one flag for a databaseVersion. For an invalid value
-// it also returns why, in GCP's words (observed live: cloudsql-mysql-backups-flags).
+// it also returns why, in GCP's words (recorded: cloudsql-mysql-backups-flags).
 func CheckFlag(version string, flag Flag) (FlagCheck, string) {
 	modeled, documented := postgresFlags, postgresDocumented
 	if IsMySQL(version) {
@@ -137,7 +137,7 @@ func (k flagKind) integerRefusal(value string) string {
 	number, err := strconv.ParseInt(value, 10, 64)
 	switch {
 	case err != nil:
-		return value + " is not an integer."
+		return value + " is not a number."
 	case float64(number) < k.low || float64(number) > k.high:
 		return fmt.Sprintf("%d is not between %d and %d.", number, int64(k.low), int64(k.high))
 	default:

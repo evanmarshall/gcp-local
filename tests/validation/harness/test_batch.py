@@ -48,7 +48,7 @@ def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
     lanes, alone = batch["schedule"](batch["plan"](), scope_tree(tmp_path))
     names = {key: [entry.name for entry in members] for key, members in lanes.items()}
     assert len(names["storage"]) >= 10
-    assert len(names["cloudsql"]) == 2
+    assert len(names["cloudsql"]) == 5
     compute = {
         "compute-networking-test_networking",
         "compute-vmconnectivity-test_vmconnectivity",

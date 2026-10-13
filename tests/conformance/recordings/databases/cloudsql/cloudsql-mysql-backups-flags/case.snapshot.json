@@ -1,0 +1,432 @@
+{
+  "cloudsql-mysql-backups-flags": {
+    "recorded-date": "13-10-2026, 21:50:56",
+    "recorded-content": {
+      "instance-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "CREATE",
+        "status": "DONE"
+      },
+      "instance-read": {
+        "availabilityType": "ZONAL",
+        "backupConfiguration": {
+          "backupRetentionSettings": {
+            "retainedBackups": 7,
+            "retentionUnit": "COUNT"
+          },
+          "backupTier": "STANDARD",
+          "binaryLogEnabled": true,
+          "enabled": true,
+          "kind": "sql#backupConfiguration",
+          "startTime": "<backup-start>",
+          "transactionLogRetentionDays": 2,
+          "transactionalLogStorageState": "CLOUD_STORAGE"
+        },
+        "databaseFlags": [
+          {
+            "name": "max_connections",
+            "value": "50"
+          },
+          {
+            "name": "slow_query_log",
+            "value": "on"
+          },
+          {
+            "name": "long_query_time",
+            "value": "2"
+          }
+        ],
+        "edition": "ENTERPRISE",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "ipConfiguration": {
+          "authorizedNetworks": [],
+          "ipv4Enabled": true,
+          "requireSsl": false,
+          "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED",
+          "sslMode": "ALLOW_UNENCRYPTED_AND_ENCRYPTED"
+        },
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "settings_fields": [
+          "activationPolicy",
+          "authorizedGaeApplications",
+          "availabilityType",
+          "backupConfiguration",
+          "connectorEnforcement",
+          "dataDiskSizeGb",
+          "dataDiskType",
+          "databaseFlags",
+          "deletionProtectionEnabled",
+          "edition",
+          "enableDataplexIntegration",
+          "ipConfiguration",
+          "kind",
+          "locationPreference",
+          "pricingPlan",
+          "replicationLagMaxSeconds",
+          "replicationType",
+          "settingsVersion",
+          "storageAutoResize",
+          "storageAutoResizeLimit",
+          "tier",
+          "userLabels"
+        ],
+        "state": "RUNNABLE",
+        "tier": "db-f1-micro"
+      },
+      "invalid-binary-log-disabled": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalid"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Invalid request: Binary log must be disabled when backup is disabled or the instance must be a replica instance with a MySQL 5.7 or above version.",
+        "status": null
+      },
+      "patch-unknown-flag": {
+        "code": 404,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalidFlagName"
+          ]
+        ],
+        "http_status": 404,
+        "message": "The requested flag is either misspelled or unsupported by Cloud SQL.",
+        "status": null
+      },
+      "patch-flag-value": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalidFlagValue"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Value requested is not valid. Failed to set slow_query_log: maybe is not on/off.",
+        "status": null
+      },
+      "patch-flag-range": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          [
+            "global",
+            "invalidFlagValue"
+          ]
+        ],
+        "http_status": 400,
+        "message": "Value requested is not valid. Failed to set long_query_time: -1.000000 is not between 0.000000 and 30000000.000000.",
+        "status": null
+      },
+      "flags-patch-operation": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "UPDATE",
+        "status": "DONE"
+      },
+      "flags-patched-read": {
+        "availabilityType": "ZONAL",
+        "backupConfiguration": {
+          "backupRetentionSettings": {
+            "retainedBackups": 7,
+            "retentionUnit": "COUNT"
+          },
+          "backupTier": "STANDARD",
+          "binaryLogEnabled": true,
+          "enabled": true,
+          "kind": "sql#backupConfiguration",
+          "startTime": "<backup-start>",
+          "transactionLogRetentionDays": 2,
+          "transactionalLogStorageState": "CLOUD_STORAGE"
+        },
+        "databaseFlags": [
+          {
+            "name": "max_connections",
+            "value": "60"
+          }
+        ],
+        "edition": "ENTERPRISE",
+        "fields": [
+          "backendType",
+          "connectionName",
+          "createTime",
+          "databaseInstalledVersion",
+          "databaseVersion",
+          "etag",
+          "gceZone",
+          "geminiConfig",
+          "includeReplicasForMajorVersionUpgrade",
+          "instanceType",
+          "ipAddresses",
+          "kind",
+          "maintenanceVersion",
+          "name",
+          "project",
+          "region",
+          "satisfiesPzi",
+          "selfLink",
+          "serverCaCert",
+          "serviceAccountEmailAddress",
+          "settings",
+          "sqlNetworkArchitecture",
+          "state",
+          "upgradableDatabaseVersions"
+        ],
+        "http_status": 200,
+        "ipConfiguration": {
+          "authorizedNetworks": [],
+          "ipv4Enabled": true,
+          "requireSsl": false,
+          "serverCaMode": "GOOGLE_MANAGED_INTERNAL_CA",
+          "serverCertificateRotationMode": "SERVER_CERTIFICATE_ROTATION_MODE_UNSPECIFIED",
+          "sslMode": "ALLOW_UNENCRYPTED_AND_ENCRYPTED"
+        },
+        "ip_types": [
+          "PRIMARY"
+        ],
+        "serverCaCert": {
+          "fields": [
+            "cert",
+            "certSerialNumber",
+            "commonName",
+            "createTime",
+            "expirationTime",
+            "instance",
+            "kind",
+            "sha1Fingerprint"
+          ],
+          "kind": "sql#sslCert",
+          "pem": true
+        },
+        "settings_fields": [
+          "activationPolicy",
+          "authorizedGaeApplications",
+          "availabilityType",
+          "backupConfiguration",
+          "connectorEnforcement",
+          "dataDiskSizeGb",
+          "dataDiskType",
+          "databaseFlags",
+          "deletionProtectionEnabled",
+          "edition",
+          "enableDataplexIntegration",
+          "ipConfiguration",
+          "kind",
+          "locationPreference",
+          "pricingPlan",
+          "replicationLagMaxSeconds",
+          "replicationType",
+          "settingsVersion",
+          "storageAutoResize",
+          "storageAutoResizeLimit",
+          "tier",
+          "userLabels"
+        ],
+        "state": "RUNNABLE",
+        "tier": "db-f1-micro"
+      },
+      "backup-operation": {
+        "backupContext_fields": [
+          "backupId",
+          "kind",
+          "name"
+        ],
+        "error": false,
+        "fields": [
+          "backupContext",
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "BACKUP_VOLUME",
+        "status": "DONE"
+      },
+      "backup-run-read": {
+        "backupKind": "SNAPSHOT",
+        "databaseVersion": "MYSQL_8_0",
+        "description": "gl on-demand",
+        "fields": [
+          "backupKind",
+          "databaseVersion",
+          "description",
+          "endTime",
+          "enqueuedTime",
+          "id",
+          "instance",
+          "kind",
+          "location",
+          "maxChargeableBytes",
+          "selfLink",
+          "startTime",
+          "status",
+          "type",
+          "windowStartTime"
+        ],
+        "http_status": 200,
+        "instance": "<instance>",
+        "kind": "sql#backupRun",
+        "location": "us",
+        "status": "SUCCESSFUL",
+        "type": "ON_DEMAND"
+      },
+      "restore-in-place": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "RESTORE_VOLUME",
+        "status": "DONE"
+      },
+      "backup-deleted": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "DELETE_BACKUP",
+        "status": "DONE"
+      },
+      "instance-deleted": {
+        "error": false,
+        "fields": [
+          "endTime",
+          "insertTime",
+          "kind",
+          "name",
+          "operationType",
+          "selfLink",
+          "startTime",
+          "status",
+          "targetId",
+          "targetLink",
+          "targetProject",
+          "user"
+        ],
+        "http_status": 200,
+        "kind": "sql#operation",
+        "operationType": "DELETE",
+        "status": "DONE"
+      },
+      "cleanup": {
+        "instances_absent": true
+      }
+    }
+  }
+}

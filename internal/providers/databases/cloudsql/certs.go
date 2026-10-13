@@ -119,7 +119,7 @@ func fingerprint(der []byte) string {
 }
 
 // issue signs a client certificate for commonName; Cloud SQL returns its
-// RSA key in PKCS #1 form (observed live: "RSA PRIVATE KEY").
+// RSA key in PKCS #1 form (recorded: "RSA PRIVATE KEY").
 func (a *authority) issue(commonName string, now time.Time) (clientCert, string, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -139,7 +139,7 @@ func (a *authority) issue(commonName string, now time.Time) (clientCert, string,
 }
 
 // caWire renders the server CA as an sql#sslCert. The instance and connect
-// settings omit selfLink; sslCerts.insert includes it (observed live).
+// settings omit selfLink; sslCerts.insert includes it (recorded).
 func (a *authority) caWire(project, instance string, link bool) map[string]any {
 	value := map[string]any{keyKind: kindSSLCert, "cert": a.caPEM, "certSerialNumber": a.ca.SerialNumber.String(),
 		"commonName": "C=US,O=gcp-local,CN=Google Cloud SQL Server CA", keyCreateTime: rfc3339(a.created),
@@ -161,10 +161,10 @@ func (c clientCert) wire(project, instance string) map[string]any {
 func rfc3339(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
 
 // commonNamePattern is the documented commonName alphabet ([a-zA-Z.-_ ]+),
-// with digits, which GCP accepts (observed live: "gl-client").
+// with digits, which GCP accepts (recorded: "gl-client").
 var commonNamePattern = regexp.MustCompile(`^[a-zA-Z0-9.\-_ ]{1,64}$`)
 
-// Refusals observed live (cloudsql-postgres-connectivity).
+// Recorded refusals (cloudsql-postgres-connectivity).
 var errCertMissing = failure{code: http.StatusNotFound, reason: "sslCertificateDoesNotExist", domain: domainGlobal,
 	message: "The SSL certificate does not exist."}
 
@@ -258,7 +258,7 @@ func (p *Provider) deleteSSLCert(call gateway.Call, request *gateway.RESTRequest
 }
 
 // connectSettings returns what a connector needs: addresses and the server
-// CA (fields of sql#connectSettings observed live).
+// CA (recorded fields of sql#connectSettings).
 func (p *Provider) connectSettings(_ gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	if request.Query.Get("readTime") != "" {
 		return nil, gap("the connectSettings readTime parameter")

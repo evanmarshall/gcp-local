@@ -75,8 +75,15 @@ func TestSettingsPatch(t *testing.T) {
 		"ipConfiguration": map[string]any{"authorizedNetworks": []any{
 			map[string]any{"value": "203.0.113.0/24"}, map[string]any{"value": "198.51.100.17/32"}, map[string]any{"value": "192.0.2.0/28"}}}})), http.StatusOK)
 	subset(t, "networks", h.expect(h.invoke(viewerToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings], map[string]any{
-		"ipConfiguration.authorizedNetworks.#": 3, "ipConfiguration.authorizedNetworks.0.value": "192.0.2.0/28",
-		"ipConfiguration.authorizedNetworks.2.value": "203.0.113.0/24",
+		"ipConfiguration.authorizedNetworks.#": 3, "ipConfiguration.authorizedNetworks.0.value": "203.0.113.0/24",
+		"ipConfiguration.authorizedNetworks.2.value": "192.0.2.0/28",
+	})
+	// Entries the instance had move after the new ones (recorded).
+	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{
+		"ipConfiguration": map[string]any{"authorizedNetworks": []any{
+			map[string]any{"value": "203.0.113.0/24"}, map[string]any{"value": "10.0.0.0/8"}}}})), http.StatusOK)
+	subset(t, "reordered", h.expect(h.invoke(viewerToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings], map[string]any{
+		"ipConfiguration.authorizedNetworks.0.value": "10.0.0.0/8", "ipConfiguration.authorizedNetworks.1.value": "203.0.113.0/24",
 	})
 }
 
@@ -124,6 +131,14 @@ func TestSettingsRefusals(t *testing.T) {
 		"Value requested is not valid. Failed to set max_connections: 1 is not between 14 and 262143.")
 	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"databaseFlags": []any{map[string]any{"name": "gl_not_a_flag", "value": "1"}}}),
 		http.StatusNotFound, "The requested flag is either misspelled or unsupported by Cloud SQL.")
+	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"databaseFlags": []any{map[string]any{"name": "max_connections", "value": "60"},
+		map[string]any{"name": "max_connections", "value": "70"}}}), http.StatusBadRequest, "Invalid request: Duplicate flags.")
+	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"databaseFlags": []any{map[string]any{"name": "log_min_duration_statement", "value": "soon"}}}),
+		http.StatusBadRequest, "Value requested is not valid. Failed to set log_min_duration_statement: soon is not a number.")
+	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"ipConfiguration": map[string]any{"sslMode": sslEncrypted, "requireSsl": true}}),
+		http.StatusBadRequest, "Invalid request: For a Postgres instance, sslMode value ENCRYPTED_ONLY and requireSsl value true are conflicting. "+
+			"When sslMode=ENCRYPTED_ONLY, requireSsl must be false. When requireSsl=true, sslMode must be TRUSTED_CLIENT_CERTIFICATE_REQUIRED. "+
+			"It's recommended that you only set sslMode.")
 	h.createMySQL()
 	for flag, message := range map[string]string{"slow_query_log": "maybe is not on/off.", "long_query_time": "-1.000000 is not between 0.000000 and 30000000.000000."} {
 		value := map[string]string{"slow_query_log": "maybe", "long_query_time": "-1"}[flag]
