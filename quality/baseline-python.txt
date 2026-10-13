@@ -173,6 +173,7 @@
 2	D103	gcp_validation/services/security/serviceaccounts.py
 2	D103	gcp_validation/services/storage/client.py
 2	D107	gcp_validation/services/storage/client.py
+2	E501	gcp_validation/services/security/cloudkms.py
 2	E501	gcp_validation/services/storage/conditions.py
 2	E501	tests/conformance/security/resourcemanager/conftest.py
 2	E501	tests/conformance/storage/test_storage.py
@@ -180,7 +181,6 @@
 2	FURB162	tests/conformance/storage/buckets/test_storage_bucket_updates.py
 2	PT028	gcp_validation/services/compute/vm_connectivity.py
 20	ANN201	gcp_validation/services/security/secretmanager.py
-20	E501	gcp_validation/services/security/cloudkms.py
 23	ANN001	gcp_validation/services/security/cloudkms.py
 24	E501	gcp_validation/services/databases/bigquery.py
 26	ANN001	gcp_validation/services/databases/bigquery.py

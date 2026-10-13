@@ -86,7 +86,7 @@ linters:
       # Every other returned error is wrapped with diagnostic context.
       ignore-sig-regexps:
         - 'status\.(Error|Errorf)\(c '
-        - 'internal/providers/provider\.(Invalid|NotFound|DecodeObject|DecodeProto|DecodeJSON|ErrorInfo|FieldViolation|ResourceInfo|PreconditionFailure)\('
+        - 'internal/providers/provider\.(Invalid|NotFound|DecodeObject|DecodeProto|DecodeJSON|DecodePolicy|ErrorInfo|FieldViolation|ResourceInfo|PreconditionFailure)\('
         - 'internal/providers/provider\.(Page|Nearest)\['
         - 'internal/providers/provider\.Gate\)\.(Check|Denial)\('
         - 'internal/providers/provider\.Operations\)\.(Start|Get|List|Cancel|Delete|Wait|Reset)\('

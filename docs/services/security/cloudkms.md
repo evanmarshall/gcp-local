@@ -26,16 +26,16 @@ client, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint("127.0.0.1:45
 ```
 
 - Tested clients: Python `google-cloud-kms` 3.18.0 (REST and gRPC) and Go `cloud.google.com/go/kms` 1.35.0 (gRPC). Node and Java are not tested.
-- RPCs without a REST method here (`RawEncrypt`, import jobs, `Decapsulate`, `GenerateRandomBytes`, deletes, retired resources), `Encrypt` with a version name, and `IAMPolicy.TestIamPermissions` return `UNIMPLEMENTED`. The location list is REST only.
+- RPCs without a REST method here (`RawEncrypt`, import jobs, `Decapsulate`, `GenerateRandomBytes`, deletes, retired resources), `Encrypt` with a version name, and `IAMPolicy.TestIamPermissions` return `UNIMPLEMENTED`. The location read is REST only.
 - The clients retry only `UNAVAILABLE` and `DEADLINE_EXCEEDED`, within a 60-second deadline; no KMS refusal uses either code.
 
 ## Methods
 
 | Resource | Methods | Notes |
 | --- | --- | --- |
-| Locations | `locations.list` at `GET .../locations/{location}` | Returns `us-central1` only |
+| Locations | `locations.get` | Any location id |
 | Key rings | `create`, `get`, `list`, `getIamPolicy`, `setIamPolicy` | No delete, as in GCP |
-| Crypto keys | `create`, `get`, `list`, `patch`, `getIamPolicy`, `setIamPolicy` | Purposes and algorithms below; `skipInitialVersionCreation`; `patch` takes `labels`, `rotationPeriod`, `nextRotationTime`, `versionTemplate.algorithm` |
+| Crypto keys | `create`, `get`, `list`, `patch`, `getIamPolicy`, `setIamPolicy` | Purposes and algorithms below; `skipInitialVersionCreation`; `patch` takes `labels` and `versionTemplate.algorithm`, and clears rotation; conditional bindings with policy version 3 |
 | Crypto keys | `encrypt`, `decrypt`, `updatePrimaryVersion` | `ENCRYPT_DECRYPT` only; optional CRC32C checksums verified; wrong AAD is 400 |
 | Versions | `create`, `get`, `list`, `patch`, `destroy`, `restore` | `patch` sets `ENABLED`/`DISABLED`; `restore` returns a scheduled version to `DISABLED`; material is removed after `destroyScheduledDuration` (default 30 days) |
 | Versions | `asymmetricSign`, `asymmetricDecrypt`, `getPublicKey` | `digest` or `data` (hashed with the algorithm's hash); EC signatures are DER; PSS salt equals the hash length; OAEP uses SHA-256 with no label; PEM with `pemCrc32c` |
@@ -48,11 +48,15 @@ client, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint("127.0.0.1:45
 | `ASYMMETRIC_DECRYPT` | `RSA_DECRYPT_OAEP_2048_SHA256` |
 | `MAC` | `HMAC_SHA256` |
 
+Lists page with `pageSize` and `pageToken` in name order (versions by number), and report `totalSize`. A foreign page token is `Invalid page token.` and a negative size `Page size must be positive.` (recorded). The default and maximum page size, 1000, are not recorded. `filter` and `orderBy` are refused with `UNIMPLEMENTED`.
+
+Bodies are decoded strictly against the request messages: an unknown or mistyped field is GCP's 400 with a `BadRequest` violation (recorded for `crypto_key`, `crypto_key.version_template`, and an `Int64Value` checksum).
+
 Refusals, modeled locally:
 
 - A key use that the key's purpose does not allow is 400 `FAILED_PRECONDITION`. So is any use of a version that is not `ENABLED`, and `updatePrimaryVersion` on a non-symmetric key.
-- Missing `versionTemplate.algorithm` for a non-symmetric purpose, an algorithm of another purpose, rotation on a non-symmetric key, both or neither of `digest` and `data`, a digest of the wrong hash or length, and any CRC32C mismatch are 400 `INVALID_ARGUMENT`.
-- Other purposes, algorithms, protection levels, and `publicKeyFormat` are 501 `UNIMPLEMENTED`.
+- Missing `versionTemplate.algorithm` for a non-symmetric purpose, an algorithm of another purpose, both or neither of `digest` and `data`, a digest of the wrong hash or length, and any CRC32C mismatch are 400 `INVALID_ARGUMENT`.
+- Other purposes, algorithms, protection levels, and `publicKeyFormat` are 501 `UNIMPLEMENTED`, as are `rotationPeriod`, `nextRotationTime`, `importOnly`, `cryptoKeyBackend`, `keyAccessJustificationsPolicy`, and `externalProtectionLevelOptions` when set.
 
 ## IAM
 
@@ -66,6 +70,8 @@ Refusals, modeled locally:
 | `restore` | `cloudkms.cryptoKeyVersions.restore` |
 
 - IAM is checked on the crypto key before any version state is read, so a denied caller gets 403 even for a disabled or missing version.
+- A 403 reads `Permission 'PERMISSION' denied on resource 'NAME' (or it may not exist).`, naming the key (the version for version methods), with an `ErrorInfo` (`IAM_PERMISSION_DENIED`, domain `cloudkms.googleapis.com`, metadata `permission`), as recorded. GCP's per-call `error_info_id` and `troubleshooter_url` metadata are not emitted.
+- IAM Conditions see `resource.type` (`cloudkms.googleapis.com/KeyRing`, `/CryptoKey`, `/CryptoKeyVersion`), `resource.service` (`cloudkms.googleapis.com`), and `resource.name` (project ID form) of the resource each method is checked on. Recorded: a `CryptoKey` condition grants the key and its version list but not a version `get`.
 - `roles/cloudkms.admin` manages keys but cannot encrypt, decrypt, sign, verify, or read public keys, as in GCP.
 - Pinned roles: `roles/cloudkms.admin`, `.cryptoKeyEncrypter`, `.cryptoKeyEncrypterDecrypter`, `.cryptoKeyDecrypter`, `.signer`, `.signerVerifier`, `.publicKeyViewer`, `.viewer`.
 - A missing resource is authorized on its nearest existing parent, then returns 404.
@@ -74,7 +80,7 @@ Refusals, modeled locally:
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `cloudkms-symmetric-key-lifecycle` | 2026-10-12 | Missing ring 404, ring and key create shapes, 403 without grants and for admin on encrypt, empty and set policies, encrypt/decrypt fields and CRC32C, wrong AAD, version create, primary change, disable, decrypt with a disabled version, destroy |
+| `cloudkms-symmetric-key-lifecycle` | 2026-10-13 | Missing ring 404, ring and key create shapes, 403 without grants and for admin on encrypt with messages and details, empty and set policies, encrypt/decrypt fields and CRC32C, wrong AAD, version create, primary change, disable, decrypt with a disabled version, destroy; version order, paging and `totalSize`, page refusals, key paging on the shared ring; unknown and mistyped body fields; a conditional grant by resource type, service, and name |
 
 ```sh
 sh scripts/check/recordings.sh   # the symmetric recording
@@ -88,5 +94,6 @@ sh scripts/check/sdk/cloudkms.sh         # google-cloud-kms over REST and gRPC, 
 - `ASYMMETRIC_DECRYPT` (RSA-OAEP) is modeled locally, not recorded.
 - Versions are `ENABLED` at once; GCP reports `PENDING_GENERATION` first for asymmetric keys.
 - No HSM, external, raw, PQC, or key-encapsulation algorithms; no RSA 3072/4096, SHA-512, or other HMAC hashes; no import jobs.
-- Rotation is stored but not run.
-- Pagination, list filters, and key update fields are not recorded.
+- No scheduled rotation: a schedule is refused, not stored ([#93](https://github.com/evanmarshall/gcp-local/issues/93)).
+- `locations.list` (`GET /v1/projects/{project}/locations`) reaches Secret Manager's location list on the shared host.
+- List filters and ordering are not served; key ring and location IAM conditions and gRPC denials are not recorded.

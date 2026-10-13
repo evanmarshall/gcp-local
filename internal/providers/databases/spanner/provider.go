@@ -59,7 +59,7 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 	}
 	p := &Provider{manager: manager, index: index, engine: engine, clock: time.Now,
 		gate: provider.Gate{Engine: engine, Index: index, Message: deniedMessage, Domain: "iam.googleapis.com",
-			Attributes: attributes},
+			Attributes: func(target, _ string) iam.ResourceAttributes { return attributes(target) }},
 		created: state.NewStore(func() createdDatabases { return createdDatabases{} }, state.GlobalScope)}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,

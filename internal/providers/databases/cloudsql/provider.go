@@ -77,7 +77,8 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		return nil, err
 	}
 	p := &Provider{manager: manager, index: index, engine: engine, releases: releases, clock: time.Now,
-		gate:    provider.Gate{Engine: engine, Index: index, Message: provider.LacksPermission, Attributes: attributes},
+		gate: provider.Gate{Engine: engine, Index: index, Message: provider.LacksPermission,
+			Attributes: func(target, _ string) iam.ResourceAttributes { return attributes(target) }},
 		catalog: state.NewStore(newCatalog, state.GlobalScope), public: map[string]*dataplane.Listener{}}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,

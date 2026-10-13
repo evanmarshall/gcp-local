@@ -9,8 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -24,10 +24,12 @@ import (
 
 // Provider owns the Cloud KMS control plane and key material state.
 type Provider struct {
-	index  *state.Index
-	engine *iam.Engine
-	scopes *state.Store[scopeState]
-	clock  func() time.Time
+	index   *state.Index
+	engine  *iam.Engine
+	gate    provider.Gate
+	manager *backend.Manager
+	scopes  *state.Store[scopeState]
+	clock   func() time.Time
 }
 
 // New registers the Cloud KMS provider.
@@ -39,7 +41,10 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 		return nil, fmt.Errorf("cloudkms permissions: %w", err)
 	}
 	p := &Provider{
-		index: index, engine: engine,
+		index: index, engine: engine, manager: manager,
+		// Recorded: cloudkms-symmetric-key-lifecycle "denied-encrypt".
+		gate: provider.Gate{Engine: engine, Index: index, Message: provider.PermissionDeniedOnResource,
+			Domain: "cloudkms.googleapis.com", OmitResource: true, Attributes: attributes},
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
@@ -84,77 +89,98 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// handle is the gateway entry point for every Cloud KMS method.
+// handle is the gateway entry point for every Cloud KMS method. It runs in
+// the manager session, which serializes it with a reset, and authorizes on
+// the nearest existing resource under the scope lock, so a missing resource
+// reads NOT_FOUND to a permitted caller and a denial otherwise.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Cloud KMS request")
 	}
-	scope, resource, target, err := p.resolve(call, request)
-	if err != nil {
+	resource := refOf(request)
+	if err := validateRef(resource); err != nil {
 		return nil, err
 	}
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
-	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
+	scope := provider.ProjectScope(resource.project)
+	var response *gateway.RESTResponse
+	err := p.manager.Use(call.Context, backend.Key{Service: serviceName, Scope: scope}, func(ctx context.Context, _ backend.Backend) error {
+		call.Context = ctx //nolint:fatcontext // one request-scoped handoff of the manager session
+		checked, candidates := checkedOn(call.Method, resource)
+		decision, target, err := provider.Nearest(p.gate, p.scopes, scope, call, checked, candidates...)
+		if err != nil {
+			return err
 		}
-		return p.denied(call, decision, target), nil
-	}
-	call.Resource = target.Name
-	call.Location = scope.Location
-	response, err := p.execute(call, request, scope, resource)
+		call.Resource = target.Name
+		call.Location = scope.Location
+		executed, err := p.execute(call, request, scope, resource)
+		if err != nil {
+			return err
+		}
+		response = provider.WithDecision(executed, decision)
+		return nil
+	})
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // wire statuses pass through
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
 	return response, nil
 }
 
-// denied renders the KMS denial shape.
-func (p *Provider) denied(_ gateway.Call, decision iam.Decision, target iam.Target) *gateway.RESTResponse {
-	return provider.WireError(403, "PERMISSION_DENIED", decision.Reason+" "+target.Name)
-}
-
-// projectMethods and ringMethods are authorized on the project and key ring;
-// every other method is authorized on its crypto key.
+// Methods by the resource their permission is checked on; every other method
+// is checked on its crypto key.
 var (
-	projectMethods = map[string]bool{methodLocationsList: true, methodKeyRingsCreate: true, methodKeyRingsList: true}
-	ringMethods    = map[string]bool{
+	projectMethods = map[string]bool{
+		methodLocationsGet: true, methodKeyRingsCreate: true, methodKeyRingsList: true,
+	}
+	ringMethods = map[string]bool{
 		methodKeyRingsGet: true, methodKeyRingsGetIam: true, methodKeyRingsSetIam: true,
 		methodCryptoKeysCreate: true, methodCryptoKeysList: true,
+	}
+	versionMethods = map[string]bool{
+		methodVersionsGet: true, methodVersionsPatch: true, methodVersionsDestroy: true, methodVersionsRestore: true,
+		methodAsymmetricSign: true, methodAsymmetricDecrypt: true, methodGetPublicKey: true,
+		methodMacSign: true, methodMacVerify: true,
 	}
 	versionNumber = regexp.MustCompile(`^[1-9][0-9]{0,8}$`)
 )
 
-// resolve derives the scope, resource reference, and IAM target of one
-// request. A resource that does not exist yet is authorized on its nearest
-// existing ancestor so the caller sees NOT_FOUND rather than an unverified
-// target, matching the real surface's ancestor-inherited permissions.
-func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, ref, iam.Target, error) {
-	resource := refOf(request)
-	scope := provider.ProjectScope(resource.project)
+// checkedOn returns the relative name a method's permission is checked on,
+// which a denial reports, and the IAM targets to authorize at, most specific
+// first. Versions are not IAM resources; their key's policy applies.
+func checkedOn(method string, resource ref) (string, []string) {
 	project := provider.ProjectResource(resource.project)
-	if err := validateRef(resource); err != nil {
-		return scope, resource, iam.Target{Name: project}, err
-	}
 	switch {
-	case projectMethods[call.Method]:
-		return scope, resource, iam.Target{Name: project}, nil
-	case ringMethods[call.Method]:
-		return scope, resource, p.anchored(resource.ringResource(), project), nil
+	case projectMethods[method]:
+		return "projects/" + resource.project + "/locations/" + resource.location, []string{project}
+	case ringMethods[method]:
+		return resource.ringName(), []string{resource.ringResource(), project}
+	case versionMethods[method]:
+		return resource.versionName(resource.version), []string{resource.keyResource(), resource.ringResource(), project}
 	default:
-		return scope, resource, p.anchored(resource.keyResource(), resource.ringResource(), project), nil
+		return resource.keyName(), []string{resource.keyResource(), resource.ringResource(), project}
 	}
+}
+
+// kinds names the KMS resource types by the collection that ends a name.
+var kinds = map[string]string{"keyRings": "KeyRing", "cryptoKeys": "CryptoKey", "cryptoKeyVersions": "CryptoKeyVersion"}
+
+// attributes are the IAM condition attributes of the resource a permission is
+// checked on, whichever policy holder Nearest picked: a version method sees
+// the version (recorded: cloudkms-symmetric-key-lifecycle "conditional-access",
+// where a CryptoKey condition grants the key and its version list, not a
+// version get). Locations carry none.
+func attributes(_, resource string) iam.ResourceAttributes {
+	segments := strings.Split(resource, "/")
+	if len(segments) < 2 || kinds[segments[len(segments)-2]] == "" {
+		return iam.ResourceAttributes{}
+	}
+	return iam.ResourceAttributes{Name: resource, Type: "cloudkms.googleapis.com/" + kinds[segments[len(segments)-2]],
+		Service: "cloudkms.googleapis.com"}
 }
 
 // validateRef rejects malformed path segments before any state access.
 func validateRef(resource ref) error {
-	if !uid.MatchString(resource.location) {
+	if resource.location != "" && !uid.MatchString(resource.location) {
 		return status.Errorf(codes.InvalidArgument, "Invalid location %q", resource.location)
 	}
 	if resource.ring != "" && !uid.MatchString(resource.ring) {
@@ -167,16 +193,6 @@ func validateRef(resource ref) error {
 		return status.Errorf(codes.InvalidArgument, "Invalid crypto key version %q", resource.version)
 	}
 	return nil
-}
-
-// anchored returns the first indexed candidate, falling back to the last.
-func (p *Provider) anchored(candidates ...string) iam.Target {
-	for _, name := range candidates[:len(candidates)-1] {
-		if _, ok := p.index.Get(name); ok {
-			return iam.Target{Name: name}
-		}
-	}
-	return iam.Target{Name: candidates[len(candidates)-1]}
 }
 
 // newGCM builds the AES-GCM cipher of one version's material.

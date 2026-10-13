@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -146,11 +147,20 @@ func TestNearestSuppliesConditionAttributes(t *testing.T) {
 		t.Fatalf("without attributes the condition must grant nothing: %v", err)
 	}
 	named := bare
-	named.Attributes = func(target string) iam.ResourceAttributes {
+	var checked []string
+	named.Attributes = func(target, resource string) iam.ResourceAttributes {
+		checked = append(checked, resource)
 		return iam.ResourceAttributes{Name: target[len("//x.googleapis.com/"):], Type: "x.googleapis.com/Table", Service: "x.googleapis.com"}
 	}
 	if _, target, err := Nearest(named, store, ProjectScope("p"), call, "", table, f.project); err != nil || target.Attributes.Type != "x.googleapis.com/Table" {
 		t.Fatalf("attributes: %v %v", target, err)
+	}
+	// A child that holds no policy is checked at its parent with its own name.
+	if _, _, err := Nearest(named, store, ProjectScope("p"), call, "projects/p/tables/t/rows/r", table+"/rows/r", table, f.project); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{table, "projects/p/tables/t/rows/r"}; !reflect.DeepEqual(checked, want) {
+		t.Fatalf("checked = %v, want %v", checked, want)
 	}
 }
 

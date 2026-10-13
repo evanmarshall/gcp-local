@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -9,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
+	"github.com/evanmarshall/gcp-local/internal/iam"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -45,6 +48,32 @@ func DecodeProto(body []byte, root string, message proto.Message, gap func(strin
 	return nil
 }
 
+// DecodePolicy strictly decodes a setIamPolicy body, a
+// google.iam.v1.SetIamPolicyRequest, and returns its policy. Audit configs
+// and an updateMask naming anything but bindings and etag (the default
+// mask) are refused with gap.
+func DecodePolicy(body []byte, gap func(string) error) (iam.Policy, error) {
+	var request iampb.SetIamPolicyRequest
+	if err := DecodeProto(body, "", &request, gap, "policy.auditConfigs"); err != nil {
+		return iam.Policy{}, err
+	}
+	for _, path := range request.GetUpdateMask().GetPaths() {
+		if path != "bindings" && path != "etag" {
+			return iam.Policy{}, gap("setIamPolicy updateMask " + path + " is not modeled")
+		}
+	}
+	var envelope struct {
+		Policy iam.Policy `json:"policy"`
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return envelope.Policy, nil
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return iam.Policy{}, FieldViolation("policy", "Invalid JSON payload received. "+err.Error())
+	}
+	return envelope.Policy, nil
+}
+
 // protoWalk checks a JSON document against a message descriptor before
 // protojson decodes it, so every refusal names its path.
 type protoWalk struct {
@@ -60,10 +89,17 @@ func (w protoWalk) message(raw json.RawMessage, message protoreflect.Message, pa
 	if wellKnown(descriptor) {
 		// Durations, timestamps, field masks, structs, and wrappers have
 		// their own JSON forms; protojson knows them.
-		if protojson.Unmarshal(raw, message.Interface()) != nil {
-			return mistyped(path, typeURL, raw)
+		if protojson.Unmarshal(raw, message.Interface()) == nil {
+			return nil
 		}
-		return nil
+		if kind, ok := wrapped(descriptor); ok {
+			// GCP names a wrapper's value field and omits the value:
+			// "Invalid value at 'plaintext_crc32c.value' (TYPE_INT64), "
+			// (recording cloudkms-symmetric-key-lifecycle, Int64Value).
+			inner := join(path, "value")
+			return FieldViolation(inner, fmt.Sprintf("Invalid value at '%s' (%s), ", inner, kind))
+		}
+		return mistyped(path, typeURL, raw)
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil {
@@ -94,6 +130,10 @@ func (w protoWalk) member(key string, raw json.RawMessage, message protoreflect.
 	if isNull(raw) {
 		return nil
 	}
+	if listForSingular(field, raw) {
+		// Recorded: serviceaccount-lifecycle-authorization "mistyped-field".
+		return refusedName(key, path, "Proto field is not repeating, cannot start list.")
+	}
 	childPath := join(path, string(field.Name()))
 	switch {
 	case field.IsList():
@@ -109,6 +149,15 @@ func (w protoWalk) member(key string, raw json.RawMessage, message protoreflect.
 	default:
 		return w.single(raw, field, func() protoreflect.Message { return message.NewField(field).Message() }, childPath, childJSON)
 	}
+}
+
+// listForSingular reports a JSON array for a field that isn't repeated, a
+// map, or a well-known type with its own JSON form (Value, ListValue).
+func listForSingular(field protoreflect.FieldDescriptor, raw json.RawMessage) bool {
+	if field.IsList() || field.IsMap() || field.Message() != nil && wellKnown(field.Message()) {
+		return false
+	}
+	return bytes.HasPrefix(bytes.TrimSpace(raw), []byte("["))
 }
 
 // eachItem checks a JSON array item by item; items are addressed path[i].
@@ -165,7 +214,7 @@ func scalarFits(raw json.RawMessage, field protoreflect.FieldDescriptor) bool {
 	text := strings.Trim(string(raw), `"`)
 	switch field.Kind() {
 	case protoreflect.StringKind, protoreflect.BytesKind:
-		return raw[0] == '"'
+		return textFits(raw, field.Kind())
 	case protoreflect.BoolKind:
 		return isBool(raw)
 	case protoreflect.EnumKind:
@@ -178,6 +227,24 @@ func scalarFits(raw json.RawMessage, field protoreflect.FieldDescriptor) bool {
 		_, unsigned := strconv.ParseUint(text, 10, 64)
 		return signed == nil || unsigned == nil
 	}
+}
+
+// textFits reports a JSON string, which for bytes must be standard or
+// URL-safe base64, padded or not, as proto JSON accepts.
+func textFits(raw json.RawMessage, kind protoreflect.Kind) bool {
+	if raw[0] != '"' {
+		return false
+	}
+	if kind != protoreflect.BytesKind {
+		return true
+	}
+	text := strings.Trim(string(raw), `"`)
+	for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.RawURLEncoding} {
+		if _, err := encoding.DecodeString(text); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // enumFits reports an enum value given by name or number.
@@ -195,6 +262,19 @@ func kindName(field protoreflect.FieldDescriptor) string {
 		return "type.googleapis.com/" + string(field.Message().FullName())
 	}
 	return "TYPE_" + strings.ToUpper(field.Kind().String())
+}
+
+// wrapped reports a google.protobuf wrapper type (Int64Value, StringValue,
+// ...) and its value field's kind name.
+func wrapped(descriptor protoreflect.MessageDescriptor) (string, bool) {
+	if !strings.HasSuffix(string(descriptor.Name()), "Value") || descriptor.Fields().Len() != 1 {
+		return "", false
+	}
+	value := descriptor.Fields().ByName("value")
+	if value == nil || value.Kind() == protoreflect.MessageKind || value.IsList() {
+		return "", false
+	}
+	return kindName(value), true
 }
 
 // wellKnown reports a google.protobuf type with a special JSON form.
@@ -373,11 +453,16 @@ func tagged(field reflect.StructField, option string) bool {
 
 // unknownName is GCP's refusal of a name the schema doesn't have.
 func unknownName(key, path string) error {
+	return refusedName(key, path, "Cannot find field.")
+}
+
+// refusedName is GCP's refusal of one member of the object at path.
+func refusedName(key, path, reason string) error {
 	description := fmt.Sprintf("Invalid JSON payload received. Unknown name %q", key)
 	if path != "" {
 		description += fmt.Sprintf(" at '%s'", path)
 	}
-	return FieldViolation(path, description+": Cannot find field.")
+	return FieldViolation(path, description+": "+reason)
 }
 
 // mistyped is GCP's refusal of a value of the wrong type.

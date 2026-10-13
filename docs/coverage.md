@@ -21,7 +21,7 @@ What each service supports and how it is verified. Every service authenticates c
 | `redis` | [Memorystore for Redis](services/databases/memorystore.md) | Real Redis per instance | 10 | 47 | Yes: Redis on the reported `127.0.0.1` port, with AUTH; no TLS | memorystore-redis-instance-admin | none |
 | `bigquery` | [BigQuery](services/databases/bigquery.md) | GoogleSQL engine (googlesqlite), in-process | 20 | — | Yes: GoogleSQL queries with joins, aggregates, CTEs, parameters, DML, DDL, and scripts, authorized per table; streaming inserts; no load, extract, or copy jobs | bigquery-dataset-rows-query, bigquery-jobs-insert-query, bigquery-sql-engine | TestLocalBigQueryDatasetAndTable |
 | `secretmanager` | [Secret Manager](services/security/secretmanager.md) | gcp-local | 15 | — | Yes: secret versions and payload access over REST and gRPC; gRPC not recorded | secretmanager-access-lifecycle | TestLocalSecretManagerSecretAndVersion |
-| `cloudkms` | [Cloud KMS](services/security/cloudkms.md) | gcp-local | 26 | — | Yes: symmetric encrypt and decrypt; asymmetric sign, HMAC, and (modeled locally) asymmetric decrypt | cloudkms-symmetric-key-lifecycle, cloudkms-asymmetric-mac-keys | TestLocalKMSKeyRingCryptoKey |
+| `cloudkms` | [Cloud KMS](services/security/cloudkms.md) | gcp-local | 26 | — | Yes: symmetric encrypt and decrypt; asymmetric sign, HMAC, and (modeled locally) asymmetric decrypt; scheduled rotation and list filters are `UNIMPLEMENTED` | cloudkms-symmetric-key-lifecycle, cloudkms-asymmetric-mac-keys | TestLocalKMSKeyRingCryptoKey |
 | `cloudtasks` | [Cloud Tasks](services/messaging/cloudtasks.md) | gcp-local | 16 | — | Yes: HTTP-target dispatch with OIDC and retries; tasks created over REST (v2beta3) or gRPC (v2); gRPC not recorded | cloudtasks-dispatch-retry | TestLocalCloudTasksQueueLifecycle |
 | `cloudscheduler` | [Cloud Scheduler](services/messaging/cloudscheduler.md) | gcp-local | 8 | 16 | Yes: cron jobs in any time zone that call HTTP targets (OIDC or OAuth) or publish to Pub/Sub as the service agent, with retries; HTTP delivery and retries not recorded | cloudscheduler-job-lifecycle | TestLocalCloudSchedulerJob |
 | `logging` | [Cloud Logging](services/logging.md) | gcp-local | 4 | — | Yes: write, filter, page, and delete log entries | logging-entries-lifecycle, logging-filter-precedence | none |
@@ -43,7 +43,7 @@ Notes on counts:
 - Secret Manager also serves 14 of its 15 methods over gRPC `google.cloud.secretmanager.v1`; locations list is REST only.
 - Cloud Tasks also serves 15 of its 16 methods over gRPC `google.cloud.tasks.v2`; locations list is REST only. REST is v2beta3.
 - Cloud Scheduler serves its 8 job methods over REST and gRPC `google.cloud.scheduler.v1.CloudScheduler`.
-- Cloud KMS serves 25 of its 26 methods over gRPC as well; only the location list is REST only ([transport](services/security/cloudkms.md#transport)).
+- Cloud KMS serves 25 of its 26 methods over gRPC as well; only the location read is REST only ([transport](services/security/cloudkms.md#transport)).
 - Resource Manager: 5 v1 methods (project get, IAM policy get, set, and test, operations get) and 24 v3 methods, all 24 also over gRPC (`google.cloud.resourcemanager.v3` and `google.longrunning.Operations` for `operations/*`).
 - Cloud Run serves its 13 methods over both REST and gRPC (`google.cloud.run.v2.Services`, `google.cloud.run.v2.Revisions`, and `google.longrunning.Operations` for Cloud Run operation names).
 

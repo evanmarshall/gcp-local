@@ -1,6 +1,6 @@
 {
   "cloudkms-symmetric-key-lifecycle": {
-    "recorded-date": "12-10-2026, 17:40:06",
+    "recorded-date": "13-10-2026, 02:00:40",
     "recorded-content": {
       "key-created": {
         "fields": [
@@ -32,12 +32,34 @@
       },
       "denied-encrypt": {
         "code": 403,
+        "details": [
+          {
+            "domain": "cloudkms.googleapis.com",
+            "metadata": {
+              "permission": "cloudkms.cryptoKeyVersions.useToEncrypt"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'cloudkms.cryptoKeyVersions.useToEncrypt' denied on resource 'projects/<project>/locations/us-central1/keyRings/<ring>/cryptoKeys/<key>' (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "admin-cannot-encrypt": {
         "code": 403,
+        "details": [
+          {
+            "domain": "cloudkms.googleapis.com",
+            "metadata": {
+              "permission": "cloudkms.cryptoKeyVersions.useToEncrypt"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'cloudkms.cryptoKeyVersions.useToEncrypt' denied on resource 'projects/<project>/locations/us-central1/keyRings/<ring>/cryptoKeys/<key>' (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "policy-read": {
@@ -156,6 +178,151 @@
           "DESTROY_SCHEDULED",
           "ENABLED"
         ]
+      },
+      "versions-order": {
+        "fields": [
+          "cryptoKeyVersions",
+          "totalSize"
+        ],
+        "http_status": 200,
+        "total_size": 2,
+        "versions": [
+          "1",
+          "2"
+        ]
+      },
+      "versions-paged": {
+        "first_fields": [
+          "cryptoKeyVersions",
+          "nextPageToken",
+          "totalSize"
+        ],
+        "first_status": 200,
+        "first_total_size": 2,
+        "first_versions": [
+          "1"
+        ],
+        "second_fields": [
+          "cryptoKeyVersions",
+          "totalSize"
+        ],
+        "second_status": 200,
+        "second_versions": [
+          "2"
+        ]
+      },
+      "versions-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page token.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "versions-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Page size must be positive.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "keys-paged": {
+        "count": 1,
+        "has_next": true,
+        "http_status": 200
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\" at 'crypto_key': Cannot find field.",
+                "field": "crypto_key"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\" at 'crypto_key': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-nested-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\" at 'crypto_key.version_template': Cannot find field.",
+                "field": "crypto_key.version_template"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\" at 'crypto_key.version_template': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "mistyped-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'plaintext_crc32c.value' (TYPE_INT64), ",
+                "field": "plaintext_crc32c.value"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'plaintext_crc32c.value' (TYPE_INT64), ",
+        "status": "INVALID_ARGUMENT"
+      },
+      "conditions-granted": {
+        "bindings": [
+          {
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+          },
+          {
+            "condition": {
+              "expression": "resource.type == \"cloudkms.googleapis.com/CryptoKey\" && resource.service == \"cloudkms.googleapis.com\" && resource.name == \"projects/<project>/locations/us-central1/keyRings/<ring>/cryptoKeys/<key>\"",
+              "title": "key-only"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/cloudkms.viewer"
+          }
+        ],
+        "http_status": 200,
+        "version": 3
+      },
+      "conditional-access": {
+        "key_get": 200,
+        "version_get": 403,
+        "versions_list": 200
+      },
+      "conditional-version-get": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudkms.googleapis.com",
+            "metadata": {
+              "permission": "cloudkms.cryptoKeyVersions.get"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'cloudkms.cryptoKeyVersions.get' denied on resource 'projects/<project>/locations/us-central1/keyRings/<ring>/cryptoKeys/<key>/cryptoKeyVersions/2' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
       },
       "cleanup": {
         "key_versions_destroyed": true

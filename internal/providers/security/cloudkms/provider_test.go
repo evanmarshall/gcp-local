@@ -133,6 +133,20 @@ func (h *harness) fails(recorder *httptest.ResponseRecorder, step string, code i
 	}
 }
 
+// failsWith is fails that also requires the error message.
+func (h *harness) failsWith(recorder *httptest.ResponseRecorder, step string, code int, statusText, message string) {
+	h.t.Helper()
+	h.fails(recorder, step, code, statusText)
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(recorder.Body.Bytes(), &body) != nil || body.Error.Message != message {
+		h.t.Fatalf("%s message = %s, want %q", step, recorder.Body.String(), message)
+	}
+}
+
 // fields requires a document's sorted top-level field names.
 func (h *harness) fields(document map[string]any, step string, want ...string) {
 	h.t.Helper()
@@ -286,11 +300,8 @@ func TestDecryptAcceptsURLSafeBase64(t *testing.T) {
 	if data, err := decodePayload("-_8=", "ciphertext", true); err != nil || !bytes.Equal(data, []byte{0xfb, 0xff}) {
 		t.Fatalf("url-safe payload = %v, %v", data, err)
 	}
-	refused := h.decrypt("not base64!", testAad)
-	h.fails(refused, "invalid base64", 400, "INVALID_ARGUMENT")
-	if !strings.Contains(refused.Body.String(), "Invalid base64 in ciphertext") {
-		t.Fatalf("invalid base64 message: %s", refused.Body.String())
-	}
+	h.failsWith(h.decrypt("not base64!", testAad), "invalid base64", 400, "INVALID_ARGUMENT",
+		`Invalid value at 'ciphertext' (TYPE_BYTES), "not base64!"`)
 }
 
 func TestRecordedVersionRotationLifecycle(t *testing.T) {
@@ -436,13 +447,20 @@ func TestEncryptChecksums(t *testing.T) {
 	h.fails(h.as(testAllowed, http.MethodPost, testKeyPath+":encrypt", body), "bad checksum", 400, "INVALID_ARGUMENT")
 }
 
+// Scheduled rotation is a coverage gap: a schedule is refused on create and
+// update rather than stored and never acted on. Clearing one is accepted.
 func TestKeyUpdateMaskAndRotation(t *testing.T) {
 	h := newHarness(t)
 	h.ring()
+	h.failsWith(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
+		"purpose": purposeEncryptDecrypt, "rotationPeriod": testRotation,
+	}), "rotating key", 501, "UNIMPLEMENTED", "Cloud KMS coverage gap: rotationPeriod is not modeled")
+	h.failsWith(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
+		"purpose": purposeEncryptDecrypt, "nextRotationTime": "2030-01-01T00:00:00Z",
+	}), "scheduled key", 501, "UNIMPLEMENTED", "Cloud KMS coverage gap: nextRotationTime is not modeled")
 	created := h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
-		"purpose": purposeEncryptDecrypt, "rotationPeriod": testRotation, "nextRotationTime": "2030-01-01T00:00:00Z",
-	}), "rotating key")
-	if created["rotationPeriod"] != testRotation || created["destroyScheduledDuration"] != defaultDestroyDuration {
+		"purpose": purposeEncryptDecrypt}), "key")
+	if created["destroyScheduledDuration"] != defaultDestroyDuration {
 		t.Fatalf("created = %v", created)
 	}
 	if _, present := created["labels"]; present {
@@ -450,13 +468,16 @@ func TestKeyUpdateMaskAndRotation(t *testing.T) {
 	}
 	h.fails(h.invoke(http.MethodPatch, testKeyPath, map[string]any{"labels": map[string]string{"a": "b"}}), "no mask", 400, "INVALID_ARGUMENT")
 	labeled := h.ok(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=labels", map[string]any{"labels": map[string]string{"a": "b"}}), "labels")
-	if labeled["rotationPeriod"] != testRotation || labeled["labels"] == nil {
+	if labeled["labels"] == nil {
 		t.Fatalf("labeled = %v", labeled)
 	}
+	h.failsWith(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=rotationPeriod",
+		map[string]any{"rotationPeriod": testRotation}), "schedule rotation", 501, "UNIMPLEMENTED",
+		"Cloud KMS coverage gap: rotationPeriod is not modeled")
 	// The released Terraform provider clears rotation this way on destroy.
 	cleared := h.ok(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=rotationPeriod,nextRotationTime",
 		map[string]any{"rotationPeriod": nil, "nextRotationTime": nil}), "clear rotation")
-	if _, present := cleared["rotationPeriod"]; present {
+	if _, present := cleared["rotationPeriod"]; present || cleared["labels"] == nil {
 		t.Fatalf("cleared = %v", cleared)
 	}
 	h.fails(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=primary", map[string]any{}), "invented primary path", 400, "INVALID_ARGUMENT")
@@ -520,5 +541,136 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, testVersions+"/1/publicKey", nil)
 	for _, verb := range []string{":asymmetricSign", ":asymmetricDecrypt", ":macSign", ":macVerify", ":restore"} {
 		probe(http.MethodPost, testVersions+"/1"+verb, map[string]any{"data": b64("x"), "ciphertext": b64("x"), "mac": b64("x")})
+	}
+}
+
+// errorDetails decodes an error's message and its first ErrorInfo.
+func errorDetails(t *testing.T, recorder *httptest.ResponseRecorder) (string, map[string]any) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Message string           `json:"message"`
+			Details []map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode the error: %v", err)
+	}
+	for _, detail := range body.Error.Details {
+		if detail["@type"] == "type.googleapis.com/google.rpc.ErrorInfo" {
+			return body.Error.Message, detail
+		}
+	}
+	return body.Error.Message, nil
+}
+
+// TestRecordedDenialDetails pins cloudkms-symmetric-key-lifecycle
+// "denied-encrypt": the key named, ErrorInfo with only the permission.
+func TestRecordedDenialDetails(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	denied := h.encrypt(testDenied)
+	h.fails(denied, "denied encrypt", 403, "PERMISSION_DENIED")
+	message, info := errorDetails(t, denied)
+	name := strings.TrimPrefix(testKeyPath, "/v1/")
+	if message != "Permission 'cloudkms.cryptoKeyVersions.useToEncrypt' denied on resource '"+name+"' (or it may not exist)." {
+		t.Fatalf("message = %q", message)
+	}
+	want := map[string]any{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "IAM_PERMISSION_DENIED",
+		"domain": "cloudkms.googleapis.com", "metadata": map[string]any{"permission": "cloudkms.cryptoKeyVersions.useToEncrypt"}}
+	if !reflect.DeepEqual(info, want) {
+		t.Fatalf("details = %v", info)
+	}
+	// A version method names the version.
+	message, _ = errorDetails(t, h.as(testDenied, http.MethodGet, testVersions+"/1", nil))
+	if message != "Permission 'cloudkms.cryptoKeyVersions.get' denied on resource '"+name+"/cryptoKeyVersions/1' (or it may not exist)." {
+		t.Fatalf("version message = %q", message)
+	}
+}
+
+// TestListPagesAndRefusals pins "versions-order", "versions-paged", and the
+// recorded page refusals; filter and orderBy are coverage gaps.
+func TestListPagesAndRefusals(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	h.ok(h.invoke(http.MethodPost, testVersions, map[string]any{}), "version 2")
+	first := h.ok(h.invoke(http.MethodGet, testVersions+"?pageSize=1", nil), "first page")
+	token, _ := first["nextPageToken"].(string)
+	if got := pageVersions(first); !reflect.DeepEqual(got, []string{"1"}) || token == "" || first["totalSize"] != float64(2) {
+		t.Fatalf("first page = %v", first)
+	}
+	second := h.ok(h.invoke(http.MethodGet, testVersions+"?pageSize=1&pageToken="+token, nil), "second page")
+	if _, more := second["nextPageToken"]; more || !reflect.DeepEqual(pageVersions(second), []string{"2"}) {
+		t.Fatalf("second page = %v", second)
+	}
+	h.failsWith(h.invoke(http.MethodGet, testVersions+"?pageToken=not-a-page-token", nil), "bad token", 400, "INVALID_ARGUMENT", "Invalid page token.")
+	h.failsWith(h.invoke(http.MethodGet, testVersions+"?pageSize=-1", nil), "negative size", 400, "INVALID_ARGUMENT", "Page size must be positive.")
+	h.failsWith(h.invoke(http.MethodGet, testVersions+"?filter=state%3DENABLED", nil), "filter", 501, "UNIMPLEMENTED",
+		"Cloud KMS coverage gap: list filter is not implemented")
+	h.failsWith(h.invoke(http.MethodGet, testKeysPath+"?orderBy=name", nil), "orderBy", 501, "UNIMPLEMENTED",
+		"Cloud KMS coverage gap: list orderBy is not implemented")
+	keys := h.ok(h.invoke(http.MethodGet, testKeysPath+"?pageSize=1", nil), "keys")
+	if _, more := keys["nextPageToken"]; more || keys["totalSize"] != float64(1) {
+		t.Fatalf("keys = %v", keys)
+	}
+	rings := h.ok(h.invoke(http.MethodGet, testRingsPath, nil), "rings")
+	if rings["totalSize"] != float64(1) {
+		t.Fatalf("rings = %v", rings)
+	}
+}
+
+// pageVersions lists the version numbers of one versions page.
+func pageVersions(page map[string]any) []string {
+	items, _ := page["cryptoKeyVersions"].([]any)
+	numbers := make([]string, 0, len(items))
+	for _, item := range items {
+		if version, ok := item.(map[string]any); ok {
+			numbers = append(numbers, versionOf(version[keyName]))
+		}
+	}
+	return numbers
+}
+
+// TestStrictBodies pins the recorded refusals of unknown and mistyped fields.
+func TestStrictBodies(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	h.grant()
+	h.failsWith(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=labels", map[string]any{"labels": map[string]string{}, "unknownField": "x"}),
+		"unknown field", 400, "INVALID_ARGUMENT", `Invalid JSON payload received. Unknown name "unknownField" at 'crypto_key': Cannot find field.`)
+	h.failsWith(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=versionTemplate.algorithm", map[string]any{
+		"versionTemplate": map[string]any{keyAlgorithm: algorithmSymmetric, "unknownField": "x"}}),
+		"unknown nested field", 400, "INVALID_ARGUMENT", `Invalid JSON payload received. Unknown name "unknownField" at 'crypto_key.version_template': Cannot find field.`)
+	h.failsWith(h.as(testAllowed, http.MethodPost, testKeyPath+":encrypt", map[string]any{"plaintext": b64(testPlaintext), "plaintextCrc32c": "many"}),
+		"mistyped field", 400, "INVALID_ARGUMENT", "Invalid value at 'plaintext_crc32c.value' (TYPE_INT64), ")
+	h.failsWith(h.invoke(http.MethodPost, testRingsPath+"?keyRingId=other", map[string]any{"unknownField": "x"}),
+		"unknown key ring field", 400, "INVALID_ARGUMENT", `Invalid JSON payload received. Unknown name "unknownField" at 'key_ring': Cannot find field.`)
+	h.failsWith(h.invoke(http.MethodPost, testKeyPath+":setIamPolicy", map[string]any{"policy": map[string]any{
+		"auditConfigs": []any{map[string]any{"service": "allServices"}}}}), "audit configs", 501, "UNIMPLEMENTED",
+		"Cloud KMS coverage gap: policy.auditConfigs is not modeled")
+}
+
+// TestConditionalGrantSeesResourceAttributes pins "conditional-access": a
+// condition on the CryptoKey type and name grants reads of the key and its
+// version list, which are checked on the key, but not a version get.
+func TestConditionalGrantSeesResourceAttributes(t *testing.T) {
+	h := newHarness(t)
+	h.key()
+	name := strings.TrimPrefix(testKeyPath, "/v1/")
+	h.ok(h.invoke(http.MethodPost, testKeyPath+":setIamPolicy", map[string]any{"policy": map[string]any{
+		"version": 3, "bindings": []any{map[string]any{"role": "roles/cloudkms.viewer", "members": []string{member(testAllowed)},
+			"condition": map[string]any{"title": "key-only", "expression": `resource.type == "cloudkms.googleapis.com/CryptoKey" && ` +
+				`resource.service == "cloudkms.googleapis.com" && resource.name == "` + name + `"`}}},
+	}}), "conditional grant")
+	h.ok(h.as(testAllowed, http.MethodGet, testKeyPath, nil), "key get")
+	h.ok(h.as(testAllowed, http.MethodGet, testVersions, nil), "version list")
+	h.fails(h.as(testAllowed, http.MethodGet, testVersions+"/1", nil), "version get", 403, "PERMISSION_DENIED")
+}
+
+func TestLocationsGet(t *testing.T) {
+	h := newHarness(t)
+	got := h.ok(h.invoke(http.MethodGet, "/v1/projects/"+testProject+"/locations/us-east1", nil), "location")
+	if got[keyName] != "projects/"+testProject+"/locations/us-east1" || got["locationId"] != "us-east1" {
+		t.Fatalf("location = %v", got)
 	}
 }

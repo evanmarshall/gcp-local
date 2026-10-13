@@ -182,7 +182,7 @@ func goSymmetric(t *testing.T, admin, app, peer *kms.KeyManagementClient, ring s
 	}
 	_, err := peer.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: []byte(testPlaintext)})
 	refused(t, "ungranted encrypt", err, codes.PermissionDenied,
-		"Missing permission: cloudkms.cryptoKeyVersions.useToEncrypt //cloudkms.googleapis.com/"+key.GetName())
+		"Permission 'cloudkms.cryptoKeyVersions.useToEncrypt' denied on resource '"+key.GetName()+"' (or it may not exist).")
 	grant(t, admin, key.GetName(), testEncrypter)
 	encrypted, err := app.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: []byte(testPlaintext), AdditionalAuthenticatedData: []byte(testAad)})
 	if err != nil || encrypted.GetCiphertextCrc32C() == nil || encrypted.GetProtectionLevel() != kmspb.ProtectionLevel_SOFTWARE {
@@ -252,7 +252,7 @@ func goMAC(t *testing.T, admin, app, peer *kms.KeyManagementClient, ring string)
 	refused(t, "disabled mac sign", err, codes.FailedPrecondition, version+" is not enabled, current state is: DISABLED.")
 	_, err = peer.MacSign(ctx, &kmspb.MacSignRequest{Name: version, Data: []byte(testPlaintext)})
 	refused(t, "ungranted mac sign", err, codes.PermissionDenied,
-		"Missing permission: cloudkms.cryptoKeyVersions.useToSign //cloudkms.googleapis.com/"+key.GetName())
+		"Permission 'cloudkms.cryptoKeyVersions.useToSign' denied on resource '"+version+"' (or it may not exist).")
 }
 
 // TestGRPCUnservedMethodsAreGaps pins the explicit refusals of RPCs and

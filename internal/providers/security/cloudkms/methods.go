@@ -11,12 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // handler serves one authorized KMS method.
@@ -24,7 +25,7 @@ type handler func(p *Provider, request *gateway.RESTRequest, scope state.Scope, 
 
 // handlers maps every registered method to its implementation.
 var handlers = map[string]handler{
-	methodLocationsList:     (*Provider).locationsList,
+	methodLocationsGet:      (*Provider).locationsGet,
 	methodKeyRingsCreate:    (*Provider).keyRingsCreate,
 	methodKeyRingsGet:       (*Provider).keyRingsGet,
 	methodKeyRingsList:      (*Provider).keyRingsList,
@@ -66,17 +67,45 @@ func respond(document any) (*gateway.RESTResponse, error) {
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// locationsList returns the modeled KMS locations.
-func (p *Provider) locationsList(_ *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
-	return respond(map[string]any{"locations": []any{
-		map[string]any{keyName: "projects/" + resource.project + "/locations/" + testLocation,
-			"locationId": testLocation, "displayName": testLocation},
-	}})
+// paging is every KMS list's: GCP's recorded refusals of a page token it
+// didn't issue and of a negative size (cloudkms-symmetric-key-lifecycle
+// "versions-invalid-token", "versions-negative-size"). The default and
+// maximum sizes are not recorded.
+var paging = provider.Paging{Default: 1000, Max: 1000,
+	InvalidToken: provider.Invalid("Invalid page token."), NegativeSize: provider.Invalid("Page size must be positive.")}
+
+// listBody renders one page with the totalSize KMS lists report, omitted
+// when zero as proto3 JSON does (recorded: "versions-paged").
+func listBody[T any](field string, items []T, next string, total int) map[string]any {
+	body := provider.ListBody(field, items, next)
+	if total > 0 {
+		body["totalSize"] = total
+	}
+	return body
+}
+
+// locationsGet returns one location; any location id is modeled.
+func (p *Provider) locationsGet(_ *gateway.RESTRequest, _ state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	return respond(map[string]any{keyName: "projects/" + resource.project + "/locations/" + resource.location,
+		"locationId": resource.location, "displayName": resource.location})
+}
+
+// decode strictly checks a body against the request message GCP's
+// transcoder decodes it into, then reads it into body. root is the request
+// field the route's body binds ("crypto_key"), "" for body "*".
+func decode(raw []byte, root string, message proto.Message, body any, unmodeled ...string) error {
+	if err := provider.DecodeProto(raw, root, message, gap, unmodeled...); err != nil {
+		return err
+	}
+	return decodeBody(raw, body)
 }
 
 // keyRingsCreate validates and stores one key ring.
 func (p *Provider) keyRingsCreate(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	resource.ring = request.Query.Get("keyRingId")
+	if err := decode(request.JSON, "key_ring", &kmspb.KeyRing{}, &struct{}{}); err != nil {
+		return nil, err
+	}
 	if !uid.MatchString(resource.ring) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid key ring id %q", resource.ring)
 	}
@@ -124,16 +153,26 @@ func (p *Provider) keyRingsGet(_ *gateway.RESTRequest, scope state.Scope, resour
 	return respond(document)
 }
 
-// keyRingsList returns the location's key rings in name order.
-func (p *Provider) keyRingsList(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
-	items := []any{}
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		for _, id := range sortedKeys(s.keyRings, resource.location+"/") {
+// keyRingsList returns one page of the location's key rings in name order.
+func (p *Provider) keyRingsList(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	var body map[string]any
+	err := p.scopes.With(scope, func(s *scopeState) error {
+		ids := sortedKeys(s.keyRings, resource.location+"/")
+		page, next, err := provider.Page(ids, request.Query, paging, gap)
+		if err != nil {
+			return err
+		}
+		items := make([]any, 0, len(page))
+		for _, id := range page {
 			items = append(items, keyRingDocument(resource, s.keyRings[id]))
 		}
+		body = listBody("keyRings", items, next, len(ids))
 		return nil
 	})
-	return respond(map[string]any{"keyRings": items})
+	if err != nil {
+		return nil, fmt.Errorf("list key rings: %w", err)
+	}
+	return respond(body)
 }
 
 // sortedKeys lists one map's keys with a prefix in order.
@@ -197,8 +236,7 @@ func (p *Provider) newCryptoKey(request *gateway.RESTRequest, name string) (*cry
 	now := p.clock()
 	record := &cryptoKeyRecord{
 		Name: name, Purpose: string(body.Purpose), Algorithm: string(body.Template.Algorithm),
-		Labels: maps.Clone(body.Labels), Rotation: body.RotationPeriod, NextRotation: body.NextRotation,
-		DestroyDuration: destroy, DestroyText: body.DestroyDuration,
+		Labels: maps.Clone(body.Labels), DestroyDuration: destroy, DestroyText: body.DestroyDuration,
 		Versions: map[string]*versionRecord{}, CreatedAt: now,
 	}
 	if request.Query.Get("skipInitialVersionCreation") == "true" {
@@ -254,12 +292,6 @@ func cryptoKeyDocument(resource ref, record *cryptoKeyRecord) map[string]any {
 	if len(record.Labels) > 0 {
 		document["labels"] = maps.Clone(record.Labels)
 	}
-	if record.Rotation != "" {
-		document["rotationPeriod"] = record.Rotation
-	}
-	if record.NextRotation != "" {
-		document["nextRotationTime"] = record.NextRotation
-	}
 	return document
 }
 
@@ -302,32 +334,44 @@ func (p *Provider) cryptoKeysGet(_ *gateway.RESTRequest, scope state.Scope, reso
 	return p.keyResponse(scope, resource, func(*cryptoKeyRecord) error { return nil })
 }
 
-// cryptoKeysList returns the key ring's crypto keys in name order.
-func (p *Provider) cryptoKeysList(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
-	items := []any{}
+// cryptoKeysList returns one page of the key ring's crypto keys in name
+// order. versionView only adds HSM attestations, which SOFTWARE keys lack.
+func (p *Provider) cryptoKeysList(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	var body map[string]any
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		if s.keyRings[resource.ringID()] == nil {
 			return notFound("KeyRing", resource.ringName())
 		}
-		for _, id := range sortedKeys(s.cryptoKeys, resource.ringID()+"/") {
+		ids := sortedKeys(s.cryptoKeys, resource.ringID()+"/")
+		page, next, err := provider.Page(ids, request.Query, paging, gap)
+		if err != nil {
+			return err
+		}
+		items := make([]any, 0, len(page))
+		for _, id := range page {
 			settle(s.cryptoKeys[id], p.clock())
 			items = append(items, cryptoKeyDocument(resource, s.cryptoKeys[id]))
 		}
+		body = listBody("cryptoKeys", items, next, len(ids))
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list crypto keys: %w", err)
 	}
-	return respond(map[string]any{"cryptoKeys": items})
+	return respond(body)
 }
 
 // keyUpdateBody is one decoded crypto key PATCH body.
 type keyUpdateBody struct {
-	Labels       map[string]string `json:"labels"`
-	Rotation     string            `json:"rotationPeriod"`
-	NextRotation string            `json:"nextRotationTime"`
-	Template     versionTemplate   `json:"versionTemplate"`
+	Labels   map[string]string `json:"labels"`
+	Template versionTemplate   `json:"versionTemplate"`
 }
+
+// unmodeledKeyFields are the CryptoKey fields a create or update refuses
+// when set. Scheduled rotation is stored by GCP and acted on; it is not
+// modeled (#93), nor are import-only keys, external backends, or Key Access
+// Justifications.
+var unmodeledKeyFields = []string{"rotationPeriod", "nextRotationTime", "importOnly", "cryptoKeyBackend", "keyAccessJustificationsPolicy"}
 
 // cryptoKeysUpdate applies the fields named by updateMask.
 func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
@@ -336,7 +380,7 @@ func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Sc
 		return nil, err
 	}
 	var body keyUpdateBody
-	if err := decodeBody(request.JSON, &body); err != nil {
+	if err := decode(request.JSON, "crypto_key", &kmspb.CryptoKey{}, &body, unmodeledKeyFields...); err != nil {
 		return nil, err
 	}
 	return p.keyResponse(scope, resource, func(record *cryptoKeyRecord) error {
@@ -352,29 +396,21 @@ func (p *Provider) cryptoKeysUpdate(request *gateway.RESTRequest, scope state.Sc
 	})
 }
 
-// validateKeyPath accepts the modeled crypto key update mask paths for one key.
+// validateKeyPath accepts the modeled crypto key update mask paths for one
+// key, in camelCase or snake_case.
 func validateKeyPath(record *cryptoKeyRecord, path string, body keyUpdateBody) error {
 	switch path {
 	case "labels":
 		return nil
-	case "rotationPeriod", "nextRotationTime":
-		if body.Rotation != "" || body.NextRotation != "" {
-			return rotationAllowed(record.Purpose)
-		}
+	case "rotationPeriod", "rotation_period", "nextRotationTime", "next_rotation_time":
+		// Decoding refused a schedule; clearing one keeps rotation off. The
+		// released Terraform provider clears it this way on destroy.
 		return nil
-	case "versionTemplate.algorithm":
+	case "versionTemplate.algorithm", "version_template.algorithm":
 		return algorithmAllowed(record.Purpose, string(body.Template.Algorithm))
 	default:
 		return status.Errorf(codes.InvalidArgument, "Unsupported update mask path %q", path)
 	}
-}
-
-// rotationAllowed refuses automatic rotation outside ENCRYPT_DECRYPT keys.
-func rotationAllowed(purpose string) error {
-	if purpose != purposeEncryptDecrypt {
-		return status.Errorf(codes.InvalidArgument, "Automatic rotation is not supported for purpose %s.", purpose)
-	}
-	return nil
 }
 
 // algorithmAllowed accepts an implemented algorithm of the key's purpose.
@@ -396,11 +432,7 @@ func applyKeyPath(record *cryptoKeyRecord, path string, body keyUpdateBody) {
 	switch path {
 	case "labels":
 		record.Labels = maps.Clone(body.Labels)
-	case "rotationPeriod":
-		record.Rotation = body.Rotation
-	case "nextRotationTime":
-		record.NextRotation = body.NextRotation
-	default:
+	case "versionTemplate.algorithm", "version_template.algorithm":
 		record.Algorithm = string(body.Template.Algorithm)
 	}
 }
@@ -410,7 +442,7 @@ func (p *Provider) updatePrimaryVersion(request *gateway.RESTRequest, scope stat
 	var body struct {
 		Version string `json:"cryptoKeyVersionId"`
 	}
-	if err := decodeBody(request.JSON, &body); err != nil {
+	if err := decode(request.JSON, "", &kmspb.UpdateCryptoKeyPrimaryVersionRequest{}, &body); err != nil {
 		return nil, err
 	}
 	if !versionNumber.MatchString(body.Version) {
@@ -486,13 +518,11 @@ func (p *Provider) setIam(request *gateway.RESTRequest, indexed, kind, name stri
 	if _, ok := p.index.Get(indexed); !ok {
 		return nil, notFound(kind, name)
 	}
-	var envelope struct {
-		Policy iam.Policy `json:"policy"`
+	decoded, err := provider.DecodePolicy(request.JSON, gap)
+	if err != nil {
+		return nil, err
 	}
-	if json.Unmarshal(request.JSON, &envelope) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
-	}
-	policy, err := p.engine.SetPolicy(indexed, envelope.Policy)
+	policy, err := p.engine.SetPolicy(indexed, decoded)
 	if err != nil {
 		return nil, fmt.Errorf("write KMS policy: %w", err)
 	}
@@ -502,7 +532,7 @@ func (p *Provider) setIam(request *gateway.RESTRequest, indexed, kind, name stri
 // parseCryptoKeyBody reads and validates one crypto key create body.
 func parseCryptoKeyBody(raw []byte) (cryptoKeyBody, error) {
 	var body cryptoKeyBody
-	if err := decodeBody(raw, &body); err != nil {
+	if err := decode(raw, "crypto_key", &kmspb.CryptoKey{}, &body, unmodeledKeyFields...); err != nil {
 		return body, err
 	}
 	if body.Purpose == "" {
@@ -526,13 +556,8 @@ func validateCryptoKeyBody(body cryptoKeyBody) error {
 	if err := algorithmAllowed(purpose, string(body.Template.Algorithm)); err != nil {
 		return err
 	}
-	switch {
-	case (body.RotationPeriod != "" || body.NextRotation != "") && purpose != purposeEncryptDecrypt:
-		return rotationAllowed(purpose)
-	case body.Template.ProtectionLevel != "" && body.Template.ProtectionLevel != protectionSoftware:
+	if body.Template.ProtectionLevel != "" && body.Template.ProtectionLevel != protectionSoftware {
 		return gap("only SOFTWARE protection")
-	case body.ImportOnly:
-		return gap("import-only keys")
 	}
 	return nil
 }

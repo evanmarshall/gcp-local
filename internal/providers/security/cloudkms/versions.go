@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -74,7 +76,10 @@ func (p *Provider) withVersion(scope state.Scope, resource ref, use func(*crypto
 // versionsCreate appends one enabled version with fresh material for the
 // key's template algorithm. It does not move an existing primary; an
 // ENCRYPT_DECRYPT key without one adopts the new version.
-func (p *Provider) versionsCreate(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+func (p *Provider) versionsCreate(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	if err := decode(request.JSON, "crypto_key_version", &kmspb.CryptoKeyVersion{}, &struct{}{}, "externalProtectionLevelOptions"); err != nil {
+		return nil, err
+	}
 	var document map[string]any
 	err := p.withKey(scope, resource, func(record *cryptoKeyRecord) error {
 		number := strconv.Itoa(len(record.Versions) + 1)
@@ -95,9 +100,11 @@ func (p *Provider) versionsCreate(_ *gateway.RESTRequest, scope state.Scope, res
 	return respond(document)
 }
 
-// versionsList returns the key's versions in number order.
-func (p *Provider) versionsList(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
-	items := []any{}
+// versionsList returns one page of the key's versions in number order
+// (recorded: cloudkms-symmetric-key-lifecycle "versions-order"). view only
+// adds HSM attestations, which SOFTWARE versions lack.
+func (p *Provider) versionsList(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	var body map[string]any
 	err := p.withKey(scope, resource, func(record *cryptoKeyRecord) error {
 		numbers := make([]int, 0, len(record.Versions))
 		for number := range record.Versions {
@@ -105,15 +112,21 @@ func (p *Provider) versionsList(_ *gateway.RESTRequest, scope state.Scope, resou
 			numbers = append(numbers, value)
 		}
 		sort.Ints(numbers)
-		for _, number := range numbers {
+		page, next, err := provider.Page(numbers, request.Query, paging, gap)
+		if err != nil {
+			return err
+		}
+		items := make([]any, 0, len(page))
+		for _, number := range page {
 			items = append(items, versionDocument(resource, record.Versions[strconv.Itoa(number)]))
 		}
+		body = listBody("cryptoKeyVersions", items, next, len(numbers))
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list crypto key versions: %w", err)
 	}
-	return respond(map[string]any{"cryptoKeyVersions": items})
+	return respond(body)
 }
 
 func (p *Provider) versionsGet(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
@@ -133,7 +146,7 @@ func (p *Provider) versionsPatch(request *gateway.RESTRequest, scope state.Scope
 	var body struct {
 		State stateEnum `json:"state"`
 	}
-	if err := decodeBody(request.JSON, &body); err != nil {
+	if err := decode(request.JSON, "crypto_key_version", &kmspb.CryptoKeyVersion{}, &body, "externalProtectionLevelOptions"); err != nil {
 		return nil, err
 	}
 	if body.State != stateEnabled && body.State != stateDisabled {
@@ -149,7 +162,10 @@ func (p *Provider) versionsPatch(request *gateway.RESTRequest, scope state.Scope
 }
 
 // versionsDestroy schedules destruction after the key's destroy duration.
-func (p *Provider) versionsDestroy(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+func (p *Provider) versionsDestroy(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	if err := decode(request.JSON, "", &kmspb.DestroyCryptoKeyVersionRequest{}, &struct{}{}); err != nil {
+		return nil, err
+	}
 	return p.withVersion(scope, resource, func(record *cryptoKeyRecord, version *versionRecord) error {
 		if version.State != stateEnabled && version.State != stateDisabled {
 			return status.Errorf(codes.FailedPrecondition, "%s is in state %s.", resource.versionName(version.Number), version.State)
@@ -161,7 +177,10 @@ func (p *Provider) versionsDestroy(_ *gateway.RESTRequest, scope state.Scope, re
 }
 
 // versionsRestore returns a version scheduled for destruction to DISABLED.
-func (p *Provider) versionsRestore(_ *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+func (p *Provider) versionsRestore(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
+	if err := decode(request.JSON, "", &kmspb.RestoreCryptoKeyVersionRequest{}, &struct{}{}); err != nil {
+		return nil, err
+	}
 	return p.withVersion(scope, resource, func(_ *cryptoKeyRecord, version *versionRecord) error {
 		if version.State != stateDestroyScheduled {
 			return status.Errorf(codes.FailedPrecondition, "%s is in state %s.", resource.versionName(version.Number), version.State)
@@ -182,7 +201,7 @@ type encryptBody struct {
 // encrypt seals one plaintext with the primary version's material.
 func (p *Provider) encrypt(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	var body encryptBody
-	if err := decodeBody(request.JSON, &body); err != nil {
+	if err := decode(request.JSON, "", &kmspb.EncryptRequest{}, &body); err != nil {
 		return nil, err
 	}
 	plaintext, err := decodePayload(body.Plaintext, "plaintext", true)
@@ -245,7 +264,7 @@ type decryptBody struct {
 // enabled. usedPrimary appears only when the primary version decrypted.
 func (p *Provider) decrypt(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	var body decryptBody
-	if err := decodeBody(request.JSON, &body); err != nil {
+	if err := decode(request.JSON, "", &kmspb.DecryptRequest{}, &body); err != nil {
 		return nil, err
 	}
 	sealed, err := decodePayload(body.Ciphertext, "ciphertext", true)

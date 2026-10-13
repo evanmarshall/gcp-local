@@ -255,10 +255,10 @@ func TestPurposeKeyCreateAndUpdateRefusals(t *testing.T) {
 	h.fails(create(map[string]any{"purpose": purposeAsymmetricSign, "versionTemplate": map[string]any{keyAlgorithm: "EC_SIGN_SECP256K1_SHA256"}}), "unimplemented algorithm", 501, "UNIMPLEMENTED")
 	h.fails(create(map[string]any{"purpose": "RAW_ENCRYPT_DECRYPT"}), "unimplemented purpose", 501, "UNIMPLEMENTED")
 	h.fails(create(map[string]any{"purpose": purposeAsymmetricSign, "rotationPeriod": testRotation,
-		"versionTemplate": map[string]any{keyAlgorithm: algorithmP256}}), "asymmetric rotation", 400, "INVALID_ARGUMENT")
+		"versionTemplate": map[string]any{keyAlgorithm: algorithmP256}}), "asymmetric rotation", 501, "UNIMPLEMENTED")
 	h.fails(h.invoke(http.MethodGet, testKeysPath+"/refused", nil), "refused key absent", 404, "NOT_FOUND")
 	path := h.purposeKey("sign", purposeAsymmetricSign, algorithmP256)
-	h.fails(h.invoke(http.MethodPatch, path+"?updateMask=rotationPeriod", map[string]any{"rotationPeriod": testRotation}), "patch rotation", 400, "INVALID_ARGUMENT")
+	h.fails(h.invoke(http.MethodPatch, path+"?updateMask=rotationPeriod", map[string]any{"rotationPeriod": testRotation}), "patch rotation", 501, "UNIMPLEMENTED")
 	h.fails(h.invoke(http.MethodPatch, path+"?updateMask=versionTemplate.algorithm,labels", map[string]any{
 		"versionTemplate": map[string]any{keyAlgorithm: algorithmHMAC}, "labels": map[string]string{"a": "b"}}), "patch wrong algorithm", 400, "INVALID_ARGUMENT")
 	if key := h.ok(h.invoke(http.MethodGet, path, nil), "unchanged key"); key["labels"] != nil {

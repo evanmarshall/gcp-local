@@ -18,7 +18,7 @@ These have no upstream counterpart. Their configurations and assertions are gcp-
 
 | Test ID | What passes locally |
 | --- | --- |
-| `TestLocalKMSKeyRingCryptoKey` | Key ring; crypto key with rotation period and primary version; versions destroyed with the key |
+| `TestLocalKMSKeyRingCryptoKey` | Key ring; crypto key with primary version (no rotation: a coverage gap); key ring and key IAM members; versions destroyed with the key |
 | `TestLocalSecretManagerSecretAndVersion` | Secret with replication policy, version with payload, enable/destroy, 404 after destroy |
 | `TestLocalCloudTasksQueueLifecycle` | Queue with rate limits, PATCH update, delete, 404 after destroy |
 | `TestLocalCloudSchedulerJob` | Pub/Sub target job with a time zone and retry config, PATCH of description and schedule, pause, empty plan, 404 after destroy |

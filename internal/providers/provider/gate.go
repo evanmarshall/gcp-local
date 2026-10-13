@@ -22,6 +22,12 @@ const (
 	// NotAuthorized is Pub/Sub's, which names neither (recording
 	// pubsub-rest-data-plane); a message without verbs is used as is.
 	NotAuthorized = "User not authorized to perform this action."
+	// PermissionDeniedOnResource is Cloud KMS's (recording cloudkms-symmetric-key-lifecycle).
+	PermissionDeniedOnResource = "Permission '%s' denied on resource '%s' (or it may not exist)."
+	// PermissionDeniedUnnamed leaves the resource unnamed: Secret Manager's
+	// (recording secretmanager-access-lifecycle) and IAM's, without the
+	// per-call Troubleshooter link GCP appends.
+	PermissionDeniedUnnamed = "Permission '%[1]s' denied on resource (or it may not exist)."
 )
 
 // Authorizer is the IAM engine's authorization entry point; *iam.Engine
@@ -44,11 +50,18 @@ type Gate struct {
 	// Empty sends no details, as Cloud Scheduler's and Memorystore's recorded
 	// denials have none. Set it only from a recorded denial with details.
 	Domain string
-	// Attributes returns the IAM Conditions resource attributes (resource.name,
-	// .type, .service) of a target Nearest picks, from the service's row of
-	// Google's resource attribute reference. Nil supplies none, so a condition
+	// Attributes returns the IAM Conditions resource attributes
+	// (resource.name, .type, .service) Nearest passes for a call, from the
+	// service's row of Google's resource attribute reference. target is the
+	// IAM resource Nearest picked; resource is the name the permission is
+	// checked on, which a denial reports and may be a child that holds no
+	// policy (a KMS crypto key version). Nil supplies none, so a condition
 	// that reads one grants nothing.
-	Attributes func(target string) iam.ResourceAttributes
+	Attributes func(target, resource string) iam.ResourceAttributes
+	// OmitResource leaves the resource out of the ErrorInfo metadata, which
+	// then names only the permission, as Secret Manager's and Cloud KMS's
+	// recorded denials do.
+	OmitResource bool
 }
 
 // Check authorizes call on target. It returns the decision and nil when the
@@ -95,16 +108,16 @@ func Nearest[T any](g Gate, store *state.Store[T], scope state.Scope, call gatew
 		target = iam.Target{Name: candidates[len(candidates)-1]}
 		for _, name := range candidates[:len(candidates)-1] {
 			if _, indexed := g.Index.Get(name); indexed {
-				target = iam.Target{Name: name}
+				target.Name = name
 				break
 			}
-		}
-		if g.Attributes != nil {
-			target.Attributes = g.Attributes(target.Name)
 		}
 		reported := resource
 		if reported == "" {
 			reported = target.Name
+		}
+		if g.Attributes != nil {
+			target.Attributes = g.Attributes(target.Name, reported)
 		}
 		decision, checkErr = g.Check(call, target, reported)
 		return nil
@@ -119,8 +132,8 @@ func Nearest[T any](g Gate, store *state.Store[T], scope state.Scope, call gatew
 // for a caller without valid credentials; otherwise 403 PERMISSION_DENIED
 // naming the first missing permission and resource, with the ErrorInfo
 // {reason IAM_PERMISSION_DENIED, Domain, metadata {permission, resource}}
-// when Domain is set. Use it directly only for a check Check can't make
-// (request features).
+// when Domain is set ({permission} only with OmitResource). Use it directly
+// only for a check Check can't make (request features).
 func (g Gate) Denial(call gateway.Call, decision iam.Decision, resource string) error {
 	if call.Principal.State != gateway.Authenticated {
 		return status.Error(codes.Unauthenticated, "Request had invalid authentication credentials.")
@@ -133,8 +146,11 @@ func (g Gate) Denial(call gateway.Call, decision iam.Decision, resource string) 
 	if g.Domain == "" {
 		return status.Error(codes.PermissionDenied, message)
 	}
-	return ErrorInfo(codes.PermissionDenied, message, "IAM_PERMISSION_DENIED", g.Domain,
-		map[string]string{"permission": permission, "resource": resource})
+	metadata := map[string]string{"permission": permission, "resource": resource}
+	if g.OmitResource {
+		delete(metadata, "resource")
+	}
+	return ErrorInfo(codes.PermissionDenied, message, "IAM_PERMISSION_DENIED", g.Domain, metadata)
 }
 
 // WithDecision sets the decision ID header, which the gateway forwards to gRPC

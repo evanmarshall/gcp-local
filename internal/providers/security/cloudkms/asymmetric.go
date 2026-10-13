@@ -15,10 +15,12 @@ import (
 	"fmt"
 	"slices"
 
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // digestFields names the Digest message field of each implemented hash.
@@ -75,7 +77,7 @@ type signBody struct {
 // uses a salt as long as the hash, as GCP documents.
 func (p *Provider) asymmetricSign(request *gateway.RESTRequest, scope state.Scope, resource ref) (*gateway.RESTResponse, error) {
 	var body signBody
-	if err := decodeBody(request.JSON, &body); err != nil {
+	if err := decode(request.JSON, "", &kmspb.AsymmetricSignRequest{}, &body); err != nil {
 		return nil, err
 	}
 	input, err := readSignInput(body)
@@ -157,7 +159,7 @@ func (p *Provider) asymmetricDecrypt(request *gateway.RESTRequest, scope state.S
 		Ciphertext    string          `json:"ciphertext"`
 		CiphertextCRC json.RawMessage `json:"ciphertextCrc32c"`
 	}
-	if err := decodeBody(request.JSON, &body); err != nil {
+	if err := decode(request.JSON, "", &kmspb.AsymmetricDecryptRequest{}, &body); err != nil {
 		return nil, err
 	}
 	ciphertext, err := decodePayload(body.Ciphertext, "ciphertext", true)
@@ -214,7 +216,11 @@ type macBody struct {
 // computes the data's tag with a MAC version.
 func (p *Provider) macTag(request *gateway.RESTRequest, scope state.Scope, resource ref, document map[string]any, verifying bool) ([]byte, []byte, error) {
 	var body macBody
-	if err := decodeBody(request.JSON, &body); err != nil {
+	var message proto.Message = &kmspb.MacSignRequest{}
+	if verifying {
+		message = &kmspb.MacVerifyRequest{}
+	}
+	if err := decode(request.JSON, "", message, &body); err != nil {
 		return nil, nil, err
 	}
 	data, err := decodePayload(body.Data, "data", true)

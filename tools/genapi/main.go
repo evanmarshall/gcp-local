@@ -1017,9 +1017,10 @@ func cloudKMSRoutes() []byte {
 func cloudKMSRows() []route {
 	const base = "/v1/projects/{project}/locations/{location}"
 	return []route{
-		{"cloudkms.locations.list", http.MethodGet, base, false, false},
-		// The real create reads only the keyRingId query; the body is optional.
-		{"cloudkms.keyRings.create", http.MethodPost, base + "/keyRings", false, false},
+		// locations.list shares Secret Manager's path on this one host, whose route wins.
+		{"cloudkms.locations.get", http.MethodGet, base, false, false},
+		// The body is an optional KeyRing, checked strictly.
+		{"cloudkms.keyRings.create", http.MethodPost, base + "/keyRings", true, false},
 		{"cloudkms.keyRings.list", http.MethodGet, base + "/keyRings", false, false},
 		{"cloudkms.keyRings.get", http.MethodGet, base + "/keyRings/{keyRing}", false, false},
 		{"cloudkms.keyRings.getIamPolicy", http.MethodGet, base + "/keyRings/{keyRing}:getIamPolicy", false, false},

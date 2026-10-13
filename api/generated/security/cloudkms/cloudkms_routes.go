@@ -5,8 +5,8 @@ import "github.com/evanmarshall/gcp-local/api/generated/contract"
 
 // CloudKMSRoutes is the Cloud KMS v1 route table slice.
 var CloudKMSRoutes = []contract.Route{
-	{Method: "cloudkms.locations.list", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}", JSONBody: false, Media: false},
-	{Method: "cloudkms.keyRings.create", Verb: "POST", Path: "/v1/projects/{project}/locations/{location}/keyRings", JSONBody: false, Media: false},
+	{Method: "cloudkms.locations.get", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}", JSONBody: false, Media: false},
+	{Method: "cloudkms.keyRings.create", Verb: "POST", Path: "/v1/projects/{project}/locations/{location}/keyRings", JSONBody: true, Media: false},
 	{Method: "cloudkms.keyRings.list", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}/keyRings", JSONBody: false, Media: false},
 	{Method: "cloudkms.keyRings.get", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}", JSONBody: false, Media: false},
 	{Method: "cloudkms.keyRings.getIamPolicy", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}/keyRings/{keyRing}:getIamPolicy", JSONBody: false, Media: false},

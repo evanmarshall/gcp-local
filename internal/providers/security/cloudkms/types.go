@@ -28,7 +28,7 @@ const serviceName = "cloudkms"
 
 // Method name constants; the generated route table uses the same identifiers.
 const (
-	methodLocationsList     = "cloudkms.locations.list"
+	methodLocationsGet      = "cloudkms.locations.get"
 	methodKeyRingsCreate    = "cloudkms.keyRings.create"
 	methodKeyRingsList      = "cloudkms.keyRings.list"
 	methodKeyRingsGet       = "cloudkms.keyRings.get"
@@ -58,7 +58,7 @@ const (
 
 // permissions follows the documented Cloud KMS access-control rows.
 var permissions = map[string]string{
-	methodLocationsList:     "cloudkms.locations.list",
+	methodLocationsGet:      "cloudkms.locations.get",
 	methodKeyRingsCreate:    "cloudkms.keyRings.create",
 	methodKeyRingsList:      "cloudkms.keyRings.list",
 	methodKeyRingsGet:       "cloudkms.keyRings.get",
@@ -105,7 +105,6 @@ const (
 	keyProtectionLevel = "protectionLevel"
 	keyAlgorithm       = "algorithm"
 	keyState           = "state"
-	testLocation       = "us-central1"
 	// The implemented purposes, the symmetric algorithm, and the only
 	// protection level.
 	purposeEncryptDecrypt    = "ENCRYPT_DECRYPT"
@@ -218,15 +217,13 @@ type versionTemplate struct {
 	ProtectionLevel protectionEnum `json:"protectionLevel"`
 }
 
-// cryptoKeyBody is one decoded crypto key create body.
+// cryptoKeyBody is one decoded crypto key create body. Strict decoding
+// (keyFields) refuses the fields it lacks.
 type cryptoKeyBody struct {
 	Purpose         purposeEnum       `json:"purpose"`
 	Labels          map[string]string `json:"labels"`
-	RotationPeriod  string            `json:"rotationPeriod"`
-	NextRotation    string            `json:"nextRotationTime"`
 	Template        versionTemplate   `json:"versionTemplate"`
 	DestroyDuration string            `json:"destroyScheduledDuration"`
-	ImportOnly      bool              `json:"importOnly"`
 }
 
 type keyRingRecord struct {
@@ -241,8 +238,6 @@ type cryptoKeyRecord struct {
 	Purpose         string
 	Algorithm       string
 	Labels          map[string]string
-	Rotation        string // duration string like 86400s, empty disables
-	NextRotation    string
 	DestroyDuration time.Duration
 	DestroyText     string
 	Versions        map[string]*versionRecord
