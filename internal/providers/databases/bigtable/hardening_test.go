@@ -234,7 +234,11 @@ func TestInstanceConditionNamesTheAddressedResource(t *testing.T) {
 	}
 	expectOK(t, "instance read", h.invokeAs("allowed", http.MethodGet, path, nil))
 	expectMessage(t, "table read", h.invokeAs("allowed", http.MethodGet, path+"/tables/"+testTable, nil), 403, "Access denied. Missing IAM permission: bigtable.tables.get.")
-	expectMessage(t, "missing table", h.invokeAs("allowed", http.MethodGet, path+"/tables/absent", nil), 403, "Access denied. Missing IAM permission: bigtable.tables.get.")
+	// A missing table authorizes at its instance, whose attributes the
+	// condition then sees (Gate.Attributes describes the chosen target); not
+	// recorded.
+	expectMessage(t, "missing table", h.invokeAs("allowed", http.MethodGet, path+"/tables/absent", nil), 404,
+		"Not found: "+tableName(testProject, testInstance, "absent"))
 }
 
 // TestDataPlaneServesOnlyTheDefaultAppProfile refuses a named app profile

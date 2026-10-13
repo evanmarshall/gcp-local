@@ -47,7 +47,7 @@ Baselines come from recorded `roles/bigquery.*` snapshots (`admin`, `dataEditor`
 - `insertAll` checks `bigquery.tables.updateData`; `tabledata.list` checks `bigquery.tables.getData` on the table.
 - `jobs.get` and `getQueryResults` need `bigquery.jobs.get`, except for the job's creator; a job user without it gets 404 for a missing job (recorded). `jobs.list` needs `bigquery.jobs.list`.
 - Denials name the dataset, table, or project as GCP does (recorded for each); a call without credentials gets GCP's 401 with `CREDENTIALS_MISSING` (recorded).
-- IAM Conditions see `resource.type` (`bigquery.googleapis.com/Dataset` or `/Table`), `resource.name` (`projects/P/datasets/D[/tables/T]`), and `resource.service` of the addressed resource, per the [IAM Conditions page](https://docs.cloud.google.com/bigquery/docs/conditions). GCP refuses conditions on table policies (recorded) and gates dataset policies, so they apply only through project grants; that evaluation is modeled, not recorded.
+- IAM Conditions see `resource.type` (`bigquery.googleapis.com/Dataset` or `/Table`), `resource.name` (`projects/P/datasets/D[/tables/T]`), and `resource.service` of the authorized resource (a missing table authorizes at its dataset), per the [IAM Conditions page](https://docs.cloud.google.com/bigquery/docs/conditions). GCP refuses conditions on table policies (recorded) and gates dataset policies, so they apply only through project grants; that evaluation is modeled, not recorded.
 
 ## Verification
 

@@ -43,7 +43,7 @@ Permissions follow [Bigtable access control](https://docs.cloud.google.com/bigta
 - `roles/bigtable.user` and `roles/bigtable.admin` hold every data permission; `roles/bigtable.viewer` holds none.
 - Instance bindings apply to its tables. A missing table returns 404 only to callers with the permission on its instance.
 - An admin call racing a delete of its table or instance reads 404, never 501. A denial reads "Access denied. Missing IAM permission: P." with no details, and a call without credentials gets GCP's 401 with `CREDENTIALS_MISSING` naming the RPC (both recorded).
-- IAM Conditions see `resource.type` (`bigtableadmin.googleapis.com/Instance` or `/Table`), `resource.name` (`projects/P/instances/I[/tables/T]`), and `resource.service` of the addressed resource. Recorded: an instance-only viewer grant reads the instance and is denied its table.
+- IAM Conditions see `resource.type` (`bigtableadmin.googleapis.com/Instance` or `/Table`), `resource.name` (`projects/P/instances/I[/tables/T]`), and `resource.service` of the authorized resource; a missing table is authorized at its instance, so an instance condition sees the instance (not recorded). Recorded: an instance-only viewer grant reads the instance and is denied its table.
 - Operation permissions are not documented or recorded: reads need the resource's `get`, cancel and delete its `update`, and list `bigtable.instances.list`.
 
 ## Verification
