@@ -375,6 +375,10 @@ func (p *Provider) newRequest(call gateway.Call, r *gateway.RESTRequest) (reques
 		return request{}, nil, err
 	}
 	req := request{call: call, rest: r, bucket: r.Path[keyBucket], object: r.Path["object"]}
+	if isFolderMethod(call.Method) {
+		// A folder method's target names the folder (folderTarget).
+		req.object = folderOf(call.Method, r)
+	}
 	if call.Method == MethodServiceAccountGet {
 		// The project is the path's; the gateway reads only bucket methods'.
 		req.call.Project = r.Path["projectId"]
@@ -492,6 +496,8 @@ func publishLinks(value map[string]any, origin string) {
 		value["mediaLink"] = origin + "/download" + self + "?" + keyGeneration + "=" + url.QueryEscape(generation) + "&" + queryAlt + "=" + altMedia
 	case kindBucketDocument:
 		value["selfLink"] = origin + "/storage/v1/b/" + url.PathEscape(name)
+	case kindFolderDocument:
+		value["selfLink"] = origin + "/storage/v1/b/" + url.PathEscape(bucket) + "/folders/" + url.PathEscape(name)
 	}
 	for _, key := range []string{"items", keyResource} {
 		for _, document := range nestedDocuments(value[key]) {
@@ -529,7 +535,7 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 		return iam.Target{}, state.Scope{}, notFound(bucket, ""), nil
 	}
 	if isFolderMethod(call.Method) {
-		return target, resource.Scope, nil, nil
+		return folderTarget(call, target, object), resource.Scope, nil, nil
 	}
 	// IAM condition attributes use Storage's documented resource names.
 	target.Attributes = iam.ResourceAttributes{Name: "projects/_/buckets/" + bucket,
@@ -544,6 +550,30 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 		target.Attributes.Type = "storage.googleapis.com/Object"
 	}
 	return target, resource.Scope, nil, nil
+}
+
+// folderOf is the folder a folder method names: the path's, or a create
+// body's name. A malformed body names none and is refused after
+// authorization.
+func folderOf(method string, r *gateway.RESTRequest) string {
+	if method != MethodFoldersInsert && method != MethodFoldersCreate {
+		return r.Path["folder"]
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(r.JSON, &body)
+	return body.Name
+}
+
+// folderTarget is the IAM target of a folder method: the folder, under its
+// bucket, for create, get, and delete (recorded: storage-hierarchical-namespace
+// "create-denied"), and the bucket for list.
+func folderTarget(call gateway.Call, bucket iam.Target, folder string) iam.Target {
+	if call.Method == MethodFoldersList || folder == "" {
+		return bucket
+	}
+	return iam.Target{Name: bucket.Name + "/folders/" + folderName(folder), Parent: bucket.Name}
 }
 
 // projectTarget resolves a project-scoped method, which needs the explicit
@@ -730,7 +760,7 @@ func objectETag(generation, metageneration string) string {
 func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, current map[string]any) (*gateway.RESTResponse, error) {
 	switch {
 	case isFolderMethod(req.call.Method):
-		return p.executeFolder(req.call.Method, req.rest, req.scope, req.bucket)
+		return p.executeFolder(ctx, b, req)
 	case strings.HasPrefix(req.call.Method, "storage.buckets."):
 		return p.executeBucket(ctx, b, req)
 	case strings.HasPrefix(req.call.Method, "storage.notifications."), req.call.Method == MethodServiceAccountGet:
@@ -1029,25 +1059,30 @@ func (p *Provider) getBucket(ctx context.Context, b *memoryBackend, r *gateway.R
 	return response, nil
 }
 
-// foldersAsPrefixes accepts includeFoldersAsPrefixes=true, which adds the
-// bucket's folders and managed folders to a "/"-delimited listing's prefixes
-// (objects/list). Managed folders are not modeled, so none exist; a bucket
-// without folders lists the same either way. A bucket with folders refuses
-// it rather than omit them.
-func (p *Provider) foldersAsPrefixes(req request) error {
+// foldersAsPrefixes serves includeFoldersAsPrefixes=true, which adds the
+// bucket's folders directly under the listing's prefix to a "/"-delimited
+// listing's prefixes, even with no object under them (objects/list; recorded:
+// storage-hierarchical-namespace "objects-with-folder-prefixes"). Managed
+// folders are not modeled, so none are added.
+func (p *Provider) foldersAsPrefixes(req request) ([]listEntry, error) {
 	include, _ := booleanOption(req.rest.Query, queryFoldersAsPrefixes)
 	req.rest.Query.Del(queryFoldersAsPrefixes)
 	if !include || req.rest.Query.Get("delimiter") != "/" {
-		return nil
+		return nil, nil
 	}
 	folders, err := p.catalog.Folders(req.scope, req.bucket)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(folders) > 0 {
-		return gap("includeFoldersAsPrefixes in a bucket with folders")
+	prefix := req.rest.Query.Get(queryPrefix)
+	var entries []listEntry
+	for _, folder := range folders {
+		rest, found := strings.CutPrefix(folder.Name, prefix)
+		if found && rest != "" && strings.Count(rest, "/") == 1 {
+			entries = append(entries, listEntry{name: folder.Name, key: folder.Name})
+		}
 	}
-	return nil
+	return entries, nil
 }
 
 // readBucket serves buckets.get and buckets.getStorageLayout.
@@ -1060,8 +1095,8 @@ func (p *Provider) readBucket(ctx context.Context, b *memoryBackend, req request
 
 // storageLayout serves buckets.getStorageLayout. gcloud reads it before
 // object commands: locationType "zone" selects its zonal-bucket client, and
-// hierarchicalNamespace its folder handling. Buckets here have neither, and
-// GCP omits hierarchicalNamespace when it is off (recorded:
+// hierarchicalNamespace its folder handling. Buckets here are never zonal,
+// and GCP omits hierarchicalNamespace when it is off (recorded:
 // storage-gcloud-object-requests "storage-layout").
 func (p *Provider) storageLayout(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, path string) (*gateway.RESTResponse, error) {
 	response, err := p.getBucket(ctx, b, r, scope, path)
@@ -1072,10 +1107,15 @@ func (p *Provider) storageLayout(ctx context.Context, b *memoryBackend, r *gatew
 	if err != nil {
 		return nil, err
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{
+	layout := map[string]any{
 		keyKind: "storage#storageLayout", keyBucket: bucket[keyName], "location": bucket["location"],
 		"locationType": bucket["locationType"],
-	}}, nil
+	}
+	if namespace, ok := bucket[keyNamespace]; ok {
+		// Recorded: storage-hierarchical-namespace "storage-layout".
+		layout[keyNamespace] = namespace
+	}
+	return &gateway.RESTResponse{JSON: layout}, nil
 }
 
 // deleteBucket deletes one bucket, then releases its catalog and IAM state.
@@ -1083,7 +1123,7 @@ func (p *Provider) storageLayout(ctx context.Context, b *memoryBackend, r *gatew
 // backend counts only live ones, so the provider checks (recorded:
 // storage-object-versioning "bucket-delete-with-noncurrent").
 func (p *Provider) deleteBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, path, bucket string) (*gateway.RESTResponse, error) {
-	listed, err := b.forward(ctx, http.MethodGet, path+"/o", url.Values{queryVersions: {"true"}, queryMaxResults: {"1"}}, nil, nil)
+	listed, err := b.forward(ctx, http.MethodGet, path+"/o", url.Values{queryVersions: {valueTrue}, queryMaxResults: {"1"}}, nil, nil)
 	if err != nil || listed.Status != http.StatusOK {
 		return listed, err
 	}
@@ -1103,29 +1143,48 @@ func (p *Provider) deleteBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	return response, err
 }
 
-// executeFolder serves the Storage Control folders surface. Folders are
-// provider-owned because the storage backend does not model them; state lives
-// in the catalog and clears with the scope.
-func (p *Provider) executeFolder(method string, r *gateway.RESTRequest, scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
-	switch method {
-	case MethodFoldersCreate, MethodFoldersInsert:
-		return p.createFolder(r, scope, bucket)
-	case MethodFoldersGet:
-		return p.getFolder(scope, bucket, r.Path["folder"])
-	case MethodFoldersList:
-		return p.listFolders(r, scope, bucket)
-	default:
-		return p.deleteFolder(scope, bucket, r.Path["folder"])
+// executeFolder serves the folders of a hierarchical-namespace bucket; any
+// other bucket refuses every folder method, after authorization (recorded:
+// storage-folders-flat). Folders are provider-owned because the storage
+// backend does not model them; state lives in the catalog and clears with
+// the scope.
+func (p *Provider) executeFolder(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
+	if !p.bucketSettings(req.scope, req.bucket).namespace {
+		return wireError(409, "conflict", "The bucket does not support hierarchical namespace."), nil
 	}
+	switch req.call.Method {
+	case MethodFoldersCreate, MethodFoldersInsert:
+		return p.createFolder(req)
+	case MethodFoldersGet:
+		return p.getFolder(req.scope, req.bucket, folderName(req.rest.Path["folder"]))
+	case MethodFoldersList:
+		return p.listFolders(req.rest, req.scope, req.bucket)
+	default:
+		return p.deleteFolder(ctx, b, req.scope, req.bucket, folderName(req.rest.Path["folder"]))
+	}
+}
+
+// folderName is a folder's name with the trailing slash GCP adds to one
+// created without it (recorded: storage-hierarchical-namespace
+// "create-without-slash").
+func folderName(name string) string {
+	if name == "" || strings.HasSuffix(name, "/") {
+		return name
+	}
+	return name + "/"
 }
 
 // folderDocument is the wire shape of one folder (folders resource).
 func folderDocument(folder Folder) map[string]any {
-	return map[string]any{keyKind: "storage#folder", keyName: folder.Name, keyBucket: folder.Bucket}
+	created := storageTime(folder.Created)
+	return map[string]any{keyKind: kindFolderDocument, keyName: folder.Name, keyBucket: folder.Bucket, "id": folder.Bucket + "/" + folder.Name,
+		"metageneration": "1", "createTime": created, "updateTime": created}
 }
 
-func folderMissing(id string) *gateway.RESTResponse {
-	return wireError(404, "notFound", "No such object: folders/"+id)
+// folderMissing answers a request for a folder that doesn't exist (recorded:
+// storage-hierarchical-namespace "get-missing", "delete-missing").
+func folderMissing() *gateway.RESTResponse {
+	return wireError(404, "notFound", "The folder does not exist.")
 }
 
 // folderRequest is a folders.insert body. The folders resource's other
@@ -1135,38 +1194,82 @@ type folderRequest struct {
 	Bucket string `json:"bucket"`
 }
 
-func (p *Provider) createFolder(r *gateway.RESTRequest, scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
-	var body folderRequest
-	if err := provider.DecodeJSON(r.JSON, "", &body, gap, provider.Fields{OutputOnly: []string{
-		"createTime", "id", keyKind, "metageneration", "pendingRenameInfo", "selfLink", "updateTime",
-	}}); err != nil {
+// createFolder serves folders.insert. The parent folder must exist unless
+// recursive=true creates it (recorded: storage-hierarchical-namespace
+// "create-missing-parent", "create-recursive", "create-duplicate").
+func (p *Provider) createFolder(req request) (*gateway.RESTResponse, error) {
+	name, err := decodeFolder(req)
+	if err != nil {
 		return nil, err
 	}
-	if body.Name == "" {
-		return nil, provider.Invalid("Expected a folder name")
+	recursive, _ := booleanOption(req.rest.Query, "recursive")
+	if refused, err := p.folderConflict(req, name, recursive); refused != nil || err != nil {
+		return refused, err
 	}
-	if body.Bucket != "" && body.Bucket != bucket {
-		return nil, provider.Invalid("Folder bucket does not match the request")
+	now := p.now()
+	for _, folder := range append(folderParents(name), name) {
+		if err := p.catalog.PublishFolder(req.scope, Folder{Bucket: req.bucket, Name: folder, Created: now}); err != nil {
+			return nil, fmt.Errorf("publish folder: %w", err)
+		}
 	}
-	if _, exists, err := p.catalog.Folder(scope, bucket, body.Name); err != nil {
+	folder, _, err := p.catalog.Folder(req.scope, req.bucket, name)
+	if err != nil {
 		return nil, err
-	} else if exists {
-		return wireError(409, "conflict", "Folder already exists"), nil
-	}
-	folder := Folder{Bucket: bucket, Name: body.Name}
-	if err := p.catalog.PublishFolder(scope, folder); err != nil {
-		return nil, fmt.Errorf("publish folder: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: folderDocument(folder)}, nil
 }
 
-func (p *Provider) getFolder(scope state.Scope, bucket, id string) (*gateway.RESTResponse, error) {
-	folder, found, err := p.catalog.Folder(scope, bucket, id)
+// decodeFolder reads a folders.insert body and returns the folder's name.
+func decodeFolder(req request) (string, error) {
+	var body folderRequest
+	if err := provider.DecodeJSON(req.rest.JSON, "", &body, gap, provider.Fields{OutputOnly: []string{
+		"createTime", "id", keyKind, "metageneration", "pendingRenameInfo", "selfLink", "updateTime",
+	}}); err != nil {
+		return "", err
+	}
+	if body.Name == "" {
+		return "", provider.Invalid("Expected a folder name")
+	}
+	if body.Bucket != "" && body.Bucket != req.bucket {
+		return "", provider.Invalid("Folder bucket does not match the request")
+	}
+	return folderName(body.Name), nil
+}
+
+// folderConflict refuses an existing folder, or a missing parent unless
+// recursive creates it.
+func (p *Provider) folderConflict(req request, name string, recursive bool) (*gateway.RESTResponse, error) {
+	if _, exists, err := p.catalog.Folder(req.scope, req.bucket, name); err != nil || exists {
+		return wireError(409, "conflict", "The folder you tried to create already exists."), err
+	}
+	for _, parent := range folderParents(name) {
+		if _, exists, err := p.catalog.Folder(req.scope, req.bucket, parent); err != nil || !exists && !recursive {
+			return wireError(409, "conflict", "The parent folder does not exist."), err
+		}
+	}
+	return nil, nil //nolint:nilnil // no conflict
+}
+
+// folderParents lists the folders above a folder or object name, outermost
+// first: "a/b/c" and "a/b/c/" both have "a/" and "a/b/".
+func folderParents(name string) []string {
+	var parents []string
+	trimmed := strings.TrimSuffix(name, "/")
+	for index, character := range trimmed {
+		if character == '/' {
+			parents = append(parents, trimmed[:index+1])
+		}
+	}
+	return parents
+}
+
+func (p *Provider) getFolder(scope state.Scope, bucket, name string) (*gateway.RESTResponse, error) {
+	folder, found, err := p.catalog.Folder(scope, bucket, name)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		return folderMissing(id), nil
+		return folderMissing(), nil
 	}
 	return &gateway.RESTResponse{JSON: folderDocument(folder)}, nil
 }
@@ -1199,15 +1302,44 @@ func (p *Provider) listFolders(r *gateway.RESTRequest, scope state.Scope, bucket
 	return &gateway.RESTResponse{JSON: result}, nil
 }
 
-func (p *Provider) deleteFolder(scope state.Scope, bucket, id string) (*gateway.RESTResponse, error) {
-	removed, err := p.catalog.DeleteFolder(scope, bucket, id)
+// deleteFolder deletes an empty folder: one with no folder or object under
+// it (recorded: storage-hierarchical-namespace "delete-with-subfolder",
+// "delete-with-object").
+func (p *Provider) deleteFolder(ctx context.Context, b *memoryBackend, scope state.Scope, bucket, name string) (*gateway.RESTResponse, error) {
+	if _, found, err := p.catalog.Folder(scope, bucket, name); err != nil || !found {
+		return folderMissing(), err
+	}
+	folders, err := p.catalog.Folders(scope, bucket)
 	if err != nil {
 		return nil, err
 	}
-	if !removed {
-		return folderMissing(id), nil
+	objects, refused, err := listedObjects(ctx, b, bucket, url.Values{queryPrefix: {name}, queryVersions: {valueTrue}})
+	if refused != nil || err != nil {
+		return refused, err
 	}
-	return &gateway.RESTResponse{Status: 204}, nil
+	nested := slices.ContainsFunc(folders, func(folder Folder) bool { return folder.Name != name && strings.HasPrefix(folder.Name, name) })
+	if nested || len(objects) > 0 {
+		return wireError(409, "conflict", "The folder you tried to delete is not empty."), nil
+	}
+	if _, err := p.catalog.DeleteFolder(scope, bucket, name); err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{Status: http.StatusNoContent}, nil
+}
+
+// createParentFolders creates the folders above a new object in a
+// hierarchical-namespace bucket, as GCP does (recorded:
+// storage-hierarchical-namespace "list-after-upload").
+func (p *Provider) createParentFolders(scope state.Scope, bucket, object string) {
+	if !p.bucketSettings(scope, bucket).namespace {
+		return
+	}
+	now := p.now()
+	for _, parent := range folderParents(object) {
+		if _, exists, err := p.catalog.Folder(scope, bucket, parent); err == nil && !exists {
+			_ = p.catalog.PublishFolder(scope, Folder{Bucket: bucket, Name: parent, Created: now})
+		}
+	}
 }
 
 // RegisterPermissions describes the initial UBLA permission plans. Registering
@@ -1358,6 +1490,7 @@ const (
 	// gcloud storage ls sends as True.
 	queryFoldersAsPrefixes = "includeFoldersAsPrefixes"
 	valueFalse             = "false"
+	valueTrue              = "true"
 	headerContentType      = "Content-Type"
 	headerPayloadHash      = "x-goog-content-sha256"
 	storageClassStandard   = "STANDARD"
@@ -1369,6 +1502,7 @@ const (
 	keyEventBasedHold = "eventBasedHold"
 	keyRetention      = "retention"
 	keyCustomTime     = "customTime"
+	keyNamespace      = "hierarchicalNamespace"
 	// queryOverrideRetention is objects.patch overrideUnlockedRetention.
 	queryOverrideRetention = "overrideUnlockedRetention"
 	// queryObjectRetention is buckets.insert enableObjectRetention.
@@ -1376,6 +1510,7 @@ const (
 	keyDefaultHold       = "defaultEventBasedHold"
 	kindBucketDocument   = "storage#bucket"
 	kindObjectDocument   = "storage#object"
+	kindFolderDocument   = "storage#folder"
 	contentJSON          = "application/json"
 	jsonNull             = "null"
 	keyResource          = "resource"

@@ -588,9 +588,8 @@ func TestGcloudObjectRequests(t *testing.T) {
 	listed := decodeBody(t, f.request(admin, "GET", listing, nil, 200).Body.Bytes())
 	items := itemList(listed["items"])
 	expectf(t, len(items) == 1 && items[0]["name"] == "gcloud.txt", "folders-as-prefixes listing = %v", listed)
-	f.request(admin, "POST", "/storage/v1/b/gcloud-bucket/folders", []byte(`{"name":"reports"}`), 200)
-	refused(t, f.request(admin, "GET", listing, nil, 400).Body.String(),
-		"Storage coverage gap: includeFoldersAsPrefixes in a bucket with folders")
+	refused(t, f.request(admin, "POST", "/storage/v1/b/gcloud-bucket/folders", []byte(`{"name":"reports"}`), 409).Body.String(),
+		"The bucket does not support hierarchical namespace.")
 	// Without a "/" delimiter the option does not apply.
 	f.request(admin, "GET", "/storage/v1/b/gcloud-bucket/o?includeFoldersAsPrefixes=true", nil, 200)
 	refused(t, f.request(admin, "GET", "/storage/v1/b/gcloud-bucket/o?includeFoldersAsPrefixes=yes", nil, 400).Body.String(),
@@ -1004,4 +1003,40 @@ func TestNotificationEvents(t *testing.T) {
 	archived := eventsOf(receive(t, messages, 1))
 	_, ok := archived["OBJECT_ARCHIVE/NONE"]
 	expectf(t, ok, "a versioned delete did not archive: %v", archived)
+}
+
+// TestHierarchicalNamespace follows storage-hierarchical-namespace: the
+// bucket needs uniform access, reports the namespace in its layout, creates
+// the folders above an uploaded object, and lists folders as prefixes.
+func TestHierarchicalNamespace(t *testing.T) {
+	f := setup(t)
+	refused(t, f.request(admin, "POST", "/storage/v1/b?project=project-a", []byte(`{"name":"no-uniform","location":"US","hierarchicalNamespace":{"enabled":true}}`), 400).Body.String(),
+		"Hierarchical namespace buckets must use uniform bucket-level access.")
+	f.namespaceBucket(testProject, "tree")
+	bucket := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/tree", nil, 200).Body.Bytes())
+	layout := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/tree/storageLayout", nil, 200).Body.Bytes())
+	for _, document := range []map[string]any{bucket, layout} {
+		expectf(t, fmt.Sprint(document[keyNamespace]) == "map[enabled:true]", "namespace: %v", document)
+	}
+	f.bucket(testProject, "flat", 200)
+	flat := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/flat/storageLayout", nil, 200).Body.Bytes())
+	_, named := flat[keyNamespace]
+	expectf(t, !named, "a flat bucket reports a namespace: %v", flat)
+	folders := "/storage/v1/b/tree/folders"
+	f.request(admin, "POST", folders, []byte(`{"name":"f1/"}`), 200)
+	f.request(admin, "POST", "/upload/storage/v1/b/tree/o?uploadType=media&name=g%2Fh%2Fobj", []byte("nested"), 200)
+	listed := decodeBody(t, f.request(admin, "GET", folders, nil, 200).Body.Bytes())
+	items := itemList(listed["items"])
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, fmt.Sprint(item[keyName]))
+	}
+	expectf(t, fmt.Sprint(names) == "[f1/ g/ g/h/]", "folders: %v", names)
+	refused(t, f.request(admin, "DELETE", folders+"/g%2Fh%2F", nil, 409).Body.String(), "The folder you tried to delete is not empty.")
+	objects := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/tree/o?delimiter=/&includeFoldersAsPrefixes=True", nil, 200).Body.Bytes())
+	expectf(t, fmt.Sprint(objects["prefixes"]) == "[f1/ g/]" && objects["items"] == nil, "folders as prefixes: %v", objects)
+	nested := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/tree/o?delimiter=/&prefix=g/&includeFoldersAsPrefixes=true", nil, 200).Body.Bytes())
+	expectf(t, fmt.Sprint(nested["prefixes"]) == "[g/h/]", "nested prefixes: %v", nested)
+	f.request(admin, "DELETE", "/storage/v1/b/tree/o/g%2Fh%2Fobj", nil, 204)
+	f.request(admin, "DELETE", "/storage/v1/b/tree", nil, 204)
 }

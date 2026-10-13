@@ -396,7 +396,8 @@ func (e *Engine) plannedPermissions(rule Rule, features map[string]bool, complet
 }
 
 // anchor resolves the resource whose policies govern a target. An unregistered
-// object is anchored by its bucket: object data stays in the backend.
+// object or folder is anchored by its bucket: its data stays with the
+// Storage provider.
 func (e *Engine) anchor(target Target) (state.Resource, error) {
 	resource, found := e.index.Get(target.Name)
 	if found {
@@ -406,10 +407,20 @@ func (e *Engine) anchor(target Target) (state.Resource, error) {
 		return resource, nil
 	}
 	parent, ok := e.index.Get(target.Parent)
-	if !ok || parent.Service != "storage" || parent.Kind != "bucket" || !strings.HasPrefix(target.Name, parent.Name+"/objects/") || target.Name == parent.Name+"/objects/" {
+	if !ok || parent.Service != "storage" || parent.Kind != "bucket" || !bucketChild(parent.Name, target.Name) {
 		return state.Resource{}, errTargetShape
 	}
 	return parent, nil
+}
+
+// bucketChild reports whether name is an object or folder of bucket.
+func bucketChild(bucket, name string) bool {
+	for _, collection := range []string{"/objects/", "/folders/"} {
+		if child, ok := strings.CutPrefix(name, bucket+collection); ok && child != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // validateRule rejects a permission plan that is incomplete, or that names a

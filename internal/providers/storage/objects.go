@@ -181,8 +181,8 @@ func (patch *objectPatch) refuseDecrease(current time.Time) error {
 		return nil
 	}
 	offset := func(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.999999") + "+00:00" }
-	return &bucketconfig.RefusalError{Status: 400, Reason: "invalid", Message: "Custom time cannot be decreased. Previously: " +
-		offset(current) + ". Attempting to set: " + offset(patch.customTime) + "."}
+	return bucketconfig.Invalid("Custom time cannot be decreased. Previously: " +
+		offset(current) + ". Attempting to set: " + offset(patch.customTime) + ".")
 }
 
 // mergedMetadata applies the patch to an object's current custom metadata.
@@ -801,6 +801,8 @@ type bucketPolicy struct {
 	retention       int64
 	defaultHold     bool
 	objectRetention bool
+	// namespace is whether the bucket has hierarchical namespace.
+	namespace bool
 }
 
 // bucketSettings reads one bucket's provider-owned policy.
@@ -823,9 +825,13 @@ func (p *Provider) bucketSettings(scope state.Scope, bucket string) bucketPolicy
 		ObjectRetention *struct {
 			Mode string `json:"mode"`
 		} `json:"objectRetention"`
+		Namespace struct {
+			Enabled bool `json:"enabled"`
+		} `json:"hierarchicalNamespace"`
 	}
 	_ = json.Unmarshal([]byte(stored.Metadata), &metadata)
-	policy := bucketPolicy{public: metadata.IAM.Public, defaultHold: metadata.DefaultHold, objectRetention: metadata.ObjectRetention != nil}
+	policy := bucketPolicy{public: metadata.IAM.Public, defaultHold: metadata.DefaultHold, objectRetention: metadata.ObjectRetention != nil,
+		namespace: metadata.Namespace.Enabled}
 	policy.softDelete, _ = strconv.ParseInt(string(metadata.SoftDelete.Seconds), 10, 64)
 	if metadata.Retention != nil {
 		policy.retention, _ = strconv.ParseInt(string(metadata.Retention.Period), 10, 64)
@@ -917,9 +923,14 @@ func (p *Provider) refuseRemoval(b *memoryBackend, scope state.Scope, bucket str
 }
 
 // created applies the bucket's default event-based hold to a generation an
-// upload, rewrite, or restore has just created, and to its document.
+// upload, rewrite, or restore has just created, and to its document, and
+// creates the folders above it in a hierarchical-namespace bucket.
 func (p *Provider) created(b *memoryBackend, scope state.Scope, bucket string, object map[string]any) {
-	if object == nil || !p.bucketSettings(scope, bucket).defaultHold {
+	if object == nil {
+		return
+	}
+	p.createParentFolders(scope, bucket, documentName(object))
+	if !p.bucketSettings(scope, bucket).defaultHold {
 		return
 	}
 	name, _ := object[keyName].(string)
@@ -1018,8 +1029,9 @@ func (p *Provider) listObjects(ctx context.Context, b *memoryBackend, req reques
 	if softDeleted {
 		return p.listSoftDeleted(req)
 	}
-	if refused := p.foldersAsPrefixes(req); refused != nil {
-		return nil, refused
+	folders, err := p.foldersAsPrefixes(req)
+	if err != nil {
+		return nil, err
 	}
 	query := req.rest.Query
 	limit, refused := listSize(query.Get(queryMaxResults), 0)
@@ -1035,7 +1047,7 @@ func (p *Provider) listObjects(ctx context.Context, b *memoryBackend, req reques
 	if refused != nil || err != nil {
 		return refused, err
 	}
-	page, next := pageAfter(objectEntries(objects, query), func(entry listEntry) string { return entry.key }, after, limit, objectPages)
+	page, next := pageAfter(mergeEntries(objectEntries(objects, query), folders), func(entry listEntry) string { return entry.key }, after, limit, objectPages)
 	items, prefixes := []map[string]any{}, []string{}
 	for _, entry := range page {
 		if entry.object == nil {
@@ -1062,7 +1074,7 @@ func listedObjects(ctx context.Context, b *memoryBackend, bucket string, query u
 	}
 	// The backend reads only a lowercase true; GCP reads booleans in any case.
 	if versions, _ := booleanOption(query, queryVersions); versions {
-		backendQuery.Set(queryVersions, "true")
+		backendQuery.Set(queryVersions, valueTrue)
 	}
 	listed, err := b.forward(ctx, http.MethodGet, "/storage/v1/b/"+url.PathEscape(bucket)+"/o", backendQuery, nil, nil)
 	if err != nil || listed.Status != http.StatusOK {
@@ -1130,6 +1142,18 @@ func objectEntries(objects []map[string]any, query url.Values) []listEntry {
 		}
 		entries = append(entries, listEntry{name: name, key: entryKey(object, versions), object: object})
 	}
+	return entries
+}
+
+// mergeEntries adds folder prefixes to a listing's entries, in key order and
+// without repeating a prefix the objects already list.
+func mergeEntries(entries, folders []listEntry) []listEntry {
+	for _, folder := range folders {
+		if !slices.ContainsFunc(entries, func(entry listEntry) bool { return entry.object == nil && entry.name == folder.name }) {
+			entries = append(entries, folder)
+		}
+	}
+	slices.SortStableFunc(entries, func(left, right listEntry) int { return cmp.Compare(left.key, right.key) })
 	return entries
 }
 

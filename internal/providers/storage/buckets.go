@@ -465,7 +465,7 @@ func (p *Provider) applyLifecycle(ctx context.Context, b *memoryBackend, scope s
 	if resource, found := p.index.Get(BucketResource(bucket)); !found || resource.Scope != scope {
 		return nil
 	}
-	objects, refused, err := listedObjects(ctx, b, bucket, url.Values{queryVersions: {"true"}})
+	objects, refused, err := listedObjects(ctx, b, bucket, url.Values{queryVersions: {valueTrue}})
 	if refused != nil || err != nil {
 		return err
 	}

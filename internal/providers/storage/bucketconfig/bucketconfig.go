@@ -19,6 +19,11 @@ func invalid(format string, args ...any) *RefusalError {
 	return &RefusalError{Status: 400, Reason: "invalid", Message: fmt.Sprintf(format, args...)}
 }
 
+// Invalid is a 400 refusal with reason invalid.
+func Invalid(message string) *RefusalError {
+	return &RefusalError{Status: 400, Reason: "invalid", Message: message}
+}
+
 // forbidden is a 403 refusal with reason forbidden.
 func forbidden(format string, args ...any) *RefusalError {
 	return &RefusalError{Status: 403, Reason: "forbidden", Message: fmt.Sprintf(format, args...)}

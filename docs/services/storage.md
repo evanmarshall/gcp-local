@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, lifecycle rules, retention policies and Bucket Lock, object holds and object retention, Pub/Sub notifications, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-five scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
+Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, lifecycle rules, retention policies and Bucket Lock, object holds and object retention, Pub/Sub notifications, hierarchical-namespace folders, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-five scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -37,6 +37,7 @@ Bucket create must set `location` and `iamConfiguration.uniformBucketLevelAccess
 | `retentionPolicy.retentionPeriod` | none | 1 second to under 100 years; `effectiveTime` = `timeCreated` |
 | `defaultEventBasedHold` | off (omitted) | `true`, `false` |
 | `lifecycle.rule` | none | Per [lifecycle](#lifecycle) |
+| `hierarchicalNamespace.enabled` | off (omitted) | `true` with uniform access, per [hierarchical namespace](#hierarchical-namespace) |
 | `storageClass` | `STANDARD` | `STANDARD` |
 
 Buckets report uniform access under both names, each with a `lockedTime` 90 days after creation.
@@ -54,7 +55,7 @@ Buckets report uniform access under both names, each with a `lockedTime` 90 days
 | Notifications | `insert`, `list`, `get`, `delete` | Per [notifications](#notifications); deleted with their bucket |
 | Projects | `serviceAccount.get` | The project's Storage service agent, `service-NUMBER@gs-project-accounts.iam.gserviceaccount.com` |
 | Buckets | `getIamPolicy`, `setIamPolicy` | Version-3 conditions on `resource.name`; public members per [public access prevention](#public-access-prevention) |
-| Buckets | `getStorageLayout` | `locationType` and no `hierarchicalNamespace`, as gcloud reads them |
+| Buckets | `getStorageLayout` | `locationType`, and `hierarchicalNamespace` when the bucket has it, as gcloud reads them |
 | Objects | `insert` | Media, multipart, and resumable uploads, up to 128 MiB per object (larger is the 400 gap) |
 | Objects | `list` | `prefix`, `delimiter`, `startOffset`, `endOffset`, `versions` per [versioning](#versioning), [paging](#lists); `softDeleted=true` per [soft delete](#soft-delete) |
 | Objects | `get` (metadata and `alt=media`), `delete` | `generation` names a live or noncurrent generation; generation, metageneration, and etag preconditions; `softDeleted=true` per [soft delete](#soft-delete) |
@@ -62,10 +63,10 @@ Buckets report uniform access under both names, each with a `lockedTime` 90 days
 | Objects | `patch` | `contentType`, `cacheControl`, `contentDisposition`, `contentEncoding`, `contentLanguage`, `metadata` (merges keys, null removes a key, null removes all), `temporaryHold`, `eventBasedHold`, `retention`, `customTime`; `generation`, `overrideUnlockedRetention`, and the four precondition options; advances metageneration, etag, and `updated` |
 | Objects | `rewrite` | Single call within one project; source metadata copied, body metadata replaces it. A JSON `null` body (rclone `moveto`) copies the source unchanged |
 | Objects (XML) | `GET`, `PUT /BUCKET/OBJECT` | Bearer token or V4 signature; `x-goog-meta-*`, `Content-MD5`, `response-content-*` |
-| Folders | `insert`/`create`, `get`, `list`, `delete` | Modeled locally in any bucket, not recorded; `list` takes `prefix` and `pageSize`/`pageToken` [paging](#lists); deleted with their bucket. GCP refuses folders in a bucket without hierarchical namespace, which the emulator does not model (see [gaps](#gaps)) |
+| Folders | `insert`/`create`, `get`, `list`, `delete` | Per [hierarchical namespace](#hierarchical-namespace); `insert` takes `recursive`, `list` takes `prefix` and `pageSize`/`pageToken` [paging](#lists) |
 
 - `projection=full` returns the `noAcl` shape: uniform buckets have no ACLs. Empty `matchGlob` and `includeTrailingDelimiter=false` are accepted as the defaults they are. Boolean options are case-insensitive.
-- `includeFoldersAsPrefixes=true` (gcloud `ls`) is accepted in a bucket without folders; managed folders are not modeled. In a bucket with [folders](#methods) it returns the 400 gap.
+- `includeFoldersAsPrefixes=true` (gcloud `ls`) with delimiter `/` adds the folders directly under the prefix to `prefixes`, even when no object is under them. Managed folders are not modeled.
 - Multipart uploads accept the single-quoted boundary gcloud's apitools sends (`boundary='===...=='`).
 - A query option that Google's [discovery document](../../api/discovery/storage-v1.json) does not define for the method is ignored, as GCP ignores it (recorded in `storage-go-client-projection`). A defined option the emulator does not serve, such as `userProject`, `predefinedAcl`, `quotaUser`, or `oauth_token`, returns the 400 gap, and so does `access_token`. The XML API has no discovery document and refuses every option it does not serve.
 - Objects carry `selfLink` and `mediaLink` at the emulator's origin, with GCP's paths and `mediaLink` query (`?generation=N&alt=media`). GCP's `selfLink` origin is `https://www.googleapis.com`.
@@ -90,6 +91,17 @@ A bucket with `versioning.enabled` keeps every live generation that an overwrite
 - Noncurrent generations keep the bucket from deleting: 409 `The bucket you tried to delete is not empty.`
 - Turning versioning off keeps the existing noncurrent generations; later overwrites replace the live one.
 - With soft delete, only a generation that leaves the bucket is soft-deleted: a deleted noncurrent generation, never a live one that becomes noncurrent. Restoring one makes the live generation noncurrent (recorded: `storage-versioning-soft-delete`).
+
+## Hierarchical namespace
+
+A bucket created with `hierarchicalNamespace.enabled: true` serves folders. Not recorded: drafts of `storage-hierarchical-namespace` and `storage-folders-flat` observed this behavior on 2026-10-13, and the emulator's answers matched both; the recordings wait on a sandbox run.
+
+- The bucket needs uniform bucket-level access: without it, 400 `Hierarchical namespace buckets must use uniform bucket-level access.` It reports `hierarchicalNamespace` on reads and in `getStorageLayout`.
+- A folder name gets a trailing `/`. Creating an existing folder is 409 `The folder you tried to create already exists.`; creating one under a missing parent is 409 `The parent folder does not exist.` unless `recursive=true` creates the parents.
+- Uploading `a/b/obj` creates `a/` and `a/b/`. Deleting the object leaves them.
+- Deleting a folder with a folder or object under it is 409 `The folder you tried to delete is not empty.`; a missing folder is 404 `The folder does not exist.` A bucket with folders deletes, and its folders with it.
+- A bucket without hierarchical namespace answers every folder method, after authorization, with 409 `The bucket does not support hierarchical namespace.`
+- Folder `create`, `get`, and `delete` authorize on the folder (`.../buckets/B/folders/F/`); `list` on the bucket.
 
 ## Lifecycle
 
@@ -214,7 +226,7 @@ Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PR
 - No Storage method answers 5xx or 429. Every refusal has the JSON API's body (`error.code`, `error.message`, `error.errors[]` with `domain` and `reason`), or an XML error document on the XML API. A failure inside the emulator that GCP would not have (a backend 5xx, a broken invariant) returns 400 `Storage emulator fault: ...`. A missing bucket on the XML API is 404 `NoSuchBucket`, as in GCP (recorded: `storage-go-client-projection`); only a path whose first segment can't name a bucket returns the gateway's 501.
 - Outside the provider, the shared gateway still renders a malformed or rejected bearer token (401) and a JSON body over 2 MiB (429) in the generic error body.
 - 128 MiB per object; uploads are buffered whole in memory, and a larger upload is the 400 gap. Chunk sizes are not checked against 256 KiB multiples.
-- Hierarchical namespace is not modeled. Bucket insert refuses `hierarchicalNamespace`, but folders are served in every bucket; GCP answers `folders.list` on a bucket without hierarchical namespace with 409 `The bucket does not support hierarchical namespace.` (observed 2026-10-13 in a `storage-list-paging` draft, not in its recording). The Terraform case `TestAccStorageBucket_basic` creates a folder in such a bucket.
+- Folder `rename` and `deleteRecursive` return the gap; managed folders are not modeled.
 - `folders.list` refuses `delimiter`, `startOffset`, and `endOffset`; `includeTrailingDelimiter=true` and `matchGlob` on `objects.list` return the gap.
 - Patching a noncurrent generation returns the gap.
 - A hold set to `null`, object retention in a bucket created without `enableObjectRetention`, and a `retentionPolicy` without `retentionPeriod` return the gap.

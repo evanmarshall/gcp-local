@@ -239,7 +239,10 @@ func (c *Catalog) lifecycleRules() map[state.Scope]map[string][]bucketconfig.Rul
 
 // Folder is one hierarchical-namespace folder entry; provider-owned because
 // the storage backend does not model folders.
-type Folder struct{ Bucket, Name string }
+type Folder struct {
+	Bucket, Name string
+	Created      time.Time
+}
 
 // PublishFolder records one folder whose parent bucket is already known.
 func (c *Catalog) PublishFolder(scope state.Scope, folder Folder) error {

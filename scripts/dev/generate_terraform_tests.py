@@ -14,6 +14,10 @@ FOLDER_HCL = (
     "}\n"
 )
 
+# GCP serves folders only in hierarchical-namespace buckets, so the bucket the
+# folder lives in enables it (the adapter already sets uniform access).
+NAMESPACE_HCL = " hierarchical_namespace { enabled = true }"
+
 BUCKET_IAM_MEMBER_HCL = (
     "resource \"google_storage_bucket_iam_member\" \"member\" {\n"
     " bucket  = google_storage_bucket.bucket.name\n"
@@ -77,7 +81,7 @@ const objectName = "tf-gce-test"
             value = value.replace(
                 'resource "google_storage_bucket" "bucket" {',
                 BUCKET_IAM_MEMBER_HCL + FOLDER_HCL +
-                'resource "google_storage_bucket" "bucket" {', 1)
+                'resource "google_storage_bucket" "bucket" {\n' + NAMESPACE_HCL, 1)
         header += "\n" + value + "\n"
     formatted = subprocess.check_output([str(root / ".tools/go/bin/gofmt")], input=header.encode())
     output = root / "tests/terraform/runner/upstream_test.go"

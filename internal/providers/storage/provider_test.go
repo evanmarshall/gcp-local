@@ -95,6 +95,12 @@ func (f *fixture) bucket(project, name string, expected int) {
 	body := []byte(`{"name":"` + name + `","location":"US-CENTRAL1","storageClass":"STANDARD","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true},"publicAccessPrevention":"enforced"},"softDeletePolicy":{"retentionDurationSeconds":"0"}}`)
 	f.request("admin@"+project+".test", "POST", "/storage/v1/b?project="+project, body, expected)
 }
+
+// namespaceBucket creates a hierarchical-namespace bucket.
+func (f *fixture) namespaceBucket(project, name string) {
+	body := []byte(`{"name":"` + name + `","location":"US-CENTRAL1","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}},"hierarchicalNamespace":{"enabled":true}}`)
+	f.request("admin@"+project+".test", "POST", "/storage/v1/b?project="+project, body, 200)
+}
 func (f *fixture) policy(t *testing.T, name, member, role string) {
 	policy := iam.Policy{Bindings: []iam.Binding{}}
 	if role != "" {
@@ -306,7 +312,7 @@ func TestCatalogResetStaysInItsProject(t *testing.T) {
 var bucketBody = map[string]any{
 	"name": "race-bucket", "location": "US-CENTRAL1", "storageClass": "STANDARD",
 	"iamConfiguration": map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": true}, "publicAccessPrevention": "enforced"},
-	"softDeletePolicy": map[string]any{"retentionDurationSeconds": "0"},
+	"softDeletePolicy": map[string]any{"retentionDurationSeconds": "0"}, "hierarchicalNamespace": map[string]any{"enabled": true},
 }
 
 // TestConcurrentBucketRequests races bucket insert, get, list, label patch,
@@ -382,17 +388,23 @@ const (
 // surface: create, conflict, get, list, delete, and denial.
 func TestFolderLifecycleAndAuthorization(t *testing.T) {
 	f := setup(t)
-	f.bucket(testProject, "hns-bucket", 200)
+	f.namespaceBucket(testProject, "hns-bucket")
 	folders := "/storage/v1/b/hns-bucket/folders"
 	created := decodeBody(t, f.request(admin, "POST", folders, []byte(`{"name":"reports"}`), 200).Body.Bytes())
-	if created["name"] != "reports" || created["bucket"] != "hns-bucket" {
+	if created["name"] != "reports/" || created["bucket"] != "hns-bucket" || created["selfLink"] == nil {
 		t.Fatalf("folder = %v", created)
 	}
-	f.request(admin, "POST", folders, []byte(`{"name":"reports"}`), 409)
+	refused(t, f.request(admin, "POST", folders, []byte(`{"name":"reports/"}`), 409).Body.String(), "The folder you tried to create already exists.")
+	refused(t, f.request(admin, "POST", folders, []byte(`{"name":"x/y/"}`), 409).Body.String(), "The parent folder does not exist.")
+	f.request(admin, "POST", folders+"?recursive=true", []byte(`{"name":"x/y/"}`), 200)
+	f.request(admin, "GET", folders+"/x%2F", nil, 200)
+	refused(t, f.request(admin, "DELETE", folders+"/x%2F", nil, 409).Body.String(), "The folder you tried to delete is not empty.")
+	f.request(admin, "DELETE", folders+"/x%2Fy%2F", nil, 204)
+	f.request(admin, "DELETE", folders+"/x%2F", nil, 204)
 	f.request(admin, "POST", folders, []byte(`{"name":""}`), 400)
 	f.request(admin, "POST", folders, []byte(`[]`), 400)
 	f.request(admin, "GET", folders+"/reports", nil, 200)
-	f.request(admin, "GET", folders+"/absent", nil, 404)
+	refused(t, f.request(admin, "GET", folders+"/absent", nil, 404).Body.String(), "The folder does not exist.")
 	f.request(admin, "POST", folders, []byte(`{"name":"archive"}`), 200)
 	listed := decodeBody(t, f.request(admin, "GET", folders, nil, 200).Body.Bytes())
 	if items, _ := listed["items"].([]any); len(items) != 2 || listed["kind"] != "storage#folders" {
@@ -405,7 +417,7 @@ func TestFolderLifecycleAndAuthorization(t *testing.T) {
 	f.request(admin, "GET", "/storage/v1/b/absent-bucket/folders", nil, 404)
 
 	// Folders in another project's bucket are unaffected by this bucket's state.
-	f.bucket(peerProject, "peer-bucket", 200)
+	f.namespaceBucket(peerProject, "peer-bucket")
 	peer := decodeBody(t, f.request("admin@project-b.test", "GET", "/storage/v1/b/peer-bucket/folders", nil, 200).Body.Bytes())
 	if items, _ := peer["items"].([]any); len(items) != 0 {
 		t.Fatalf("another bucket listed these folders: %v", peer)
@@ -414,16 +426,24 @@ func TestFolderLifecycleAndAuthorization(t *testing.T) {
 	f.request(admin, "DELETE", folders+"/reports", nil, 204)
 	f.request(admin, "DELETE", folders+"/reports", nil, 404)
 	f.request(admin, "GET", folders+"/reports", nil, 404)
+
+	// A bucket without hierarchical namespace refuses folders after authorization.
+	f.bucket(testProject, "flat-bucket", 200)
+	f.request("stranger@project-a.test", "GET", "/storage/v1/b/flat-bucket/folders", nil, 403)
+	for _, method := range []string{"GET", "POST"} {
+		refused(t, f.request(admin, method, "/storage/v1/b/flat-bucket/folders", []byte(`{"name":"f/"}`), 409).Body.String(),
+			"The bucket does not support hierarchical namespace.")
+	}
 }
 
 // TestDeletedBucketDropsItsFolders proves a bucket recreated under the same
 // name does not inherit the deleted bucket's folders.
 func TestDeletedBucketDropsItsFolders(t *testing.T) {
 	f := setup(t)
-	f.bucket(testProject, "reused-bucket", 200)
+	f.namespaceBucket(testProject, "reused-bucket")
 	f.request(admin, "POST", "/storage/v1/b/reused-bucket/folders", []byte(`{"name":"stale"}`), 200)
 	f.request(admin, "DELETE", "/storage/v1/b/reused-bucket", nil, 204)
-	f.bucket(testProject, "reused-bucket", 200)
+	f.namespaceBucket(testProject, "reused-bucket")
 	f.request(admin, "GET", "/storage/v1/b/reused-bucket/folders/stale", nil, 404)
 }
 
@@ -493,7 +513,7 @@ func TestCatalogFoldersStayInTheirProject(t *testing.T) {
 // filters by prefix, and refuses a foreign token and an unserved option.
 func TestFolderListPaging(t *testing.T) {
 	f := setup(t)
-	f.bucket(testProject, "folder-pages", 200)
+	f.namespaceBucket(testProject, "folder-pages")
 	folders := "/storage/v1/b/folder-pages/folders"
 	for _, name := range []string{"c/", "a/", "b/", "a/x/"} {
 		f.request(admin, "POST", folders, []byte(`{"name":"`+name+`","kind":"storage#folder"}`), 200)

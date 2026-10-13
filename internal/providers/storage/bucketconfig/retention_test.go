@@ -68,7 +68,7 @@ func TestRetentionChanges(t *testing.T) {
 	for raw, message := range map[string]string{
 		`{"mode":"Forever","retainUntilTime":"2026-10-14T00:00:00Z"}`:  "Invalid value for: Forever is not a valid value",
 		`{"mode":"Unlocked","retainUntilTime":"2020-01-01T00:00:00Z"}`: "Retain until time cannot be in the past.",
-		`{"mode":"Unlocked"}`:                       "Missing retain until time. Both mode and retain until time are required.",
+		`{"mode":"Unlocked"}`:                        "Missing retain until time. Both mode and retain until time are required.",
 		`{"retainUntilTime":"2026-10-14T00:00:00Z"}`: "Missing retention mode. Both mode and retain until time are required.",
 	} {
 		_, err := ParseRetention(json.RawMessage(raw), now)

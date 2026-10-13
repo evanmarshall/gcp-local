@@ -164,6 +164,7 @@ resource "google_storage_folder" "folder" {
  bucket = google_storage_bucket.bucket.name
 }
 resource "google_storage_bucket" "bucket" {
+ hierarchical_namespace { enabled = true }
   name     = "%s"
   location = "US"
 }

@@ -69,6 +69,8 @@ var queryOptions = map[string][]string{
 	MethodObjectsList:    {queryPrefix, "delimiter", queryMaxResults, queryPageToken, "startOffset", "endOffset", queryVersions, querySoftDeleted, queryFoldersAsPrefixes},
 	// folders/list: delimiter and the offsets are gaps.
 	MethodFoldersList: {queryPrefix, "pageSize", queryPageToken},
+	// folders/insert: recursive creates the missing parents.
+	MethodFoldersInsert: {"recursive"},
 	// objects/restore: generation names the soft-deleted version; the
 	// preconditions apply to the live object it would replace.
 	MethodObjectsRestore: {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
@@ -98,7 +100,7 @@ func booleanOption(query url.Values, key string) (bool, error) {
 	switch {
 	case isFalse(value):
 		return false, nil
-	case strings.EqualFold(value, "true"):
+	case strings.EqualFold(value, valueTrue):
 		return true, nil
 	}
 	return false, provider.Invalid(key + " must be a boolean")
@@ -519,6 +521,7 @@ type bucketRequest struct {
 	} `json:"versioning"`
 	Hold            bool            `json:"defaultEventBasedHold"`
 	RetentionPolicy json.RawMessage `json:"retentionPolicy,omitempty"`
+	Namespace       *bucketAccess   `json:"hierarchicalNamespace,omitempty"`
 	Lifecycle       json.RawMessage `json:"lifecycle,omitempty"`
 }
 
@@ -590,12 +593,22 @@ func decodeBucketRequest(body []byte) (bucketRequest, error) {
 		}
 		return request, gap("unsupported bucket configuration")
 	}
-	for _, check := range []func(*bucketRequest) error{uniformAccess, unsupportedBucketPolicy, bucketRetention, bucketPlacement} {
+	for _, check := range []func(*bucketRequest) error{uniformAccess, namespaceAccess, unsupportedBucketPolicy, bucketRetention, bucketPlacement} {
 		if err := check(&request); err != nil {
 			return request, err
 		}
 	}
 	return request, nil
+}
+
+// namespaceAccess refuses hierarchical namespace without uniform
+// bucket-level access, as GCP does before any other check (recorded:
+// storage-hierarchical-namespace "namespace-without-uniform").
+func namespaceAccess(request *bucketRequest) error {
+	if request.Namespace != nil && request.Namespace.Enabled && (request.IAM.Uniform == nil || !request.IAM.Uniform.Enabled) {
+		return bucketconfig.Invalid("Hierarchical namespace buckets must use uniform bucket-level access.")
+	}
+	return nil
 }
 
 // bucketRetention fills in the default soft-delete policy and checks both
@@ -636,7 +649,7 @@ func bucketPlacement(request *bucketRequest) error {
 func softDeleteRetention(value json.Number) (int64, error) {
 	seconds, err := strconv.ParseInt(string(value), 10, 64)
 	if err != nil || (seconds != 0 && (seconds < minRetention || seconds > maxRetention)) {
-		return 0, &bucketconfig.RefusalError{Status: 400, Reason: "invalid", Message: "Soft delete policy must have a retention duration between 7 days and 90 days."}
+		return 0, bucketconfig.Invalid("Soft delete policy must have a retention duration between 7 days and 90 days.")
 	}
 	return seconds, nil
 }
@@ -729,6 +742,10 @@ func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketReques
 	// The backend owns versioning: it keeps the noncurrent generations.
 	delete(metadata, "versioning")
 	createdProtection(metadata, request, timeCreated, objectRetention)
+	// A bucket reports hierarchicalNamespace only when it has one.
+	if request.Namespace == nil || !request.Namespace.Enabled {
+		delete(metadata, keyNamespace)
+	}
 	setLifecycle(metadata, rules)
 	project, _ := p.index.Get(provider.ProjectResource(scope.Project))
 	metadata["projectNumber"] = project.Number
