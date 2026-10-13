@@ -1,5 +1,4 @@
 1	ANN002	gcp_validation/services/messaging/pubsub.py
-1	ANN003	gcp_validation/services/databases/bigtable.py
 1	ANN003	gcp_validation/services/messaging/pubsub.py
 1	ANN201	gcp_validation/federation.py
 1	ANN201	gcp_validation/live_paths.py
@@ -10,7 +9,6 @@
 1	ANN204	gcp_validation/services/compute/networking.py
 1	ANN204	gcp_validation/services/compute/vm_connectivity.py
 1	ANN204	gcp_validation/services/databases/bigquery.py
-1	ANN204	gcp_validation/services/databases/bigtable.py
 1	ANN204	gcp_validation/services/messaging/cloudtasks.py
 1	ANN204	gcp_validation/services/security/cloudkms.py
 1	ANN204	gcp_validation/services/security/projectiam.py
@@ -44,7 +42,6 @@
 1	D107	gcp_validation/services/compute/networking.py
 1	D107	gcp_validation/services/compute/vm_connectivity.py
 1	D107	gcp_validation/services/databases/bigquery.py
-1	D107	gcp_validation/services/databases/bigtable.py
 1	D107	gcp_validation/services/messaging/cloudtasks.py
 1	D107	gcp_validation/services/security/cloudkms.py
 1	D107	gcp_validation/services/security/projectiam.py
@@ -54,16 +51,13 @@
 1	D107	gcp_validation/services/storage/sdk_slice.py
 1	D205	gcp_validation/services/compute/networking.py
 1	D205	gcp_validation/services/compute/vm_connectivity.py
-1	D205	gcp_validation/services/databases/bigtable.py
 1	D205	gcp_validation/services/security/cloudkms.py
 1	D209	gcp_validation/services/compute/networking.py
 1	D209	gcp_validation/services/compute/vm_connectivity.py
-1	D209	gcp_validation/services/databases/bigtable.py
 1	D209	gcp_validation/services/security/cloudkms.py
 1	D401	gcp_validation/services/artifactregistry.py
 1	D401	gcp_validation/services/compute/vm_connectivity.py
 1	D401	gcp_validation/services/databases/bigquery.py
-1	D401	gcp_validation/services/databases/bigtable.py
 1	D401	gcp_validation/services/messaging/cloudtasks.py
 1	D401	gcp_validation/services/messaging/pubsub.py
 1	D401	gcp_validation/services/security/cloudkms.py
@@ -119,7 +113,6 @@
 1	T201	gcp_validation/services/compute/networking.py
 1	T201	gcp_validation/services/compute/vm_connectivity.py
 1	T201	gcp_validation/services/databases/bigquery.py
-1	T201	gcp_validation/services/databases/bigtable.py
 1	T201	gcp_validation/services/messaging/cloudtasks.py
 1	T201	gcp_validation/services/messaging/pubsub.py
 1	T201	gcp_validation/services/security/cloudkms.py
@@ -132,7 +125,6 @@
 1	TRY004	gcp_validation/services/security/secretmanager.py
 1	TRY004	gcp_validation/services/storage/normalization.py
 10	ANN201	gcp_validation/services/artifactregistry.py
-10	ANN201	gcp_validation/services/databases/bigtable.py
 10	ANN201	gcp_validation/services/security/projectiam.py
 10	ANN201	gcp_validation/services/security/secretmanager.py
 10	E501	gcp_validation/services/artifactregistry.py
@@ -151,10 +143,8 @@
 17	E501	gcp_validation/services/storage/client.py
 19	ANN001	gcp_validation/services/artifactregistry.py
 19	ANN001	gcp_validation/services/compute/vm_connectivity.py
-19	ANN001	gcp_validation/services/databases/bigtable.py
 19	ANN001	gcp_validation/services/messaging/cloudtasks.py
 19	ANN001	gcp_validation/services/security/projectiam.py
-19	E501	gcp_validation/services/databases/bigtable.py
 2	ANN002	gcp_validation/services/storage/sdk_slice.py
 2	ANN003	gcp_validation/services/storage/sdk_slice.py
 2	ANN201	gcp_validation/services/messaging/pubsub_scope.py
@@ -194,7 +184,6 @@
 3	D102	gcp_validation/services/storage/authorization.py
 3	D103	gcp_validation/sandbox.py
 3	D103	gcp_validation/services/artifactregistry.py
-3	D103	gcp_validation/services/databases/bigtable.py
 3	D103	gcp_validation/services/storage/sdk_slice.py
 3	D107	gcp_validation/live_rest.py
 3	D107	gcp_validation/services/messaging/pubsub.py
@@ -231,7 +220,6 @@
 5	ANN201	gcp_validation/services/storage/normalization.py
 5	D102	gcp_validation/services/artifactregistry.py
 5	D102	gcp_validation/services/compute/networking.py
-5	D102	gcp_validation/services/databases/bigtable.py
 5	D102	gcp_validation/services/security/cloudkms.py
 5	D102	gcp_validation/services/security/projectiam.py
 5	E501	tests/conformance/storage/test_storage_conditions.py

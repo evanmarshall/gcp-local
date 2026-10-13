@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:57:15.197934+00:00",
+  "recorded_at": "2026-10-13T00:29:00.391393+00:00",
   "scenario": {
     "id": "bigtable-instance-table-admin",
     "service": "bigtable",
     "transport": "rest-v1",
-    "revision": "edd943a0f9d3e7b81556edab4c57a660444168dfc2fc78e9605c543e9e739c66",
+    "revision": "500442bc0dd0938389e5cc601e09c3823eb72be663b387441ad840cb9d977b90",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "b6827353796684e9b3ad6fc274ae7b7f82a7cd9a867add7d87ef22858328244d",
+  "snapshot_sha256": "946e46606ec7ad7e58e035064020bd8720a1e17876f6ab32255790e6fdffe35c",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,7 +22,8 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/databases/bigtable.py": "684387485b8fd9e2b358d6528a93a87e0672178d90ff7bd4cc3c03e83d6741e0",
+      "gcp_validation/services/databases/bigtable.py": "e85a96a68cef4a3a7c653adff062dd2f5862c934d3caa16b4467cd96c1710788",
+      "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/live_paths.py": "9f6dcf0382d5be6ce5039f0f0bcff07f7c02c9c087deb9f5885f5a9834a5a1d7",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
@@ -34,11 +35,11 @@
       ],
       "location": "global",
       "limits": {
-        "max_instances": 1,
-        "max_clusters": 1,
+        "max_instances": 2,
+        "max_clusters": 2,
         "max_nodes": 1,
-        "max_tables": 1,
-        "max_run_seconds": 900
+        "max_tables": 3,
+        "max_run_seconds": 1500
       },
       "cleanup_required": true,
       "identities": [

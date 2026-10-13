@@ -58,9 +58,20 @@ var spannerDatabaseAdminRPC = transcodedService{
 	},
 }
 
+// bigtableOperations binds google.longrunning.Operations to one Bigtable
+// operation name pattern, as the Bigtable admin service config
+// (bigtableadmin_v2.yaml) binds them under /v2/{name=operations/**}.
+func bigtableOperations(rest, pattern string) []mixinBinding {
+	method := longrunningOperations.Methods().ByName
+	return []mixinBinding{
+		{method("GetOperation"), rest + ".get", &annotations.HttpRule{Pattern: &annotations.HttpRule_Get{Get: "/v2/{name=" + pattern + "}"}}},
+		{method("DeleteOperation"), rest + ".delete", &annotations.HttpRule{Pattern: &annotations.HttpRule_Delete{Delete: "/v2/{name=" + pattern + "}"}}},
+		{method("CancelOperation"), rest + ".cancel", &annotations.HttpRule{Pattern: &annotations.HttpRule_Post{Post: "/v2/{name=" + pattern + "}:cancel"}, Body: "*"}},
+	}
+}
+
 // bigtableInstanceAdminRPC is the BigtableInstanceAdmin surface of the
-// Bigtable REST provider. PartialUpdateInstance stays a gap: the REST update
-// returns the instance, not the operation the RPC returns.
+// Bigtable REST provider, plus instance operation polling and listing.
 var bigtableInstanceAdminRPC = transcodedService{
 	service: btadminpb.File_google_bigtable_admin_v2_bigtable_instance_admin_proto.Services().ByName("BigtableInstanceAdmin"),
 	alias:   adminpb, importPath: "cloud.google.com/go/bigtable/admin/apiv2/adminpb",
@@ -68,10 +79,14 @@ var bigtableInstanceAdminRPC = transcodedService{
 	rest: map[string]string{
 		"CreateInstance": "bigtable.instances.create", "GetInstance": "bigtable.instances.get",
 		"ListInstances": "bigtable.instances.list", "DeleteInstance": "bigtable.instances.delete",
-		"GetCluster": "bigtable.clusters.get", "ListClusters": "bigtable.clusters.list",
+		"PartialUpdateInstance": "bigtable.instances.update",
+		"GetCluster":            "bigtable.clusters.get", "ListClusters": "bigtable.clusters.list",
 		getIamPolicy: "bigtable.instances.getIamPolicy", setIamPolicy: "bigtable.instances.setIamPolicy",
 	},
 	routes: bigtableRows(),
+	mixins: append(bigtableOperations("bigtable.operations", "operations/projects/*/instances/*/locations/*/operations/*"),
+		mixinBinding{longrunningOperations.Methods().ByName("ListOperations"), "bigtable.operations.list",
+			&annotations.HttpRule{Pattern: &annotations.HttpRule_Get{Get: "/v2/{name=operations/projects/*}/operations"}}}),
 }
 
 // bigtableTableAdminRPC is the BigtableTableAdmin surface of the Bigtable REST
@@ -87,6 +102,7 @@ var bigtableTableAdminRPC = transcodedService{
 		getIamPolicy: "bigtable.tables.getIamPolicy", setIamPolicy: "bigtable.tables.setIamPolicy",
 	},
 	routes: bigtableRows(),
+	mixins: bigtableOperations("bigtable.tableOperations", "operations/projects/*/instances/*/tables/*/locations/*/operations/*"),
 }
 
 // iamAdminRPC is the google.iam.admin.v1.IAM service-account and role surface

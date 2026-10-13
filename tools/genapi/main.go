@@ -826,8 +826,23 @@ func bigtableRows() []route {
 		{"bigtable.tables.modifyColumnFamilies", http.MethodPost, base + "/instances/{instance}/tables/{table}:modifyColumnFamilies", true, false},
 		{"bigtable.tables.getIamPolicy", http.MethodPost, base + "/instances/{instance}/tables/{table}:getIamPolicy", true, false},
 		{"bigtable.tables.setIamPolicy", http.MethodPost, base + "/instances/{instance}/tables/{table}:setIamPolicy", true, false},
+		// Operations are named after their instance or table and its zone
+		// (recorded: bigtable-instance-table-admin).
+		{"bigtable.operations.list", http.MethodGet, "/v2/operations/projects/{project}/operations", false, false},
+		{"bigtable.operations.get", http.MethodGet, bigtableOperation, false, false},
+		{"bigtable.operations.delete", http.MethodDelete, bigtableOperation, false, false},
+		{"bigtable.operations.cancel", http.MethodPost, bigtableOperation + ":cancel", false, false},
+		{"bigtable.tableOperations.get", http.MethodGet, bigtableTableOperation, false, false},
+		{"bigtable.tableOperations.delete", http.MethodDelete, bigtableTableOperation, false, false},
+		{"bigtable.tableOperations.cancel", http.MethodPost, bigtableTableOperation + ":cancel", false, false},
 	}
 }
+
+// Bigtable's instance and table operation routes.
+const (
+	bigtableOperation      = "/v2/operations/projects/{project}/instances/{instance}/locations/{location}/operations/{operation}"
+	bigtableTableOperation = "/v2/operations/projects/{project}/instances/{instance}/tables/{table}/locations/{location}/operations/{operation}"
+)
 
 // artifactRegistryRoutes generates the Artifact Registry v1 route slice.
 func artifactRegistryRoutes() []byte {

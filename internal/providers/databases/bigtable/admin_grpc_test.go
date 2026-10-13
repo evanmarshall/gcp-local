@@ -1,7 +1,10 @@
 package bigtable
 
 import (
+	"strings"
+
 	"context"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"testing"
 	"time"
 
@@ -64,7 +67,7 @@ func TestAdminClientsOverGRPC(t *testing.T) {
 	tablesOverGRPC(ctx, t, d)
 	succeeded(t, "DeleteInstance", instances.DeleteInstance(ctx, testInstance))
 	_, err = instances.InstanceInfo(ctx, testInstance)
-	refused(t, "deleted instance", err, codes.NotFound, "The resource 'instance/"+testInstance+"' was not found")
+	refused(t, "deleted instance", err, codes.NotFound, "Instance "+provider.InstanceName(testProject, testInstance)+" not found.")
 }
 
 // tablesOverGRPC creates, reads, protects, and deletes a table with the Go
@@ -76,7 +79,7 @@ func tablesOverGRPC(ctx context.Context, t *testing.T, d *dataGateway) {
 	viewer, err := bigtable.NewAdminClient(ctx, testProject, testInstance, option.WithGRPCConn(d.conn(t, viewerActor)))
 	succeeded(t, "viewer table admin client", err)
 	refused(t, "viewer create", viewer.CreateTable(ctx, testTable), codes.PermissionDenied,
-		"The caller does not have bigtable.tables.create access to "+instanceResource(testProject, testInstance)+".")
+		"Access denied. Missing IAM permission: bigtable.tables.create.")
 	succeeded(t, "CreateTable", tables.CreateTableFromConf(ctx, &bigtable.TableConf{TableID: testTable,
 		Families: map[string]bigtable.GCPolicy{familyOne: bigtable.MaxVersionsPolicy(1)}}))
 	names, err := tables.Tables(ctx)
@@ -92,7 +95,7 @@ func tablesOverGRPC(ctx context.Context, t *testing.T, d *dataGateway) {
 	}
 	succeeded(t, "protect", tables.UpdateTableWithDeletionProtection(ctx, testTable, bigtable.Protected))
 	refused(t, "protected delete", tables.DeleteTable(ctx, testTable), codes.FailedPrecondition,
-		`table "`+tableName(testProject, testInstance, testTable)+`" is protected from deletion`)
+		"Unable to delete table "+tableName(testProject, testInstance, testTable)+" because the deletion protection field is set to true.")
 	succeeded(t, "unprotect", tables.UpdateTableWithDeletionProtection(ctx, testTable, bigtable.Unprotected))
 	_, err = tables.TableIAM(testTable).Policy(ctx)
 	succeeded(t, "table policy", err)
@@ -107,17 +110,39 @@ func TestAdminGapsOverGRPC(t *testing.T) {
 	conn := d.conn(t, testActor)
 	instances, tables := adminpb.NewBigtableInstanceAdminClient(conn), adminpb.NewBigtableTableAdminClient(conn)
 	name := provider.InstanceName(testProject, testInstance)
-	// The REST update returns the instance, not the operation this RPC returns.
-	_, err := instances.PartialUpdateInstance(ctx, &adminpb.PartialUpdateInstanceRequest{Instance: &adminpb.Instance{Name: name}})
-	refused(t, "PartialUpdateInstance", err, codes.Unimplemented, "No provider implements /google.bigtable.admin.v2.BigtableInstanceAdmin/PartialUpdateInstance")
-	_, err = instances.CreateAppProfile(ctx, &adminpb.CreateAppProfileRequest{Parent: name, AppProfileId: "p"})
+	_, err := instances.CreateAppProfile(ctx, &adminpb.CreateAppProfileRequest{Parent: name, AppProfileId: "p"})
 	refused(t, "CreateAppProfile", err, codes.Unimplemented, "No provider implements /google.bigtable.admin.v2.BigtableInstanceAdmin/CreateAppProfile")
 	_, err = tables.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: name + "/tables/t"})
 	refused(t, "TestIamPermissions", err, codes.Unimplemented, "No provider implements /google.bigtable.admin.v2.BigtableTableAdmin/TestIamPermissions")
 	_, err = instances.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name + "/materializedViews/v"})
 	refused(t, "view policy", err, codes.Unimplemented,
 		"No provider implements /google.bigtable.admin.v2.BigtableInstanceAdmin/GetIamPolicy for projects/*/instances/*/materializedViews/* resources")
-	// Bigtable names operations under operations/; no binding serves them.
-	_, err = longrunningpb.NewOperationsClient(conn).GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: "operations/" + name + "/locations/" + testZone + "/operations/1"})
+	// Operations are served only under a Bigtable instance or table name.
+	_, err = longrunningpb.NewOperationsClient(conn).GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: "operations/x"})
 	refused(t, "GetOperation", err, codes.Unimplemented, "No provider implements /google.longrunning.Operations/GetOperation")
+}
+
+// TestPartialUpdateOverGRPC changes only the masked display name and polls
+// the returned operation, which is already done, over gRPC.
+func TestPartialUpdateOverGRPC(t *testing.T) {
+	h := newHarness(t)
+	h.instance()
+	d := serveData(t, h)
+	ctx := context.Background()
+	conn := d.conn(t, testActor)
+	name := provider.InstanceName(testProject, testInstance)
+	operation, err := adminpb.NewBigtableInstanceAdminClient(conn).PartialUpdateInstance(ctx, &adminpb.PartialUpdateInstanceRequest{
+		Instance:   &adminpb.Instance{Name: name, DisplayName: "renamed", Labels: map[string]string{"dropped": "x"}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}}})
+	succeeded(t, "PartialUpdateInstance", err)
+	if !operation.GetDone() || !strings.HasPrefix(operation.GetName(), "operations/"+name+"/locations/"+testZone+"/operations/") {
+		t.Fatalf("operation = %v", operation)
+	}
+	polled, err := longrunningpb.NewOperationsClient(conn).GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: operation.GetName()})
+	succeeded(t, "GetOperation", err)
+	updated := &adminpb.Instance{}
+	succeeded(t, "unpack", polled.GetResponse().UnmarshalTo(updated))
+	if updated.GetDisplayName() != "renamed" || updated.GetLabels()["env"] != "dev" || updated.GetLabels()["dropped"] != "" {
+		t.Fatalf("updated = %v", updated)
+	}
 }

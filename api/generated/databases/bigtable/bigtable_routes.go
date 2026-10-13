@@ -22,4 +22,11 @@ var BigtableRoutes = []contract.Route{
 	{Method: "bigtable.tables.modifyColumnFamilies", Verb: "POST", Path: "/v2/projects/{project}/instances/{instance}/tables/{table}:modifyColumnFamilies", JSONBody: true, Media: false},
 	{Method: "bigtable.tables.getIamPolicy", Verb: "POST", Path: "/v2/projects/{project}/instances/{instance}/tables/{table}:getIamPolicy", JSONBody: true, Media: false},
 	{Method: "bigtable.tables.setIamPolicy", Verb: "POST", Path: "/v2/projects/{project}/instances/{instance}/tables/{table}:setIamPolicy", JSONBody: true, Media: false},
+	{Method: "bigtable.operations.list", Verb: "GET", Path: "/v2/operations/projects/{project}/operations", JSONBody: false, Media: false},
+	{Method: "bigtable.operations.get", Verb: "GET", Path: "/v2/operations/projects/{project}/instances/{instance}/locations/{location}/operations/{operation}", JSONBody: false, Media: false},
+	{Method: "bigtable.operations.delete", Verb: "DELETE", Path: "/v2/operations/projects/{project}/instances/{instance}/locations/{location}/operations/{operation}", JSONBody: false, Media: false},
+	{Method: "bigtable.operations.cancel", Verb: "POST", Path: "/v2/operations/projects/{project}/instances/{instance}/locations/{location}/operations/{operation}:cancel", JSONBody: false, Media: false},
+	{Method: "bigtable.tableOperations.get", Verb: "GET", Path: "/v2/operations/projects/{project}/instances/{instance}/tables/{table}/locations/{location}/operations/{operation}", JSONBody: false, Media: false},
+	{Method: "bigtable.tableOperations.delete", Verb: "DELETE", Path: "/v2/operations/projects/{project}/instances/{instance}/tables/{table}/locations/{location}/operations/{operation}", JSONBody: false, Media: false},
+	{Method: "bigtable.tableOperations.cancel", Verb: "POST", Path: "/v2/operations/projects/{project}/instances/{instance}/tables/{table}/locations/{location}/operations/{operation}:cancel", JSONBody: false, Media: false},
 }

@@ -1,7 +1,17 @@
 {
   "bigtable-instance-table-admin": {
-    "recorded-date": "12-10-2026, 17:57:15",
+    "recorded-date": "13-10-2026, 00:29:00",
     "recorded-content": {
+      "instance-started": {
+        "done": false,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.CreateInstanceMetadata",
+        "name": "operations/projects/<project>/instances/<instance>/locations/us-central1-b/operations/<id>"
+      },
       "instance-operation": {
         "done": true,
         "error": null,
@@ -66,8 +76,187 @@
       },
       "denied-read": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "Access denied. Missing IAM permission: bigtable.instances.get.",
         "status": "PERMISSION_DENIED"
+      },
+      "second-instance-started": {
+        "done": false,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.CreateInstanceMetadata",
+        "name": "operations/projects/<project>/instances/<second>/locations/us-central1-b/operations/<id>"
+      },
+      "second-instance-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.CreateInstanceMetadata",
+        "response_fields": [
+          "@type",
+          "displayName",
+          "edition",
+          "labels",
+          "name",
+          "state",
+          "type"
+        ],
+        "response_type": "type.googleapis.com/google.bigtable.admin.v2.Instance"
+      },
+      "instances-list": {
+        "fields": [
+          "instances"
+        ],
+        "http_status": 200,
+        "item_fields": [
+          "createTime",
+          "displayName",
+          "edition",
+          "knowledgeCatalogRegion",
+          "labels",
+          "name",
+          "state",
+          "type"
+        ],
+        "owned_order": [
+          "projects/<project>/instances/<instance>",
+          "projects/<project>/instances/<second>"
+        ]
+      },
+      "instances-bad-token": {
+        "fields": [
+          "instances"
+        ],
+        "http_status": 200
+      },
+      "rename-started": {
+        "done": true,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.UpdateInstanceMetadata",
+        "name": "operations/projects/<project>/instances/<instance>/locations/us-central1-b/operations/<id>"
+      },
+      "rename-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.UpdateInstanceMetadata",
+        "response_fields": [
+          "@type",
+          "createTime",
+          "displayName",
+          "edition",
+          "knowledgeCatalogRegion",
+          "labels",
+          "name",
+          "type"
+        ],
+        "response_type": "type.googleapis.com/google.bigtable.admin.v2.Instance"
+      },
+      "renamed-read": {
+        "displayName": "gcp-local renamed",
+        "fields": [
+          "createTime",
+          "displayName",
+          "edition",
+          "knowledgeCatalogRegion",
+          "labels",
+          "name",
+          "state",
+          "type"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        }
+      },
+      "relabel-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.UpdateInstanceMetadata",
+        "response_fields": [
+          "@type",
+          "createTime",
+          "displayName",
+          "edition",
+          "knowledgeCatalogRegion",
+          "labels",
+          "name",
+          "type"
+        ],
+        "response_type": "type.googleapis.com/google.bigtable.admin.v2.Instance"
+      },
+      "relabeled-read": {
+        "displayName": "gcp-local renamed",
+        "fields": [
+          "createTime",
+          "displayName",
+          "edition",
+          "knowledgeCatalogRegion",
+          "labels",
+          "name",
+          "state",
+          "type"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local",
+          "stage": "patched"
+        }
+      },
+      "update-without-mask": {
+        "code": 501,
+        "details": [],
+        "http_status": 501,
+        "message": "A non-empty 'update_mask' must be specified. An empty 'update_mask' is currently not supported.",
+        "status": "UNIMPLEMENTED"
+      },
+      "anonymous-read": {
+        "code": 401,
+        "details": [
+          {
+            "domain": "googleapis.com",
+            "metadata": {
+              "method": "google.bigtable.admin.v2.BigtableInstanceAdmin.GetInstance",
+              "service": "bigtableadmin.googleapis.com"
+            },
+            "reason": "CREDENTIALS_MISSING",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 401,
+        "message": "Request is missing required authentication credential. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+        "status": "UNAUTHENTICATED"
       },
       "policy-read": {
         "bindings": null,
@@ -79,6 +268,10 @@
       "viewer-granted": {
         "bindings": [
           {
+            "condition": {
+              "expression": "resource.type == \"bigtableadmin.googleapis.com/Instance\" && resource.service == \"bigtableadmin.googleapis.com\" && resource.name == \"projects/<project>/instances/<instance>\"",
+              "title": "instance-only"
+            },
             "members": [
               "serviceAccount:<allowed>"
             ],
@@ -90,14 +283,17 @@
           "etag",
           "version"
         ],
-        "http_status": 200
+        "http_status": 200,
+        "version": 3
       },
       "viewer-read": {
         "http_status": 200
       },
       "viewer-cannot-create-table": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "Access denied. Missing IAM permission: bigtable.tables.create.",
         "status": "PERMISSION_DENIED"
       },
       "table-created": {
@@ -141,8 +337,128 @@
       },
       "duplicate-table": {
         "code": 409,
+        "details": [],
         "http_status": 409,
+        "message": "Table already exists: projects/<project>/instances/<instance>/tables/t1 : Table t1 already exists.",
         "status": "ALREADY_EXISTS"
+      },
+      "condition-excludes-table": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Access denied. Missing IAM permission: bigtable.tables.get.",
+        "status": "PERMISSION_DENIED"
+      },
+      "tables-list": {
+        "fields": [
+          "tables"
+        ],
+        "http_status": 200,
+        "order": [
+          "projects/<project>/instances/<instance>/tables/t0",
+          "projects/<project>/instances/<instance>/tables/t1"
+        ]
+      },
+      "tables-paged": {
+        "first_count": 1,
+        "first_has_next": true,
+        "second_count": 1,
+        "second_status": 200
+      },
+      "tables-bad-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid token",
+        "status": "INVALID_ARGUMENT"
+      },
+      "tables-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid request: Page size cannot be negative",
+        "status": "INVALID_ARGUMENT"
+      },
+      "table-unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"bogus\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"bogus\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "drop-unknown-family": {
+        "code": 404,
+        "details": [],
+        "http_status": 404,
+        "message": "Cannot drop non-existent family nope",
+        "status": "NOT_FOUND"
+      },
+      "protect-started": {
+        "done": true,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.UpdateTableMetadata",
+        "name": "operations/projects/<project>/instances/<instance>/tables/t1/locations/us-central1-b/operations/<id>"
+      },
+      "protect-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.UpdateTableMetadata",
+        "response_fields": [
+          "@type",
+          "columnFamilies",
+          "deletionProtection",
+          "granularity",
+          "name"
+        ],
+        "response_type": "type.googleapis.com/google.bigtable.admin.v2.Table"
+      },
+      "protected-delete": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Unable to delete table projects/<project>/instances/<instance>/tables/t1 because the deletion protection field is set to true.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "unprotect-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.bigtable.admin.v2.UpdateTableMetadata",
+        "response_fields": [
+          "@type",
+          "columnFamilies",
+          "granularity",
+          "name"
+        ],
+        "response_type": "type.googleapis.com/google.bigtable.admin.v2.Table"
       },
       "table-deleted": {
         "body": {},
@@ -150,12 +466,16 @@
       },
       "table-absent": {
         "code": 404,
+        "details": [],
         "http_status": 404,
+        "message": "Not found: projects/<project>/instances/<instance>/tables/t1",
         "status": "NOT_FOUND"
       },
       "duplicate-instance": {
         "code": 409,
+        "details": [],
         "http_status": 409,
+        "message": "Instance <instance> already exists.",
         "status": "ALREADY_EXISTS"
       },
       "instance-deleted": {
@@ -164,7 +484,9 @@
       },
       "instance-absent": {
         "code": 404,
+        "details": [],
         "http_status": 404,
+        "message": "Instance projects/<project>/instances/<instance> not found.",
         "status": "NOT_FOUND"
       },
       "cleanup": {

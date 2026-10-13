@@ -218,10 +218,31 @@ func TestInstanceAndTableLifecycle(t *testing.T) {
 	expectError(t, "cascaded table get", h.invoke(http.MethodGet, testInstances+"/"+testInstance+"/tables/"+testTable, nil), 404, "NOT_FOUND")
 }
 
-// expectOperation asserts the recorded completed CreateInstance operation.
-func expectOperation(t *testing.T, operation map[string]any) {
+// poll reads an operation until it is done, as a client does.
+func (h *harness) poll(operation map[string]any) map[string]any {
+	h.t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); operation["done"] != true; {
+		if time.Now().After(deadline) {
+			h.t.Fatalf("operation never finished: %v", operation)
+		}
+		time.Sleep(20 * time.Millisecond)
+		recorder := h.invoke(http.MethodGet, "/v2/"+dig(operation, "name"), nil)
+		expectOK(h.t, "operation poll", recorder)
+		operation = decode(h.t, recorder)
+	}
+	return operation
+}
+
+// expectOperation asserts the recorded CreateInstance operation: running with
+// only name and metadata at first, then done with the instance.
+func expectOperation(h *harness, started map[string]any) {
+	t := h.t
 	t.Helper()
-	if got := fields(operation); got != "done,metadata,name,response" || operation["done"] != true {
+	if got := fields(started); got != "metadata,name" {
+		t.Fatalf("started operation = %v", started)
+	}
+	operation := h.poll(started)
+	if got := fields(operation); got != "done,metadata,name,response" || operation["name"] != started["name"] {
 		t.Fatalf("operation = %v", operation)
 	}
 	wantName := "operations/projects/" + testProject + "/instances/" + testInstance + "/locations/" + testZone + "/operations/"
@@ -242,7 +263,7 @@ func expectOperation(t *testing.T, operation map[string]any) {
 // create operation, instance read, and cluster listing.
 func TestRecordedInstanceShapes(t *testing.T) {
 	h := newHarness(t)
-	expectOperation(t, h.instance())
+	expectOperation(h, h.instance())
 	instance := decode(t, h.invoke(http.MethodGet, testInstances+"/"+testInstance, nil))
 	if got := fields(instance); got != "createTime,displayName,edition,knowledgeCatalogRegion,labels,name,state,type" {
 		t.Fatalf("instance fields = %s", got)
@@ -504,7 +525,8 @@ func TestTableUpdateAndProtectedInstanceDelete(t *testing.T) {
 	update := func(protected bool) {
 		t.Helper()
 		operation := decode(t, h.invoke(http.MethodPatch, path+"?updateMask=deletionProtection", map[string]any{"deletionProtection": protected}))
-		if name, _ := operation["name"].(string); !strings.HasPrefix(name, "projects/"+testProject+"/instances/"+testInstance+"/tables/"+testTable+"/operations/") || operation["done"] != true {
+		prefix := "operations/projects/" + testProject + "/instances/" + testInstance + "/tables/" + testTable + "/locations/" + testZone + "/operations/"
+		if name, _ := operation["name"].(string); !strings.HasPrefix(name, prefix) || operation["done"] != true {
 			t.Fatalf("update operation = %v", operation)
 		}
 	}

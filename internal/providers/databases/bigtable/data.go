@@ -142,62 +142,66 @@ type viewed interface {
 	GetMaterializedViewName() string
 }
 
+// profiled is a request that names an app profile; every data RPC does.
+type profiled interface{ GetAppProfileId() string }
+
+// dataDenied is the data plane's 403 message, the permission then the
+// resource; it is not recorded.
+const dataDenied = "Request had insufficient permissions: %s on %s."
+
 // authorizeData authorizes one data call against its table when published,
 // else its instance, else the project, so absence is reported only to callers
-// that hold the permission. It returns the project scope to forward to.
+// that hold the permission. It returns the project scope to forward to. Only
+// the default app profile is modeled.
 func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (state.Scope, error) {
-	if view, ok := request.(viewed); ok && (view.GetAuthorizedViewName() != "" || view.GetMaterializedViewName() != "") {
-		return state.Scope{}, gap("authorized and materialized views")
+	if err := unservedData(request); err != nil {
+		return state.Scope{}, err
 	}
 	parts := strings.Split(call.Resource, "/")
-	if len(parts) < 4 {
+	if len(parts) < 4 || !uid.MatchString(parts[3]) {
 		return state.Scope{}, status.Error(codes.InvalidArgument, "Malformed resource name")
 	}
-	scope := provider.ProjectScope(parts[1])
-	target, exists, decision, err := p.authorizeDataTarget(call, scope, parts)
+	project, instance := parts[1], parts[3]
+	scope := provider.ProjectScope(project)
+	candidates := []string{instanceResource(project, instance), provider.ProjectResource(project)}
+	if len(parts) == 6 {
+		candidates = append([]string{tableResource(project, instance, parts[5])}, candidates...)
+	}
+	gate := p.gate
+	gate.Message = dataDenied
+	decision, target, err := provider.Nearest(gate, p.scopes, scope, call, "", candidates...)
 	if decision.ID != "" {
 		_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-decision-id", decision.ID))
 	}
 	if err != nil {
-		code := status.Code(err)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return scope, fmt.Errorf("authorize %s: %w", call.Method, err)
-		}
-		return scope, status.Errorf(code, "Request had insufficient permissions: %s on %s.", provider.DeniedPermission(decision),
-			strings.TrimPrefix(target.Name, "//bigtableadmin.googleapis.com/"))
+		return scope, dataRefusal(call, err, decision, target)
 	}
-	if !exists {
-		return scope, provider.NotFound(kindInstance, parts[3])
+	if target.Name == provider.ProjectResource(project) {
+		return scope, status.Errorf(codes.NotFound, "Instance %s not found.", provider.InstanceName(project, instance))
 	}
 	return scope, nil
 }
 
-// authorizeDataTarget authorizes call on the data target, resolving it again
-// once when a concurrent delete removed it after dataTarget read it.
-func (p *Provider) authorizeDataTarget(call gateway.Call, scope state.Scope, parts []string) (iam.Target, bool, iam.Decision, error) {
-	target, exists := p.dataTarget(scope, parts)
-	decision, err := p.engine.Authorize(call, target, nil)
-	if provider.Unverified(err) {
-		target, exists = p.dataTarget(scope, parts)
-		decision, err = p.engine.Authorize(call, target, nil)
+// unservedData refuses authorized and materialized views and app profiles
+// other than the default one.
+func unservedData(request proto.Message) error {
+	if view, ok := request.(viewed); ok && (view.GetAuthorizedViewName() != "" || view.GetMaterializedViewName() != "") {
+		return gap("authorized and materialized views")
 	}
-	return target, exists, decision, err //nolint:wrapcheck // the caller maps the IAM status
+	if named, ok := request.(profiled); ok && named.GetAppProfileId() != "" && named.GetAppProfileId() != "default" {
+		return gap("app profile " + named.GetAppProfileId())
+	}
+	return nil
 }
 
-// dataTarget resolves the IAM target of a table or instance name split on
-// "/", and whether its instance exists, from provider state and the index.
-func (p *Provider) dataTarget(scope state.Scope, parts []string) (iam.Target, bool) {
-	project, instance := parts[1], parts[3]
-	if !uid.MatchString(instance) || p.withInstance(scope, instance, func(*scopeState, *instanceRecord) error { return nil }) != nil {
-		return iam.Target{Name: provider.ProjectResource(project)}, false
+// dataRefusal renders a data-plane authorization refusal: a denial naming
+// the permission and the target, or the 401 for a call without credentials.
+func dataRefusal(call gateway.Call, err error, decision iam.Decision, target iam.Target) error {
+	if status.Code(err) == codes.PermissionDenied {
+		return status.Errorf(codes.PermissionDenied, dataDenied, provider.DeniedPermission(decision),
+			strings.TrimPrefix(target.Name, "//"+adminHost+"/"))
 	}
-	target := iam.Target{Name: instanceResource(project, instance)}
-	if len(parts) == 6 {
-		if resource, found := p.index.Get(tableResource(project, instance, parts[5])); found && resource.Scope == scope {
-			target.Name = resource.Name
-		}
-	}
-	return target, true
+	return credentials(call, err, "bigtable.googleapis.com", strings.ReplaceAll(strings.TrimPrefix(call.Method, "/"), "/", "."))
 }
 
 // gap reports an unsupported request shape explicitly.

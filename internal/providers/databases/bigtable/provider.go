@@ -3,7 +3,6 @@ package bigtable
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -25,8 +24,9 @@ type Provider struct {
 	gate    provider.Gate
 	scopes  *state.Store[scopeState]
 	clock   func() time.Time
-	// operations numbers instance and table operation names.
-	operations atomic.Uint64
+	// operations holds instance and table operations, named after their
+	// resource and zone.
+	operations *provider.Operations
 	// serverOptions are passed to each emulator; tests use them to observe calls.
 	serverOptions []grpc.ServerOption
 }
@@ -41,10 +41,11 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	p := &Provider{
 		manager: manager, index: index, engine: engine,
-		gate:   provider.Gate{Engine: engine, Index: index, Message: deniedMessage},
+		gate:   provider.Gate{Engine: engine, Index: index, Message: provider.MissingPermission, Attributes: attributes},
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
+	p.operations = provider.NewOperations(state.GlobalScope, createLatency, operationMetadata).Named(operationName)
 	if err := p.registerBackend(manager, engine, index); err != nil {
 		return nil, err
 	}
@@ -82,13 +83,16 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 	return nil
 }
 
-// Reset clears the scope's provider-owned instances.
+// Reset clears the scope's provider-owned instances and operations.
 func (p *Provider) Reset(scope state.Scope) error {
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		s.reset()
 		return nil
 	}); err != nil {
 		return fmt.Errorf("clear the bigtable scope: %w", err)
+	}
+	if err := p.operations.Reset(scope); err != nil {
+		return fmt.Errorf("clear the bigtable operations: %w", err)
 	}
 	return nil
 }
@@ -107,7 +111,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	// so a request racing one reads 404, never an unverified target.
 	decision, target, err := provider.Nearest(p.gate, p.scopes, scope, call, "", candidates...)
 	if err != nil {
-		return nil, err
+		return nil, credentials(call, err, adminHost, rpcNames[call.Method])
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -118,8 +122,14 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return provider.WithDecision(response, decision), nil
 }
 
-// deniedMessage is the 403 message: the permission, then the resource.
-const deniedMessage = "The caller does not have %s access to %s."
+// credentials replaces the refusal of a call without credentials with GCP's
+// CREDENTIALS_MISSING 401 for rpc on host; other refusals pass unchanged.
+func credentials(call gateway.Call, err error, host, rpc string) error {
+	if status.Code(err) == codes.Unauthenticated && call.Principal.State == gateway.Anonymous {
+		return provider.CredentialsMissing(host, rpc) //nolint:wrapcheck // a wire status
+	}
+	return err
+}
 
 // resolve derives the scope and the IAM target candidates, most specific
 // first, for one request; it never calls the backend. Instance methods
@@ -133,8 +143,13 @@ func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (sta
 	candidates := []string{provider.ProjectResource(project)}
 	instance, table := request.Path["instance"], request.Path["table"]
 	switch call.Method {
-	case methodInstancesCreate, methodInstancesList:
+	case methodInstancesCreate, methodInstancesList, methodOperationsList:
 		return scope, candidates, nil
+	case methodOperationGet, methodOperationDelete, methodOperationCancel:
+		// An operation outlives its instance, so the instance need not exist.
+		return scope, append([]string{instanceResource(project, instance)}, candidates...), nil
+	case methodTableOpGet, methodTableOpDelete, methodTableOpCancel:
+		return scope, append([]string{tableResource(project, instance, table), instanceResource(project, instance)}, candidates...), nil
 	case methodInstancesGet, methodInstancesUpdate, methodInstancesDelete, methodInstancesGetIam, methodInstancesSetIam,
 		methodClustersList, methodClustersGet, methodTablesCreate, methodTablesList:
 		if err := p.existingInstance(scope, instance); err != nil {
