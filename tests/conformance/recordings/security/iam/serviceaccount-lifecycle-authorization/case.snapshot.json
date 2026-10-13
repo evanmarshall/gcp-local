@@ -1,6 +1,6 @@
 {
   "serviceaccount-lifecycle-authorization": {
-    "recorded-date": "12-10-2026, 17:40:37",
+    "recorded-date": "13-10-2026, 02:11:03",
     "recorded-content": {
       "created": {
         "client_id_equals_unique_id": true,
@@ -40,8 +40,97 @@
       },
       "denied-read": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "iam.serviceAccounts.get",
+              "resource": "projects/-/serviceAccounts/<unique-id>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'iam.serviceAccounts.get' denied on resource '//iam.googleapis.com/projects/-/serviceAccounts/<unique-id>' (or it may not exist).",
         "status": "PERMISSION_DENIED"
+      },
+      "denied-missing": {
+        "code": 404,
+        "details": [],
+        "http_status": 404,
+        "message": "Unknown service account",
+        "status": "NOT_FOUND"
+      },
+      "fixture-missing": {
+        "code": 404,
+        "details": [],
+        "http_status": 404,
+        "message": "Unknown service account",
+        "status": "NOT_FOUND"
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "top-level-display-name": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"displayName\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"displayName\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "mistyped-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"displayName\" at 'service_account': Proto field is not repeating, cannot start list.",
+                "field": "service_account"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"displayName\" at 'service_account': Proto field is not repeating, cannot start list.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "second-created": {
+        "email": "<second>",
+        "fields": [
+          "description",
+          "displayName",
+          "email",
+          "etag",
+          "name",
+          "oauth2ClientId",
+          "projectId",
+          "uniqueId"
+        ],
+        "http_status": 200
       },
       "policy-read": {
         "bindings": null,
@@ -50,8 +139,50 @@
         ],
         "http_status": 200
       },
+      "conditions-granted-first": {
+        "bindings": [
+          {
+            "condition": {
+              "expression": "resource.type == \"iam.googleapis.com/ServiceAccount\" && resource.name == \"projects/-/serviceAccounts/<unique-id>\"",
+              "title": "account-first"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/iam.serviceAccountViewer"
+          }
+        ],
+        "http_status": 200,
+        "version": 3
+      },
+      "conditions-granted-second": {
+        "bindings": [
+          {
+            "condition": {
+              "expression": "request.time < timestamp(\"2100-01-01T00:00:00Z\")",
+              "title": "account-second"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/iam.serviceAccountViewer"
+          }
+        ],
+        "http_status": 200,
+        "version": 3
+      },
+      "conditional-access": {
+        "first": 403,
+        "second": 200
+      },
       "user-granted": {
         "bindings": [
+          {
+            "members": [
+              "serviceAccount:<fixture>"
+            ],
+            "role": "roles/iam.serviceAccountKeyAdmin"
+          },
           {
             "members": [
               "serviceAccount:<allowed>"
@@ -82,7 +213,19 @@
       },
       "allowed-cannot-update": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "iam.serviceAccounts.update",
+              "resource": "projects/-/serviceAccounts/<unique-id>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'iam.serviceAccounts.update' denied on resource '//iam.googleapis.com/projects/-/serviceAccounts/<unique-id>' (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "patched": {
@@ -102,6 +245,70 @@
       "invalid-id": {
         "code": 400,
         "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "keys-listed": {
+        "all": {
+          "http_status": 200,
+          "types": [
+            "SYSTEM_MANAGED"
+          ]
+        },
+        "system": {
+          "http_status": 200,
+          "types": [
+            "SYSTEM_MANAGED"
+          ]
+        },
+        "user": {
+          "http_status": 200,
+          "types": []
+        }
+      },
+      "key-unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "list-paged": {
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "owned_count": 2,
+        "owned_in_unique_id_order": true,
+        "second_count": 1,
+        "second_status": 200
+      },
+      "list-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "list-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "The field page_size is out of range. It must be between 0 and 100.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "list-oversize": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "The field page_size is out of range. It must be between 0 and 100.",
         "status": "INVALID_ARGUMENT"
       },
       "deleted": {

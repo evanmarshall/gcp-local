@@ -21,6 +21,7 @@ import (
 type Provider struct {
 	index       *state.Index
 	engine      *iam.Engine
+	gate        provider.Gate
 	scopes      *state.Store[scopeState]
 	roles       *roles
 	credentials Credentials
@@ -45,6 +46,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	p := &Provider{
 		index: index, engine: engine,
+		gate:        provider.Gate{Engine: engine, Index: index, Message: denialMessage, Domain: "iam.googleapis.com"},
 		scopes:      state.NewStore(newScopeState, state.GlobalScope),
 		credentials: credentials,
 		clock:       time.Now,
@@ -163,25 +165,45 @@ func refuse(method string, decision iam.Decision, authorizeErr error, resource s
 }
 
 // authorize evaluates call on target. For an addressed account it checks
-// existence and authorizes under one scope lock; a missing account is err.
+// existence and authorizes under one scope lock; a missing account is err,
+// to any caller, as GCP answers. The account and key methods are refused
+// with GCP's recorded denial as err; IAM Credentials keeps its own, returned
+// as the second result.
 func (p *Provider) authorize(call gateway.Call, scope state.Scope, target iam.Target, account string) (iam.Decision, error, error) {
 	if account == "" {
-		decision, authorizeErr := p.engine.Authorize(call, target, nil)
-		return decision, authorizeErr, nil //nolint:wrapcheck // the caller maps the IAM status
+		if credentialMethods[call.Method] {
+			decision, authorizeErr := p.engine.Authorize(call, target, nil)
+			return decision, authorizeErr, nil //nolint:wrapcheck // the caller maps the IAM status
+		}
+		decision, err := p.gate.Check(call, target, "projects/"+scope.Project)
+		return decision, nil, err
 	}
 	var decision iam.Decision
-	var authorizeErr error
+	var authorizeErr, checkErr error
 	var exists bool
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if exists = p.accountExists(s, call.Method, scope, account); exists {
-			decision, authorizeErr = p.engine.Authorize(call, target, nil)
+		if exists = p.accountExists(s, call.Method, scope, account); !exists {
+			return nil
 		}
+		if credentialMethods[call.Method] {
+			decision, authorizeErr = p.engine.Authorize(call, target, nil)
+			return nil
+		}
+		// No condition attributes: on GCP a condition on an account's
+		// resource.type and name grants nothing while one on request.time
+		// grants (recorded "conditional-access"), and a condition that
+		// reads a missing attribute grants nothing here too.
+		resource := "projects/-/serviceAccounts/" + accountUniqueID(s.accounts[account])
+		decision, checkErr = p.gate.Check(call, target, resource)
 		return nil
 	})
-	if !exists {
+	switch {
+	case !exists && credentialMethods[call.Method]:
 		return decision, nil, provider.NotFound(kindAccount, account)
+	case !exists:
+		return decision, nil, errUnknownAccount
 	}
-	return decision, authorizeErr, nil //nolint:wrapcheck // the caller maps the IAM status
+	return decision, authorizeErr, checkErr
 }
 
 // resolve derives the scope and IAM target, and the account id a method

@@ -10,6 +10,10 @@ import (
 	"errors"
 	"regexp"
 	"time"
+
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // serviceName owns the backend registration.
@@ -78,10 +82,13 @@ const (
 )
 
 // keyRecord is one user-managed key of a service account. The private key
-// leaves only in the create response; the public half lives in the IAM engine.
+// leaves only in the create response; keys.get renders the public half and
+// its self-signed certificate (DER), and the IAM engine verifies with it.
 type keyRecord struct {
-	ID        string
-	CreatedAt time.Time
+	ID          string
+	CreatedAt   time.Time
+	Public      *rsa.PublicKey
+	Certificate []byte
 }
 
 // accountRecord is one stored service account.
@@ -119,6 +126,20 @@ func (s *scopeState) reset() {
 
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("iam requires registry, manager, index, and iam")
+
+// errUnknownAccount is GCP's answer for an account that doesn't exist, to
+// any caller (recorded: serviceaccount-lifecycle-authorization
+// "denied-missing" and "fixture-missing").
+var errUnknownAccount = status.Error(codes.NotFound, "Unknown service account")
+
+// gap refuses a service-account request shape gcp-local doesn't model.
+var gap = provider.CoverageGap("IAM")
+
+// denialMessage is IAM's recorded 403 ("denied-read"), without the
+// Troubleshooter link GCP appends; the resource is the account's
+// projects/-/serviceAccounts/UNIQUE_ID name, which the ErrorInfo metadata
+// also carries.
+const denialMessage = "Permission '%s' denied on resource '//iam.googleapis.com/%s' (or it may not exist)."
 
 // accountResource names one service account in the IAM index.
 func accountResource(project, account string) string {

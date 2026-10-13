@@ -69,8 +69,11 @@ func TestGoClientOverGRPC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	email := accountEmail(testProject, testAccount)
 	name := createAccountOverGRPC(t, client)
+	account, err := client.GetServiceAccount(ctx, &adminpb.GetServiceAccountRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
 	patched, err := client.PatchServiceAccount(ctx, &adminpb.PatchServiceAccountRequest{
 		ServiceAccount: &adminpb.ServiceAccount{Name: name, DisplayName: "renamed"}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}}})
 	if err != nil || patched.GetDisplayName() != "renamed" {
@@ -85,13 +88,13 @@ func TestGoClientOverGRPC(t *testing.T) {
 	}
 	_, err = peer.GetServiceAccount(ctx, &adminpb.GetServiceAccountRequest{Name: name})
 	refused(t, "ungranted get", err, codes.PermissionDenied,
-		"The caller does not have iam.serviceAccounts.get access to "+accountResource(testProject, email)+".")
+		"Permission 'iam.serviceAccounts.get' denied on resource '//iam.googleapis.com/projects/-/serviceAccounts/"+account.GetUniqueId()+"' (or it may not exist).")
 	keysOverGRPC(t, h, client, name)
 	if err := client.DeleteServiceAccount(ctx, &adminpb.DeleteServiceAccountRequest{Name: name}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	_, err = client.GetServiceAccount(ctx, &adminpb.GetServiceAccountRequest{Name: name})
-	refused(t, "deleted get", err, codes.NotFound, "The resource 'serviceAccount/"+testAccount+"' was not found")
+	refused(t, "deleted get", err, codes.NotFound, "Unknown service account")
 }
 
 // createAccountOverGRPC creates, reads, and lists the test account and
@@ -128,9 +131,15 @@ func keysOverGRPC(t *testing.T, h *harness, client *admin.IamClient, account str
 	if json.Unmarshal(recorder.Body.Bytes(), &created) != nil {
 		t.Fatalf("key body %s", recorder.Body.String())
 	}
+	// Every account also has its system-managed key.
 	keys, err := client.ListServiceAccountKeys(ctx, &adminpb.ListServiceAccountKeysRequest{Name: account})
-	if err != nil || len(keys.GetKeys()) != 1 || keys.GetKeys()[0].GetKeyType() != adminpb.ListServiceAccountKeysRequest_USER_MANAGED {
+	if err != nil || len(keys.GetKeys()) != 2 {
 		t.Fatalf("list keys = %v, %v", keys, err)
+	}
+	keys, err = client.ListServiceAccountKeys(ctx, &adminpb.ListServiceAccountKeysRequest{Name: account,
+		KeyTypes: []adminpb.ListServiceAccountKeysRequest_KeyType{adminpb.ListServiceAccountKeysRequest_USER_MANAGED}})
+	if err != nil || len(keys.GetKeys()) != 1 || keys.GetKeys()[0].GetKeyType() != adminpb.ListServiceAccountKeysRequest_USER_MANAGED {
+		t.Fatalf("list user keys = %v, %v", keys, err)
 	}
 	keyName := account + "/keys/" + created.Name[strings.LastIndex(created.Name, "/")+1:]
 	if key, err := client.GetServiceAccountKey(ctx, &adminpb.GetServiceAccountKeyRequest{Name: keyName}); err != nil || key.GetKeyAlgorithm() != adminpb.ServiceAccountKeyAlgorithm_KEY_ALG_RSA_2048 {

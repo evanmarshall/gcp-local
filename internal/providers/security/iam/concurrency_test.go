@@ -15,7 +15,7 @@ import (
 func TestPatchIsAtomic(t *testing.T) {
 	h := newHarness(t)
 	account := testBase + "/" + testAccount
-	h.expect(http.MethodPost, testBase, map[string]any{"accountId": testAccount, "displayName": "before"}, 200)
+	h.expect(http.MethodPost, testBase, map[string]any{"accountId": testAccount, "serviceAccount": map[string]any{"displayName": "before"}}, 200)
 	h.expect(http.MethodPatch, account, map[string]any{
 		"serviceAccount": map[string]any{"displayName": "after"},
 		"updateMask":     "displayName,bogus",

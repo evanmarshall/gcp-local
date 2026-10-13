@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:40:37.005385+00:00",
+  "recorded_at": "2026-10-13T02:11:03.212828+00:00",
   "scenario": {
     "id": "serviceaccount-lifecycle-authorization",
     "service": "iam",
     "transport": "rest-v1",
-    "revision": "2003a8c4ef4986b38d6af14bc37fe9329a61b751916dc40507893a3515c41c4c",
+    "revision": "a231c429d6fe87fba9eeb1b5d616b357f21412586f9b3a8174b7f064cfad9186",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "66367f188973cb7de3f3effc790f83d510d778ab1c90d895d53dc7c40ef14df8",
+  "snapshot_sha256": "759ee5965b0f3a54f611ba8a1974906b3c16ec108230e33ccc1b682126bc838d",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,7 +22,9 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/security/serviceaccounts.py": "7f206bd6211aece94007e76f332a3d58cb24e7196203e78320db91c4fde8c923",
+      "gcp_validation/services/security/serviceaccounts.py": "c12540817c4fb600792e99e44759a2ef7bd4fcfeae86c619c7d1d1b16f9094eb",
+      "gcp_validation/services/security/refusals.py": "7e5c208b9472d70b50966390e74a6cea0d0f34de2ae5eb01121bf4ef526a8f7e",
+      "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "tests/conformance/security/iam/conftest.py": "10852728f206f0d9c44b75679f4843baddea41e9d6e2cc691363e608cd449387"
@@ -33,9 +35,9 @@
       ],
       "location": "global",
       "limits": {
-        "max_service_accounts": 1,
+        "max_service_accounts": 2,
         "max_keys": 0,
-        "max_run_seconds": 600
+        "max_run_seconds": 900
       },
       "cleanup_required": true,
       "identities": [

@@ -72,7 +72,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Resource Manager](docs/services/security/resourcemanager.md) | gcp-local | Folders, project moves, and organization and folder IAM inherited by everything under them |
 | [VPC networking](docs/services/networking.md) | gcp-local | Connectivity verdicts; no real traffic |
 
-IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage, Cloud SQL, and Memorystore; on other services a condition that reads `resource.*` grants nothing. Deny rules and principal access boundaries for service accounts are enforced locally but not recorded; organization policy and VPC Service Controls are not enforced ([IAM](docs/architecture/iam.md)).
+IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage, Cloud SQL, Memorystore, Secret Manager, and Cloud KMS; on other services a condition that reads `resource.*` grants nothing. Deny rules and principal access boundaries for service accounts are enforced locally but not recorded; organization policy and VPC Service Controls are not enforced ([IAM](docs/architecture/iam.md)).
 
 ## How it works
 
