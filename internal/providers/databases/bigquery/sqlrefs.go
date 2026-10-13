@@ -73,9 +73,10 @@ func parseTree(sql string) (*astNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	output, err := googlesql.ParseScript(strings.ReplaceAll(sql, "\n", "\r"), options, nil)
+	output, err := googlesql.ParseScript(strings.ReplaceAll(sql, "\n", "\r"), options,
+		&googlesql.ErrorMessageOptions{Mode: googlesql.ErrorMessageModeErrorMessageOneLine, Stability: googlesql.ErrorMessageStabilityProduction})
 	if err != nil {
-		return nil, invalidQuery(err.Error())
+		return nil, invalidQuery(syntaxPosition(err.Error()))
 	}
 	script, err := output.Script()
 	if err != nil {
@@ -87,6 +88,15 @@ func parseTree(sql string) (*astNode, error) {
 		return nil, fmt.Errorf("dump the parsed script: %w", err)
 	}
 	return readTree(dump)
+}
+
+// syntaxPosition spells the parser's "[at 1:1]" position as GCP's syntax
+// errors do: "... at [1:1]" (recorded: bigquery-api-surface).
+func syntaxPosition(message string) string {
+	if text, position, ok := strings.Cut(message, " [at "); ok {
+		return text + " at [" + position
+	}
+	return message
 }
 
 // maxASTDepth bounds the dump; a deeper script is refused rather than

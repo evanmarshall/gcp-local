@@ -2,6 +2,8 @@ package bigquery
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // Provider owns datasets, table metadata, and jobs; each project's engine
@@ -22,6 +25,7 @@ type Provider struct {
 	manager *backend.Manager
 	index   *state.Index
 	engine  *iam.Engine
+	gate    provider.Gate
 	scopes  *state.Store[scopeState]
 	clock   func() time.Time
 }
@@ -39,6 +43,8 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	p := &Provider{
 		manager: manager, index: index, engine: engine,
+		// Denials are rendered by authorize; Message is BigQuery's dataset form.
+		gate:   provider.Gate{Engine: engine, Index: index, Message: "Permission %s denied on %s", Attributes: attributes},
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
@@ -87,26 +93,33 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// handle is the gateway entry point for every BigQuery method.
+// handle is the gateway entry point for every BigQuery method. Every refusal
+// is rendered as BigQuery's v2 error body, with errors[].reason.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid BigQuery request")
 	}
+	response, err := p.serve(call, request)
+	if err != nil {
+		return wireError(err), nil
+	}
+	return response, nil
+}
+
+// serve authorizes one call at its nearest indexed resource, then runs it.
+func (p *Provider) serve(call gateway.Call, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
 	scope, target, err := resolveTarget(call, request)
 	if err != nil {
 		return nil, err
 	}
 	authorized := call
 	authorized.Method = p.ownJobCheck(call, request, scope)
-	decision, resource, authorizeErr := p.authorizeAt(authorized, target.Name, scope.Project)
-	if authorizeErr != nil {
-		if provider.Unverified(authorizeErr) {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-		}
-		return provider.Denied(decision, resource), nil
+	decision, err := p.authorize(authorized, call.Method, scope.Project, target.Name)
+	if err != nil {
+		return nil, err
 	}
-	call.Resource = resource
+	call.Resource = target.Name
 	call.Location = scope.Location
 	response, err := p.execute(call, request, scope)
 	if err != nil {
@@ -116,31 +129,29 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	return response, nil
 }
 
-// authorizeAt authorizes one call against a resource, or, when the index
-// lacks it, against its nearest indexed ancestor (table, then dataset, then
-// project), so absence reads 404 through the policies that govern it. The
-// target is chosen and authorized under the scope lock, which every index
-// change for this provider's datasets and tables also holds, so a concurrent
-// create or delete cannot unindex the target mid-check. An indexed resource
-// never falls back: an engine refusal such as an unsupported policy stays
-// closed, and so does a scope the store refuses.
-func (p *Provider) authorizeAt(call gateway.Call, resource, project string) (iam.Decision, string, error) {
-	var decision iam.Decision
-	var authorizeErr error
-	if err := p.scopes.With(provider.ProjectScope(project), func(*scopeState) error {
-		for {
-			parent := parentResource(resource, project)
-			if _, indexed := p.index.Get(resource); indexed || parent == resource {
-				break
-			}
-			resource = parent
-		}
-		decision, authorizeErr = p.engine.Authorize(call, iam.Target{Name: resource}, nil)
-		return nil
-	}); err != nil {
-		return decision, resource, fmt.Errorf("authorize in project %q: %w", project, err)
+// authorize authorizes call against resource, or, when the index lacks it,
+// against its nearest indexed ancestor (table, then dataset, then project),
+// so absence reads 404 through the policies that govern it. provider.Nearest
+// picks and checks the target under the scope lock, which every index change
+// for this provider's datasets and tables also holds. A refusal is
+// BigQuery's: a denial naming resource, or the 401 for a call without
+// credentials naming method.
+func (p *Provider) authorize(call gateway.Call, method, project, resource string) (iam.Decision, error) {
+	candidates := []string{provider.ProjectResource(project)}
+	for name := resource; name != candidates[len(candidates)-1]; name = parentResource(name, project) {
+		candidates = append(candidates[:len(candidates)-1], name, candidates[len(candidates)-1])
 	}
-	return decision, resource, authorizeErr //nolint:wrapcheck // callers wrap or render the refusal
+	decision, _, err := provider.Nearest(p.gate, p.scopes, provider.ProjectScope(project), call, resource, candidates...)
+	switch {
+	case err == nil:
+		return decision, nil
+	case status.Code(err) == codes.PermissionDenied:
+		return decision, denied(decision, resource)
+	case status.Code(err) == codes.Unauthenticated && call.Principal.State == gateway.Anonymous:
+		return decision, credentialsMissing(method)
+	default:
+		return decision, err
+	}
 }
 
 // parentResource names a table's dataset, or a dataset's project.
@@ -151,15 +162,12 @@ func parentResource(resource, project string) string {
 	return provider.ProjectResource(project)
 }
 
-// stampDecision names the call's IAM decision on its response, unless a
-// related check that denied the call already named its own.
+// stampDecision names the call's IAM decision on its response.
 func stampDecision(response *gateway.RESTResponse, id string) {
 	if response.Headers == nil {
 		response.Headers = http.Header{}
 	}
-	if response.Headers.Get(headerDecision) == "" {
-		response.Headers.Set(headerDecision, id)
-	}
+	response.Headers.Set(headerDecision, id)
 }
 
 // headerDecision names the IAM decision that answered the request.
@@ -168,15 +176,15 @@ const headerDecision = "X-Gcp-Local-Decision-Id"
 // resolveTarget derives the scope and IAM target for one request. Dataset methods
 // authorize against the dataset resource. Table, row, and table IAM methods
 // authorize against the table, whose policy inherits the dataset's; a table
-// that does not exist authorizes against its dataset (authorizeAt), so only
+// that does not exist authorizes against its dataset (authorize), so only
 // callers with dataset access learn it is absent.
 func resolveTarget(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
 	project := request.Path["project"]
 	scope := provider.ProjectScope(project)
 	target := iam.Target{Name: provider.ProjectResource(project)}
-	dataset, table := request.Path["datasetId"], request.Path["tableId"]
+	dataset, table := request.Path[keyDatasetID], request.Path["tableId"]
 	switch call.Method {
-	case methodDatasetsCreate, methodDatasetsList, methodJobsQuery, methodJobsResults, methodJobsInsert, methodJobsGet:
+	case methodDatasetsCreate, methodDatasetsList, methodJobsQuery, methodJobsResults, methodJobsInsert, methodJobsGet, methodJobsList:
 		// The collection-level create takes the dataset id from the body, and
 		// query jobs authorize at the project, like the documented rows.
 		return scope, target, nil
@@ -191,9 +199,221 @@ func resolveTarget(call gateway.Call, request *gateway.RESTRequest) (state.Scope
 		return scope, target, nil
 	default:
 		if !uid.MatchString(table) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid table id %q", table)
+			return scope, target, failure(codes.InvalidArgument, reasonInvalid, fmt.Sprintf("Invalid table ID %q.", table))
 		}
 		target.Name = tableResource(project, dataset, table)
 		return scope, target, nil
 	}
+}
+
+// BigQuery's errors[].reason values (recorded: bigquery-api-surface).
+const (
+	reasonInvalid      = "invalid"
+	reasonInvalidQuery = "invalidQuery"
+	reasonNotFound     = "notFound"
+	reasonDuplicate    = "duplicate"
+	reasonAccessDenied = "accessDenied"
+	reasonInUse        = "resourceInUse"
+)
+
+// apiError is a refusal with BigQuery's errors[] entry: entry nil sends an
+// empty errors list, as GCP's policy-version refusal does.
+type apiError struct {
+	status   *status.Status
+	entry    map[string]any
+	decision string
+}
+
+func (e *apiError) Error() string { return e.status.Message() }
+
+// GRPCStatus lets callers and tests read the code.
+func (e *apiError) GRPCStatus() *status.Status { return e.status }
+
+// failure is a refusal whose errors[] entry carries reason in the global
+// domain.
+func failure(code codes.Code, reason, message string) error { return refusal(code, reason, message) }
+
+// refusal is failure's concrete form.
+func refusal(code codes.Code, reason, message string) *apiError {
+	return &apiError{status: status.New(code, message), entry: entry(reason, message)}
+}
+
+// entry is one errors[] entry in the global domain.
+func entry(reason, message string) map[string]any {
+	return map[string]any{keyMessage: message, keyDomain: "global", keyReason: reason}
+}
+
+// Keys of the errors[] entries.
+const (
+	keyMessage = "message"
+	keyDomain  = "domain"
+	keyReason  = "reason"
+	keyStatus  = "status"
+)
+
+// queryFailure marks a query's refusal of its SQL as invalidQuery on the q
+// parameter, as GCP does (recorded for a syntax error); other refusals pass.
+func queryFailure(err error) error {
+	var refused *apiError
+	if err == nil || errors.As(err, &refused) || status.Code(err) != codes.InvalidArgument {
+		return err
+	}
+	message := status.Convert(err).Message()
+	located := entry(reasonInvalidQuery, message)
+	located["location"], located["locationType"] = "q", "parameter"
+	return &apiError{status: status.New(codes.InvalidArgument, message), entry: located}
+}
+
+// denied is BigQuery's 403 naming the denied permission and the addressed
+// dataset, table, or project (recorded for each).
+func denied(decision iam.Decision, resource string) error {
+	permission := provider.DeniedPermission(decision)
+	project, rest, _ := strings.Cut(strings.TrimPrefix(resource, "//bigquery.googleapis.com/projects/"), "/datasets/")
+	dataset, table, isTable := strings.Cut(rest, "/tables/")
+	var message string
+	switch {
+	case strings.HasPrefix(resource, "//cloudresourcemanager.googleapis.com/projects/"):
+		project = provider.LastSegment(resource)
+		message = fmt.Sprintf("Access Denied: Project %s: User does not have %s permission in project %s.", project, permission, project)
+	case isTable:
+		name := project + ":" + dataset + "." + table
+		message = fmt.Sprintf("Access Denied: Table %s: Permission %s denied on table %s (or it may not exist).", name, permission, name)
+	default:
+		name := project + ":" + dataset
+		message = fmt.Sprintf("Access Denied: Dataset %s: Permission %s denied on dataset %s (or it may not exist).", name, permission, name)
+	}
+	denial := refusal(codes.PermissionDenied, reasonAccessDenied, message)
+	denial.decision = decision.ID
+	return denial
+}
+
+// rpcNames are the google.cloud.bigquery.v2 RPCs GCP names in a
+// missing-credential 401 (recorded for datasets.get).
+var rpcNames = map[string]string{
+	methodDatasetsCreate: "DatasetService.InsertDataset", methodDatasetsDelete: "DatasetService.DeleteDataset",
+	methodDatasetsGet: "DatasetService.GetDataset", methodDatasetsList: "DatasetService.ListDatasets",
+	methodDatasetsUpdate: "DatasetService.PatchDataset", methodTablesCreate: "TableService.InsertTable",
+	methodTablesDelete: "TableService.DeleteTable", methodTablesGet: "TableService.GetTable",
+	methodTablesList: "TableService.ListTables", methodTablesUpdate: "TableService.PatchTable",
+	methodJobsQuery: "JobService.Query", methodJobsResults: "JobService.GetQueryResults",
+	methodJobsInsert: "JobService.InsertJob", methodJobsGet: "JobService.GetJob", methodJobsList: "JobService.ListJobs",
+}
+
+// credentialsMissing is GCP's 401 for a call without credentials, with
+// BigQuery's "Login Required." entry (recorded).
+func credentialsMissing(method string) error {
+	rpc := ""
+	if name, ok := rpcNames[method]; ok {
+		rpc = "google.cloud.bigquery.v2." + name
+	}
+	login := entry("required", "Login Required.")
+	login["location"], login["locationType"] = "Authorization", "header"
+	return &apiError{status: status.Convert(provider.CredentialsMissing(apiHost, rpc)), entry: login}
+}
+
+// apiHost is the API host conditions and 401s name.
+const apiHost = "bigquery.googleapis.com"
+
+// attributes are the IAM Condition attributes of a dataset or table, as the
+// BigQuery IAM Conditions page documents them. GCP refuses conditions on
+// table policies (recorded), so only project-level grants can use them.
+func attributes(target string) iam.ResourceAttributes {
+	name, ok := strings.CutPrefix(target, "//"+apiHost+"/")
+	switch {
+	case !ok:
+		return iam.ResourceAttributes{}
+	case strings.Contains(name, "/tables/"):
+		return iam.ResourceAttributes{Name: name, Type: apiHost + "/Table", Service: apiHost}
+	default:
+		return iam.ResourceAttributes{Name: name, Type: apiHost + "/Dataset", Service: apiHost}
+	}
+}
+
+// httpCodes maps the statuses BigQuery refuses with to HTTP codes, as the
+// gateway does.
+var httpCodes = map[codes.Code]int{
+	codes.InvalidArgument: 400, codes.FailedPrecondition: 400, codes.OutOfRange: 400, codes.Unauthenticated: 401,
+	codes.PermissionDenied: 403, codes.NotFound: 404, codes.AlreadyExists: 409, codes.Aborted: 409,
+	codes.ResourceExhausted: 429, codes.Canceled: 499, codes.Unimplemented: 501, codes.Unavailable: 503,
+	codes.DeadlineExceeded: 504,
+}
+
+// defaultReasons are the errors[] reasons of plain status refusals.
+var defaultReasons = map[codes.Code]string{
+	codes.InvalidArgument: reasonInvalid, codes.FailedPrecondition: reasonInvalid, codes.NotFound: reasonNotFound,
+	codes.AlreadyExists: reasonDuplicate, codes.PermissionDenied: reasonAccessDenied,
+}
+
+// wireError renders a refusal as BigQuery's v2 error body: code, message,
+// status, errors[], and google.rpc details.
+func wireError(err error) *gateway.RESTResponse {
+	refused := refusalOf(err)
+	code, ok := httpCodes[refused.status.Code()]
+	if !ok {
+		code = http.StatusInternalServerError
+	}
+	entries := []any{}
+	if refused.entry != nil {
+		entries = append(entries, refused.entry)
+	}
+	body := map[string]any{keyCode: code, keyMessage: refused.status.Message(), "errors": entries, keyStatus: statusName(refused.status.Code())}
+	var details []json.RawMessage
+	for _, detail := range refused.status.Proto().GetDetails() {
+		if encoded, encodeErr := protojson.Marshal(detail); encodeErr == nil {
+			details = append(details, encoded)
+		}
+	}
+	if len(details) > 0 {
+		body["details"] = details
+	}
+	response := &gateway.RESTResponse{Status: code, JSON: map[string]any{"error": body}}
+	if refused.decision != "" {
+		stampDecision(response, refused.decision)
+	}
+	return response
+}
+
+// refusalOf reads an error as a refusal. A plain status gets GCP's reason
+// for its code; one carrying a BadRequest names no domain, as recorded. A
+// refusal without a recorded reason, such as a coverage gap, has an empty
+// errors list. A failure that carries no status is an internal error, never
+// its text.
+func refusalOf(err error) *apiError {
+	var refused *apiError
+	var wrapped interface{ GRPCStatus() *status.Status }
+	switch {
+	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		return &apiError{status: status.FromContextError(err)}
+	case errors.As(err, &refused):
+		return refused
+	case errors.As(err, &wrapped):
+		current := wrapped.GRPCStatus()
+		refused = &apiError{status: current}
+		if reason, ok := defaultReasons[current.Code()]; ok {
+			refused.entry = entry(reason, current.Message())
+			if len(current.Proto().GetDetails()) > 0 {
+				delete(refused.entry, keyDomain)
+			}
+		}
+		return refused
+	default:
+		return &apiError{status: status.New(codes.Internal, "Internal provider error")}
+	}
+}
+
+// statusNames spell the statuses whose Google name differs from the code's
+// upper-cased name.
+var statusNames = map[codes.Code]string{
+	codes.Canceled: "CANCELLED", codes.InvalidArgument: "INVALID_ARGUMENT", codes.DeadlineExceeded: "DEADLINE_EXCEEDED",
+	codes.NotFound: "NOT_FOUND", codes.AlreadyExists: "ALREADY_EXISTS", codes.PermissionDenied: "PERMISSION_DENIED",
+	codes.ResourceExhausted: "RESOURCE_EXHAUSTED", codes.FailedPrecondition: "FAILED_PRECONDITION",
+	codes.OutOfRange: "OUT_OF_RANGE", codes.DataLoss: "DATA_LOSS",
+}
+
+// statusName spells a status as Google's REST errors do.
+func statusName(code codes.Code) string {
+	if name, ok := statusNames[code]; ok {
+		return name
+	}
+	return strings.ToUpper(code.String())
 }

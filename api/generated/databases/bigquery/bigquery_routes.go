@@ -27,4 +27,5 @@ var BigQueryRoutes = []contract.Route{
 	{Method: "bigquery.jobs.getQueryResults", Verb: "GET", Path: "/bigquery/v2/projects/{project}/queries/{jobId}", JSONBody: false, Media: false},
 	{Method: "bigquery.jobs.insert", Verb: "POST", Path: "/bigquery/v2/projects/{project}/jobs", JSONBody: true, Media: false},
 	{Method: "bigquery.jobs.get", Verb: "GET", Path: "/bigquery/v2/projects/{project}/jobs/{jobId}", JSONBody: false, Media: false},
+	{Method: "bigquery.jobs.list", Verb: "GET", Path: "/bigquery/v2/projects/{project}/jobs", JSONBody: false, Media: false},
 }

@@ -31,6 +31,7 @@ const (
 	methodJobsResults    = "bigquery.jobs.getQueryResults"
 	methodJobsInsert     = "bigquery.jobs.insert"
 	methodJobsGet        = "bigquery.jobs.get"
+	methodJobsList       = "bigquery.jobs.list"
 	methodDatasetsGetIam = "bigquery.datasets.getIamPolicy"
 	methodDatasetsSetIam = "bigquery.datasets.setIamPolicy"
 	methodTablesGetIam   = "bigquery.tables.getIamPolicy"
@@ -55,6 +56,7 @@ var permissions = map[string]string{
 	methodJobsResults:    "bigquery.jobs.get",
 	methodJobsInsert:     permJobsCreate,
 	methodJobsGet:        "bigquery.jobs.get",
+	methodJobsList:       "bigquery.jobs.list",
 	methodDatasetsGetIam: "bigquery.datasets.getIamPolicy",
 	methodDatasetsSetIam: "bigquery.datasets.setIamPolicy",
 	methodTablesGetIam:   "bigquery.tables.getIamPolicy",
@@ -76,6 +78,8 @@ const (
 	checkQueryUpdate = "bigquery.query.replaceTable"
 	checkQueryDrop   = "bigquery.query.dropTable"
 	checkOwnJob      = "bigquery.jobs.readOwn"
+	// checkListAll lists other users' jobs (jobs.list allUsers=true).
+	checkListAll = "bigquery.jobs.listAllUsers"
 )
 
 var relatedPermissions = map[string]string{
@@ -85,6 +89,7 @@ var relatedPermissions = map[string]string{
 	checkQueryUpdate: "bigquery.tables.update",
 	checkQueryDrop:   "bigquery.tables.delete",
 	checkOwnJob:      permJobsCreate,
+	checkListAll:     "bigquery.jobs.listAll",
 }
 
 // Resource-name helpers follow the real BigQuery namespace.
@@ -115,13 +120,17 @@ const (
 	typeView  = "VIEW"
 )
 
-// datasetRecord is one stored BigQuery dataset.
+// datasetRecord is one stored BigQuery dataset. Patched records that a
+// patch ran: GCP then reports maxTimeTravelHours (recorded).
 type datasetRecord struct {
 	ID           string
 	Labels       map[string]string
 	FriendlyName string
+	Description  string
 	Location     string
 	CreatedAt    time.Time
+	ModifiedAt   time.Time
+	Patched      bool
 }
 
 // tableRecord is one table's metadata. Its columns and rows live in the
@@ -137,8 +146,10 @@ type tableRecord struct {
 	ViewRefs     []tableName
 	Labels       map[string]string
 	FriendlyName string
+	Description  string
 	Location     string
 	CreatedAt    time.Time
+	ModifiedAt   time.Time
 }
 
 // jobRecord is one stored query job with its materialized result. Principal
@@ -158,6 +169,8 @@ type jobRecord struct {
 	Principal    string
 	Query        string
 	Labels       map[string]string
+	// RequestID is the jobs.query requestId that ran the job, if any.
+	RequestID string
 }
 
 // scopeState is one project slice of provider state.

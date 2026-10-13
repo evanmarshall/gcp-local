@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "approved": true,
+  "services": [
+    "bigquery"
+  ],
+  "project": "gcp-local-stitchwink-dev",
+  "project_number": "482773321601",
+  "location": "global",
+  "limits": {
+    "max_datasets": 3,
+    "max_tables": 3,
+    "max_rows": 0,
+    "max_queries": 6,
+    "max_run_seconds": 900
+  },
+  "cleanup_required": true,
+  "scheduled_runs": true
+}

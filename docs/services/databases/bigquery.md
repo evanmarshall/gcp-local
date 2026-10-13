@@ -1,6 +1,6 @@
 # BigQuery
 
-BigQuery v2 runs GoogleSQL on an embedded engine: queries with joins, aggregates, CTEs, window functions, and parameters; DML; DDL for tables and views; and scripts. Every table a query names is authorized before it runs. Datasets, tables, streaming inserts, and `tabledata.list` work as before. Three scenarios are recorded against GCP.
+BigQuery v2 runs GoogleSQL on an embedded engine: queries with joins, aggregates, CTEs, window functions, and parameters; DML; DDL for tables and views; and scripts. Every table a query names is authorized before it runs. Datasets, tables, streaming inserts, `tabledata.list`, and `jobs.list` are served. Errors carry GCP's v2 body with `errors[].reason`. Four scenarios are recorded against GCP.
 
 ## Use
 
@@ -17,12 +17,13 @@ client.query("SELECT name, COUNT(*) FROM shop.orders o JOIN shop.people p ON o.p
 
 | Resource | Methods | Notes |
 | --- | --- | --- |
-| Datasets | `insert`, `get`, `list`, `patch`, `delete` | `patch` changes labels and friendly name. Delete of a non-empty dataset is 400 unless `deleteContents=true` |
+| Datasets | `insert`, `get`, `list`, `patch`, `delete` | `patch` merges labels (a `null` value removes one) and changes `friendlyName` and `description` only when sent. `list` is by ID, paged by `maxResults`/`pageToken`; `_` datasets only with `all=true`. Delete of a non-empty dataset is 400 `resourceInUse` unless `deleteContents=true` |
 | Datasets | `getIamPolicy`, `setIamPolicy` | Return 400 "This feature requires allowlisting", as recorded in GCP |
-| Tables | `insert`, `get`, `list`, `patch`, `delete` | `insert` takes a schema; views come from `CREATE VIEW`. Tables created by DDL report the engine's schema |
-| Tables | `getIamPolicy`, `setIamPolicy` | The table's own policy; it inherits the dataset's and never changes it |
+| Tables | `insert`, `get`, `list`, `patch`, `delete` | `insert` takes a schema, labels, `friendlyName`, and `description`; views come from `CREATE VIEW`. `patch` merges like datasets; a schema is accepted only unchanged. `list` is by ID with `totalItems`, paged. Tables created by DDL report the engine's schema |
+| Tables | `getIamPolicy`, `setIamPolicy` | The table's own policy; it inherits the dataset's and never changes it. Version 3 and conditions are refused, as GCP refuses them (recorded) |
 | Rows | `tabledata.insertAll`, `tabledata.list` | An invalid row fails the request: it is `invalid` in `insertErrors`, the rest `stopped`, nothing lands. `ignoreUnknownValues`, `maxResults`, `pageToken`, `startIndex`, and `formatOptions.useInt64Timestamp` are served |
-| Jobs | `jobs.query`, `jobs.insert`, `jobs.get`, `jobs.getQueryResults` | GoogleSQL only. `jobs.insert` takes query jobs and finishes them before returning (`DONE`). Named and positional parameters, `defaultDataset`, `dryRun`, `maxResults`, page tokens, top-level `fields`, and `formatOptions` are served |
+| Jobs | `jobs.query`, `jobs.insert`, `jobs.get`, `jobs.getQueryResults` | GoogleSQL only. `jobs.insert` takes query jobs and finishes them before returning (`DONE`). Named and positional parameters, `defaultDataset`, `dryRun`, `maxResults`, page tokens, top-level `fields`, and `formatOptions` are served. A `jobs.query` retry with the same `requestId` within 15 minutes returns the first run's job |
+| Jobs | `jobs.list` | The caller's jobs, newest first; `allUsers=true` needs `bigquery.jobs.listAll`. `projection`, `stateFilter`, `minCreationTime`, `maxCreationTime`, `maxResults`, `pageToken` |
 
 Statements: `SELECT` (joins, subqueries, CTEs, `UNNEST`, window functions, `QUALIFY`, pipe syntax), `INSERT`, `UPDATE`, `DELETE`, `MERGE` from a table, `TRUNCATE TABLE`, `CREATE [OR REPLACE] TABLE [AS SELECT]`, `CREATE [OR REPLACE] VIEW`, `DROP TABLE`, `DROP VIEW`, and scripts with `DECLARE`, `SET`, `IF`, loops, and `BEGIN`…`END`. A script returns its last result. DML returns `numDmlAffectedRows` and `dmlStats`; DML and `CREATE` return the target table's schema.
 
@@ -44,7 +45,9 @@ Baselines come from recorded `roles/bigquery.*` snapshots (`admin`, `dataEditor`
 - Reading a view needs `getData` on the view and on every table it reads (views guide). Authorized views are not modeled.
 - A script is checked whole before its first statement runs; a later statement's denial runs nothing.
 - `insertAll` checks `bigquery.tables.updateData`; `tabledata.list` checks `bigquery.tables.getData` on the table.
-- `jobs.get` and `getQueryResults` need `bigquery.jobs.get`, except for the job's creator; a job user without it gets 404 for a missing job (recorded).
+- `jobs.get` and `getQueryResults` need `bigquery.jobs.get`, except for the job's creator; a job user without it gets 404 for a missing job (recorded). `jobs.list` needs `bigquery.jobs.list`.
+- Denials name the dataset, table, or project as GCP does (recorded for each); a call without credentials gets GCP's 401 with `CREDENTIALS_MISSING` (recorded).
+- IAM Conditions see `resource.type` (`bigquery.googleapis.com/Dataset` or `/Table`), `resource.name` (`projects/P/datasets/D[/tables/T]`), and `resource.service` of the addressed resource, per the [IAM Conditions page](https://docs.cloud.google.com/bigquery/docs/conditions). GCP refuses conditions on table policies (recorded) and gates dataset policies, so they apply only through project grants; that evaluation is modeled, not recorded.
 
 ## Verification
 
@@ -52,6 +55,7 @@ Baselines come from recorded `roles/bigquery.*` snapshots (`admin`, `dataEditor`
 | --- | --- | --- |
 | `bigquery-dataset-rows-query` | 2026-10-12 | Dataset and table documents, insertAll and string-encoded reads, query and dry run shapes, dataset IAM 400, table-level grant, denied identity 403, non-empty dataset delete |
 | `bigquery-jobs-insert-query` | 2026-10-12 | The Python client's `query().result()` calls: `jobs.insert`, `jobs.get` polling, `getQueryResults` pages; duplicate job id 409; creator reads its job without `bigquery.jobs.get`; ungranted reads 403; missing job 404 |
+| `bigquery-api-surface` | 2026-10-13 | `errors[]` reasons and messages for duplicate, missing, denied, anonymous, bad ID, in-use, invalid query, missing query table, and denied query; unknown body names ignored; patch merges for datasets and tables; dataset and table list order, fields, paging, and page refusals; `jobs.list` order and projections; table policy version 3 refused |
 | `bigquery-sql-engine` | 2026-10-12 | `CREATE TABLE`, `INSERT`, `CREATE TABLE AS SELECT`, a DDL table's schema, a join with `GROUP BY`/`HAVING`, a CTE with a subquery and functions, named and positional parameters, a default dataset, a script, `UPDATE`, `DELETE`, `MERGE`, a view, `tabledata.list`, a table-level reader that can read its table but gets 403 joining a second table and 403 on DML, missing table 404, unknown column 400, `DROP VIEW`, `DROP TABLE` |
 
 Statistics such as `totalBytesProcessed` are stand-ins (`"0"`); only their presence is recorded.
@@ -70,13 +74,17 @@ These return `UNIMPLEMENTED` ("BigQuery coverage gap: …"):
 - References: other projects' tables, wildcard tables, `INFORMATION_SCHEMA`.
 - Parameters: `STRUCT`, `RANGE`, and arrays of types other than `INT64`, `FLOAT64`, `BOOL`, and `STRING`.
 - Engine limits, for example `MERGE` from a subquery; the message names the engine's refusal.
-- Legacy SQL, `BATCH` priority, destination tables, and any other Job or `jobs.query` field not listed above.
+- Legacy SQL, `BATCH` priority, and every Job and `jobs.query` field the discovery schema has but the provider doesn't model, by name: destination tables, write and create dispositions, `maximumBytesBilled` (queries bill no bytes locally, so a cap can't be enforced), sessions, reservations, load, extract, and copy jobs, and more. Names the schema lacks are ignored, as GCP ignores them (recorded).
+- Dataset fields `access` (other than the default list), `defaultTableExpirationMs`, `defaultPartitionExpirationMs`, `defaultEncryptionConfiguration`, `maxTimeTravelHours` other than 168, and the rest of the unmodeled schema; [#90](https://github.com/evanmarshall/gcp-local/issues/90) models them.
+- Table fields `timePartitioning`, `rangePartitioning`, `clustering`, `expirationTime`, `encryptionConfiguration`, `externalDataConfiguration`, `materializedView`, `requirePartitionFilter`, column options (`maxLength`, `precision`, `defaultValueExpression`, `policyTags`, …), and schema changes through `patch`.
+- Query parameters `datasets.list` `filter`, `datasets.get` `datasetView` and `accessPolicyVersion`, `datasets.patch` `updateMode`, `tables.get` `view` and `selectedFields`, `tables.patch` `autodetect_schema`, `jobs.list` `parentJobId`.
 - `tables.insert` with a `view`; `insertAll` into `RECORD` columns or with `skipInvalidRows` or `templateSuffix`; `tabledata.list` `selectedFields`; `timestampOutputFormat=ISO8601_STRING`; nested `fields` selectors.
 - Names the local engine can't keep apart: datasets or tables whose ids differ only in case, and tables whose `dataset_table` storage names collide (`ds.t_x` and `ds_t.x`).
 
 Not modeled:
 
-- `MERGE` reports no `numDmlAffectedRows`. Tables created by DDL report no `REQUIRED` modes or descriptions. `insertId` deduplication, streaming buffer limits, partitioning, clustering, load, extract, and copy jobs, `jobs.list`, `jobs.cancel`, materialized views, authorized views, and `access` list updates.
+- `MERGE` reports no `numDmlAffectedRows`. Tables created by DDL report no `REQUIRED` modes or descriptions. `insertId` deduplication, streaming buffer limits, `jobs.cancel`, and authorized views.
+- List default page sizes (1,000) are not recorded. Query-time denials of a table use the table form recorded for `tables.get`; GCP's query wording is not recorded.
 - State is in memory; restart discards it.
 - Job retention follows GCP's documented bounds, not recorded: `getQueryResults` returns 404 24 hours after a job ran, when its rows are freed, and `jobs.get` returns 404 after 180 days (GCP keeps six months of job history). The 404 message is the emulator's.
 

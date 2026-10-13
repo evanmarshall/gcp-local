@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -314,7 +317,7 @@ func TestRefusedScopeFailsClosed(t *testing.T) {
 	h := newHarness(t)
 	call := gateway.Call{Context: context.Background(), Method: methodDatasetsGet,
 		Principal: gateway.Principal{State: gateway.Authenticated, Subject: testActor}}
-	if _, _, err := h.bq.authorizeAt(call, datasetResource("", testDataset), ""); err == nil || !strings.Contains(err.Error(), `authorize in project ""`) {
+	if _, err := h.bq.authorize(call, call.Method, "", datasetResource("", testDataset)); err == nil || !strings.Contains(err.Error(), `authorize in scope /global`) {
 		t.Fatalf("authorize in a refused scope = %v, want a refusal", err)
 	}
 }
@@ -372,5 +375,375 @@ func TestRecreatedDatasetStartsWithEmptyPolicy(t *testing.T) {
 	policy := h.expect(http.MethodPost, table+":getIamPolicy", map[string]any{}, 200)
 	if strings.Contains(policy.Body.String(), member) {
 		t.Fatalf("recreated table kept the deleted grants: %s", policy.Body.String())
+	}
+}
+
+// wireOf decodes a v2 error body.
+func wireOf(t *testing.T, recorder *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var body struct {
+		Error map[string]any `json:"error"`
+	}
+	decode(t, recorder, &body)
+	return body.Error
+}
+
+// expectRefusal asserts a recorded v2 refusal: its code, message, and the
+// one errors[] entry ({} for none).
+func expectRefusal(t *testing.T, step string, recorder *httptest.ResponseRecorder, code int, message string, entry map[string]any) {
+	t.Helper()
+	wire := wireOf(t, recorder)
+	entries, _ := wire["errors"].([]any)
+	got := map[string]any{}
+	if len(entries) == 1 {
+		got, _ = entries[0].(map[string]any)
+	}
+	if recorder.Code != code || wire["message"] != message || len(entries) > 1 || fmt.Sprint(got) != fmt.Sprint(entry) {
+		t.Errorf("%s = %d %s, want %d %q %v", step, recorder.Code, recorder.Body.String(), code, message, entry)
+	}
+}
+
+// global is an errors[] entry in the global domain.
+func global(reason, message string) map[string]any {
+	return map[string]any{"domain": "global", "message": message, "reason": reason}
+}
+
+// TestRecordedErrorBodies follows bigquery-api-surface: each refusal's
+// message and errors[] entry.
+func TestRecordedErrorBodies(t *testing.T) {
+	h := newHarness(t)
+	h.table()
+	dataset, table := testDatasets+"/"+testDataset, testDatasets+"/"+testDataset+"/tables"
+	name := testProject + ":" + testDataset
+	create := map[string]any{"datasetReference": map[string]any{"datasetId": testDataset}}
+	message := "Already Exists: Dataset " + name
+	expectRefusal(t, "duplicate dataset", h.invoke(http.MethodPost, testDatasets, create), 409, message, global("duplicate", message))
+	message = "Not found: Dataset " + name + "_absent"
+	expectRefusal(t, "missing dataset", h.invoke(http.MethodGet, dataset+"_absent", nil), 404, message, global("notFound", message))
+	message = "Access Denied: Dataset " + name + ": Permission bigquery.datasets.get denied on dataset " + name + " (or it may not exist)."
+	expectRefusal(t, "denied dataset", h.invokeAs("denied", http.MethodGet, dataset, nil), 403, message, global("accessDenied", message))
+	message = "Access Denied: Table " + name + ".absent: Permission bigquery.tables.get denied on table " + name + ".absent (or it may not exist)."
+	expectRefusal(t, "denied missing table", h.invokeAs("denied", http.MethodGet, table+"/absent", nil), 403, message, global("accessDenied", message))
+	message = "Not found: Table " + name + ".absent"
+	expectRefusal(t, "missing table", h.invoke(http.MethodGet, table+"/absent", nil), 404, message, global("notFound", message))
+	message = `Invalid table ID "bad id!".`
+	expectRefusal(t, "bad table id", h.invoke(http.MethodPost, table, map[string]any{"tableReference": map[string]any{"tableId": "bad id!"},
+		"schema": map[string]any{"fields": []any{map[string]any{"name": "a", "type": "STRING"}}}}), 400, message, global("invalid", message))
+	message = "Dataset " + name + " is still in use"
+	expectRefusal(t, "dataset in use", h.invoke(http.MethodDelete, dataset, nil), 400, message, global("resourceInUse", message))
+	message = "Access Denied: Project " + testProject + ": User does not have bigquery.jobs.create permission in project " + testProject + "."
+	expectRefusal(t, "denied query", h.queryAs("denied", "SELECT 1", nil), 403, message, global("accessDenied", message))
+	message = "Not found: Table " + name + ".absent was not found in location US"
+	expectRefusal(t, "query missing table", h.queryAs(testToken, "SELECT 1 FROM "+testDataset+".absent", nil), 404, message, global("notFound", message))
+	message = `Syntax error: Unexpected identifier "SELEC" at [1:1]`
+	expectRefusal(t, "syntax", h.queryAs(testToken, "SELEC 1", nil), 400, message,
+		map[string]any{"domain": "global", "location": "q", "locationType": "parameter", "message": message, "reason": "invalidQuery"})
+	message = "Invalid value at 'max_results.value' (TYPE_UINT32), \"-1\""
+	recorder := h.invoke(http.MethodGet, testDatasets+"?maxResults=-1", nil)
+	expectRefusal(t, "negative maxResults", recorder, 400, message, map[string]any{"message": message, "reason": "invalid"})
+	if details, _ := wireOf(t, recorder)["details"].([]any); len(details) != 1 {
+		t.Errorf("maxResults details = %s", recorder.Body.String())
+	}
+	expectRefusal(t, "policy version", h.invoke(http.MethodPost, table+"/"+testTable+":setIamPolicy", map[string]any{"policy": map[string]any{"version": 3}}),
+		400, "Unsupported policy version 3; max supported version is 1.", map[string]any{})
+
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, dataset, nil)
+	recorder = httptest.NewRecorder()
+	h.gate.ServeHTTP(recorder, request)
+	expectRefusal(t, "anonymous", recorder, 401, "Request is missing required authentication credential. Expected OAuth 2 access token,"+
+		" login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+		map[string]any{"domain": "global", "location": "Authorization", "locationType": "header", "message": "Login Required.", "reason": "required"})
+	if details := fmt.Sprint(wireOf(t, recorder)["details"]); !strings.Contains(details, "google.cloud.bigquery.v2.DatasetService.GetDataset") {
+		t.Errorf("anonymous details = %s", details)
+	}
+}
+
+// descriptors is the slice of a dataset or table document the patch tests read.
+type descriptors struct {
+	Labels       map[string]string `json:"labels"`
+	FriendlyName string            `json:"friendlyName"`
+	Description  string            `json:"description"`
+	TimeTravel   string            `json:"maxTimeTravelHours"`
+}
+
+// patched sends one patch and decodes the result.
+func (h *harness) patched(path string, body any) descriptors {
+	h.t.Helper()
+	var document descriptors
+	decode(h.t, h.expect(http.MethodPatch, path, body, 200), &document)
+	return document
+}
+
+// TestDatasetPatchMergesLabelsAndKeepsOmittedFields follows the recorded
+// patches: labels merge, omitted descriptors stay, and a patched dataset
+// reports its time-travel window. A null label removes it.
+func TestDatasetPatchMergesLabelsAndKeepsOmittedFields(t *testing.T) {
+	h := newHarness(t)
+	h.expect(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": testDataset},
+		"friendlyName": "one", "description": "first", "labels": map[string]string{"a": "1", "b": "2"}}, 200)
+	dataset := testDatasets + "/" + testDataset
+	if got := h.patched(dataset, map[string]any{"labels": map[string]any{"a": "1"}}); fmt.Sprint(got) != "{map[a:1 b:2] one first 168}" {
+		t.Fatalf("labels patch = %+v", got)
+	}
+	if got := h.patched(dataset, map[string]any{"friendlyName": "renamed", "labels": map[string]any{"b": nil}}); fmt.Sprint(got) != "{map[a:1] renamed first 168}" {
+		t.Fatalf("name patch = %+v", got)
+	}
+	// A read-modify-write sends the read document back; unchanged values pass.
+	h.expect(http.MethodPatch, dataset, json.RawMessage(h.expect(http.MethodGet, dataset, nil, 200).Body.Bytes()), 200)
+}
+
+// TestTablePatchMergesLabelsAndKeepsOmittedFields follows the recorded table
+// patches, and refuses a schema change instead of dropping it.
+func TestTablePatchMergesLabelsAndKeepsOmittedFields(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	table := testDatasets + "/" + testDataset + "/tables/" + testTable
+	h.expect(http.MethodPost, testDatasets+"/"+testDataset+"/tables", map[string]any{"tableReference": map[string]any{"tableId": testTable}, "friendlyName": "t",
+		"labels": map[string]string{"a": "1", "b": "2"}, "schema": map[string]any{"fields": []any{map[string]any{"name": "title", "type": "STRING"}}}}, 200)
+	if got := h.patched(table, map[string]any{"labels": map[string]any{"a": "9"}, "description": "about"}); fmt.Sprint(got) != "{map[a:9 b:2] t about }" {
+		t.Fatalf("table patch = %+v", got)
+	}
+	h.expect(http.MethodPatch, table, json.RawMessage(h.expect(http.MethodGet, table, nil, 200).Body.Bytes()), 200)
+	want(t, "schema change", h.invoke(http.MethodPatch, table, map[string]any{"schema": map[string]any{"fields": []any{
+		map[string]any{"name": "other", "type": "STRING"}}}}), 501, "BigQuery coverage gap: schema changes through tables.patch")
+}
+
+// TestUnmodeledFieldsAreGaps refuses each unmodeled dataset and table field by
+// name instead of dropping it, and ignores names the schema lacks, as GCP does.
+func TestUnmodeledFieldsAreGaps(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	dataset := map[string]any{"datasetReference": map[string]any{"datasetId": "second"}}
+	with := func(base map[string]any, key string, value any) map[string]any {
+		copied := maps.Clone(base)
+		copied[key] = value
+		return copied
+	}
+	for field, value := range map[string]any{
+		"defaultTableExpirationMs": "3600000", "defaultPartitionExpirationMs": "3600000",
+		"defaultEncryptionConfiguration": map[string]any{"kmsKeyName": "k"}, "storageBillingModel": "PHYSICAL",
+	} {
+		want(t, field, h.invoke(http.MethodPost, testDatasets, with(dataset, field, value)), 501, "BigQuery coverage gap: "+field+" is not modeled")
+	}
+	want(t, "access", h.invoke(http.MethodPost, testDatasets, with(dataset, "access", []any{map[string]any{"role": "READER", "userByEmail": "a@b.c"}})),
+		501, "BigQuery coverage gap: dataset access entries other than the defaults")
+	want(t, "time travel", h.invoke(http.MethodPost, testDatasets, with(dataset, "maxTimeTravelHours", "48")), 501, "BigQuery coverage gap: maxTimeTravelHours other than 168")
+	want(t, "dataset view", h.invoke(http.MethodGet, testDatasets+"/"+testDataset+"?datasetView=ACL", nil), 501, "BigQuery coverage gap: query parameter datasetView")
+	want(t, "list filter", h.invoke(http.MethodGet, testDatasets+"?filter=labels.a:1", nil), 501, "BigQuery coverage gap: query parameter filter")
+	want(t, "unknown name", h.invoke(http.MethodPost, testDatasets, with(dataset, "bogus", 1)), 200, `"datasetId":"second"`)
+	table := map[string]any{"tableReference": map[string]any{"tableId": "t"}, "schema": map[string]any{"fields": []any{map[string]any{"name": "a", "type": "STRING"}}}}
+	for field, value := range map[string]any{
+		"timePartitioning": map[string]any{"type": "DAY"}, "rangePartitioning": map[string]any{"field": "a"},
+		"clustering": map[string]any{"fields": []string{"a"}}, "expirationTime": "1800000000000",
+		"encryptionConfiguration": map[string]any{"kmsKeyName": "k"}, "externalDataConfiguration": map[string]any{"sourceUris": []string{"gs://b/o"}},
+		"materializedView": map[string]any{"query": "SELECT 1"}, "requirePartitionFilter": true,
+	} {
+		want(t, field, h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", with(table, field, value)), 501, "BigQuery coverage gap: "+field+" is not modeled")
+	}
+	nested := with(table, "schema", map[string]any{"fields": []any{map[string]any{"name": "r", "type": "RECORD", "fields": []any{
+		map[string]any{"name": "s", "type": "STRING", "maxLength": "10"}}}}})
+	want(t, "nested column option", h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", nested), 501,
+		"BigQuery coverage gap: schema.fields.fields.maxLength is not modeled")
+	want(t, "table view", h.invoke(http.MethodGet, testDatasets+"/"+testDataset+"/tables/t?view=BASIC", nil), 501, "BigQuery coverage gap: query parameter view")
+}
+
+// pick follows keys and indexes into decoded JSON; a missing step is nil.
+func pick(value any, steps ...any) any {
+	for _, step := range steps {
+		if index, ok := step.(int); ok {
+			if list, _ := value.([]any); index < len(list) {
+				value = list[index]
+				continue
+			}
+			return nil
+		}
+		object, _ := value.(map[string]any)
+		value = object[fmt.Sprint(step)]
+	}
+	return value
+}
+
+// listed reads one list page: the IDs under field's references, and the body.
+func (h *harness) listed(path, field, id string) ([]string, map[string]any) {
+	h.t.Helper()
+	var body map[string]any
+	decode(h.t, h.expect(http.MethodGet, path, nil, 200), &body)
+	items, _ := body[field].([]any)
+	names := make([]string, 0, len(items))
+	for index := range items {
+		names = append(names, fmt.Sprint(pick(body, field, index, strings.TrimSuffix(field, "s")+"Reference", id)))
+	}
+	return names, body
+}
+
+// TestDatasetsListIsOrderedAndPaged lists datasets by ID in pages, hides
+// "_" datasets without all=true, and lists nothing for a foreign token
+// (recorded).
+func TestDatasetsListIsOrderedAndPaged(t *testing.T) {
+	h := newHarness(t)
+	for _, id := range []string{"zeta", "alpha", "_hidden", "mid"} {
+		h.expect(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": id}}, 200)
+	}
+	if names, body := h.listed(testDatasets, "datasets", "datasetId"); fmt.Sprint(names) != "[alpha mid zeta]" || body["kind"] != "bigquery#datasetList" {
+		t.Fatalf("datasets = %v %v", names, body)
+	}
+	if names, _ := h.listed(testDatasets+"?all=true", "datasets", "datasetId"); fmt.Sprint(names) != "[_hidden alpha mid zeta]" {
+		t.Fatalf("all datasets = %v", names)
+	}
+	names, body := h.listed(testDatasets+"?maxResults=2", "datasets", "datasetId")
+	rest, _ := h.listed(testDatasets+"?maxResults=2&pageToken="+fmt.Sprint(body["nextPageToken"]), "datasets", "datasetId")
+	if fmt.Sprint(names) != "[alpha mid]" || fmt.Sprint(rest) != "[zeta]" {
+		t.Fatalf("pages = %v %v", names, rest)
+	}
+	if names, body := h.listed(testDatasets+"?pageToken=not-a-page-token", "datasets", "datasetId"); len(names) != 0 || len(body) != 2 {
+		t.Fatalf("foreign token = %v", body)
+	}
+	want(t, "mistyped maxResults", h.invoke(http.MethodGet, testDatasets+"?maxResults=many", nil), 400, `Invalid value at 'max_results.value' (TYPE_UINT32), \"many\"`)
+}
+
+// TestTablesListIsOrderedAndPaged lists tables by ID with totalItems and
+// reads the first page for a foreign token (recorded).
+func TestTablesListIsOrderedAndPaged(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	tables := testDatasets + "/" + testDataset + "/tables"
+	for _, id := range []string{"t1", "t0"} {
+		h.expect(http.MethodPost, tables, map[string]any{"tableReference": map[string]any{"tableId": id}, "labels": map[string]string{"k": "v"},
+			"schema": map[string]any{"fields": []any{map[string]any{"name": "a", "type": "STRING"}}}}, 200)
+	}
+	names, body := h.listed(tables+"?maxResults=1", "tables", "tableId")
+	item, _ := pick(body, "tables", 0).(map[string]any)
+	if fmt.Sprint(names) != "[t0]" || body["totalItems"] != float64(2) || body["nextPageToken"] == nil || len(item) != 6 || item["labels"] == nil {
+		t.Fatalf("tables page = %v", body)
+	}
+	if names, _ := h.listed(tables+"?pageToken=not-a-page-token", "tables", "tableId"); fmt.Sprint(names) != "[t0 t1]" {
+		t.Fatalf("foreign table token = %v", names)
+	}
+	want(t, "missing dataset tables", h.invoke(http.MethodGet, testDatasets+"/absent/tables", nil), 404, "Not found: Dataset "+testProject+":absent")
+}
+
+// jobListing is the slice of a jobs.list page the tests read.
+type jobListing struct {
+	Kind string           `json:"kind"`
+	Jobs []map[string]any `json:"jobs"`
+	Next string           `json:"nextPageToken"`
+}
+
+// jobsListed reads one jobs.list page.
+func (h *harness) jobsListed(path string) jobListing {
+	h.t.Helper()
+	var listing jobListing
+	decode(h.t, h.expect(http.MethodGet, path, nil, 200), &listing)
+	return listing
+}
+
+// fiveJobs runs two jobs.insert jobs, two jobs.query jobs, and one job by
+// another user, a second apart; it returns the second job's creation time.
+func (h *harness) fiveJobs() int64 {
+	h.t.Helper()
+	h.rows()
+	h.grantJobUsers()
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	h.bq.clock = func() time.Time { clock = clock.Add(time.Second); return clock }
+	for _, id := range []string{"first", "second"} {
+		h.expect(http.MethodPost, testJobs, queryJob(id, testSQL), 200)
+	}
+	h.expect(http.MethodPost, testQueries, map[string]any{"query": "SELECT 1", "useLegacySql": false, "requestId": "r"}, 200)
+	h.expect(http.MethodPost, testQueries, map[string]any{"query": "SELECT 1", "useLegacySql": false}, 200)
+	want(h.t, "runner job", h.invokeAs("runner", http.MethodPost, testQueries, map[string]any{"query": "SELECT 1", "useLegacySql": false}), 200, "jobComplete")
+	created, _ := strconv.ParseInt(fmt.Sprint(pick(h.jobsListed(testJobs + "?maxResults=3").Jobs[2], "statistics", "creationTime")), 10, 64)
+	return created
+}
+
+// TestJobsListNewestFirst lists the caller's jobs newest first in the
+// recorded minimal and full shapes, and refuses a foreign token as GCP does.
+func TestJobsListNewestFirst(t *testing.T) {
+	h := newHarness(t)
+	h.fiveJobs()
+	listing := h.jobsListed(testJobs + "?maxResults=3")
+	keys := func(item map[string]any) string { return fmt.Sprint(slices.Sorted(maps.Keys(item))) }
+	if listing.Kind != "bigquery#jobList" || len(listing.Jobs) != 3 || listing.Next == "" ||
+		keys(listing.Jobs[0]) != "[id jobReference kind state statistics status]" || pick(listing.Jobs[2], "jobReference", "jobId") != "second" {
+		t.Fatalf("jobs = %+v", listing)
+	}
+	full := h.jobsListed(testJobs + "?projection=full&maxResults=3&pageToken=" + listing.Next)
+	if len(full.Jobs) != 1 || pick(full.Jobs[0], "jobReference", "jobId") != "first" ||
+		keys(full.Jobs[0]) != "[configuration id jobReference kind principal_subject state statistics status user_email]" {
+		t.Fatalf("full page = %+v", full)
+	}
+	expectRefusal(t, "bad token", h.invoke(http.MethodGet, testJobs+"?pageToken=not-a-page-token", nil), 400, "Invalid pagination token not-a-page-token",
+		global("invalid", "Invalid pagination token not-a-page-token"))
+	want(t, "parent job", h.invoke(http.MethodGet, testJobs+"?parentJobId=x", nil), 501, "BigQuery coverage gap: query parameter parentJobId")
+}
+
+// TestJobsListFiltersByUserStateAndTime lists only the caller's jobs unless
+// allUsers, which needs bigquery.jobs.listAll, and applies stateFilter and
+// the creation-time bounds.
+func TestJobsListFiltersByUserStateAndTime(t *testing.T) {
+	h := newHarness(t)
+	second := h.fiveJobs()
+	counts := map[string]int{
+		testJobs: 4, testJobs + "?allUsers=true": 5, testJobs + "?stateFilter=running": 0, testJobs + "?stateFilter=done": 4,
+		testJobs + "?minCreationTime=" + strconv.FormatInt(second, 10): 3, testJobs + "?maxCreationTime=" + strconv.FormatInt(second-1, 10): 1,
+	}
+	for path, count := range counts {
+		if got := len(h.jobsListed(path).Jobs); got != count {
+			t.Errorf("%s lists %d jobs, want %d", path, got, count)
+		}
+	}
+	want(t, "runner list", h.invokeAs("runner", http.MethodGet, testJobs, nil), 403, "bigquery.jobs.list permission")
+}
+
+// TestRequestIDDeduplicatesRetries answers a jobs.query retry with the same
+// requestId from the first run instead of running it again.
+func TestRequestIDDeduplicatesRetries(t *testing.T) {
+	h := newHarness(t)
+	h.rows()
+	insert := map[string]any{"query": "INSERT INTO " + testDataset + "." + testTable + " (title) VALUES ('again')", "useLegacySql": false, "requestId": "retry-1"}
+	var first, second struct {
+		JobReference struct {
+			JobID string `json:"jobId"`
+		} `json:"jobReference"`
+	}
+	decode(t, h.expect(http.MethodPost, testQueries, insert, 200), &first)
+	decode(t, h.expect(http.MethodPost, testQueries, insert, 200), &second)
+	if first.JobReference.JobID == "" || first.JobReference.JobID != second.JobReference.JobID {
+		t.Fatalf("retry ran a new job: %s then %s", first.JobReference.JobID, second.JobReference.JobID)
+	}
+	want(t, "one insert", h.queryAs(testToken, "SELECT COUNT(*) AS n FROM "+testDataset+"."+testTable+" WHERE title = 'again'", nil), 200, `"v":"1"`)
+}
+
+// TestProjectConditionSeesTheAddressedResource grants dataViewer on the
+// project under a condition naming one dataset, with BigQuery's documented
+// resource.type, resource.service, and resource.name. GCP refuses
+// conditions on table policies (recorded), so a project grant is where they
+// apply; this evaluation is modeled, not recorded.
+func TestProjectConditionSeesTheAddressedResource(t *testing.T) {
+	h := newHarness(t)
+	h.table()
+	h.expect(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": "other"}}, 200)
+	project := provider.ProjectResource(testProject)
+	policy, err := h.engine.GetPolicy(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expression := `resource.type == "bigquery.googleapis.com/Dataset" && resource.service == "bigquery.googleapis.com"` +
+		` && resource.name == "projects/` + testProject + `/datasets/` + testDataset + `"`
+	policy.Version = 3
+	policy.Bindings = append(policy.Bindings, iam.Binding{Role: "roles/bigquery.dataViewer", Members: []string{account("reader")},
+		Condition: json.RawMessage(`{"title":"one-dataset","expression":` + strconv.Quote(expression) + `}`)})
+	if _, err := h.engine.SetPolicy(project, policy); err != nil {
+		t.Fatal(err)
+	}
+	h.expectAs("reader", http.MethodGet, testDatasets+"/"+testDataset, 200)
+	h.expectAs("reader", http.MethodGet, testDatasets+"/other", 403)
+	h.expectAs("reader", http.MethodGet, testDatasets+"/"+testDataset+"/tables/"+testTable, 403)
+}
+
+// expectAs issues one request as token and requires the status.
+func (h *harness) expectAs(token, verb, path string, code int) {
+	h.t.Helper()
+	if recorder := h.invokeAs(token, verb, path, nil); recorder.Code != code {
+		h.t.Errorf("%s %s as %s = %d %s, want %d", verb, path, token, recorder.Code, recorder.Body.String(), code)
 	}
 }

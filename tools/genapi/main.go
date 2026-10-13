@@ -734,6 +734,7 @@ func bigqueryRoutes() []byte {
 		{"bigquery.jobs.getQueryResults", http.MethodGet, "/bigquery/v2/projects/{project}/queries/{jobId}", false, false},
 		{"bigquery.jobs.insert", http.MethodPost, "/bigquery/v2/projects/{project}/jobs", true, false},
 		{"bigquery.jobs.get", http.MethodGet, "/bigquery/v2/projects/{project}/jobs/{jobId}", false, false},
+		{"bigquery.jobs.list", http.MethodGet, "/bigquery/v2/projects/{project}/jobs", false, false},
 	}
 	return routeTable("BigQueryRoutes", "is the BigQuery v2 route table slice.", handWritten("main.go"), rows)
 }

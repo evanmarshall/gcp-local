@@ -196,9 +196,11 @@ func TestJobRefusals(t *testing.T) {
 		message          string
 	}{
 		{"legacy default", http.MethodPost, testJobs, edited(func(_, _, q map[string]any) { delete(q, "useLegacySql") }), 501, "Legacy SQL is not supported"},
-		{"load job", http.MethodPost, testJobs, edited(func(_, c, _ map[string]any) { c["load"] = map[string]any{} }), 501, "BigQuery coverage gap: job field load"},
+		{"load job", http.MethodPost, testJobs, edited(func(_, c, _ map[string]any) { c["load"] = map[string]any{"sourceUris": []string{"gs://b/o"}} }), 501, "BigQuery coverage gap: configuration.load is not modeled"},
 		{"no query", http.MethodPost, testJobs, edited(func(_, c, _ map[string]any) { delete(c, "query") }), 501, "BigQuery coverage gap: only query jobs are supported"},
-		{"destination", http.MethodPost, testJobs, edited(func(_, _, q map[string]any) { q["destinationTable"] = map[string]any{} }), 501, "BigQuery coverage gap: job field destinationTable"},
+		{"destination", http.MethodPost, testJobs, edited(func(_, _, q map[string]any) { q["destinationTable"] = map[string]any{"tableId": "t"} }), 501, "BigQuery coverage gap: configuration.query.destinationTable is not modeled"},
+		{"bytes cap", http.MethodPost, testJobs, edited(func(_, _, q map[string]any) { q["maximumBytesBilled"] = "1000" }), 501, "BigQuery coverage gap: configuration.query.maximumBytesBilled is not modeled"},
+		{"unknown job field", http.MethodPost, testJobs + "?prettyPrint=false", jobBody("ignored", testSQL, func(_, c, _ map[string]any) { c["bogus"] = 1 }), 200, `"jobId":"ignored"`},
 		{"batch", http.MethodPost, testJobs, edited(func(_, _, q map[string]any) { q["priority"] = "BATCH" }), 501, "BigQuery coverage gap: query priority BATCH"},
 		{"foreign project", http.MethodPost, testJobs, edited(func(r, _, _ map[string]any) { r["projectId"] = "other-project" }), 400, "Job project disagrees with the request path"},
 		{"bad job id", http.MethodPost, testJobs, edited(func(r, _, _ map[string]any) { r["jobId"] = "bad id" }), 400, "Invalid job id"},
@@ -209,8 +211,8 @@ func TestJobRefusals(t *testing.T) {
 		{"get option", http.MethodGet, testJobs + "/stored?projection=full", nil, 501, "BigQuery coverage gap: query parameter projection"},
 		{"nested fields", http.MethodGet, testQueries + "/stored?fields=schema/fields", nil, 501, "BigQuery coverage gap: nested fields selectors"},
 		{"media", http.MethodGet, testQueries + "/stored?alt=media", nil, 501, "BigQuery coverage gap: alt=media"},
-		{"get other location", http.MethodGet, testJobs + "/stored?location=EU", nil, 404, "job/stored"},
-		{"results other location", http.MethodGet, testQueries + "/stored?location=EU", nil, 404, "job/stored"},
+		{"get other location", http.MethodGet, testJobs + "/stored?location=EU", nil, 404, "Not found: Job demo-bq:EU.stored"},
+		{"results other location", http.MethodGet, testQueries + "/stored?location=EU", nil, 404, "Not found: Job demo-bq:EU.stored"},
 		{"bad maxResults", http.MethodGet, testQueries + "/stored?maxResults=-1", nil, 400, "Invalid maxResults"},
 		{"bad pageToken", http.MethodGet, testQueries + "/stored?pageToken=next", nil, 400, "Invalid pageToken"},
 		{"timestamp format", http.MethodGet, testQueries + "/stamped?formatOptions.timestampOutputFormat=ISO8601_STRING", nil, 501, "BigQuery coverage gap: formatOptions.timestampOutputFormat=ISO8601_STRING"},
@@ -247,7 +249,7 @@ func TestJobsAuthorizeTheTable(t *testing.T) {
 	}
 	want(t, "jobs.query without table access", h.invokeAs("runner", http.MethodPost, testQueries, map[string]any{"query": testSQL}), 403, "bigquery.tables.getData")
 	h.expect(http.MethodGet, testJobs+"/denied", nil, 404)
-	want(t, "job user read of a missing job", h.invokeAs("runner", http.MethodGet, testJobs+"/denied", nil), 404, "job/denied")
+	want(t, "job user read of a missing job", h.invokeAs("runner", http.MethodGet, testJobs+"/denied", nil), 404, "Not found: Job demo-bq:US.denied")
 	want(t, "ungranted read of a missing job", h.invokeAs("stranger", http.MethodGet, testJobs+"/denied", nil), 403, "bigquery.jobs.create")
 	if _, err := h.engine.SetPolicy(tableResource(testProject, testDataset, testTable), iam.Policy{Bindings: []iam.Binding{
 		{Role: "roles/bigquery.dataViewer", Members: []string{account("reader")}},
@@ -512,15 +514,15 @@ func TestQueryAuthorizesEveryTable(t *testing.T) {
 	ok := "SELECT p.name FROM shop.people p JOIN shop.orders o ON o.person = p.id WHERE o.total > 10"
 	h.rowsAre("granted join", h.queryAs("reader", ok, nil), "ada")
 	denied := []struct{ name, sql, resource string }{
-		{"second table in a join", "SELECT p.name, s.code FROM shop.people p JOIN vault.secrets s ON s.person = p.id", "vault/tables/secrets"},
-		{"subquery", "SELECT name FROM shop.people WHERE id IN (SELECT person FROM vault.secrets)", "vault/tables/secrets"},
-		{"cte", "WITH s AS (SELECT * FROM vault.secrets) SELECT * FROM s", "vault/tables/secrets"},
-		{"case folded name", "SELECT * FROM VAULT.Secrets", "vault/tables/secrets"},
-		{"behind a comment line", "SELECT 1 -- note\nFROM vault.secrets", "vault/tables/secrets"},
-		{"later script statement", "SELECT 1; SELECT * FROM vault.secrets", "vault/tables/secrets"},
-		{"correlated-looking alias", "SELECT * FROM shop.people AS vault, vault.secrets", "vault/tables/secrets"},
-		{"table argument", "SELECT * FROM APPENDS(TABLE vault.secrets, NULL, NULL)", "vault/tables/secrets"},
-		{"missing table in a readable dataset", "SELECT * FROM vault.absent", "datasets/vault"},
+		{"second table in a join", "SELECT p.name, s.code FROM shop.people p JOIN vault.secrets s ON s.person = p.id", "Table demo-bq:vault.secrets"},
+		{"subquery", "SELECT name FROM shop.people WHERE id IN (SELECT person FROM vault.secrets)", "Table demo-bq:vault.secrets"},
+		{"cte", "WITH s AS (SELECT * FROM vault.secrets) SELECT * FROM s", "Table demo-bq:vault.secrets"},
+		{"case folded name", "SELECT * FROM VAULT.Secrets", "Table demo-bq:vault.secrets"},
+		{"behind a comment line", "SELECT 1 -- note\nFROM vault.secrets", "Table demo-bq:vault.secrets"},
+		{"later script statement", "SELECT 1; SELECT * FROM vault.secrets", "Table demo-bq:vault.secrets"},
+		{"correlated-looking alias", "SELECT * FROM shop.people AS vault, vault.secrets", "Table demo-bq:vault.secrets"},
+		{"table argument", "SELECT * FROM APPENDS(TABLE vault.secrets, NULL, NULL)", "Table demo-bq:vault.secrets"},
+		{"missing table in a readable dataset", "SELECT * FROM vault.absent", "Dataset demo-bq:vault"},
 	}
 	for _, d := range denied {
 		recorder := h.queryAs("reader", d.sql, nil)
@@ -529,7 +531,7 @@ func TestQueryAuthorizesEveryTable(t *testing.T) {
 	}
 	// A string that spells a node line forges nothing; the real read of
 	// vault.secrets is still checked.
-	want(t, "forged dump line", h.queryAs("reader", "SELECT '''x\n      TablePathExpression [0-1]''' AS s FROM vault.secrets", nil), 403, "vault/tables/secrets")
+	want(t, "forged dump line", h.queryAs("reader", "SELECT '''x\n      TablePathExpression [0-1]''' AS s FROM vault.secrets", nil), 403, "Table demo-bq:vault.secrets")
 
 	before := rowsOf(t, h.invoke(http.MethodGet, testDatasets+"/shop/tables/people/data", nil))
 	writes := []struct{ name, sql, permission string }{
@@ -560,7 +562,7 @@ func TestViewNeedsItsTables(t *testing.T) {
 	h.people()
 	h.expect(http.MethodPost, testQueries, map[string]any{"query": "CREATE VIEW shop.leak AS SELECT code FROM vault.secrets"}, 200)
 	h.readerOf("shop.leak")
-	want(t, "view over an unreadable table", h.queryAs("reader", "SELECT code FROM shop.leak", nil), 403, "vault/tables/secrets")
+	want(t, "view over an unreadable table", h.queryAs("reader", "SELECT code FROM shop.leak", nil), 403, "Table demo-bq:vault.secrets")
 	h.readerOf("shop.leak", "vault.secrets")
 	h.rowsAre("view and table readable", h.queryAs("reader", "SELECT code FROM shop.leak", nil), "s3cret")
 }
@@ -623,7 +625,9 @@ func TestQueryRefusals(t *testing.T) {
 	want(t, "view through tables.insert", h.invoke(http.MethodPost, testDatasets+"/shop/tables", map[string]any{
 		"tableReference": map[string]any{"tableId": "v"}, "view": map[string]any{"query": "SELECT 1"},
 	}), 501, "BigQuery coverage gap: views through tables.insert; create them with CREATE VIEW")
-	want(t, "unknown jobs.query field", h.queryAs(testToken, "SELECT 1", map[string]any{"createSession": true}), 501, "BigQuery coverage gap: job field createSession")
+	want(t, "unmodeled jobs.query field", h.queryAs(testToken, "SELECT 1", map[string]any{"createSession": true}), 501, "BigQuery coverage gap: createSession is not modeled")
+	want(t, "jobs.query bytes cap", h.queryAs(testToken, "SELECT 1", map[string]any{"maximumBytesBilled": "1000"}), 501, "BigQuery coverage gap: maximumBytesBilled is not modeled")
+	want(t, "unknown jobs.query field", h.queryAs(testToken, "SELECT 1", map[string]any{"bogus": true}), 200, `"jobComplete":true`)
 	want(t, "legacy jobs.query", h.queryAs(testToken, "SELECT 1", map[string]any{"useLegacySql": true}), 501, "Legacy SQL is not supported")
 	want(t, "cross-project default dataset", h.queryAs(testToken, "SELECT 1", map[string]any{"defaultDataset": map[string]any{"projectId": "other", "datasetId": "shop"}}),
 		501, "BigQuery coverage gap: cross-project table references (default dataset other.shop)")

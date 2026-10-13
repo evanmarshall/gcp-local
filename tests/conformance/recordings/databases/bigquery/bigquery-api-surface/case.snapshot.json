@@ -1,0 +1,626 @@
+{
+  "bigquery-api-surface": {
+    "recorded-date": "13-10-2026, 01:18:52",
+    "recorded-content": {
+      "dataset-created": {
+        "description": "owned",
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "selfLink",
+          "type"
+        ],
+        "friendlyName": "gcp-local",
+        "http_status": 200,
+        "labels": {
+          "extra": "1",
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        }
+      },
+      "dataset-duplicate": {
+        "code": 409,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Already Exists: Dataset <project>:<dataset>",
+            "reason": "duplicate"
+          }
+        ],
+        "http_status": 409,
+        "message": "Already Exists: Dataset <project>:<dataset>",
+        "status": "ALREADY_EXISTS"
+      },
+      "dataset-unknown-field": {
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "etag",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200
+      },
+      "dataset-missing": {
+        "code": 404,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Not found: Dataset <project>:<dataset>_absent",
+            "reason": "notFound"
+          }
+        ],
+        "http_status": 404,
+        "message": "Not found: Dataset <project>:<dataset>_absent",
+        "status": "NOT_FOUND"
+      },
+      "dataset-denied": {
+        "code": 403,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Access Denied: Dataset <project>:<dataset>: Permission bigquery.datasets.get denied on dataset <project>:<dataset> (or it may not exist).",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Dataset <project>:<dataset>: Permission bigquery.datasets.get denied on dataset <project>:<dataset> (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "dataset-anonymous": {
+        "code": 401,
+        "details": [
+          {
+            "domain": "googleapis.com",
+            "metadata": {
+              "method": "google.cloud.bigquery.v2.DatasetService.GetDataset",
+              "service": "bigquery.googleapis.com"
+            },
+            "reason": "CREDENTIALS_MISSING",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "errors": [
+          {
+            "domain": "global",
+            "location": "Authorization",
+            "locationType": "header",
+            "message": "Login Required.",
+            "reason": "required"
+          }
+        ],
+        "http_status": 401,
+        "message": "Request is missing required authentication credential. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+        "status": "UNAUTHENTICATED"
+      },
+      "dataset-patch-labels": {
+        "description": "owned",
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "friendlyName": "gcp-local",
+        "http_status": 200,
+        "labels": {
+          "extra": "1",
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        }
+      },
+      "dataset-patch-name": {
+        "description": "owned",
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "friendlyName": "renamed",
+        "http_status": 200,
+        "labels": {
+          "extra": "1",
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        }
+      },
+      "datasets-list": {
+        "fields": [
+          "datasets",
+          "etag",
+          "kind"
+        ],
+        "item": {
+          "datasetReference": {
+            "datasetId": "<dataset>",
+            "projectId": "<project>"
+          },
+          "friendlyName": "renamed",
+          "id": "<project>:<dataset>",
+          "kind": "bigquery#dataset",
+          "labels": {
+            "extra": "1",
+            "gcp-local-run": "<run>",
+            "managed-by": "gcp-local"
+          },
+          "location": "US"
+        },
+        "item_fields": [
+          "datasetReference",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "location",
+          "type"
+        ],
+        "owned_order": [
+          "<dataset>",
+          "<dataset>_b"
+        ]
+      },
+      "datasets-paged": {
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "second_count": 1,
+        "second_status": 200
+      },
+      "datasets-bad-token": {
+        "fields": [
+          "etag",
+          "kind"
+        ],
+        "http_status": 200
+      },
+      "datasets-negative-size": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'max_results.value' (TYPE_UINT32), \"-1\"",
+                "field": "max_results.value"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "errors": [
+          {
+            "message": "Invalid value at 'max_results.value' (TYPE_UINT32), \"-1\"",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'max_results.value' (TYPE_UINT32), \"-1\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "datasets-mistyped-size": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'max_results.value' (TYPE_UINT32), \"many\"",
+                "field": "max_results.value"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "errors": [
+          {
+            "message": "Invalid value at 'max_results.value' (TYPE_UINT32), \"many\"",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'max_results.value' (TYPE_UINT32), \"many\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "table-created": {
+        "description": "first",
+        "fields": [
+          "creationTime",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "type"
+        ],
+        "friendlyName": "one",
+        "http_status": 200,
+        "labels": {
+          "a": "1",
+          "b": "2"
+        }
+      },
+      "table-duplicate": {
+        "code": 409,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Already Exists: Table <project>:<dataset>.t1",
+            "reason": "duplicate"
+          }
+        ],
+        "http_status": 409,
+        "message": "Already Exists: Table <project>:<dataset>.t1",
+        "status": "ALREADY_EXISTS"
+      },
+      "table-bad-id": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Invalid table ID \"bad id!\".",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid table ID \"bad id!\".",
+        "status": "INVALID_ARGUMENT"
+      },
+      "table-missing": {
+        "code": 404,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Not found: Table <project>:<dataset>.absent",
+            "reason": "notFound"
+          }
+        ],
+        "http_status": 404,
+        "message": "Not found: Table <project>:<dataset>.absent",
+        "status": "NOT_FOUND"
+      },
+      "table-denied": {
+        "code": 403,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Access Denied: Table <project>:<dataset>.t1: Permission bigquery.tables.get denied on table <project>:<dataset>.t1 (or it may not exist).",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Table <project>:<dataset>.t1: Permission bigquery.tables.get denied on table <project>:<dataset>.t1 (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "table-patch-name": {
+        "description": "first",
+        "fields": [
+          "creationTime",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "type"
+        ],
+        "friendlyName": "renamed",
+        "http_status": 200,
+        "labels": {
+          "a": "1",
+          "b": "2"
+        }
+      },
+      "table-patch-labels": {
+        "description": "first",
+        "fields": [
+          "creationTime",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "numActiveLogicalBytes",
+          "numBytes",
+          "numLongTermBytes",
+          "numLongTermLogicalBytes",
+          "numRows",
+          "numTotalLogicalBytes",
+          "schema",
+          "selfLink",
+          "tableReference",
+          "type"
+        ],
+        "friendlyName": "renamed",
+        "http_status": 200,
+        "labels": {
+          "a": "1",
+          "b": "2"
+        }
+      },
+      "tables-list": {
+        "fields": [
+          "etag",
+          "kind",
+          "tables",
+          "totalItems"
+        ],
+        "item": {
+          "id": "<project>:<dataset>.t0",
+          "kind": "bigquery#table",
+          "labels": null,
+          "tableReference": {
+            "datasetId": "<dataset>",
+            "projectId": "<project>",
+            "tableId": "t0"
+          },
+          "type": "TABLE"
+        },
+        "item_fields": [
+          "creationTime",
+          "id",
+          "kind",
+          "tableReference",
+          "type"
+        ],
+        "order": [
+          "t0",
+          "t1"
+        ],
+        "totalItems": 2
+      },
+      "tables-paged": {
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "second_count": 1,
+        "second_status": 200
+      },
+      "tables-bad-token": {
+        "fields": [
+          "etag",
+          "kind",
+          "tables",
+          "totalItems"
+        ],
+        "http_status": 200
+      },
+      "tables-negative-size": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'max_results.value' (TYPE_UINT32), \"-1\"",
+                "field": "max_results.value"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "errors": [
+          {
+            "message": "Invalid value at 'max_results.value' (TYPE_UINT32), \"-1\"",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'max_results.value' (TYPE_UINT32), \"-1\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "tables-mistyped-size": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'max_results.value' (TYPE_UINT32), \"many\"",
+                "field": "max_results.value"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "errors": [
+          {
+            "message": "Invalid value at 'max_results.value' (TYPE_UINT32), \"many\"",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'max_results.value' (TYPE_UINT32), \"many\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "jobs-list": {
+        "fields": [
+          "etag",
+          "jobs",
+          "kind",
+          "nextPageToken"
+        ],
+        "has_next": true,
+        "http_status": 200,
+        "item_configuration_fields": [],
+        "item_fields": [
+          "id",
+          "jobReference",
+          "kind",
+          "state",
+          "statistics",
+          "status"
+        ],
+        "item_state": "DONE",
+        "item_status": {
+          "state": "DONE"
+        },
+        "order": [
+          "<q2>",
+          "<q1>"
+        ]
+      },
+      "jobs-list-full": {
+        "item_fields": [
+          "configuration",
+          "id",
+          "jobReference",
+          "kind",
+          "principal_subject",
+          "state",
+          "statistics",
+          "status",
+          "user_email"
+        ],
+        "query_echoed": true
+      },
+      "jobs-bad-token": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Invalid pagination token not-a-page-token",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid pagination token not-a-page-token",
+        "status": "INVALID_ARGUMENT"
+      },
+      "query-invalid": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "location": "q",
+            "locationType": "parameter",
+            "message": "Syntax error: Unexpected identifier \"SELEC\" at [1:1]",
+            "reason": "invalidQuery"
+          }
+        ],
+        "http_status": 400,
+        "message": "Syntax error: Unexpected identifier \"SELEC\" at [1:1]",
+        "status": "INVALID_ARGUMENT"
+      },
+      "query-missing-table": {
+        "code": 404,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Not found: Table <project>:<dataset>.absent was not found in location US",
+            "reason": "notFound"
+          }
+        ],
+        "http_status": 404,
+        "message": "Not found: Table <project>:<dataset>.absent was not found in location US",
+        "status": "NOT_FOUND"
+      },
+      "query-denied": {
+        "code": 403,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Access Denied: Project <project>: User does not have bigquery.jobs.create permission in project <project>.",
+            "reason": "accessDenied"
+          }
+        ],
+        "http_status": 403,
+        "message": "Access Denied: Project <project>: User does not have bigquery.jobs.create permission in project <project>.",
+        "status": "PERMISSION_DENIED"
+      },
+      "conditional-grant": {
+        "code": 400,
+        "details": [],
+        "errors": [],
+        "http_status": 400,
+        "message": "Unsupported policy version 3; max supported version is 1.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "dataset-in-use": {
+        "code": 400,
+        "details": [],
+        "errors": [
+          {
+            "domain": "global",
+            "message": "Dataset <project>:<dataset> is still in use",
+            "reason": "resourceInUse"
+          }
+        ],
+        "http_status": 400,
+        "message": "Dataset <project>:<dataset> is still in use",
+        "status": "INVALID_ARGUMENT"
+      },
+      "cleanup": {
+        "datasets_absent": true
+      }
+    }
+  }
+}

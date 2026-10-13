@@ -1,7 +1,6 @@
 package bigquery
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"crypto/rand"
@@ -10,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
+	"math"
 	"net/url"
 	"regexp"
 	"slices"
@@ -44,7 +43,9 @@ var jobOptions = map[string][]string{
 	methodJobsInsert: nil,
 	methodJobsQuery:  nil,
 	methodJobsGet:    {keyLocation},
-	methodJobsResults: {keyLocation, "maxResults", optionPageToken, optionStartIndex, "timeoutMs",
+	methodJobsList: {"allUsers", "maxCreationTime", "minCreationTime", optionMaxResults, optionPageToken, "projection",
+		"stateFilter", "parentJobId"},
+	methodJobsResults: {keyLocation, optionMaxResults, optionPageToken, optionStartIndex, "timeoutMs",
 		optionInt64Timestamp, optionTimestampFormat},
 }
 
@@ -79,7 +80,7 @@ func validateJobOptions(method string, query url.Values) error {
 func timestampFormat(query url.Values) (bool, error) {
 	switch format := query.Get(optionTimestampFormat); format {
 	case "", "TIMESTAMP_OUTPUT_FORMAT_UNSPECIFIED", sqlFloat64:
-		return query.Get(optionInt64Timestamp) == "true", nil
+		return query.Get(optionInt64Timestamp) == textTrue, nil
 	case sqlInt64:
 		return true, nil
 	default:
@@ -116,10 +117,51 @@ type queryOptions struct {
 	DefaultDataset  *datasetReference `json:"defaultDataset"`
 	ParameterMode   string            `json:"parameterMode"`
 	QueryParameters []queryParameter  `json:"queryParameters"`
-	// The query cache is an optimization, and no bytes are billed locally;
-	// results are the same either way.
-	UseQueryCache      *bool  `json:"useQueryCache"`
-	MaximumBytesBilled string `json:"maximumBytesBilled"`
+	// The query cache is an optimization; results are the same either way.
+	UseQueryCache *bool `json:"useQueryCache"`
+}
+
+// unmodeledQuery lists the JobConfigurationQuery fields the provider doesn't
+// model (BigQuery v2 discovery); jobs.insert refuses each under
+// configuration.query. maximumBytesBilled is one: queries bill no bytes
+// locally, so a cap GCP would enforce could never be.
+var unmodeledQuery = []string{
+	"continuous", "createDisposition", "maximumBillingTier", "clustering", "preserveNulls", "writeDisposition",
+	"writeIncrementalResults", "scriptOptions", "allowLargeResults", "connectionProperties", "destinationTable",
+	"maximumBytesBilled", "flattenResults", "createSession", "timePartitioning", "destinationEncryptionConfiguration",
+	"userDefinedFunctionResources", "rangePartitioning", "tableDefinitions", "schemaUpdateOptions", "secureContext",
+}
+
+// jobFields are the Job fields jobs.insert doesn't model: load, extract, and
+// copy jobs, job limits, and the query fields above. GCP ignores names its
+// schema lacks, and so does the provider.
+var jobFields = func() provider.Fields {
+	fields := provider.Fields{
+		Unmodeled: []string{
+			"configuration.load", "configuration.extract", "configuration.copy", "configuration.jobTimeoutMs",
+			"configuration.maxSlots", "configuration.reservation",
+		},
+		OutputOnly: []string{
+			"principal_subject", "id", keyStatistics, keySelfLink, keyKind, keyETag, keyStatus, "jobCreationReason",
+			"user_email", "configuration.query.systemVariables",
+		},
+		IgnoreUnknown: true,
+	}
+	for _, name := range unmodeledQuery {
+		fields.Unmodeled = append(fields.Unmodeled, "configuration.query."+name)
+	}
+	return fields
+}()
+
+// queryFields are the QueryRequest fields jobs.query doesn't model (BigQuery
+// v2 discovery).
+var queryFields = provider.Fields{
+	Unmodeled: []string{
+		"secureContext", "createSession", "connectionProperties", "reservation", "arrowSerializationOptions",
+		"writeIncrementalResults", "destinationEncryptionConfiguration", "jobTimeoutMs", "maxSlots", "preserveNulls",
+		"queryResultsFormat", "continuous", "maximumBytesBilled",
+	},
+	IgnoreUnknown: true,
 }
 
 // insertBody is the slice of the Job resource jobs.insert serves.
@@ -140,26 +182,12 @@ type insertBody struct {
 	} `json:"configuration"`
 }
 
-// decodeStrict reads a request body, refusing unknown fields as coverage
-// gaps rather than ignoring what they would change.
-func decodeStrict(body []byte, value any) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil {
-		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
-			return gap("job field " + strings.Trim(field, `"`))
-		}
-		return provider.Invalid("Invalid job body")
-	}
-	return nil
-}
-
 // decodeInsert reads a jobs.insert body. Only Standard SQL query jobs are
 // served; load, extract, and copy jobs, destination tables, and every other
 // Job field are coverage gaps.
 func decodeInsert(body []byte, project string) (insertBody, error) {
 	var job insertBody
-	if err := decodeStrict(body, &job); err != nil {
+	if err := provider.DecodeJSON(body, "", &job, gap, jobFields); err != nil {
 		return job, err
 	}
 	reference := job.JobReference
@@ -201,9 +229,9 @@ func (p *Provider) jobsInsert(call gateway.Call, request *gateway.RESTRequest, s
 	if !body.Configuration.DryRun && p.jobCopy(scope, id) != nil {
 		return nil, status.Errorf(codes.AlreadyExists, "Already Exists: Job %s:%s.%s", scope.Project, cmp.Or(body.JobReference.Location, "US"), id)
 	}
-	job, denied, err := p.runQuery(call, scope, body.Configuration.Query.queryOptions, body.JobReference.Location, body.Configuration.DryRun)
-	if err != nil || denied != nil {
-		return denied, err
+	job, err := p.runQuery(call, scope, body.Configuration.Query.queryOptions, body.JobReference.Location, body.Configuration.DryRun)
+	if err != nil {
+		return nil, err
 	}
 	job.ID = id
 	job.Labels = body.Configuration.Labels
@@ -255,7 +283,7 @@ func decodeQuery(request *gateway.RESTRequest) (queryRequest, error) {
 	if err := validateJobOptions(methodJobsQuery, request.Query); err != nil {
 		return body, err
 	}
-	if err := decodeStrict(request.JSON, &body); err != nil {
+	if err := provider.DecodeJSON(request.JSON, "", &body, gap, queryFields); err != nil {
 		return body, err
 	}
 	if body.UseLegacySQL != nil && *body.UseLegacySQL {
@@ -274,7 +302,7 @@ func (body queryRequest) resultOptions() url.Values {
 		format.Set(optionTimestampFormat, body.FormatOptions.TimestampOutputFormat)
 	}
 	if body.MaxResults != "" {
-		format.Set("maxResults", body.MaxResults.String())
+		format.Set(optionMaxResults, body.MaxResults.String())
 	}
 	return format
 }
@@ -290,12 +318,21 @@ func (p *Provider) jobsQuery(call gateway.Call, request *gateway.RESTRequest, sc
 	if err != nil {
 		return nil, err
 	}
-	job, denied, err := p.runQuery(call, scope, body.queryOptions, body.Location, body.DryRun)
-	if err != nil || denied != nil {
-		return denied, err
+	job := p.requestedBefore(scope, call.Principal.Subject, body.RequestID)
+	if job != nil && !body.DryRun {
+		start, end, err := resultPage(format, len(job.Rows))
+		if err != nil {
+			return nil, err
+		}
+		return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, false, start, end, int64Timestamp)}, nil
+	}
+	job, err = p.runQuery(call, scope, body.queryOptions, body.Location, body.DryRun)
+	if err != nil {
+		return nil, err
 	}
 	job.ID = newJobID()
 	job.Labels = body.Labels
+	job.RequestID = body.RequestID
 	if body.DryRun {
 		return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, true, 0, 0, false)}, nil
 	}
@@ -314,27 +351,56 @@ func (p *Provider) jobsQuery(call gateway.Call, request *gateway.RESTRequest, sc
 	return &gateway.RESTResponse{JSON: queryResponse(scope.Project, job, false, start, end, int64Timestamp)}, nil
 }
 
+// requestWindow is how long a jobs.query requestId deduplicates retries.
+// GCP documents only "a few minutes" of best-effort idempotency.
+const requestWindow = 15 * time.Minute
+
+// requestedBefore returns a copy of the caller's job that a jobs.query with
+// the same requestId ran within requestWindow, or nil: a retry gets that
+// job's result instead of running the query again.
+func (p *Provider) requestedBefore(scope state.Scope, principal, requestID string) *jobRecord {
+	if requestID == "" {
+		return nil
+	}
+	var found *jobRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		for _, job := range s.jobs {
+			if job.RequestID == requestID && job.Principal == principal && p.clock().Sub(job.CreatedAt) < requestWindow {
+				clone := *job
+				found = &clone
+			}
+		}
+		return nil
+	})
+	return found
+}
+
 // runQuery plans a script, authorizes every table it names, runs it, and
 // returns the unstored job. A denied check returns its 403; nothing runs
 // before every check passes. location, when set, must be the location of
-// every dataset the script names.
-func (p *Provider) runQuery(call gateway.Call, scope state.Scope, options queryOptions, location string, dryRun bool) (*jobRecord, *gateway.RESTResponse, error) {
+// every dataset the script names. GoogleSQL's refusals are invalidQuery.
+func (p *Provider) runQuery(call gateway.Call, scope state.Scope, options queryOptions, location string, dryRun bool) (*jobRecord, error) {
+	job, err := p.planAndRun(call, scope, options, location, dryRun)
+	return job, queryFailure(err)
+}
+
+func (p *Provider) planAndRun(call gateway.Call, scope state.Scope, options queryOptions, location string, dryRun bool) (*jobRecord, error) {
 	defaultDataset, err := options.defaultDataset(scope.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	catalog := p.catalogOf(scope)
 	plan, err := planQuery(catalog, options.Query, defaultDataset, options.parameterMode(), options.QueryParameters)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	jobLocation, err := p.jobLocation(scope, catalog, plan, location)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for _, check := range plan.checks {
-		if denied, err := p.authorizeCheck(call, scope.Project, check); denied != nil || err != nil {
-			return nil, denied, err
+		if err := p.authorizeCheck(call, scope.Project, check); err != nil {
+			return nil, err
 		}
 	}
 	now := p.clock()
@@ -343,12 +409,31 @@ func (p *Provider) runQuery(call gateway.Call, scope state.Scope, options queryO
 		Principal: call.Principal.Subject, Query: options.Query,
 	}
 	if dryRun {
-		return job, nil, p.dryRunSchema(call.Context, scope, plan, job)
+		return job, p.dryRunSchema(call.Context, scope, plan, job)
 	}
 	if err := p.runPlan(call.Context, scope, plan, job); err != nil {
-		return nil, nil, err
+		return nil, missingTable(err, scope.Project, jobLocation)
 	}
-	return job, nil, nil
+	return job, nil
+}
+
+// missingTable spells the engine's refusal of a table that doesn't exist as
+// GCP's query error: "Not found: Table P:D.T was not found in location US"
+// (recorded). Other errors pass.
+func missingTable(err error, project, location string) error {
+	name, ok := strings.CutPrefix(status.Convert(err).Message(), "Not found: Table ")
+	if status.Code(err) != codes.NotFound || !ok {
+		return err
+	}
+	parts := strings.Split(strings.ReplaceAll(name, "`", ""), ".")
+	if len(parts) == 2 {
+		parts = append([]string{project}, parts...)
+	}
+	if len(parts) != 3 {
+		return err
+	}
+	message := "Not found: Table " + parts[0] + ":" + parts[1] + "." + parts[2] + " was not found in location " + location
+	return failure(codes.NotFound, reasonNotFound, message)
 }
 
 // defaultDataset reads the default dataset, which must be in the job's
@@ -571,21 +656,14 @@ func (p *Provider) catalogOf(scope state.Scope) *catalog {
 	return c
 }
 
-// authorizeCheck runs one of a query's table checks.
-func (p *Provider) authorizeCheck(call gateway.Call, project string, check tableCheck) (*gateway.RESTResponse, error) {
+// authorizeCheck runs one of a query's table checks; a denial names the
+// checked table or dataset.
+func (p *Provider) authorizeCheck(call gateway.Call, project string, check tableCheck) error {
 	related := call
 	related.Method = check.method
 	related.Resource = check.resource
-	decision, resource, err := p.authorizeAt(related, check.resource, project)
-	if err == nil {
-		return nil, nil //nolint:nilnil // a nil response with a nil error means the check passed
-	}
-	if provider.Unverified(err) {
-		return nil, fmt.Errorf("authorize the query: %w", err)
-	}
-	denied := provider.Denied(decision, resource)
-	denied.Headers = http.Header{headerDecision: {decision.ID}}
-	return denied, nil
+	_, err := p.authorize(related, call.Method, project, check.resource)
+	return err
 }
 
 // ownJobCheck names the permission plan that authorizes a job read: a stored
@@ -641,7 +719,10 @@ func (p *Provider) requestedJob(method string, request *gateway.RESTRequest, sco
 	id := request.Path["jobId"]
 	job := p.jobCopy(scope, id)
 	if location := request.Query.Get(keyLocation); job == nil || (location != "" && !strings.EqualFold(location, job.Location)) {
-		return nil, provider.NotFound("job", id)
+		if job != nil {
+			location = cmp.Or(location, job.Location)
+		}
+		return nil, failure(codes.NotFound, reasonNotFound, "Not found: Job "+scope.Project+":"+cmp.Or(location, "US")+"."+id)
 	}
 	return job, nil
 }
@@ -701,7 +782,7 @@ func resultPage(query url.Values, total int) (int, int, error) {
 	}
 	start = min(start, total)
 	end := total
-	if value := query.Get("maxResults"); value != "" {
+	if value := query.Get(optionMaxResults); value != "" {
 		limit, err := strconv.Atoi(value)
 		if err != nil || limit < 0 {
 			return 0, 0, provider.Invalid("Invalid maxResults")
@@ -724,6 +805,16 @@ const (
 	keyJobReference = "jobReference"
 	keyCacheHit     = "cacheHit"
 	keyQuery        = "query"
+	keyStatistics   = "statistics"
+	keyCode         = "code"
+	keyUseLegacySQL = "useLegacySql"
+	keyLastModified = "lastModifiedTime"
+	keyDatasetID    = "datasetId"
+	// optionMaxResults bounds a list or result page.
+	optionMaxResults = "maxResults"
+	// textTrue and jsonNull are the literal values options and bodies compare.
+	textTrue = "true"
+	jsonNull = "null"
 	// keyBytesProcessed is always "0": no bytes are billed locally.
 	keyBytesProcessed = "totalBytesProcessed"
 )
@@ -783,7 +874,7 @@ func queryResponse(project string, job *jobRecord, dryRun bool, start, end int, 
 	response["queryId"] = job.ID
 	response["startTime"] = created
 	response["totalSlotMs"] = "0"
-	response["jobCreationReason"] = map[string]any{"code": "REQUESTED"}
+	response["jobCreationReason"] = map[string]any{keyCode: "REQUESTED"}
 	return response
 }
 
@@ -827,7 +918,7 @@ func jobWire(project string, job *jobRecord, dryRun bool) map[string]any {
 	created := strconv.FormatInt(job.CreatedAt.UnixMilli(), 10)
 	configuration := map[string]any{
 		"jobType": "QUERY",
-		keyQuery:  map[string]any{keyQuery: job.Query, "useLegacySql": false, "priority": "INTERACTIVE"},
+		keyQuery:  map[string]any{keyQuery: job.Query, keyUseLegacySQL: false, "priority": "INTERACTIVE"},
 	}
 	if dryRun {
 		configuration["dryRun"] = true
@@ -852,14 +943,14 @@ func jobWire(project string, job *jobRecord, dryRun bool) map[string]any {
 		keySelfLink:     selfLink + project + "/jobs/" + job.ID + "?location=" + location,
 		keyJobReference: jobReference(project, job),
 		"configuration": configuration,
-		"statistics":    statistics,
-		"status":        map[string]any{"state": "DONE"},
+		keyStatistics:   statistics,
+		keyStatus:       map[string]any{"state": "DONE"},
 	}
 	if _, email, ok := strings.Cut(job.Principal, ":"); ok {
 		document["user_email"] = email
 		document["principal_subject"] = job.Principal
 	}
-	document["jobCreationReason"] = map[string]any{"code": "REQUESTED"}
+	document["jobCreationReason"] = map[string]any{keyCode: "REQUESTED"}
 	return document
 }
 
@@ -887,4 +978,129 @@ func resultsWire(project string, job *jobRecord, start, end int, int64Timestamp 
 		response[optionPageToken] = strconv.Itoa(end)
 	}
 	return response
+}
+
+// jobsList lists jobs newest first, as GCP does (recorded): the caller's own,
+// or with allUsers every user's, which needs bigquery.jobs.listAll. Every
+// local job is done; stateFilter and the creation-time bounds filter them.
+// parentJobId is a gap: local scripts run no child jobs.
+func (p *Provider) jobsList(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	query := request.Query
+	full, err := jobListOptions(query)
+	if err != nil {
+		return nil, err
+	}
+	owner := call.Principal.Subject
+	if query.Get("allUsers") == textTrue {
+		related := call
+		related.Method = checkListAll
+		if _, err := p.authorize(related, call.Method, scope.Project, provider.ProjectResource(scope.Project)); err != nil {
+			return nil, err
+		}
+		owner = ""
+	}
+	keep, err := jobFilter(query)
+	if err != nil {
+		return nil, err
+	}
+	page, next, err := listPage(p.listedJobs(scope, owner, keep), query)
+	if errors.Is(err, errBadPageToken) {
+		return nil, failure(codes.InvalidArgument, reasonInvalid, "Invalid pagination token "+query.Get(optionPageToken))
+	}
+	if err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(page))
+	for _, job := range page {
+		items = append(items, jobItem(scope.Project, job, full))
+	}
+	document := provider.ListBody("jobs", items, next)
+	document[keyKind], document[keyETag] = "bigquery#jobList", etagOf(p.clock())
+	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// jobListOptions validates jobs.list's options and reports the full
+// projection.
+func jobListOptions(query url.Values) (bool, error) {
+	if err := validateJobOptions(methodJobsList, query); err != nil {
+		return false, err
+	}
+	if err := refuseOptions(query, "parentJobId"); err != nil {
+		return false, err
+	}
+	switch projection := strings.ToLower(query.Get("projection")); projection {
+	case "", "minimal", "full":
+		return projection == "full", nil
+	default:
+		return false, failure(codes.InvalidArgument, reasonInvalid, "Invalid projection "+query.Get("projection"))
+	}
+}
+
+// listedJobs copies the jobs owner created (every job for "") that keep
+// accepts, newest first.
+func (p *Provider) listedJobs(scope state.Scope, owner string, keep func(*jobRecord) bool) []*jobRecord {
+	var jobs []*jobRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		s.expireJobs(p.clock())
+		for _, job := range s.jobs {
+			if (owner == "" || job.Principal == owner) && keep(job) {
+				clone := *job
+				jobs = append(jobs, &clone)
+			}
+		}
+		return nil
+	})
+	slices.SortFunc(jobs, func(a, b *jobRecord) int {
+		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(b.ID, a.ID))
+	})
+	return jobs
+}
+
+// jobFilter reads stateFilter and the creation-time bounds (milliseconds).
+func jobFilter(query url.Values) (func(*jobRecord) bool, error) {
+	done := len(query["stateFilter"]) == 0
+	for _, state := range query["stateFilter"] {
+		switch strings.ToLower(state) {
+		case "done":
+			done = true
+		case "pending", "running":
+		default:
+			return nil, failure(codes.InvalidArgument, reasonInvalid, "Invalid stateFilter "+state)
+		}
+	}
+	bounds := [2]int64{0, math.MaxInt64}
+	for i, name := range []string{"minCreationTime", "maxCreationTime"} {
+		if text := query.Get(name); text != "" {
+			value, err := strconv.ParseUint(text, 10, 63)
+			if err != nil {
+				return nil, failure(codes.InvalidArgument, reasonInvalid, "Invalid "+name+" "+text)
+			}
+			bounds[i] = int64(value)
+		}
+	}
+	return func(job *jobRecord) bool {
+		created := job.CreatedAt.UnixMilli()
+		return done && created >= bounds[0] && created <= bounds[1]
+	}, nil
+}
+
+// jobItem is one jobs.list entry: the recorded minimal fields, and with the
+// full projection the configuration and creator too (recorded).
+func jobItem(project string, job *jobRecord, full bool) map[string]any {
+	document := jobWire(project, job, false)
+	item := map[string]any{"state": "DONE"}
+	keys := []string{"id", keyJobReference, keyKind, keyStatistics, keyStatus}
+	if full {
+		keys = append(keys, "configuration", "principal_subject", "user_email")
+	}
+	for _, key := range keys {
+		if value, ok := document[key]; ok {
+			item[key] = value
+		}
+	}
+	if !full {
+		statistics, _ := document[keyStatistics].(map[string]any)
+		item[keyStatistics] = map[string]any{keyCreationTime: statistics[keyCreationTime], "startTime": statistics["startTime"], "endTime": statistics["endTime"]}
+	}
+	return item
 }
