@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-13T01:25:17.596707+00:00",
+  "recorded_at": "2026-10-13T04:32:48.797199+00:00",
   "scenario": {
     "id": "vertexai-inference-authorization",
     "service": "aiplatform",
     "transport": "rest-v1",
-    "revision": "f28cbb2bed97f2f774ad039a53ad72ed2992a2a61ae0a5e97e697b61dc5a1aa3",
+    "revision": "6d7b7171d6a291f0b8a997bf013f46eba4cfbef11d7ccd6bb1a291a277c41db0",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "ac51a6fc17015622605d40a8a4563befbac6b5c7ee0ae76fe11ad91e6c90ff4c",
+  "snapshot_sha256": "73398d94acd26b1c2e497787d6424a2448b368b892740bea36f9c11f75ccb8f5",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,7 +22,7 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/vertexai.py": "2b3379acbb718c20480eb923c2f6bcd7d992b6fbd14a7956a93073165ef1a84e",
+      "gcp_validation/services/vertexai.py": "d58120eec905a1709e86615740efe0c737c345b5c2b07bfcca0e43cd5d61f703",
       "gcp_validation/services/denials.py": "e84ffee7cc1328868f18c1b7ccfc55c27b604031bcc9344fae5ab8ae1cf9a3ea",
       "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
@@ -36,6 +36,7 @@
       "location": "global",
       "limits": {
         "max_generate_calls": 3,
+        "max_embedding_calls": 20,
         "max_output_tokens": 16,
         "max_run_seconds": 300
       },

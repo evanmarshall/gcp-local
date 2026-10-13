@@ -9,6 +9,7 @@
   "location": "global",
   "limits": {
     "max_generate_calls": 3,
+    "max_embedding_calls": 20,
     "max_output_tokens": 16,
     "max_run_seconds": 300
   },

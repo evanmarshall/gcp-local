@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 	"time"
@@ -80,12 +81,32 @@ const (
 	modelDomain = "aiplatform.googleapis.com"
 )
 
-// The publisher models GCP serves in us-central1 (recorded: countTokens on
-// each in vertexai-inference-authorization). Any other ID is GCP's 404.
+// The publisher models GCP serves in us-central1, per method family
+// (recorded in vertexai-inference-authorization: countTokens on the
+// generative models, predict and embedContent on the embedding ones). Any
+// other ID is GCP's 404; an embedding model asked through the other
+// embedding method is GCP's 400.
 var (
 	generativeModels = names("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-image")
-	embeddingModels  = names("text-embedding-005", "text-embedding-004", "text-multilingual-embedding-002", "gemini-embedding-001")
+	predictModels    = names("text-embedding-005", "text-embedding-004", "text-multilingual-embedding-002", "gemini-embedding-001")
+	embedModels      = names("gemini-embedding-001", "gemini-embedding-2-preview")
+	embeddingModels  = union(predictModels, embedModels)
 )
+
+// union merges sets.
+func union(sets ...map[string]bool) map[string]bool {
+	merged := map[string]bool{}
+	for _, set := range sets {
+		maps.Copy(merged, set)
+	}
+	return merged
+}
+
+// wrongEmbeddingMethod refuses an embedding model through the method GCP
+// doesn't serve it by; the 400 is recorded, the wording is local.
+func wrongEmbeddingMethod(method string, t target) error {
+	return provider.Invalid(fmt.Sprintf("%s is not served for %s.", method, t.model))
+}
 
 // modelNotFound is GCP's 404 for a model it doesn't serve (recorded).
 func modelNotFound(t target) error {
@@ -358,6 +379,9 @@ func (p *Provider) predict(ctx context.Context, request *gateway.RESTRequest, t 
 	if !embeddingModels[t.model] {
 		return nil, gap("predict is served only for text embedding models")
 	}
+	if !predictModels[t.model] {
+		return nil, wrongEmbeddingMethod("predict", t)
+	}
 	var body predictRequest
 	if err := provider.DecodeJSON(request.JSON, "", &body, gap, provider.Fields{}); err != nil {
 		return nil, err
@@ -431,6 +455,9 @@ func (r *embedRequest) text() (string, int, error) {
 func (p *Provider) embedContent(ctx context.Context, request *gateway.RESTRequest, t target) (*gateway.RESTResponse, error) {
 	if !embeddingModels[t.model] {
 		return nil, gap("embedContent is served only for embedding models")
+	}
+	if !embedModels[t.model] {
+		return nil, wrongEmbeddingMethod("embedContent", t)
 	}
 	var body embedRequest
 	if err := decodeBody(request.JSON, &body, embedFields); err != nil {

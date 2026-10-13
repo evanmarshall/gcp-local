@@ -98,11 +98,16 @@ func (t Tool) unmodeledKind() string {
 }
 
 // FunctionDeclaration is one callable function and its parameter schema.
+// The response schemas describe what the function returns; the google-genai
+// SDK sends one by default. The backends pick calls from the parameters, so
+// they are accepted unread.
 type FunctionDeclaration struct {
 	Name                 string         `json:"name"`
 	Description          string         `json:"description,omitempty"`
 	Parameters           map[string]any `json:"parameters,omitempty"`
 	ParametersJSONSchema map[string]any `json:"parametersJsonSchema,omitempty"`
+	Response             map[string]any `json:"response,omitempty"`
+	ResponseJSONSchema   any            `json:"responseJsonSchema,omitempty"`
 }
 
 // schema returns the declaration's parameter schema in either form.
@@ -202,9 +207,7 @@ var generationFields = []string{
 // requestFields lists the unmodeled fields shared by generation and counting.
 func requestFields() []string {
 	fields := append(contentFields("contents"), contentFields("systemInstruction")...)
-	for _, kind := range []string{
-		"functionDeclarations.response", "functionDeclarations.responseJsonSchema", "functionDeclarations.behavior",
-	} {
+	for _, kind := range []string{"functionDeclarations.behavior"} {
 		fields = append(fields, "tools."+kind)
 	}
 	for _, field := range generationFields {

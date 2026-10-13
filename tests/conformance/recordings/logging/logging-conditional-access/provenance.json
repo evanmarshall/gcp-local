@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-13T03:25:37.017120+00:00",
+  "recorded_at": "2026-10-13T04:40:50.514444+00:00",
   "scenario": {
     "id": "logging-conditional-access",
     "service": "logging",
     "transport": "rest-v2",
-    "revision": "116538c02ea47824c89e6db35accf7378c369f7f520584392c6e73ff6cb7a5e7",
+    "revision": "3d74429b36fb5bf08aa1f5f4d9e054927f19bbbb38c0f7c3c2f98bd908fb7f96",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "55a11750d4a2eb97ad0f8108bc8b444d0ea88309900eec4a4855925bff86fffd",
+  "snapshot_sha256": "879675f82b867f8aa66f34c60f0aaab64fbf703be9dac50c92f31c52ad3c2589",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -24,7 +24,6 @@
     "contract_files": {
       "gcp_validation/services/artifactregistry.py": "3795f12f69c29568412ff925fe22d7d7944ec4f0568dc9faec2622aaf188a6cb",
       "gcp_validation/services/cloudlogging.py": "0478b0a6a6ce3dc0c7aa139f0bbdbd26fa701a99333fa2170009392779bf4c09",
-      "gcp_validation/services/vertexai.py": "2b3379acbb718c20480eb923c2f6bcd7d992b6fbd14a7956a93073165ef1a84e",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98"
     },

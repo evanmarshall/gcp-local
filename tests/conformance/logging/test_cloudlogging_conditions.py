@@ -26,13 +26,14 @@ from gcp_validation.services.artifactregistry import LIVE_ENDPOINT as REGISTRY_E
 from gcp_validation.services.artifactregistry import RepositoryFixture
 from gcp_validation.services.cloudlogging import LIVE_ENDPOINT as LOGGING_ENDPOINT
 from gcp_validation.services.cloudlogging import LoggingClient
-from gcp_validation.services.vertexai import LIVE_ENDPOINT as VERTEX_ENDPOINT
-from gcp_validation.services.vertexai import MODEL, PROMPT, REGION
 
 SERVICE = 'iam-conditions'
 LIMITS = {'max_added_bindings': 4, 'max_policy_writes': 4, 'max_repositories': 1,
           'max_run_seconds': 900}
 POLICY_ENDPOINT = 'https://cloudresourcemanager.googleapis.com'
+VERTEX_ENDPOINT = 'https://us-central1-aiplatform.googleapis.com'
+REGION, MODEL = 'us-central1', 'gemini-2.5-flash'
+PROMPT = {'contents': [{'role': 'user', 'parts': [{'text': 'Reply with one word: ready'}]}]}
 TITLE = 'gcp-local-conditions-'
 ALWAYS = 'request.time < timestamp("2100-01-01T00:00:00Z")'
 # Phase one: each check's role, bound on its service's resource.service value.
@@ -176,7 +177,6 @@ def conditions(gcp_snapshot, gcp_target, pytestconfig):
     contract_files=(
         'gcp_validation/services/artifactregistry.py',
         'gcp_validation/services/cloudlogging.py',
-        'gcp_validation/services/vertexai.py',
         'gcp_validation/live_rest.py',
         'gcp_validation/sandbox.py',
     ),

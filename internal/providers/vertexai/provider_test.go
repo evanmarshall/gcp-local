@@ -282,6 +282,9 @@ func TestModelCatalog(t *testing.T) {
 		{testEmbedding + ":generateContent", prompt("hi"), 501, "Vertex AI coverage gap: generateContent on an embedding model"},
 		{testEmbedding + ":streamGenerateContent", prompt("hi"), 501, "streamGenerateContent on an embedding model"},
 		{testModel + ":embedContent", map[string]any{"content": turn(actorUser, map[string]any{"text": "hi"})}, 501, "embedContent is served only for embedding models"},
+		{testEmbedding + ":embedContent", map[string]any{"content": turn(actorUser, map[string]any{"text": "hi"})}, 400, "embedContent is not served for " + testEmbedding},
+		{"gemini-embedding-2-preview:predict", map[string]any{"instances": []any{map[string]any{"content": "hi"}}}, 400, "predict is not served for gemini-embedding-2-preview"},
+		{"gemini-embedding-2:embedContent", map[string]any{"content": turn(actorUser, map[string]any{"text": "hi"})}, 404, "Publisher model"},
 	} {
 		got := h.call(modelPath+item.suffix, item.body, actorUser)
 		if got.Code != item.code || !strings.Contains(errorMessage(t, got), item.want) {

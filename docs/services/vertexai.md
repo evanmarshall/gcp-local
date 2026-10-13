@@ -39,7 +39,7 @@ All methods are REST only, under `/v1` and `/v1beta1` at `projects/{project}/loc
 | `:predict` | Text embedding models only (`instances[].content`, `parameters.outputDimensionality`). Other instance and parameter keys are accepted and unread, as GCP accepts them |
 | `:embedContent` | Embedding models only; text parts only; `outputDimensionality` top-level or in `embedContentConfig` |
 
-Models: `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.5-flash-image`, `text-embedding-005`, `text-embedding-004`, `text-multilingual-embedding-002`, `gemini-embedding-001`, the IDs GCP served in `us-central1` when recorded. Any other ID (including the retired `gemini-2.0-flash`) is GCP's 404 `Publisher model ... was not found`, in every location. `countTokens` on an embedding model is GCP's 400 `Should provide instances for text model prediction.`
+Models are the IDs GCP served in `us-central1` when recorded, per method: generation and `countTokens` on `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.5-flash-image`; `:predict` on `text-embedding-005`, `text-embedding-004`, `text-multilingual-embedding-002`, `gemini-embedding-001`; `:embedContent` on `gemini-embedding-001` and `gemini-embedding-2-preview`. Any other ID (the retired `gemini-2.0-flash`, `gemini-embedding-2`) is GCP's 404 `Publisher model ... was not found`, in every location. An embedding model through the other embedding method is 400, as in GCP (the message is local). `countTokens` on an embedding model is GCP's 400 `Should provide instances for text model prediction.`
 
 Request bodies are decoded strictly, in either field spelling: an unknown field is GCP's 400 (`Unknown name "x"`); paths in nested refusals use JSON names (`generationConfig.temperature`), not GCP's proto names. `labels` are accepted. `safetySettings` with `BLOCK_NONE` or `OFF` are accepted; an unknown category, threshold, or method is GCP's 400. `thinkingConfig.thinkingBudget` is accepted; the backends don't think.
 
@@ -80,7 +80,7 @@ Ollama:
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `vertexai-inference-authorization` | 2026-10-13 | Response shapes, streaming, token counts, embeddings, denials with ErrorInfo, the model catalog by `countTokens`, unknown models, `countTokens` on an embedding model, `BLOCK_NONE` safety settings, an unknown category, unknown and mistyped fields, empty contents |
+| `vertexai-inference-authorization` | 2026-10-13 | Response shapes, streaming, token counts, embeddings, denials with ErrorInfo, the model catalog by `countTokens`, `:predict`, and `:embedContent`, unknown models, `countTokens` on an embedding model, `BLOCK_NONE` safety settings, an unknown category, unknown and mistyped fields, empty contents |
 
 ```sh
 sh scripts/check/recordings.sh   # the recording
@@ -94,7 +94,7 @@ These return 501 naming the field:
 - `safetySettings` thresholds that block (`BLOCK_LOW_AND_ABOVE`, `BLOCK_MEDIUM_AND_ABOVE`, `BLOCK_ONLY_HIGH`): the backends don't rate harm. Responses carry no `safetyRatings`.
 - `cachedContent`, `modelArmorConfig`, `serviceTier`, `toolConfig.retrievalConfig`, and function calling mode `VALIDATED`.
 - `generationConfig` `responseLogprobs`, `logprobs`, `presencePenalty`, `frequencyPenalty`, `routingConfig`, `modelConfig`, `audioTimestamp`, `responseModalities`, `mediaResolution`, `speechConfig`, `enableAffectiveDialog`, `imageConfig`, `thinkingConfig.includeThoughts`, `thinkingConfig.thinkingLevel`; `candidateCount` above 1.
-- Parts other than text, inline data, function calls, and function results (`fileData`, `executableCode`, `videoMetadata`, ...); tools other than function declarations (Google Search, retrieval, code execution, ...); function `response` schemas and `behavior`.
+- Parts other than text, inline data, function calls, and function results (`fileData`, `executableCode`, `videoMetadata`, ...); tools other than function declarations (Google Search, retrieval, code execution, ...); function `behavior`. Function `response` and `responseJsonSchema` are accepted and unread.
 - `generateContent` and `streamGenerateContent` on an embedding model, `embedContent` on a Gemini model, `predict` on a Gemini model, `countTokens` with `instances`.
 
 Also:

@@ -16,7 +16,8 @@ from gcp_validation.sandbox import Sandbox
 from gcp_validation.services.denials import iam_denial
 
 SERVICE = 'aiplatform'
-LIMITS = {'max_generate_calls': 3, 'max_output_tokens': 16, 'max_run_seconds': 300}
+LIMITS = {'max_generate_calls': 3, 'max_embedding_calls': 20, 'max_output_tokens': 16,
+          'max_run_seconds': 300}
 LIVE_ENDPOINT = 'https://us-central1-aiplatform.googleapis.com'
 REGION = 'us-central1'
 MODEL = 'gemini-2.5-flash'
@@ -33,6 +34,11 @@ CATALOG_PROBES = ('gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
                   'gemini-2.5-flash-image', 'gemini-2.0-flash', 'gemini-nonexistent-model',
                   'text-embedding-005', 'text-embedding-004', 'text-multilingual-embedding-002',
                   'gemini-embedding-001')
+# Embedding IDs probed with both embedding methods (8 dimensions each): 200 where GCP
+# serves the model by that method.
+EMBEDDING_PROBES = ('text-embedding-005', 'text-embedding-004', 'text-multilingual-embedding-002',
+                    'gemini-embedding-001', 'gemini-embedding-2', 'gemini-embedding-2-preview',
+                    'gemini-embedding-002', 'text-embedding-999')
 SAFETY = [{'category': 'HARM_CATEGORY_DANGEROUS_CONTENT', 'threshold': 'BLOCK_NONE'}]
 
 
@@ -102,6 +108,17 @@ def embedding(response: Response) -> dict:
             'prediction_fields': sorted(prediction), 'dimensions': len(values)}
 
 
+def embedding_models(run: InferenceRun) -> dict:
+    """Record which embedding IDs GCP serves through predict and embedContent."""
+    text = {'role': 'user', 'parts': [{'text': 'ready'}]}
+    return {model: {
+        'predict': run.call(model, 'predict', {'instances': [{'content': 'ready'}],
+                                              'parameters': {'outputDimensionality': 8}}).status,
+        'embed_content': run.call(model, 'embedContent', {'content': text,
+                                                          'outputDimensionality': 8}).status,
+    } for model in EMBEDDING_PROBES}
+
+
 def refusals(run: InferenceRun, snapshot: SnapshotCase, observe: Observations) -> None:
     """Record the model catalog, safety settings, and refused request bodies."""
     snapshot.match('count-tokens-models', {model: run.call(model, 'countTokens', PROMPT).status
@@ -149,6 +166,7 @@ def run_scenario(run: InferenceRun, snapshot: SnapshotCase) -> None:
         EMBEDDING, 'predict', {**instances, 'parameters': {'outputDimensionality': 8}})))
     snapshot.match('denied-embedding', iam_denial(observe, run.call(
         EMBEDDING, 'predict', instances, actor='denied')))
+    snapshot.match('embedding-models', embedding_models(run))
     snapshot.match('unknown-embedding-model', detailed(observe, run.call(
         'text-embedding-999', 'predict', instances)))
     snapshot.match('predict-unknown-field', detailed(observe, run.call(

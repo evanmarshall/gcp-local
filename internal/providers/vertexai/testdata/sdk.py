@@ -56,7 +56,7 @@ def main() -> None:
     assert [len(item.values) for item in embedded.embeddings] == [16, 16]
     assert embedded.embeddings[0].values != embedded.embeddings[1].values
 
-    gemini_embedding = allowed.models.embed_content(model="gemini-embedding-2", contents="alpha")
+    gemini_embedding = allowed.models.embed_content(model="gemini-embedding-001", contents="alpha")
     assert len(gemini_embedding.embeddings[0].values) == 3072
 
     # Automatic function calling: the stub calls get_weather, the SDK runs it,

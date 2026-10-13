@@ -1,6 +1,6 @@
 {
   "vertexai-inference-authorization": {
-    "recorded-date": "13-10-2026, 01:25:17",
+    "recorded-date": "13-10-2026, 04:32:48",
     "recorded-content": {
       "count-tokens": {
         "fields": [
@@ -194,6 +194,40 @@
         "http_status": 403,
         "message": "Permission 'aiplatform.endpoints.predict' denied on resource '//aiplatform.googleapis.com/projects/<project>/locations/us-central1/publishers/google/models/text-embedding-005' (or it may not exist).",
         "status": "PERMISSION_DENIED"
+      },
+      "embedding-models": {
+        "gemini-embedding-001": {
+          "embed_content": 200,
+          "predict": 200
+        },
+        "gemini-embedding-002": {
+          "embed_content": 404,
+          "predict": 404
+        },
+        "gemini-embedding-2": {
+          "embed_content": 404,
+          "predict": 404
+        },
+        "gemini-embedding-2-preview": {
+          "embed_content": 200,
+          "predict": 400
+        },
+        "text-embedding-004": {
+          "embed_content": 400,
+          "predict": 200
+        },
+        "text-embedding-005": {
+          "embed_content": 400,
+          "predict": 200
+        },
+        "text-embedding-999": {
+          "embed_content": 404,
+          "predict": 404
+        },
+        "text-multilingual-embedding-002": {
+          "embed_content": 400,
+          "predict": 200
+        }
       },
       "unknown-embedding-model": {
         "code": 404,
