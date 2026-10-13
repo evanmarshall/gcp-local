@@ -37,15 +37,27 @@ func orTrue(value *flexBool) bool {
 	return value == nil || bool(*value)
 }
 
-// peerProject reports the project a peer network reference names, or "" for
-// a bare network name.
-func peerProject(reference string) string {
+// refProject reports the project a network or subnetwork reference names, or
+// "" for a bare name.
+func refProject(reference string) string {
 	_, rest, found := strings.Cut(reference, "projects/")
 	if !found {
 		return ""
 	}
 	project, _, _ := strings.Cut(rest, "/")
 	return project
+}
+
+// sameProject refuses a network or subnetwork reference into another
+// project: that is Shared VPC, which is not modeled. Without it, the
+// reference would resolve to a same-named resource of the request's project.
+func sameProject(project string, references ...string) error {
+	for _, reference := range references {
+		if other := refProject(reference); other != "" && other != project {
+			return gap("Shared VPC: a network or subnetwork in another project is not modeled")
+		}
+	}
+	return nil
 }
 
 // addPeering stores one peering of a network toward a same-project peer.
@@ -59,7 +71,7 @@ func (p *Provider) addPeering(request *gateway.RESTRequest, scope state.Scope) (
 	if !uidPattern.MatchString(spec.name) || peer == "" {
 		return nil, provider.Invalid("A peering requires a name and a peer network")
 	}
-	if project := peerProject(spec.network); project != "" && project != scope.Project {
+	if project := refProject(spec.network); project != "" && project != scope.Project {
 		return nil, gap("cross-project network peering is not modeled")
 	}
 	network := request.Path["network"]

@@ -420,7 +420,7 @@ func TestAuthorizedNetworkMustExist(t *testing.T) {
 		len(details) != 1 || object(t, details[0])["fieldViolations"] == nil {
 		t.Fatalf("missing network = %v", refused)
 	}
-	must(t, h.index.Put("compute", state.Resource{Name: "//compute.googleapis.com/projects/demo-redis/global/network/cache-net", Service: "compute", Kind: "network",
+	must(t, h.index.Put("compute", state.Resource{Name: "//compute.googleapis.com/projects/demo-redis/global/networks/cache-net", Service: "compute", Kind: "network",
 		Parent: provider.ProjectResource(testProject), Scope: provider.ProjectScope(testProject)}))
 	created := h.expect(h.create(adminToken, testProject, testRegion, testInstance, basic(map[string]any{"authorizedNetwork": network})), http.StatusOK)
 	if object(t, created["response"])["authorizedNetwork"] != network {

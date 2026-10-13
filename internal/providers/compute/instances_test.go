@@ -3,6 +3,7 @@ package compute
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -442,5 +443,260 @@ func TestInstanceAccountNeedsActAs(t *testing.T) {
 	accounts := mustJSON(t, document["serviceAccounts"])
 	if accounts != `[{"email":"`+saAccount+`","scopes":["https://www.googleapis.com/auth/cloud-platform"]}]` {
 		t.Fatalf("serviceAccounts = %s", accounts)
+	}
+}
+
+// listPage lists path with query and returns the item names and the next
+// page's token.
+func (h *harness) listPage(path string, query url.Values) ([]string, string) {
+	h.t.Helper()
+	recorder := h.expectCode(http.MethodGet, path+"?"+query.Encode(), nil, 200)
+	var list struct {
+		Items []struct {
+			Name string `json:"name"`
+		} `json:"items"`
+		Next string `json:"nextPageToken"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &list); err != nil {
+		h.t.Fatal(err)
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, item := range list.Items {
+		names = append(names, item.Name)
+	}
+	return names, list.Next
+}
+
+// firewallList creates fw-b, fw-c, and fw-a, in that order, and returns the
+// firewalls collection path.
+func (h *harness) firewallList() string {
+	h.t.Helper()
+	h.topology(vmNetA, vmSubnetA, testRangeA)
+	for _, name := range []string{"fw-b", "fw-c", "fw-a"} {
+		h.expectCode(http.MethodPost, globalPath+"/firewalls", map[string]any{
+			keyName: name, keyNetwork: vmNetA, "allowed": []any{map[string]any{keyIPProto: "tcp"}},
+		}, 200)
+	}
+	return globalPath + "/firewalls"
+}
+
+// Compute list filters (recorded: compute-lists-operations-iam).
+func TestListFilters(t *testing.T) {
+	h := newHarness(t)
+	path := h.firewallList()
+	for filter, want := range map[string]string{
+		"name eq fw-.*":                         "fw-a,fw-b,fw-c",
+		`name eq "fw-[ab]"`:                     "fw-a,fw-b",
+		"name ne .*-b":                          "fw-a,fw-c",
+		`name = "fw-b"`:                         "fw-b",
+		"name = fw-b":                           "fw-b",
+		`name != "fw-b"`:                        "fw-a,fw-c",
+		`(name != "fw-a") (name != "fw-c")`:     "fw-b",
+		`(name != "fw-a") AND (name != "fw-c")`: "fw-b",
+	} {
+		if names, _ := h.listPage(path, url.Values{"filter": {filter}}); strings.Join(names, ",") != want {
+			t.Errorf("filter %q = %v, want %s", filter, names, want)
+		}
+	}
+	for _, filter := range []string{
+		"name > fw-a", `(name = "fw-a") OR (name = "fw-b")`, "description = x", "labels.env = gl",
+		`(name eq fw-a) (name = "fw-b")`, "name = fw-*",
+	} {
+		recorder := h.expectCode(http.MethodGet, path+"?"+url.Values{"filter": {filter}}.Encode(), nil, 501)
+		if !strings.Contains(recorder.Body.String(), "Compute coverage gap") {
+			t.Errorf("filter %q = %s", filter, recorder.Body.String())
+		}
+	}
+}
+
+// Compute list paging and order (recorded: compute-lists-operations-iam).
+func TestListPagingAndOrder(t *testing.T) {
+	h := newHarness(t)
+	path := h.firewallList()
+	first, token := h.listPage(path, url.Values{"maxResults": {"2"}})
+	second, last := h.listPage(path, url.Values{"maxResults": {"2"}, "pageToken": {token}})
+	if strings.Join(first, ",") != "fw-a,fw-b" || token == "" || strings.Join(second, ",") != "fw-c" || last != "" {
+		t.Fatalf("pages = %v %q %v %q", first, token, second, last)
+	}
+	for _, size := range []string{"0", "501"} {
+		if names, _ := h.listPage(path, url.Values{"maxResults": {size}}); len(names) != 3 {
+			t.Errorf("maxResults %s = %v", size, names)
+		}
+	}
+	if names, _ := h.listPage(path, url.Values{"orderBy": {"creationTimestamp desc"}}); strings.Join(names, ",") != "fw-a,fw-c,fw-b" {
+		t.Errorf("newest first = %v", names)
+	}
+}
+
+// Compute's refusals of list options (recorded: compute-lists-operations-iam).
+func TestListOptionRefusals(t *testing.T) {
+	h := newHarness(t)
+	path := h.firewallList()
+	refusals := []struct {
+		query url.Values
+		want  string
+	}{
+		{url.Values{"maxResults": {"-1"}}, `Invalid value at 'header.max_results' (TYPE_UINT32), \"-1\"`},
+		{url.Values{"maxResults": {"two"}}, `Invalid value at 'header.max_results' (TYPE_UINT32), \"two\"`},
+		{url.Values{"pageToken": {"bogus"}}, "Invalid value for field 'pageToken': 'bogus'. Invalid pagination token"},
+		{url.Values{"filter": {"name eq x"}, "orderBy": {"name"}}, "Specifying both a list filter and sort order is not currently supported"},
+		{url.Values{"orderBy": {"creationTimestamp"}}, "Invalid sort order expression: operator ASC not supported on the specified field."},
+		{url.Values{"orderBy": {"name desc"}}, "Invalid sort order expression: operator DESC not supported on the specified field."},
+		{url.Values{"orderBy": {"description"}}, "Invalid sort order expression: sorting not supported on the specified field."},
+	}
+	for _, refusal := range refusals {
+		recorder := h.expectCode(http.MethodGet, path+"?"+refusal.query.Encode(), nil, 400)
+		if body := recorder.Body.String(); !strings.Contains(body, refusal.want) || !strings.Contains(body, `"reason":"invalid"`) {
+			t.Errorf("%v = %s", refusal.query, body)
+		}
+	}
+}
+
+// A label filter needs the label: a missing label matches neither = nor !=
+// (recorded: compute-lists-operations-iam).
+func TestInstanceLabelFilters(t *testing.T) {
+	h := newHarness(t)
+	h.topology(vmNetA, vmSubnetA, testRangeA)
+	body := vmBody(vmOne, vmSubnetA)
+	body["labels"] = map[string]any{"env": "gl"}
+	h.expectCode(http.MethodPost, zonePath+"/instances", body, 200)
+	for filter, want := range map[string]int{
+		"labels.env = gl": 1, "labels.env = other": 0, "labels.env != gl": 0, "labels.missing != x": 0, "labels.env != other": 1,
+	} {
+		if names, _ := h.listPage(zonePath+"/instances", url.Values{"filter": {filter}}); len(names) != want {
+			t.Errorf("filter %q = %v", filter, names)
+		}
+	}
+}
+
+// Global, regional, and zonal operations list, wait, and delete in their own
+// collection only (recorded: compute-lists-operations-iam).
+func TestOperationsListWaitAndDelete(t *testing.T) {
+	h := newHarness(t)
+	network := decode(t, h.expectCode(http.MethodPost, globalPath+"/networks", map[string]any{keyName: vmNetA, keyAutoSubnets: false}, 200))
+	subnet := decode(t, h.expectCode(http.MethodPost, regionPath+"/subnetworks", map[string]any{
+		keyName: vmSubnetA, keyNetwork: vmNetA, keyIPCIDR: testRangeA,
+	}, 200))
+	instance := decode(t, h.expectCode(http.MethodPost, zonePath+"/instances", vmBody(vmOne, vmSubnetA), 200))
+	for base, operation := range map[string]map[string]any{globalPath: network, regionPath: subnet, zonePath: instance} {
+		name, _ := operation[keyName].(string)
+		if names, _ := h.listPage(base+"/operations", url.Values{"filter": {`name = "` + name + `"`}}); len(names) != 1 {
+			t.Fatalf("%s operations = %v", base, names)
+		}
+		if waited := decode(t, h.expectCode(http.MethodPost, base+"/operations/"+name+"/wait", nil, 200)); waited[keyStatus] != "DONE" {
+			t.Fatalf("wait = %v", waited)
+		}
+		if recorder := h.expectCode(http.MethodDelete, base+"/operations/"+name, nil, 204); recorder.Body.Len() != 0 {
+			t.Fatalf("delete body = %s", recorder.Body.String())
+		}
+		h.expectCode(http.MethodGet, base+"/operations/"+name, nil, 404)
+		h.expectCode(http.MethodDelete, base+"/operations/"+name, nil, 404)
+	}
+	other := "/compute/v1/projects/demo-net/regions/us-east1/operations"
+	if names, _ := h.listPage(other, url.Values{}); len(names) != 0 {
+		t.Fatalf("another region's operations = %v", names)
+	}
+	before, _ := h.listPage(globalPath+"/operations", url.Values{})
+	h.expectCode(http.MethodPost, globalPath+"/networks", map[string]any{keyName: vmNetB, keyAutoSubnets: false}, 200)
+	h.expectCode(http.MethodPost, globalPath+"/networks", map[string]any{keyName: "net-c", keyAutoSubnets: false}, 200)
+	after, _ := h.listPage(globalPath+"/operations", url.Values{})
+	if len(after) != len(before)+2 || !slices.IsSorted(after) {
+		t.Fatalf("operations in name order = %v", after)
+	}
+}
+
+// A network or subnetwork in another project is Shared VPC, a gap; it never
+// resolves to the request project's resource of the same name.
+func TestSharedVPCReferencesAreGaps(t *testing.T) {
+	h := newHarness(t)
+	h.topology(vmNetA, vmSubnetA, testRangeA)
+	foreign := "projects/host-project/global/networks/" + vmNetA
+	instance := vmBody(vmOne, vmSubnetA)
+	instance["networkInterfaces"] = []any{map[string]any{"subnetwork": "projects/host-project/regions/us-central1/subnetworks/" + vmSubnetA}}
+	for path, body := range map[string]map[string]any{
+		globalPath + "/firewalls":   {keyName: "fw", keyNetwork: foreign, "allowed": []any{map[string]any{keyIPProto: "tcp"}}},
+		globalPath + "/routes":      {keyName: "route", keyNetwork: foreign, keyDestRange: "10.9.0.0/16", "nextHopGateway": "default-internet-gateway"},
+		regionPath + "/subnetworks": {keyName: "s2", keyNetwork: foreign, keyIPCIDR: "10.11.0.0/24"},
+		regionPath + "/routers":     {keyName: "r", keyNetwork: foreign, keyNATs: []any{}},
+		zonePath + "/instances":     instance,
+	} {
+		recorder := h.expectCode(http.MethodPost, path, body, 501)
+		if !strings.Contains(recorder.Body.String(), "Shared VPC: a network or subnetwork in another project is not modeled") {
+			t.Errorf("%s = %s", path, recorder.Body.String())
+		}
+	}
+	for verb, path := range map[string]string{
+		http.MethodPost: "/compute/v1/projects/demo-net/enableXpnHost",
+		http.MethodGet:  "/compute/v1/locations/global/firewallPolicies",
+		http.MethodPut:  "/compute/v1/projects/demo-net/global/firewallPolicies/p",
+	} {
+		want := "Compute coverage gap: hierarchical and network firewall policies are not modeled"
+		if strings.Contains(path, "Xpn") {
+			want = "Compute coverage gap: Shared VPC is not modeled"
+		}
+		if recorder := h.expectCode(verb, path, map[string]any{}, 501); !strings.Contains(recorder.Body.String(), want) {
+			t.Errorf("%s %s = %s", verb, path, recorder.Body.String())
+		}
+	}
+}
+
+// Subnetwork policies read at the requested version, and their conditions see
+// resource.name and resource.service but no resource.type (recorded:
+// compute-lists-operations-iam).
+func TestSubnetworkPolicyVersionsAndConditionAttributes(t *testing.T) {
+	h := newHarness(t)
+	h.topology(vmNetA, vmSubnetA, testRangeA)
+	policyPath := regionPath + "/subnetworks/" + vmSubnetA
+	if got := decode(t, h.expectCode(http.MethodGet, policyPath+"/getIamPolicy?optionsRequestedPolicyVersion=2", nil, 200)); fieldSet(got) != "etag" {
+		t.Fatalf("empty policy = %v", got)
+	}
+	h.expectConditionAttributes(policyPath)
+	v3 := decode(t, h.expectCode(http.MethodGet, policyPath+"/getIamPolicy?optionsRequestedPolicyVersion=3", nil, 200))
+	if v3["version"] != float64(3) || at3(v3, "condition") == nil {
+		t.Fatalf("v3 read = %v", v3)
+	}
+	for _, query := range []string{"", "?optionsRequestedPolicyVersion=1"} {
+		v1 := decode(t, h.expectCode(http.MethodGet, policyPath+"/getIamPolicy"+query, nil, 200))
+		role, _ := at3(v1, "role").(string)
+		if v1["version"] != float64(1) || at3(v1, "condition") != nil || !strings.HasPrefix(role, "roles/compute.networkViewer_withcond_") {
+			t.Fatalf("v1 read %q = %v", query, v1)
+		}
+	}
+	h.expectCode(http.MethodGet, regionPath+"/subnetworks/missing/getIamPolicy", nil, 404)
+	if recorder := h.expectCode(http.MethodPost, policyPath+"/setIamPolicy", map[string]any{"bindings": []any{}, "etag": "x"}, 501); !strings.Contains(recorder.Body.String(), "deprecated top-level bindings") {
+		t.Fatalf("flattened body = %s", recorder.Body.String())
+	}
+}
+
+// at3 reads one field of a policy's first binding.
+func at3(policy map[string]any, field string) any {
+	bindings, _ := policy["bindings"].([]any)
+	if len(bindings) == 0 {
+		return nil
+	}
+	binding, _ := bindings[0].(map[string]any)
+	return binding[field]
+}
+
+// expectConditionAttributes grants a viewer networkViewer on the subnetwork
+// under one condition at a time and checks what the viewer may read.
+func (h *harness) expectConditionAttributes(policyPath string) {
+	h.t.Helper()
+	for expression, want := range map[string]int{
+		`resource.name == "projects/demo-net/regions/us-central1/subnetworks/subnet-a"`: 200,
+		`resource.service == "compute.googleapis.com"`:                                  200,
+		`resource.type == "compute.googleapis.com/Subnetwork"`:                          403,
+		`resource.name == "projects/demo-net/regions/us-central1/subnetworks/other"`:    403,
+	} {
+		h.expectCode(http.MethodPost, policyPath+"/setIamPolicy", map[string]any{"policy": map[string]any{"version": 3, "bindings": []any{
+			map[string]any{"role": "roles/compute.networkViewer", "members": []any{"serviceAccount:viewer@demo-net.iam.gserviceaccount.com"},
+				"condition": map[string]any{"title": "t", "expression": expression}},
+		}}}, 200)
+		if got := h.invokeAs("viewer", http.MethodGet, policyPath, nil).Code; got != want {
+			h.t.Errorf("%s: get = %d, want %d", expression, got, want)
+		}
+	}
+	if got := h.invokeAs("viewer", http.MethodGet, globalPath+"/networks/"+vmNetA, nil).Code; got != 403 {
+		h.t.Errorf("network without a grant = %d", got)
 	}
 }

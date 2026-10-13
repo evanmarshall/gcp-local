@@ -147,6 +147,11 @@ func badRequest(message string) error {
 	return &computeError{response: wireError(400, "badRequest", message), message: message}
 }
 
+// invalidField refuses a request parameter with Compute's "invalid" reason.
+func invalidField(message string) error {
+	return &computeError{response: wireError(400, "invalid", message), message: message}
+}
+
 // invalidValue is the request parser's refusal of a value of the wrong JSON
 // type: it carries a status and a BadRequest detail and no domain (recorded).
 func invalidValue(field, kind, raw string) error {

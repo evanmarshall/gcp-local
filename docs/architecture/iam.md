@@ -30,9 +30,9 @@ A resource that leaves the index takes its policy with it, whichever provider de
 
 ## Conditions, deny rules, and boundaries
 
-Only allow-binding conditions on Storage are recorded against GCP (`storage-iam-conditions`). Deny rules and principal access boundaries are enforced locally and not recorded.
+Only allow-binding conditions on Storage and Compute subnetworks are recorded against GCP (`storage-iam-conditions`, `compute-lists-operations-iam`). Deny rules and principal access boundaries are enforced locally and not recorded.
 
-**Conditions (CEL).** Expressions see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers supply the `resource.*` values through `iam.Target.Attributes` (or `provider.Gate.Attributes`); Storage, Cloud SQL, Spanner, Firestore, Memorystore, Secret Manager, and Cloud KMS do (Memorystore supplies `resource.name` and `resource.service`). IAM service accounts don't, because GCP doesn't (recorded in `serviceaccount-lifecycle-authorization`). An attribute the provider didn't supply is absent, so reading it is an evaluation error, not `""`. An allow binding grants only when its condition returns `true`; `false`, an error, or a non-boolean grants nothing. So `!resource.name.startsWith("x")` grants nothing on a service without `resource.name`. GCP documents the same outcome: a condition part that reads an attribute the resource doesn't provide "is never interpreted as granting access" ([attribute reference](https://cloud.google.com/iam/docs/conditions-attribute-reference)).
+**Conditions (CEL).** Expressions see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers supply the `resource.*` values through `iam.Target.Attributes` (or `provider.Gate.Attributes`); Storage, Cloud SQL, Spanner, Firestore, Memorystore, Secret Manager, and Cloud KMS do (Memorystore supplies `resource.name` and `resource.service`). Compute supplies `resource.name` (`projects/P/regions/R/subnetworks/S`) and `resource.service` for its resources, and no `resource.type`: on GCP a condition `resource.type == "compute.googleapis.com/Subnetwork"` grants nothing (recorded). IAM service accounts don't, because GCP doesn't (recorded in `serviceaccount-lifecycle-authorization`). An attribute the provider didn't supply is absent, so reading it is an evaluation error, not `""`. An allow binding grants only when its condition returns `true`; `false`, an error, or a non-boolean grants nothing. So `!resource.name.startsWith("x")` grants nothing on a service without `resource.name`. GCP documents the same outcome: a condition part that reads an attribute the resource doesn't provide "is never interpreted as granting access" ([attribute reference](https://cloud.google.com/iam/docs/conditions-attribute-reference)).
 
 **Deny rules** (`denyRules` on a v3 policy) are checked at every node of the target's ancestry, each rule independently:
 
@@ -53,6 +53,19 @@ Not recorded: deny rules and boundaries need organization-level setup (`roles/ia
 ## Organization policy
 
 Organization policies are a separate family from IAM: the engine stores them per hierarchy node, and providers check them at the mutation, after `Authorize` allows the request, with `CheckOrgPolicy` (or `SetPolicyFor` for a policy write's members). A violation is an `*OrgPolicyError` the provider renders as its service does; the decision record gets an `org-policy` signal, so a trace tells a constraint refusal (IAM checks allowed, signal `violation`) from an IAM denial. `dryRunSpec` verdicts are only traced. Constraints, evaluation, and evidence: [Organization Policy](../services/security/orgpolicy.md).
+
+## Policy versions and audit configs
+
+`getIamPolicy` returns the stored policy at the requested version, on every service (`Policy.View`, with `provider.RequestedPolicyVersion` reading the request). Recorded on project IAM (`project-iam-policy-versions`) and Compute subnetworks (`compute-lists-operations-iam`):
+
+- A policy with a conditional binding reads as version 3 only when version 3 is requested. Otherwise it reads as version 1 and each conditional binding loses its condition and its role gains `_withcond_` and a 20-character hex hash.
+- A policy without conditions reads as version 1, whatever was written.
+- A requested version above 3 is 400. Any other, 2 and negative included, reads as version 1.
+- A write with an `etag` to a policy that holds a condition must say version 3, or it is 400.
+
+Storage returns its stored policy at any requested version: a version-1 read of a conditional bucket policy is 200 (recorded: `storage-iam-conditions`; the body isn't compared), though the bucket reference says the request fails.
+
+`auditConfigs` are stored and returned on projects, folders, and organizations. They aren't enforced: no audit logs are written. On any other resource they return 501.
 
 ## Groups and domains
 

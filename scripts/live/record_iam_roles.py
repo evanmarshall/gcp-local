@@ -27,7 +27,7 @@ ROLES = {
     # snapshots; each entry must be re-recorded read-only before its
     # checksummed manifest snapshot is promoted.
     "run": ("run.admin", "run.developer", "run.invoker", "run.viewer"),
-    "compute": ("compute.admin", "compute.networkAdmin", "compute.viewer"),
+    "compute": ("compute.admin", "compute.networkAdmin", "compute.networkViewer", "compute.viewer"),
     "secretmanager": (
         "secretmanager.admin", "secretmanager.secretAccessor", "secretmanager.viewer",
     ),

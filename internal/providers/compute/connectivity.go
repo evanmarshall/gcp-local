@@ -55,7 +55,7 @@ func (p *Provider) executeConnectivity(call gateway.Call, request *gateway.RESTR
 	case methodConnectivityCreate:
 		return p.createConnectivity(request, scope)
 	case methodConnectivityList:
-		return p.listConnectivity(scope)
+		return p.listConnectivity(request, scope)
 	case methodConnectivityGet:
 		return p.getConnectivity(request, scope)
 	case methodConnectivityRerun:
@@ -227,15 +227,21 @@ func (p *Provider) getConnectivity(request *gateway.RESTRequest, scope state.Sco
 }
 
 // listConnectivity returns the stored tests in name order.
-func (p *Provider) listConnectivity(scope state.Scope) (*gateway.RESTResponse, error) {
-	items := []any{}
+func (p *Provider) listConnectivity(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	var items []any
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		for _, name := range sortedKeys(s.connectivity) {
 			items = append(items, connectivityDocument(scope.Project, s.connectivity[name]))
 		}
 		return nil
 	})
-	return &gateway.RESTResponse{JSON: map[string]any{"resources": items}}, nil
+	// The reference documents no default or largest page size; a filter or
+	// orderBy is a gap.
+	page, next, err := provider.Page(items, request.Query, provider.Paging{Default: 1000, Max: 1000}, gap)
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: provider.ListBody("resources", page, next)}, nil
 }
 
 // deleteConnectivity removes one stored test and reports the operation.

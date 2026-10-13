@@ -661,6 +661,9 @@ func computeRoutes() []byte {
 		base      = "/compute/v1/projects/{project}"
 		globalNet = base + "/global/networks"
 		globalFW  = base + "/global/firewalls"
+		unmodeled = "/compute/v1/{path=**}"
+		// unmodeledMethod is the provider's explicit gap for every other path.
+		unmodeledMethod = "compute.unmodeled"
 	)
 	rows := []route{
 		{"compute.networks.create", http.MethodPost, globalNet, true, false},
@@ -670,8 +673,8 @@ func computeRoutes() []byte {
 		{"compute.subnetworks.create", http.MethodPost, base + "/regions/{region}/subnetworks", true, false},
 		{"compute.subnetworks.list", http.MethodGet, base + "/regions/{region}/subnetworks", false, false},
 		{"compute.subnetworks.get", http.MethodGet, base + "/regions/{region}/subnetworks/{subnetwork}", false, false},
-		{"compute.subnetworks.getIamPolicy", http.MethodGet, base + "/regions/{region}/subnetworks/{subnetwork}:getIamPolicy", false, false},
-		{"compute.subnetworks.setIamPolicy", http.MethodPost, base + "/regions/{region}/subnetworks/{subnetwork}:setIamPolicy", true, false},
+		{"compute.subnetworks.getIamPolicy", http.MethodGet, base + "/regions/{region}/subnetworks/{subnetwork}/getIamPolicy", false, false},
+		{"compute.subnetworks.setIamPolicy", http.MethodPost, base + "/regions/{region}/subnetworks/{subnetwork}/setIamPolicy", true, false},
 		{"compute.subnetworks.delete", http.MethodDelete, base + "/regions/{region}/subnetworks/{subnetwork}", false, false},
 		{"compute.firewalls.create", http.MethodPost, globalFW, true, false},
 		{"compute.firewalls.list", http.MethodGet, globalFW, false, false},
@@ -701,6 +704,22 @@ func computeRoutes() []byte {
 		{"compute.instances.get", http.MethodGet, base + "/zones/{zone}/instances/{instance}", false, false},
 		{"compute.instances.delete", http.MethodDelete, base + "/zones/{zone}/instances/{instance}", false, false},
 		{"compute.zoneOperations.get", http.MethodGet, base + "/zones/{zone}/operations/{operation}", false, false},
+		{"compute.regionOperations.list", http.MethodGet, base + "/regions/{region}/operations", false, false},
+		{"compute.zoneOperations.list", http.MethodGet, base + "/zones/{zone}/operations", false, false},
+		{"compute.globalOperations.wait", http.MethodPost, base + "/global/operations/{operation}/wait", false, false},
+		{"compute.regionOperations.wait", http.MethodPost, base + "/regions/{region}/operations/{operation}/wait", false, false},
+		{"compute.zoneOperations.wait", http.MethodPost, base + "/zones/{zone}/operations/{operation}/wait", false, false},
+		{"compute.globalOperations.delete", http.MethodDelete, base + "/global/operations/{operation}", false, false},
+		{"compute.regionOperations.delete", http.MethodDelete, base + "/regions/{region}/operations/{operation}", false, false},
+		{"compute.zoneOperations.delete", http.MethodDelete, base + "/zones/{zone}/operations/{operation}", false, false},
+		// Every other Compute v1 path (Shared VPC, firewall policies, and the
+		// rest) reaches the provider's explicit gap instead of a later table,
+		// such as the Storage XML API's /{bucket}/{object}.
+		{unmodeledMethod, http.MethodGet, unmodeled, false, false},
+		{unmodeledMethod, http.MethodPost, unmodeled, true, false},
+		{unmodeledMethod, http.MethodPut, unmodeled, true, false},
+		{unmodeledMethod, http.MethodPatch, unmodeled, true, false},
+		{unmodeledMethod, http.MethodDelete, unmodeled, false, false},
 	}
 	return routeTable("ComputeRoutes", "is the Compute Engine v1 route table slice.", handWritten("main.go"), rows)
 }

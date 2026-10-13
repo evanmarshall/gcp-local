@@ -63,6 +63,7 @@ def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
         "compute-networking-test_networking",
         "compute-vmconnectivity-test_vmconnectivity",
         "compute-vmserviceaccounts-test_vmserviceaccounts",
+        "compute-listsiam-test_listsiam",
     }
     assert set(names["compute"]) == compute
     assert sorted(entry.name for entry in alone) == [

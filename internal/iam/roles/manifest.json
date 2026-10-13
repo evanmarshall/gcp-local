@@ -138,6 +138,11 @@
       "sha256": "9ed3b1f7df8400f2b03f8841a96b51088307db55d032e81de7492ec0915a4892"
     },
     {
+      "file": "compute/compute.networkViewer.json",
+      "name": "roles/compute.networkViewer",
+      "sha256": "b17edaf8f26f38480472345dc406397ce32e0a0f2469d279d584547a555d341e"
+    },
+    {
       "file": "compute/compute.viewer.json",
       "name": "roles/compute.viewer",
       "sha256": "9c4cc90423e20f8bebd6a89c26ac002bb983aeb5880f352d1f2a41dc9e6dd449"

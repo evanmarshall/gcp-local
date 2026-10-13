@@ -1,0 +1,445 @@
+{
+  "compute-lists-operations-iam": {
+    "recorded-date": "13-10-2026, 04:38:24",
+    "recorded-content": {
+      "inserts": {
+        "instance": {
+          "kind": "compute#operation",
+          "status": "DONE"
+        },
+        "network": {
+          "kind": "compute#operation",
+          "status": "DONE"
+        },
+        "subnetwork": {
+          "kind": "compute#operation",
+          "status": "DONE"
+        }
+      },
+      "firewalls-filter-regex": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-b",
+          "<prefix>-fw-c"
+        ],
+        "next_page": false
+      },
+      "firewalls-filter-regex-quoted": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-b",
+          "<prefix>-fw-c"
+        ],
+        "next_page": false
+      },
+      "firewalls-filter-regex-ne": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-c"
+        ],
+        "next_page": false
+      },
+      "firewalls-filter-equal": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-b"
+        ],
+        "next_page": false
+      },
+      "firewalls-filter-equal-bare": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-b"
+        ],
+        "next_page": false
+      },
+      "firewalls-filter-not-equal": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-c"
+        ],
+        "next_page": false
+      },
+      "firewalls-filter-and": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-b"
+        ],
+        "next_page": false
+      },
+      "firewalls-order-name-unfiltered": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-b",
+          "<prefix>-fw-c"
+        ],
+        "next_page": false
+      },
+      "firewalls-order-created-desc-unfiltered": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-c",
+          "<prefix>-fw-b"
+        ],
+        "next_page": false
+      },
+      "firewalls-order-created-asc-unfiltered": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value for field 'orderBy': 'creationTimestamp'. Invalid sort order expression: operator ASC not supported on the specified field.",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-order-name-desc-unfiltered": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value for field 'orderBy': 'name desc'. Invalid sort order expression: operator DESC not supported on the specified field.",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-order-description-unfiltered": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value for field 'orderBy': 'description'. Invalid sort order expression: sorting not supported on the specified field.",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-order-name": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value for field 'orderBy': 'name'. Specifying both a list filter and sort order is not currently supported",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-order-created-desc": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value for field 'orderBy': 'creationTimestamp desc'. Specifying both a list filter and sort order is not currently supported",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-order-created-asc": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value for field 'orderBy': 'creationTimestamp'. Specifying both a list filter and sort order is not currently supported",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-order-name-desc": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value for field 'orderBy': 'name desc'. Specifying both a list filter and sort order is not currently supported",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-max-results-zero": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-b",
+          "<prefix>-fw-c"
+        ],
+        "next_page": false
+      },
+      "firewalls-max-results-over": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-b",
+          "<prefix>-fw-c"
+        ],
+        "next_page": false
+      },
+      "firewalls-max-results-negative": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value at 'header.max_results' (TYPE_UINT32), \"-1\"",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-max-results-text": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value at 'header.max_results' (TYPE_UINT32), \"two\"",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-page-token-unknown": {
+        "code": 400,
+        "http_status": 400,
+        "message": "Invalid value for field 'pageToken': 'gcp-local-unknown'. Invalid pagination token",
+        "reasons": [
+          "invalid"
+        ]
+      },
+      "firewalls-page-1": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-a",
+          "<prefix>-fw-b"
+        ],
+        "next_page": true
+      },
+      "firewalls-page-2": {
+        "http_status": 200,
+        "kind": "compute#firewallList",
+        "names": [
+          "<prefix>-fw-c"
+        ],
+        "next_page": false
+      },
+      "instances-label-equal": {
+        "http_status": 200,
+        "kind": "compute#instanceList",
+        "names": [
+          "<prefix>-vm"
+        ],
+        "next_page": false
+      },
+      "instances-label-other-value": {
+        "http_status": 200,
+        "kind": "compute#instanceList",
+        "names": [],
+        "next_page": false
+      },
+      "instances-label-not-equal": {
+        "http_status": 200,
+        "kind": "compute#instanceList",
+        "names": [],
+        "next_page": false
+      },
+      "instances-label-missing-not-equal": {
+        "http_status": 200,
+        "kind": "compute#instanceList",
+        "names": [],
+        "next_page": false
+      },
+      "global-operations-list": {
+        "http_status": 200,
+        "items": [
+          {
+            "operationType": "insert",
+            "same_name": true,
+            "status": "DONE"
+          }
+        ],
+        "kind": "compute#operationList"
+      },
+      "global-operation-wait": {
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "global-operation-delete": {
+        "body": null,
+        "http_status": 204
+      },
+      "global-operation-after-delete": {
+        "http_status": 404
+      },
+      "region-operations-list": {
+        "http_status": 200,
+        "items": [
+          {
+            "operationType": "insert",
+            "same_name": true,
+            "status": "DONE"
+          }
+        ],
+        "kind": "compute#operationList"
+      },
+      "region-operation-wait": {
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "region-operation-delete": {
+        "body": null,
+        "http_status": 204
+      },
+      "region-operation-after-delete": {
+        "http_status": 404
+      },
+      "zone-operations-list": {
+        "http_status": 200,
+        "items": [
+          {
+            "operationType": "insert",
+            "same_name": true,
+            "status": "DONE"
+          }
+        ],
+        "kind": "compute#operationList"
+      },
+      "zone-operation-wait": {
+        "http_status": 200,
+        "kind": "compute#operation",
+        "operationType": "insert",
+        "status": "DONE"
+      },
+      "zone-operation-delete": {
+        "body": null,
+        "http_status": 204
+      },
+      "zone-operation-after-delete": {
+        "http_status": 404
+      },
+      "subnetwork-policy-initial": {
+        "bindings": [],
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200,
+        "version": null
+      },
+      "subnetwork-policy-version-2": {
+        "bindings": [],
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200,
+        "version": null
+      },
+      "subnetwork-policy-set-conditional": {
+        "bindings": [
+          {
+            "condition": {
+              "expression": "resource.name == \"projects/<project>/regions/us-central1/subnetworks/<prefix>-s\"",
+              "title": "gcp-local-conformance"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/compute.networkViewer",
+            "withcond_suffix": null
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "version": 3
+      },
+      "subnetwork-policy-read-v3": {
+        "bindings": [
+          {
+            "condition": {
+              "expression": "resource.name == \"projects/<project>/regions/us-central1/subnetworks/<prefix>-s\"",
+              "title": "gcp-local-conformance"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/compute.networkViewer",
+            "withcond_suffix": null
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "version": 3
+      },
+      "subnetwork-policy-read-v1": {
+        "bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/compute.networkViewer",
+            "withcond_suffix": {
+              "hex": true,
+              "length": 20
+            }
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "version": 1
+      },
+      "subnetwork-policy-read-default": {
+        "bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/compute.networkViewer",
+            "withcond_suffix": {
+              "hex": true,
+              "length": 20
+            }
+          }
+        ],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "version": 1
+      },
+      "subnetwork-attribute-grants": {
+        "name": {
+          "http_status": 200
+        },
+        "none": {
+          "http_status": 200
+        },
+        "service": {
+          "http_status": 200
+        },
+        "time": {
+          "http_status": 200
+        },
+        "type": {
+          "http_status": 403
+        }
+      },
+      "network-without-grant": {
+        "http_status": 403
+      },
+      "cleanup": {
+        "owned_resources_absent": true
+      }
+    }
+  }
+}

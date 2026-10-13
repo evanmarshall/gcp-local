@@ -2,13 +2,18 @@ package compute
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
+	"net/url"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
 
@@ -18,7 +23,8 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodNetworksCreate, methodNetworksGet, methodNetworksList, methodNetworksDelete,
 		methodNetworksAddPeering, methodNetworksRemovePeering:
 		return p.executeNetwork(call, request, scope)
-	case methodSubnetworksCreate, methodSubnetworksGet, methodSubnetworksList, methodSubnetworksDelete:
+	case methodSubnetworksCreate, methodSubnetworksGet, methodSubnetworksList, methodSubnetworksDelete,
+		methodSubnetworksGetIam, methodSubnetworksSetIam:
 		return p.executeSubnetwork(call, request, scope)
 	case methodFirewallsCreate, methodFirewallsGet, methodFirewallsList, methodFirewallsDelete, methodFirewallsUpdate:
 		return p.executeFirewall(call, request, scope)
@@ -38,17 +44,35 @@ func (p *Provider) executeAnalysis(call gateway.Call, request *gateway.RESTReque
 	switch call.Method {
 	case methodConnectivityRerun, methodConnectivityCreate, methodConnectivityGet, methodConnectivityList, methodConnectivityDelete:
 		return p.executeConnectivity(call, request, scope)
-	case methodOperationsGet:
-		return p.operationGet(request, scope, "global")
-	case methodRegionOperationsGet:
-		return p.operationGet(request, scope, "region")
-	case methodZoneOperationsGet:
-		return p.operationGet(request, scope, keyZone)
-	case methodOperationsList:
-		return p.operationsList(request, scope, "global")
+	case methodOperationsGet, methodRegionOperationsGet, methodZoneOperationsGet,
+		methodOperationsWait, methodRegionOperationsWait, methodZoneOperationsWait:
+		// Every operation is DONE, so wait returns at once, as it does for a
+		// finished operation.
+		return p.operationGet(request, scope, operationKind(request.Path))
+	case methodOperationsList, methodRegionOperationsList, methodZoneOperationsList:
+		return p.operationsList(request, scope, operationKind(request.Path))
+	case methodOperationsDelete, methodRegionOperationsDelete, methodZoneOperationsDelete:
+		return p.operationDelete(request, scope, operationKind(request.Path))
 	default:
 		return nil, gap("this method is not implemented")
 	}
+}
+
+// operationKind is the scope of the operations collection a path addresses.
+func operationKind(path map[string]string) string {
+	switch {
+	case path[keyZone] != "":
+		return keyZone
+	case path[keyRegion] != "":
+		return keyRegion
+	default:
+		return "global"
+	}
+}
+
+// operationLocation is the region or zone a path's operations collection is in.
+func operationLocation(path map[string]string) string {
+	return path[keyRegion] + path[keyZone]
 }
 
 // networkDocument renders the recorded network wire shape. Optional fields
@@ -196,7 +220,7 @@ func operationDocument(project string, record *operationRecord) map[string]any {
 		"user":          "gcp-local",
 	}
 	switch record.Kind {
-	case "region":
+	case keyRegion:
 		entry[keySelfLink] = regionalSelfLink(project, record.Region, "operations", record.Name)
 		entry[keyRegion] = regionLink(project, record.Region)
 	case keyZone:
@@ -220,23 +244,41 @@ func operationDocument(project string, record *operationRecord) map[string]any {
 }
 
 func (p *Provider) operationGet(request *gateway.RESTRequest, scope state.Scope, kind string) (*gateway.RESTResponse, error) {
-	name := scope.Project + "/" + kind + "/" + request.Path["operation"]
-	p.mu.RLock()
 	var document map[string]any
-	if record := p.records[name]; record != nil {
+	p.mu.RLock()
+	if record := p.records[operationKey(scope, kind, request.Path)]; record != nil {
 		document = operationDocument(scope.Project, record)
 	}
 	p.mu.RUnlock()
 	if document == nil {
-		return nil, notFound(operationRef(scope.Project, kind, request.Path["region"], request.Path[keyZone], request.Path["operation"]))
+		return nil, notFound(operationRef(scope.Project, kind, request.Path[keyRegion], request.Path[keyZone], request.Path["operation"]))
 	}
 	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// operationKey is an operation record's key: project, scope kind, its region
+// or zone, and name, so a regional operation is found only in its region.
+func operationKey(scope state.Scope, kind string, path map[string]string) string {
+	return scope.Project + "/" + kind + "/" + operationLocation(path) + "/" + path["operation"]
+}
+
+// operationDelete forgets one operation; its work is unaffected.
+func (p *Provider) operationDelete(request *gateway.RESTRequest, scope state.Scope, kind string) (*gateway.RESTResponse, error) {
+	key := operationKey(scope, kind, request.Path)
+	p.mu.Lock()
+	_, found := p.records[key]
+	delete(p.records, key)
+	p.mu.Unlock()
+	if !found {
+		return nil, notFound(operationRef(scope.Project, kind, request.Path[keyRegion], request.Path[keyZone], request.Path["operation"]))
+	}
+	return &gateway.RESTResponse{Status: http.StatusNoContent}, nil
 }
 
 // operationRef names one operation in Compute's not-found message.
 func operationRef(project, kind, region, zone, name string) string {
 	switch kind {
-	case "region":
+	case keyRegion:
 		return regionalRef(project, region, "operations", name)
 	case keyZone:
 		return zonalRef(project, zone, "operations", name)
@@ -245,22 +287,30 @@ func operationRef(project, kind, region, zone, name string) string {
 	}
 }
 
-// operationsList returns the scope's operations collection.
-func (p *Provider) operationsList(_ *gateway.RESTRequest, scope state.Scope, kind string) (*gateway.RESTResponse, error) {
+// operationsList returns one page of the request's region, zone, or global
+// operations collection.
+func (p *Provider) operationsList(request *gateway.RESTRequest, scope state.Scope, kind string) (*gateway.RESTResponse, error) {
+	options, err := parseList(request.Query, false)
+	if err != nil {
+		return nil, err
+	}
+	prefix := scope.Project + "/" + kind + "/" + operationLocation(request.Path) + "/"
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-	names := make([]string, 0, len(p.records))
-	for name, record := range p.records {
-		if record.Kind == kind && strings.HasPrefix(name, scope.Project+"/") {
-			names = append(names, name)
+	keys := make([]string, 0, len(p.records))
+	for key := range p.records {
+		if strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
 		}
 	}
-	sort.Strings(names)
-	items := make([]any, 0, len(names))
-	for _, name := range names {
-		items = append(items, operationDocument(scope.Project, p.records[name]))
+	sort.Strings(keys)
+	var items []map[string]any
+	for _, key := range keys {
+		if document := operationDocument(scope.Project, p.records[key]); options.match(document) {
+			items = append(items, document)
+		}
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{keyItems: items}}, nil
+	p.mu.RUnlock()
+	return options.page(items, "compute#operationList")
 }
 
 // newOperation registers the completed compute operation for a realized
@@ -285,13 +335,13 @@ func (p *Provider) finishOperation(scope state.Scope, kind, region, opType, targ
 	}); scopeErr != nil {
 		return nil, gap("allocate the compute operation")
 	}
-	suffix := strconv.FormatInt(generation, 10)
+	// Named like Compute's operation-MILLIS-..., so name order is creation order.
 	record := &operationRecord{
-		ID: "op-" + suffix, Name: "operation-" + suffix, Kind: kind, Region: region,
-		Type: opType, Target: target, Created: now, Done: true, Error: failure,
+		ID: strconv.FormatInt(generation, 10), Name: fmt.Sprintf("operation-%013d-%08d", now.UnixMilli(), generation),
+		Kind: kind, Region: region, Type: opType, Target: target, Created: now, Done: true, Error: failure,
 	}
 	p.mu.Lock()
-	p.records[scope.Project+"/"+kind+"/"+record.Name] = record
+	p.records[scope.Project+"/"+kind+"/"+region+"/"+record.Name] = record
 	p.mu.Unlock()
 	return &gateway.RESTResponse{Status: 200, Headers: http.Header{}, JSON: operationDocument(scope.Project, record)}, nil
 }
@@ -322,4 +372,224 @@ func routerDocument(project string, record *routerRecord) map[string]any {
 		keyNATs:        nats,
 		keyDescription: record.Description,
 	}
+}
+
+// listOptions is a list request's filter, order, and page, as the Compute v1
+// list methods document them.
+type listOptions struct {
+	terms  []filterTerm
+	newest bool       // orderBy "creationTimestamp desc"
+	paging url.Values // pageSize and pageToken for provider.Page
+	token  string
+}
+
+// filterTerm is one comparison of a list filter: an AIP-160 = or != on a
+// value, or a regular-expression eq or ne that must match the whole field.
+type filterTerm struct {
+	field  string
+	negate bool
+	value  string
+	regex  *regexp.Regexp
+}
+
+// maxListResults is Compute's default and largest page size.
+const maxListResults = 500
+
+// parseList reads a list request's options (recorded: compute-lists-operations-iam).
+// labeled reports whether the collection has labels a filter can name.
+func parseList(query url.Values, labeled bool) (listOptions, error) {
+	options := listOptions{paging: url.Values{}}
+	filter, order := strings.TrimSpace(query.Get("filter")), query.Get("orderBy")
+	if filter != "" && order != "" {
+		return listOptions{}, invalidField(fmt.Sprintf("Invalid value for field 'orderBy': '%s'. Specifying both a list filter and sort order is not currently supported", order))
+	}
+	newest, err := parseOrder(order)
+	if err != nil {
+		return listOptions{}, err
+	}
+	options.newest = newest
+	// maxResults is a uint32 from 0 to 500: 0 is the default, and a larger
+	// value is accepted as 500.
+	if text := query.Get("maxResults"); text != "" {
+		size, err := strconv.ParseUint(text, 10, 32)
+		if err != nil {
+			return listOptions{}, invalidField("Invalid value at 'header.max_results' (TYPE_UINT32), " + strconv.Quote(text))
+		}
+		if size > 0 {
+			options.paging.Set("pageSize", strconv.FormatUint(size, 10))
+		}
+	}
+	token := query.Get("pageToken")
+	options.paging.Set("pageToken", token)
+	options.token = token
+	terms, err := parseFilter(filter, labeled)
+	options.terms = terms
+	return options, err
+}
+
+// parseOrder reads orderBy: name (the default) or creationTimestamp desc,
+// which reports newest. Compute refuses the other direction of either and any
+// other field (recorded: compute-lists-operations-iam).
+func parseOrder(order string) (bool, error) {
+	field, direction, _ := strings.Cut(strings.TrimSpace(order), " ")
+	direction = strings.ToLower(strings.TrimSpace(direction))
+	var reason string
+	switch {
+	case order == "" || (field == keyName && (direction == "" || direction == "asc")):
+		return false, nil
+	case field == keyTimestamp && direction == "desc":
+		return true, nil
+	case field == keyName:
+		reason = "operator DESC not supported on the specified field."
+	case field == keyTimestamp:
+		reason = "operator ASC not supported on the specified field."
+	default:
+		reason = "sorting not supported on the specified field."
+	}
+	return false, invalidField(fmt.Sprintf("Invalid value for field 'orderBy': '%s'. Invalid sort order expression: %s", order, reason))
+}
+
+// filterComparison matches one comparison: a field, an operator, and the
+// value, quoted or bare.
+var filterComparison = regexp.MustCompile(`^([a-zA-Z][a-zA-Z0-9_.-]*)\s*(!=|=|\s(?:eq|ne)\s)\s*(.*)$`)
+
+// parseFilter parses a Compute list filter: one bare comparison, or
+// parenthesized comparisons joined by spaces or AND, all AIP-160 (=, !=) or
+// all regular expressions (eq, ne). Fields are name and, on a labeled
+// collection, labels.KEY. Every other form is a gap, never ignored.
+func parseFilter(filter string, labeled bool) ([]filterTerm, error) {
+	if filter == "" {
+		return nil, nil
+	}
+	var parts []string
+	if strings.HasPrefix(filter, "(") {
+		for rest := filter; rest != ""; rest = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rest), "AND ")) {
+			closing := strings.Index(rest, ")")
+			if !strings.HasPrefix(rest, "(") || closing < 0 {
+				return nil, gap("this list filter form is not modeled")
+			}
+			parts = append(parts, strings.TrimSpace(rest[1:closing]))
+			rest = rest[closing+1:]
+		}
+	} else {
+		parts = []string{filter}
+	}
+	terms := make([]filterTerm, 0, len(parts))
+	for _, part := range parts {
+		term, err := parseTerm(part, labeled)
+		if err != nil {
+			return nil, err
+		}
+		if len(terms) > 0 && (term.regex == nil) != (terms[0].regex == nil) {
+			return nil, gap("a list filter mixing regular expressions and comparisons is not modeled")
+		}
+		terms = append(terms, term)
+	}
+	return terms, nil
+}
+
+// parseTerm parses one comparison of a filter.
+func parseTerm(text string, labeled bool) (filterTerm, error) {
+	match := filterComparison.FindStringSubmatch(text)
+	if match == nil {
+		return filterTerm{}, gap("this list filter form is not modeled")
+	}
+	field, operator, value := match[1], strings.TrimSpace(match[2]), unquote(strings.TrimSpace(match[3]))
+	_, label := strings.CutPrefix(field, "labels.")
+	if field != keyName && (!label || !labeled) {
+		return filterTerm{}, gap("a list filter on " + field + " is not modeled")
+	}
+	term := filterTerm{field: field, negate: operator == "!=" || operator == "ne", value: value}
+	if operator != "eq" && operator != "ne" {
+		if strings.Contains(value, "*") {
+			return filterTerm{}, gap("a list filter wildcard is not modeled")
+		}
+		return term, nil
+	}
+	pattern, err := filterRegex(value, label)
+	term.regex = pattern
+	return term, err
+}
+
+// filterRegex compiles an eq or ne filter value, which must match the whole
+// field. Regular expressions on labels are a gap.
+func filterRegex(value string, label bool) (*regexp.Regexp, error) {
+	if label {
+		return nil, gap("a regular-expression list filter on labels is not modeled")
+	}
+	pattern, err := regexp.Compile("^(?:" + value + ")$")
+	if err != nil {
+		return nil, gap("this list filter regular expression is not modeled")
+	}
+	return pattern, nil
+}
+
+// unquote strips one pair of double or single quotes.
+func unquote(value string) string {
+	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
+		return strings.ReplaceAll(value[1:len(value)-1], `\"`, `"`)
+	}
+	return value
+}
+
+// match reports whether a rendered document passes every filter term.
+func (o listOptions) match(document map[string]any) bool {
+	for _, term := range o.terms {
+		// A missing label matches neither = nor != (recorded).
+		value, present := fieldText(document, term.field)
+		equal := value == term.value
+		if term.regex != nil {
+			equal = term.regex.MatchString(value)
+		}
+		if !present || equal == term.negate {
+			return false
+		}
+	}
+	return true
+}
+
+// fieldText reads a filterable field of a rendered document: name or one
+// label's value.
+func fieldText(document map[string]any, field string) (string, bool) {
+	if key, label := strings.CutPrefix(field, "labels."); label {
+		labels, _ := document["labels"].(map[string]string)
+		value, present := labels[key]
+		return value, present
+	}
+	value, present := document[field].(string)
+	return value, present
+}
+
+// page orders the matched documents and renders the requested page as a
+// Compute list response.
+func (o listOptions) page(items []map[string]any, kind string) (*gateway.RESTResponse, error) {
+	if o.newest {
+		slices.SortStableFunc(items, func(a, b map[string]any) int { return createdAt(b).Compare(createdAt(a)) })
+	}
+	page, next, err := provider.Page(items, o.paging, provider.Paging{
+		Default: maxListResults, Max: maxListResults,
+		InvalidToken: invalidField("Invalid value for field 'pageToken': '" + o.token + "'. Invalid pagination token"),
+	}, gap)
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]any{keyItems: page, keyKind: kind}
+	if page == nil {
+		body[keyItems] = []map[string]any{}
+	}
+	if next != "" {
+		body["nextPageToken"] = next
+	}
+	return &gateway.RESTResponse{JSON: body}, nil
+}
+
+// createdAt reads a rendered document's creation time: creationTimestamp,
+// or an operation's insertTime.
+func createdAt(document map[string]any) time.Time {
+	text, _ := document[keyTimestamp].(string)
+	if text == "" {
+		text, _ = document["insertTime"].(string)
+	}
+	moment, _ := time.Parse(time.RFC3339Nano, text)
+	return moment
 }

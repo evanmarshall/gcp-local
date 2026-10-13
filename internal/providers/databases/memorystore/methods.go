@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -81,8 +80,8 @@ func (p *Provider) networkExists(network string) error {
 		return gap("authorizedNetwork needs the compute service to check the network; add compute to -services")
 	}
 	// The Compute provider indexes a network as
-	// //compute.googleapis.com/projects/P/global/network/N.
-	if _, found := p.index.Get("//compute.googleapis.com/" + strings.Replace(network, "/global/networks/", "/global/network/", 1)); found {
+	// //compute.googleapis.com/projects/P/global/networks/N.
+	if _, found := p.index.Get("//compute.googleapis.com/" + network); found {
 		return nil
 	}
 	return provider.BadRequest("com.google.apps.framework.request.StatusException: <eye3 title='INVALID_ARGUMENT'/> generic::INVALID_ARGUMENT: "+ //nolint:wrapcheck // GCP's recorded refusal

@@ -80,6 +80,12 @@ func newHarness(t *testing.T) *harness {
 // invoke issues one REST request as the fixture principal.
 func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder {
 	h.t.Helper()
+	return h.invokeAs("actor", verb, path, body)
+}
+
+// invokeAs issues one REST request as serviceAccount:TOKEN@demo-net.
+func (h *harness) invokeAs(token, verb, path string, body any) *httptest.ResponseRecorder {
+	h.t.Helper()
 	var encoded []byte
 	if body != nil {
 		encoded, _ = json.Marshal(body) //nolint:errchkjson // plain map bodies
@@ -88,7 +94,7 @@ func (h *harness) invoke(verb, path string, body any) *httptest.ResponseRecorder
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	request.Header.Set("Authorization", "Bearer actor")
+	request.Header.Set("Authorization", "Bearer "+token)
 	recorder := httptest.NewRecorder()
 	h.gate.ServeHTTP(recorder, request)
 	return recorder

@@ -10,7 +10,15 @@ const (
 	kindRoute      = "route"
 	kindRouter     = "router"
 	kindInstance   = "instance"
-	kindLocation   = "location"
+)
+
+// Collection names of the resources' relative names and IAM targets.
+const (
+	collectionNetworks    = "networks"
+	collectionSubnetworks = "subnetworks"
+	collectionFirewalls   = "firewalls"
+	collectionRoutes      = "routes"
+	collectionRouters     = "routers"
 )
 
 // networkRecord is one stored VPC network.

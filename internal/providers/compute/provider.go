@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +21,7 @@ import (
 type Provider struct {
 	index   *state.Index
 	engine  *iam.Engine
+	gate    provider.Gate
 	scopes  *state.Store[scopeState]
 	clock   func() time.Time
 	records map[string]*operationRecord
@@ -41,6 +41,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	p := &Provider{
 		index: index, engine: engine,
+		gate:    provider.Gate{Engine: engine, Index: index, Message: provider.PermissionDeniedOn, Attributes: attributes},
 		scopes:  state.NewStore(newScopeState, state.GlobalScope),
 		records: map[string]*operationRecord{},
 		clock:   time.Now,
@@ -59,12 +60,43 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}); err != nil {
 		return nil, fmt.Errorf("register the compute backend: %w", err)
 	}
+	return p, p.register(registry)
+}
+
+// register binds every served method to handle and every other Compute path
+// to its explicit gap.
+func (p *Provider) register(registry *gateway.Registry) error {
 	for _, method := range methodNames() {
 		if err := registry.Register(method, p.handle); err != nil {
-			return nil, fmt.Errorf("register %s: %w", method, err)
+			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}
-	return p, nil
+	if err := registry.Register(methodUnmodeled, unmodeled); err != nil {
+		return fmt.Errorf("register %s: %w", methodUnmodeled, err)
+	}
+	return nil
+}
+
+// methodUnmodeled is every Compute v1 path no other route serves.
+const methodUnmodeled = "compute.unmodeled"
+
+// unmodeled refuses a Compute method the provider doesn't serve, naming the
+// feature when it is a known gap. It changes nothing, so it needs no
+// authorization.
+func unmodeled(_ gateway.Call, raw any) (any, error) {
+	request, _ := raw.(*gateway.RESTRequest)
+	path := ""
+	if request != nil {
+		path = request.Path["path"]
+	}
+	switch {
+	case strings.Contains(path, "firewallPolicies"):
+		return nil, gap("hierarchical and network firewall policies are not modeled")
+	case strings.Contains(strings.ToLower(path), "xpn"):
+		return nil, gap("Shared VPC is not modeled")
+	default:
+		return nil, gap("this Compute method is not implemented")
+	}
 }
 
 // Reset clears the scope's topology state and its operation records.
@@ -85,29 +117,27 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// authorize evaluates the method's permission plan for one call.
-func (p *Provider) authorize(call gateway.Call, target iam.Target) (iam.Decision, error) {
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
-	if authorizeErr != nil {
-		return decision, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-	}
-	return decision, nil
-}
-
-// handle is the gateway entry point for every compute method.
+// handle is the gateway entry point for every compute method. It authorizes
+// at the addressed resource when it exists (so its own policy and IAM
+// Conditions apply) and at the project otherwise, under the scope lock that
+// every index change holds.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid compute request")
 	}
-	scope, target := p.resolveTarget(call, request)
-	decision, authorizeErr := p.authorize(call, target)
-	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, authorizeErr
+	// Regions are placement attributes, not namespaces (the storage
+	// precedent): every compute resource lives in the project's global scope
+	// so network references resolve across regions.
+	project := request.Path["project"]
+	scope := provider.ProjectScope(project)
+	candidates := append(addressed(request.Path), provider.ProjectResource(project))
+	decision, target, err := provider.Nearest(p.gate, p.scopes, scope, call, "", candidates...)
+	if err != nil {
+		if code := status.Code(err); code == codes.PermissionDenied || code == codes.Unauthenticated {
+			return p.denied(call, decision, target)
 		}
-		return p.denied(call, decision, target)
+		return nil, err
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -120,20 +150,41 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		}
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
-// resolveTarget derives the scope and IAM target for the request's path shape.
-// Regions are placement attributes, not namespaces (the storage precedent):
-// every compute resource lives in the project's global scope so network
-// references resolve across regions.
-func (p *Provider) resolveTarget(_ gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target) {
-	project := request.Path["project"]
-	return provider.ProjectScope(project), iam.Target{Name: provider.ProjectResource(project)}
+// addressed names the IAM target of the resource a request's path addresses,
+// or none for a collection or project method.
+func addressed(path map[string]string) []string {
+	project := path["project"]
+	switch {
+	case path["instance"] != "":
+		return []string{instanceName(project, path[keyZone], path["instance"])}
+	case path["subnetwork"] != "":
+		return []string{regionalName(project, path["region"], collectionSubnetworks, path["subnetwork"])}
+	case path["router"] != "":
+		return []string{regionalName(project, path["region"], collectionRouters, path["router"])}
+	case path["network"] != "":
+		return []string{globalName(project, collectionNetworks, path["network"])}
+	case path["firewall"] != "":
+		return []string{globalName(project, collectionFirewalls, path["firewall"])}
+	case path["route"] != "":
+		return []string{globalName(project, collectionRoutes, path["route"])}
+	}
+	return nil
+}
+
+// attributes supplies the IAM Conditions resource.name and resource.service
+// of a Compute resource target, and nothing for the project. Compute's
+// resource.type isn't "compute.googleapis.com/Subnetwork" for a subnetwork
+// and isn't modeled, so a condition on it grants nothing (recorded:
+// compute-lists-operations-iam).
+func attributes(target, _ string) iam.ResourceAttributes {
+	name, found := strings.CutPrefix(target, "//compute.googleapis.com/")
+	if !found {
+		return iam.ResourceAttributes{}
+	}
+	return iam.ResourceAttributes{Name: name, Service: "compute.googleapis.com"}
 }
 
 // denied renders the compute denial shape; Network Management methods use the

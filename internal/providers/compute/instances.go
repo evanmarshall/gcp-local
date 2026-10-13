@@ -76,7 +76,7 @@ type instanceInterface struct {
 // parseInstance validates an instance insert body: one interface, one boot
 // disk created from initializeParams, and at most one service account.
 // Everything else is refused as a gap by the body schema.
-func parseInstance(body *instanceBody) (instanceInterface, string, error) {
+func parseInstance(body *instanceBody, project string) (instanceInterface, string, error) {
 	if body.MachineType == "" {
 		return instanceInterface{}, "", provider.Invalid("An instance requires a machineType")
 	}
@@ -87,6 +87,9 @@ func parseInstance(body *instanceBody) (instanceInterface, string, error) {
 		return instanceInterface{}, "", provider.Invalid("An instance requires a network interface")
 	}
 	nic := body.NetworkInterfaces[0]
+	if err := sameProject(project, nic.Network, nic.Subnetwork); err != nil {
+		return instanceInterface{}, "", err
+	}
 	subnetRegion, subnet := subnetReference(nic.Subnetwork)
 	return instanceInterface{
 		network: networkName(nic.Network), subnetwork: subnet, subnetRegion: subnetRegion, address: nic.NetworkIP,
@@ -111,7 +114,7 @@ func (p *Provider) createInstance(call gateway.Call, request *gateway.RESTReques
 	if err != nil {
 		return nil, err
 	}
-	nic, machineType, err := parseInstance(body)
+	nic, machineType, err := parseInstance(body, scope.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +350,7 @@ func (p *Provider) getInstance(request *gateway.RESTRequest, scope state.Scope) 
 // listInstances returns the zone's instances in name order.
 func (p *Provider) listInstances(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	zone := request.Path[keyZone]
-	return listRecords(p, scope, "compute#instanceList", func(s *scopeState) map[string]*instanceRecord { return s.instances },
+	return listRecords(p, request, scope, "compute#instanceList", func(s *scopeState) map[string]*instanceRecord { return s.instances },
 		func(record *instanceRecord) bool { return record.Zone == zone }, inProject(scope, instanceDocument))
 }
 
