@@ -457,7 +457,10 @@ func TestResumableRefusals(t *testing.T) {
 	f.startSession(admin, "ref-bucket", "", `{"name":"a","acl":[]}`, nil, 400)
 	f.startSession(admin, "ref-bucket", "", `null`, nil, 400)
 	f.startSession(admin, "ref-bucket", "", "", nil, 400)
-	f.startSession(admin, "ref-bucket", "&name=a", "", map[string]string{"X-Upload-Content-Length": strconv.Itoa(maxObjectSize + 1)}, 429)
+	// Over the emulator's object limit is a 400 gap: clients retry a 429.
+	refused(t, f.session(admin, "POST", "/upload/storage/v1/b/ref-bucket/o?uploadType=resumable&name=a",
+		map[string]string{"X-Upload-Content-Length": strconv.Itoa(maxObjectSize + 1)}, nil, 400).Body.String(),
+		"Storage coverage gap: objects over 128 MiB")
 	f.startSession(admin, "ref-bucket", "&name=a", "", map[string]string{"X-Upload-Content-Length": "-1"}, 400)
 	location := f.startSession(admin, "ref-bucket", "&name=a.txt", "", map[string]string{"X-Upload-Content-Length": "4"}, 200)
 	for _, tc := range []struct {
@@ -473,7 +476,7 @@ func TestResumableRefusals(t *testing.T) {
 		{"gap after received", span(2, 3, "4"), "cd", 400},
 		{"total changed", span(0, 1, "5"), "ab", 400},
 		{"declared total exceeded", span(0, 4, "*"), "abcde", 400},
-		{"total over the limit", map[string]string{"Content-Range": "bytes */" + strconv.Itoa(maxObjectSize+1)}, "", 429},
+		{"total over the limit", map[string]string{"Content-Range": "bytes */" + strconv.Itoa(maxObjectSize+1)}, "", 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f.t = t
@@ -619,7 +622,10 @@ func TestXMLRefusals(t *testing.T) {
 		{"unknown option", admin, "GET", "/xml-bucket/dir/obj.txt?acl", nil, 400, "Storage coverage gap"},
 		{"GET-only option on PUT", admin, "PUT", "/xml-bucket/new.txt?generation=1", nil, 400, "Storage coverage gap"},
 		{"repeated option", admin, "GET", "/xml-bucket/dir/obj.txt?generation=1&generation=2", nil, 400, "must not repeat"},
-		{"unknown bucket", admin, "GET", "/no-such-bucket/obj.txt", nil, 501, "no bucket no-such-bucket"},
+		{"unknown bucket", admin, "GET", "/no-such-bucket/obj.txt", nil, 404, "NoSuchBucket"},
+		{"anonymous unknown bucket", "", "GET", "/no-such-bucket/obj.txt", nil, 404, "NoSuchBucket"},
+		{"not a bucket name", admin, "GET", "/x/obj.txt", nil, 501, "no bucket x"},
+		{"gap as XML", admin, "GET", "/xml-bucket/dir/obj.txt?acl", nil, 400, "<Code>InvalidArgument</Code>"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f.t = t

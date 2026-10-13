@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -464,5 +465,54 @@ func TestCatalogFoldersStayInTheirProject(t *testing.T) {
 	}
 	if items, _ := catalog.Folders(a, catalogBucket); len(items) != 0 {
 		t.Fatal("reset retained folders")
+	}
+}
+
+// errPayload stands for a non-status provider error whose text carries
+// backend payload.
+var errPayload = errors.New("payload with a secret")
+
+// TestErrorsUseTheStorageShape checks that refusals carry the JSON API's
+// errors[] list and never a retryable 5xx: a gap, an emulator fault, and a
+// wrapped non-status error.
+func TestErrorsUseTheStorageShape(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "shape-bucket", 200)
+	body := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/shape-bucket/acl", nil, 400).Body.Bytes())
+	refusal, _ := body["error"].(map[string]any)
+	reasons, _ := refusal["errors"].([]any)
+	first, _ := reasons[0].(map[string]any)
+	if _, generic := refusal["status"]; generic || first["reason"] != "invalid" || first["domain"] != "global" {
+		t.Fatalf("gap body = %v", body)
+	}
+	for err, want := range map[error]string{
+		fault("broken invariant"): "Storage emulator fault: broken invariant",
+		errPayload:                "Storage emulator fault: internal provider error",
+		fmt.Errorf("forward: %w", provider.Invalid("x")): `"x"`,
+	} {
+		response := statusRefusal(err)
+		encoded := string(mustMarshal(t, response.JSON))
+		if response.Status != 400 || !strings.Contains(encoded, want) || strings.Contains(encoded, "secret") {
+			t.Fatalf("%v rendered %d %s", err, response.Status, encoded)
+		}
+	}
+}
+
+// TestBackendServerErrorsAreFaults checks that a backend 5xx is never
+// relayed: fake-gcs answers a compose of missing sources with 500.
+func TestBackendServerErrorsAreFaults(t *testing.T) {
+	b := &memoryBackend{}
+	if err := b.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Stop(context.Background()) })
+	headers := http.Header{"Content-Type": {"application/json"}}
+	if _, err := b.forward(context.Background(), "POST", "/storage/v1/b", nil, headers, []byte(`{"name":"compose-bucket"}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := b.forward(context.Background(), "POST", "/storage/v1/b/compose-bucket/o/out/compose", nil,
+		headers, []byte(`{"sourceObjects":[{"name":"absent"}]}`))
+	if response := statusRefusal(err); err == nil || response.Status != 400 || !strings.Contains(string(mustMarshal(t, response.JSON)), "HTTP 500") {
+		t.Fatalf("backend 5xx = %v", err)
 	}
 }

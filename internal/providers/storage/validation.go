@@ -195,7 +195,9 @@ func validateOptionValues(query url.Values) error {
 // maxUploadMetadata bounds the multipart metadata part that accompanies an object.
 const maxUploadMetadata = 64 << 10
 
-var errUploadTooLarge = status.Error(codes.ResourceExhausted, "Objects are limited to 128 MiB")
+// errUploadTooLarge refuses an object over maxObjectSize as a gap, not 429:
+// clients retry 429, and GCP accepts objects up to 5 TiB.
+var errUploadTooLarge = gap("objects over 128 MiB")
 
 func parseUpload(r *gateway.RESTRequest) (*uploadRequest, error) {
 	if r.Media == nil {

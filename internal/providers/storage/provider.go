@@ -78,10 +78,10 @@ func New(registry *gateway.Registry, manager *backend.Manager, index *state.Inde
 func (p *Provider) registerRoutes(registry *gateway.Registry) error {
 	handlers := map[string]gateway.Handler{}
 	for _, route := range storageapi.StorageRoutes {
-		handlers[route.Method] = unsupported
+		handlers[route.Method] = storageErrors(unsupported)
 	}
 	for _, method := range registeredMethods {
-		handlers[method] = p.handle
+		handlers[method] = storageErrors(p.handle)
 	}
 	for method, handler := range handlers {
 		if err := registry.Register(method, handler); err != nil {
@@ -99,6 +99,65 @@ func gap(message string) error {
 }
 
 const storageGap = "Storage coverage gap: "
+
+// fault reports a failure inside the emulator for a request GCP would serve,
+// such as a broken backend invariant. storageErrors renders it as a 400, not a
+// 5xx: the Go client retries every 5xx without a limit, and nothing here
+// clears on a retry.
+func fault(message string) error {
+	return status.Error(codes.Internal, message)
+}
+
+// storageErrors renders every error a Storage handler returns in the API's
+// own shape: the JSON API's errors[] body, which the shared gateway body
+// lacks, or the XML API's error document. Only 4xx codes reach the wire;
+// faults and wrapped non-status errors become 400 "Storage emulator fault".
+// UNIMPLEMENTED (a path no route or bucket claims) and context errors keep the
+// gateway's rendering.
+func storageErrors(handler gateway.Handler) gateway.Handler {
+	return func(call gateway.Call, raw any) (any, error) {
+		response, err := handler(call, raw)
+		if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return response, err
+		}
+		refusal := statusRefusal(err)
+		if refusal == nil {
+			return nil, err
+		}
+		if call.Method == MethodXMLGet || call.Method == MethodXMLPut {
+			return xmlapi.Result(refusal), nil
+		}
+		return refusal, nil
+	}
+}
+
+// statusRefusal is the Storage JSON API response for one handler error, or
+// nil for UNIMPLEMENTED. Reasons are GCP's for the same HTTP codes.
+func statusRefusal(err error) *gateway.RESTResponse {
+	var wrapped interface{ GRPCStatus() *status.Status }
+	if !errors.As(err, &wrapped) {
+		// A non-status error can carry backend payloads; report none of it.
+		return wireError(400, "invalid", "Storage emulator fault: internal provider error")
+	}
+	refused := wrapped.GRPCStatus()
+	message := refused.Message()
+	switch refused.Code() {
+	case codes.Unimplemented:
+		return nil
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange:
+		return wireError(400, "invalid", message)
+	case codes.Unauthenticated:
+		return wireError(401, "required", message)
+	case codes.PermissionDenied:
+		return wireError(403, "forbidden", message)
+	case codes.NotFound:
+		return wireError(404, "notFound", message)
+	case codes.AlreadyExists, codes.Aborted:
+		return wireError(409, "conflict", message)
+	default:
+		return wireError(400, "invalid", "Storage emulator fault: "+message)
+	}
+}
 
 // unsupported answers every generated Storage route this provider does not serve.
 func unsupported(call gateway.Call, _ any) (any, error) {
@@ -431,7 +490,7 @@ func (p *Provider) objectFeatures(ctx context.Context, b *memoryBackend, call ga
 		features[objectExistsCondition] = false
 		return features, nil, nil
 	default:
-		return nil, nil, status.Error(codes.Unavailable, "Unable to resolve existing object before authorization")
+		return nil, nil, fault("Unable to resolve existing object before authorization")
 	}
 }
 
@@ -489,10 +548,9 @@ func (b *memoryBackend) forward(ctx context.Context, method, path string, query 
 	}
 	result, err := b.request(req)
 	if err != nil {
-		return nil, status.Error(codes.Unavailable, "Storage backend request failed")
+		return nil, fault("Storage backend request failed")
 	}
-	defer result.Body.Close()
-	payload, err := readBackendPayload(result.Body)
+	payload, err := readBackendPayload(result, method+" "+path)
 	if err != nil {
 		return nil, err
 	}
@@ -524,14 +582,21 @@ func objectOfPath(path string) (string, string) {
 	return bucket, object
 }
 
-// readBackendPayload reads a backend body, refusing one over maxBackendPayload.
-func readBackendPayload(body io.Reader) ([]byte, error) {
-	payload, err := io.ReadAll(io.LimitReader(body, maxBackendPayload+1))
+// readBackendPayload reads and closes the backend's answer to request,
+// refusing a body over maxBackendPayload. The provider validates requests
+// before forwarding them, so a backend 5xx is an emulator fault, not a
+// transient failure; relaying it would make clients retry forever.
+func readBackendPayload(result *http.Response, request string) ([]byte, error) {
+	defer result.Body.Close()
+	if result.StatusCode >= http.StatusInternalServerError {
+		return nil, fault(fmt.Sprintf("Storage backend answered %s with HTTP %d", request, result.StatusCode))
+	}
+	payload, err := io.ReadAll(io.LimitReader(result.Body, maxBackendPayload+1))
 	if err != nil {
 		return nil, fmt.Errorf("read backend response: %w", err)
 	}
 	if len(payload) > maxBackendPayload {
-		return nil, status.Error(codes.ResourceExhausted, "Storage response exceeds supported size")
+		return nil, fault("Storage backend response exceeds the supported size")
 	}
 	return payload, nil
 }

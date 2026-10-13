@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -395,7 +396,7 @@ func readSource(ctx context.Context, b *memoryBackend, bucket, object, generatio
 		return nil, err
 	}
 	if response.Status != http.StatusOK || response.Body == nil {
-		return nil, status.Error(codes.Unavailable, "Unable to read the rewrite source")
+		return nil, fault("Unable to read the rewrite source")
 	}
 	data, err := io.ReadAll(response.Body)
 	if err != nil {
@@ -473,12 +474,8 @@ func (p *Provider) newXMLRequest(call gateway.Call, r *gateway.RESTRequest) (req
 		call.Principal = principal
 	}
 	if _, found := p.index.Get(BucketResource(bucket)); !found {
-		if !signed {
-			// The XML route matches almost any path. Without a signature or a
-			// known bucket, report the missing route as the gateway would.
-			return request{}, nil, status.Error(codes.Unimplemented, "No provider implements this REST API method, and no bucket "+bucket+" exists for the XML API")
-		}
-		return request{}, xmlapi.Error(404, "NoSuchBucket", "The specified bucket does not exist.", ""), nil
+		refused, err := missingXMLBucket(bucket, signed)
+		return request{}, refused, err
 	}
 	req := request{call: call, rest: r, bucket: bucket, object: r.Path["object"], xml: true}
 	req.call.Method = MethodObjectsGet
@@ -492,6 +489,25 @@ func (p *Provider) newXMLRequest(call gateway.Call, r *gateway.RESTRequest) (req
 	}
 	return p.resolveRequest(req)
 }
+
+// missingXMLBucket answers an XML request for a bucket that does not exist.
+// GCP answers 404 NoSuchBucket (recorded: storage-go-client-projection
+// "xml-read-missing-bucket"); a 501 would make the Go client, which reads
+// media over XML, retry forever. The XML route matches almost any path, so an
+// unsigned path whose first segment cannot name a bucket is a missing route,
+// as the gateway reports.
+func missingXMLBucket(bucket string, signed bool) (*gateway.RESTResponse, error) {
+	if !signed && !bucketName.MatchString(bucket) {
+		return nil, status.Error(codes.Unimplemented, "No provider implements this REST API method, and no bucket "+bucket+" exists for the XML API")
+	}
+	return xmlapi.Error(404, "NoSuchBucket", "The specified bucket does not exist.", ""), nil
+}
+
+// bucketName matches a name GCP accepts for a bucket without dots: 3 to 63
+// lowercase letters, digits, dashes, and underscores, starting and ending
+// with a letter or digit (storage/docs/buckets#naming). Dotted names, which
+// may be longer, are matched up to the same length.
+var bucketName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$`)
 
 // xmlUpload reads an XML PUT body and its object headers.
 func xmlUpload(r *gateway.RESTRequest, name string) (*uploadRequest, *gateway.RESTResponse, error) {
