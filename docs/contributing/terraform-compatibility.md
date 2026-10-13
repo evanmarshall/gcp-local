@@ -24,6 +24,7 @@ These have no upstream counterpart. Their configurations and assertions are gcp-
 | `TestLocalCloudSchedulerJob` | Pub/Sub target job with a time zone and retry config, PATCH of description and schedule, pause, empty plan, 404 after destroy |
 | `TestLocalFirestoreDocument` | Document create, refresh, empty plan, 404 after destroy |
 | `TestLocalBigQueryDatasetAndTable` | Dataset and table with a schema, destroy |
+| `TestLocalBigQueryPartitionsAndAccess` | Day-partitioned and clustered table with `require_partition_filter`, range-partitioned table, dataset default partition expiration, inline `access` blocks with a group, `google_bigquery_dataset_access` for a user and an authorized dataset, removing the user entry, empty plans, destroy |
 | `TestLocalSpannerInstanceAndDatabase` | Instance with processing units, database with DDL, empty plan, 404 after destroy |
 | `TestLocalPubSubTopicAndSubscription` | Topic and pull subscription over REST with retention, empty plan, 404 after destroy |
 | `TestLocalComputeNetworkAndSubnetwork` | Custom network and regional subnetwork, empty plan, 404 after destroy |
