@@ -85,7 +85,7 @@ func (p *Provider) networkExists(network string) error {
 	if _, found := p.index.Get("//compute.googleapis.com/" + strings.Replace(network, "/global/networks/", "/global/network/", 1)); found {
 		return nil
 	}
-	return provider.BadRequest("com.google.apps.framework.request.StatusException: <eye3 title='INVALID_ARGUMENT'/> generic::INVALID_ARGUMENT: "+
+	return provider.BadRequest("com.google.apps.framework.request.StatusException: <eye3 title='INVALID_ARGUMENT'/> generic::INVALID_ARGUMENT: "+ //nolint:wrapcheck // GCP's recorded refusal
 		"Invalid authorized network '"+provider.LastSegment(network)+"'.", "instance.authorized_network", "Invalid value: "+network)
 }
 
