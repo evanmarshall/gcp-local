@@ -519,9 +519,7 @@ type bucketRequest struct {
 	} `json:"versioning"`
 	Hold            bool            `json:"defaultEventBasedHold"`
 	RetentionPolicy json.RawMessage `json:"retentionPolicy,omitempty"`
-	Lifecycle       *struct {
-		Rule []json.RawMessage `json:"rule"`
-	} `json:"lifecycle,omitempty"`
+	Lifecycle       json.RawMessage `json:"lifecycle,omitempty"`
 }
 
 // Public access prevention values (buckets resource, iamConfiguration).
@@ -544,6 +542,11 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	if err != nil {
 		return nil, err
 	}
+	project, _ := p.index.Get(provider.ProjectResource(scope.Project))
+	rules, err := bucketconfig.ParseLifecycle(request.Lifecycle, request.Location, project.Number)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // GCP's refusal, rendered as is
+	}
 	if _, exists := p.index.Get(BucketResource(request.Name)); exists {
 		return bucketNameOwned(), nil
 	}
@@ -560,7 +563,7 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 		return nil, err
 	}
 	objectRetention, _ := booleanOption(r.Query, queryObjectRetention)
-	metadata, err := p.createdBucketMetadata(scope, request, payload, body, objectRetention)
+	metadata, err := p.createdBucketMetadata(scope, request, payload, body, objectRetention, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -662,7 +665,7 @@ func uniformAccess(request *bucketRequest) error {
 }
 
 // unsupportedBucketPolicy requires uniform bucket-level access, the only
-// access model here, and refuses the retention and lifecycle settings the
+// access model here, and refuses the settings the
 // emulator does not implement. An omitted public access prevention is GCP's
 // default, inherited (recorded: storage-bucket-defaults).
 func unsupportedBucketPolicy(request *bucketRequest) error {
@@ -674,9 +677,6 @@ func unsupportedBucketPolicy(request *bucketRequest) error {
 	}
 	if request.SoftDelete.EffectiveTime != nil {
 		return gap("soft-delete effective time is server-owned")
-	}
-	if request.Lifecycle != nil && len(request.Lifecycle.Rule) > 0 {
-		return gap("bucket lifecycle rules")
 	}
 	return nil
 }
@@ -712,7 +712,7 @@ func storageTime(t time.Time) string {
 
 // createdBucketMetadata derives the provider-owned metadata of a new bucket
 // from the request body forwarded to the backend and the backend's reply.
-func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketRequest, payload []byte, created map[string]any, objectRetention bool) (string, error) {
+func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketRequest, payload []byte, created map[string]any, objectRetention bool, rules []bucketconfig.Rule) (string, error) {
 	metadata := map[string]any{}
 	_ = json.Unmarshal(payload, &metadata)
 	seconds, _ := softDeleteRetention(request.SoftDelete.Seconds)
@@ -729,6 +729,7 @@ func (p *Provider) createdBucketMetadata(scope state.Scope, request bucketReques
 	// The backend owns versioning: it keeps the noncurrent generations.
 	delete(metadata, "versioning")
 	createdProtection(metadata, request, timeCreated, objectRetention)
+	setLifecycle(metadata, rules)
 	project, _ := p.index.Get(provider.ProjectResource(scope.Project))
 	metadata["projectNumber"] = project.Number
 	metadata["metageneration"] = "1"
@@ -760,6 +761,16 @@ func createdProtection(metadata map[string]any, request bucketRequest, timeCreat
 	if objectRetention {
 		metadata["objectRetention"] = map[string]any{"mode": "Enabled"}
 	}
+}
+
+// setLifecycle stores validated lifecycle rules as GCP renders them; no rules
+// is no lifecycle field (recorded: storage-lifecycle-rules "rules-emptied").
+func setLifecycle(metadata map[string]any, rules []bucketconfig.Rule) {
+	if len(rules) == 0 {
+		delete(metadata, "lifecycle")
+		return
+	}
+	metadata["lifecycle"] = map[string]any{"rule": rules}
 }
 
 // retentionPolicy renders a bucket retention policy; isLocked appears only

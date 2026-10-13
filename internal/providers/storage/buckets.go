@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
@@ -23,7 +24,7 @@ import (
 )
 
 func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, name string) (*gateway.RESTResponse, error) {
-	patch, err := decodeBucketPatch(r.JSON)
+	patch, err := decodeBucketPatch(r.JSON, name)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +117,7 @@ func applyBucketPatch(metadata map[string]any, patch map[string]json.RawMessage,
 		{"softDeletePolicy", func(raw json.RawMessage) error { return patchSoftDelete(metadata, raw, now) }},
 		{"retentionPolicy", func(raw json.RawMessage) error { return patchRetentionPolicy(metadata, raw, name, now) }},
 		{keyDefaultHold, func(raw json.RawMessage) error { return patchDefaultHold(metadata, raw) }},
+		{"lifecycle", func(raw json.RawMessage) error { return patchLifecycle(metadata, raw) }},
 	} {
 		if raw, ok := patch[field.key]; ok {
 			if err := field.apply(raw); err != nil {
@@ -156,6 +158,19 @@ func patchRetentionPolicy(metadata map[string]any, raw json.RawMessage, name str
 	return nil
 }
 
+// patchLifecycle replaces the bucket's lifecycle rules; null or no rules
+// removes them (recorded: storage-lifecycle-rules "rules-cleared").
+func patchLifecycle(metadata map[string]any, raw json.RawMessage) error {
+	location, _ := metadata["location"].(string)
+	project, _ := metadata["projectNumber"].(string)
+	rules, err := bucketconfig.ParseLifecycle(raw, location, project)
+	if err != nil {
+		return err //nolint:wrapcheck // GCP's refusal, rendered as is
+	}
+	setLifecycle(metadata, rules)
+	return nil
+}
+
 // patchDefaultHold sets the default event-based hold new objects take.
 func patchDefaultHold(metadata map[string]any, raw json.RawMessage) error {
 	var hold *bool
@@ -184,12 +199,19 @@ func (p *Provider) currentBucket(ctx context.Context, b *memoryBackend, r *gatew
 	return current, nil, nil
 }
 
-// decodeBucketPatch reads a bucket patch, which may change labels and the
-// soft-delete retention only.
-func decodeBucketPatch(body []byte) (map[string]json.RawMessage, error) {
+// decodeBucketPatch reads a bucket patch of the patchedBucketFields. gcloud
+// sends the bucket's name with every update; it must name the bucket.
+func decodeBucketPatch(body []byte, bucket string) (map[string]json.RawMessage, error) {
 	var patch map[string]json.RawMessage
 	if json.Unmarshal(body, &patch) != nil || patch == nil {
 		return nil, provider.Invalid("Expected a bucket patch")
+	}
+	if raw, ok := patch[keyName]; ok {
+		var name string
+		if json.Unmarshal(raw, &name) != nil || name != bucket {
+			return nil, provider.Invalid("Bucket name does not match the patch target")
+		}
+		delete(patch, keyName)
 	}
 	for key := range patch {
 		if !slices.Contains(patchedBucketFields, key) {
@@ -200,7 +222,7 @@ func decodeBucketPatch(body []byte) (map[string]json.RawMessage, error) {
 }
 
 // patchedBucketFields are the bucket fields a patch may change.
-var patchedBucketFields = []string{"labels", "softDeletePolicy", "versioning", "retentionPolicy", keyDefaultHold}
+var patchedBucketFields = []string{"labels", "softDeletePolicy", "versioning", "retentionPolicy", keyDefaultHold, "lifecycle"}
 
 // patchVersioning turns versioning on or off in the backend, which keeps the
 // noncurrent generations, when the patch names it (raw is nil otherwise).
@@ -389,4 +411,138 @@ func (p *Provider) listBuckets(ctx context.Context, b *memoryBackend, r *gateway
 	result := provider.ListBody("items", page, next)
 	result[keyKind] = "storage#buckets"
 	return &gateway.RESTResponse{JSON: result}, nil
+}
+
+// lifecycleInterval is how often the lifecycle worker applies the rules. GCP
+// applies them asynchronously, typically within a day of an object
+// qualifying (storage/docs/lifecycle#behavior); the worker acts within a
+// minute of the provider's clock.
+const lifecycleInterval = time.Minute
+
+// runLifecycle applies the lifecycle rules every lifecycleInterval until ctx
+// ends.
+func (p *Provider) runLifecycle(ctx context.Context) {
+	ticker := time.NewTicker(lifecycleInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.sweepLifecycle(ctx)
+		}
+	}
+}
+
+// sweepLifecycle applies every bucket's lifecycle rules once at the
+// provider's clock, under each scope's backend gate. GCP performs lifecycle
+// actions itself, as the project's Storage service agent, and requires no
+// role for them; they never remove a held or retained generation.
+func (p *Provider) sweepLifecycle(ctx context.Context) {
+	for scope, buckets := range p.catalog.lifecycleRules() {
+		_ = p.manager.Use(ctx, backend.Key{Service: serviceName, Scope: scope}, func(session context.Context, driver backend.Backend) error {
+			b, err := backendOf(driver)
+			if err != nil {
+				return err
+			}
+			for _, name := range slices.Sorted(maps.Keys(buckets)) {
+				if err := p.applyLifecycle(session, b, scope, name, buckets[name]); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+}
+
+// applyLifecycle applies one bucket's rules to each of its generations.
+func (p *Provider) applyLifecycle(ctx context.Context, b *memoryBackend, scope state.Scope, bucket string, rules []bucketconfig.Rule) error {
+	if resource, found := p.index.Get(BucketResource(bucket)); !found || resource.Scope != scope {
+		return nil
+	}
+	objects, refused, err := listedObjects(ctx, b, bucket, url.Values{queryVersions: {"true"}})
+	if refused != nil || err != nil {
+		return err
+	}
+	versioned, err := b.versioned(ctx, bucket)
+	if err != nil {
+		return err
+	}
+	now := p.now()
+	for i, object := range objects {
+		view := lifecycleView(b, bucket, object, newerVersions(objects, i))
+		if action, found := bucketconfig.Apply(rules, view, now); found {
+			if err := p.lifecycleAction(ctx, b, scope, bucket, object, action, versioned && view.Noncurrent.IsZero()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// lifecycleAction performs one action on one generation at the provider's
+// clock. SetStorageClass changes the class in place; Delete skips a held or
+// retained generation.
+func (p *Provider) lifecycleAction(ctx context.Context, b *memoryBackend, scope state.Scope, bucket string, object map[string]any, action bucketconfig.Action, archive bool) error {
+	if action.Type == bucketconfig.ActionSetStorageClass {
+		now := p.now()
+		b.setOverlay(bucket, documentName(object), fmt.Sprint(object[keyGeneration]), func(overlay *objectOverlay) {
+			overlay.storageClass, overlay.classUpdated = action.StorageClass, now
+		})
+		return nil
+	}
+	if protected := p.refuseRemoval(b, scope, bucket, object); protected != nil {
+		return nil //nolint:nilerr // a protected generation is skipped, as GCP's lifecycle skips it
+	}
+	return p.lifecycleDelete(ctx, b, scope, bucket, object, archive)
+}
+
+// newerVersions counts the generations of objects[i]'s name after it; objects
+// are in name and generation order.
+func newerVersions(objects []map[string]any, i int) int {
+	count := 0
+	for _, later := range objects[i+1:] {
+		if documentName(later) != documentName(objects[i]) {
+			break
+		}
+		count++
+	}
+	return count
+}
+
+// lifecycleView is what the lifecycle conditions read about one generation.
+func lifecycleView(b *memoryBackend, bucket string, object map[string]any, newer int) bucketconfig.Object {
+	parse := func(key string) time.Time {
+		text, _ := object[key].(string)
+		parsed, _ := time.Parse(time.RFC3339Nano, text)
+		return parsed
+	}
+	class, _ := object["storageClass"].(string)
+	overlay := b.overlay(bucket, documentName(object), fmt.Sprint(object[keyGeneration]))
+	return bucketconfig.Object{Name: documentName(object), StorageClass: class, Created: parse("timeCreated"),
+		CustomTime: overlay.customTime, Noncurrent: parse("timeDeleted"), NewerVersions: newer}
+}
+
+// lifecycleDelete performs a Delete action: in a versioned bucket the live
+// generation becomes noncurrent; otherwise the generation is deleted, and
+// soft-deleted when the bucket keeps soft-deleted objects.
+func (p *Provider) lifecycleDelete(ctx context.Context, b *memoryBackend, scope state.Scope, bucket string, object map[string]any, archive bool) error {
+	name, generation := documentName(object), fmt.Sprint(object[keyGeneration])
+	query := url.Values{keyGeneration: {generation}}
+	if archive {
+		query = nil
+	}
+	keep, err := p.retainRemoved(ctx, b, scope, bucket, name, generation, !archive)
+	if err != nil {
+		return err
+	}
+	response, err := b.forward(ctx, http.MethodDelete, objectPath(bucket, name), query, nil, nil)
+	if err != nil {
+		return err
+	}
+	noContentOnSuccess(response)
+	if err := keep(response); err != nil {
+		return err
+	}
+	return b.prune(ctx, bucket, name, generation)
 }

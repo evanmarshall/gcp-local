@@ -31,12 +31,15 @@ import (
 // patchedObjectFields are the object fields a patch may set: the ones the Go
 // client's ObjectHandle.Update sends for ordinary metadata, holds, and object
 // retention (storage/docs/json_api/v1/objects/patch). Every other writable
-// field (acl, customTime, contexts, storageClass) is a gap.
+// field (acl, contexts, storageClass) is a gap.
 var patchedObjectFields = map[string]bool{
 	keyContentType: true, keyCacheControl: true, keyDisposition: true,
 	"contentEncoding": true, keyLanguage: true, keyMetadata: true,
-	keyTemporaryHold: true, keyEventBasedHold: true, keyRetention: true,
+	keyTemporaryHold: true, keyEventBasedHold: true, keyRetention: true, keyCustomTime: true,
 }
+
+// overlayFields are the patch fields the provider owns in the overlay.
+var overlayFields = map[string]bool{keyRetention: true, keyTemporaryHold: true, keyEventBasedHold: true, keyCustomTime: true}
 
 // objectPatch is one decoded objects.patch body. strings holds the string
 // fields to set; metadata is the custom metadata change, where a nil value
@@ -51,6 +54,8 @@ type objectPatch struct {
 	holds         map[string]bool
 	setRetention  bool
 	retention     *bucketconfig.Retention
+	// customTime is the new customTime; zero leaves it.
+	customTime time.Time
 }
 
 // decodeObjectPatch reads an objects.patch body and refuses each field and
@@ -90,7 +95,7 @@ func (patch *objectPatch) decodeField(key string, raw json.RawMessage, target ma
 		}
 		patch.setMetadata, patch.clearMetadata = true, patch.metadata == nil
 		return nil
-	case key == keyRetention || key == keyTemporaryHold || key == keyEventBasedHold:
+	case overlayFields[key]:
 		return patch.decodeProtection(key, raw, now)
 	}
 	return patch.decodeString(key, raw)
@@ -111,8 +116,29 @@ func (patch *objectPatch) decodeString(key string, raw json.RawMessage) error {
 	return nil
 }
 
-// decodeProtection records a hold or object retention field.
+// decodeCustomTime records a new customTime. GCP ignores null: customTime
+// can't be removed (recorded: storage-lifecycle-rules "custom-time-removed").
+func (patch *objectPatch) decodeCustomTime(raw json.RawMessage) error {
+	var text *string
+	if json.Unmarshal(raw, &text) != nil {
+		return provider.Invalid(keyCustomTime + " must be a string")
+	}
+	if text == nil {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, *text)
+	if err != nil {
+		return gap(keyCustomTime + " that is not an RFC 3339 time")
+	}
+	patch.customTime = parsed
+	return nil
+}
+
+// decodeProtection records a hold, object retention, or customTime field.
 func (patch *objectPatch) decodeProtection(key string, raw json.RawMessage, now time.Time) error {
+	if key == keyCustomTime {
+		return patch.decodeCustomTime(raw)
+	}
 	if key == keyRetention {
 		retention, err := bucketconfig.ParseRetention(raw, now)
 		patch.setRetention, patch.retention = true, retention
@@ -143,6 +169,20 @@ func (patch *objectPatch) apply(overlay *objectOverlay, now time.Time) {
 	if patch.setRetention {
 		overlay.retention = patch.retention
 	}
+	if !patch.customTime.IsZero() {
+		overlay.customTime = patch.customTime
+	}
+}
+
+// refuseDecrease refuses moving customTime earlier (recorded:
+// storage-lifecycle-rules "custom-time-earlier").
+func (patch *objectPatch) refuseDecrease(current time.Time) error {
+	if patch.customTime.IsZero() || !patch.customTime.Before(current) {
+		return nil
+	}
+	offset := func(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.999999") + "+00:00" }
+	return &bucketconfig.RefusalError{Status: 400, Reason: "invalid", Message: "Custom time cannot be decreased. Previously: " +
+		offset(current) + ". Attempting to set: " + offset(patch.customTime) + "."}
 }
 
 // mergedMetadata applies the patch to an object's current custom metadata.
@@ -185,6 +225,9 @@ func (p *Provider) patchObject(ctx context.Context, b *memoryBackend, req reques
 		return refused, err
 	}
 	generation, _ := current[keyGeneration].(string)
+	if err := patch.refuseDecrease(b.overlay(req.bucket, req.object, generation).customTime); err != nil {
+		return nil, err
+	}
 	if err := p.changeRetention(b, req, patch, generation); err != nil {
 		return nil, err
 	}

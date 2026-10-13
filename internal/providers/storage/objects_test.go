@@ -265,7 +265,7 @@ func TestObjectPatchRefusals(t *testing.T) {
 	f, _ := patchFixture(t)
 	for _, test := range []struct{ path, body, message string }{
 		{patchObjectPath, `{"acl":[]}`, "Storage coverage gap: unsupported object patch field acl"},
-		{patchObjectPath, `{"customTime":"2026-01-01T00:00:00Z"}`, "Storage coverage gap: unsupported object patch field customTime"},
+		{patchObjectPath, `{"customTime":"tomorrow"}`, "Storage coverage gap: customTime that is not an RFC 3339 time"},
 		{patchObjectPath, `{"contentType":"text/plain","temporaryHold":null}`, "Storage coverage gap: temporaryHold values other than true and false"},
 		{patchObjectPath, `{"retention":{"mode":"Unlocked","retainUntilTime":"2999-01-01T00:00:00Z"}}`, "Storage coverage gap: object retention in a bucket created without enableObjectRetention"},
 		{patchObjectPath, `{"contentType":null}`, "Storage coverage gap: clearing object field contentType"},

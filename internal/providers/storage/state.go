@@ -4,6 +4,7 @@ package storage
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -41,12 +42,16 @@ type Catalog struct {
 	mu    sync.Mutex
 	store *state.Store[projectState]
 	index *state.Index
+	// scopes are the scopes a bucket was published in since their last reset.
+	// The store can't enumerate its scopes, and the lifecycle worker visits
+	// each one.
+	scopes map[state.Scope]bool
 }
 
 func NewCatalog(index *state.Index) *Catalog {
 	return &Catalog{store: state.NewStore(func() projectState {
 		return projectState{Buckets: map[string]Bucket{}, Folders: map[string]Folder{}, Uploads: map[string]*uploadSession{}, SoftDeleted: map[string]softObject{}}
-	}, state.GlobalScope), index: index}
+	}, state.GlobalScope), index: index, scopes: map[state.Scope]bool{}}
 }
 func BucketResource(name string) string { return "//storage.googleapis.com/projects/_/buckets/" + name }
 
@@ -78,6 +83,7 @@ func (c *Catalog) PublishBucket(scope state.Scope, bucket Bucket) error {
 	}); err != nil {
 		return fmt.Errorf("publish bucket %s: %w", bucket.Name, err)
 	}
+	c.scopes[scope] = true
 	return nil
 }
 func (c *Catalog) Bucket(scope state.Scope, name string) (Bucket, bool, error) {
@@ -139,7 +145,35 @@ func (c *Catalog) Reset(scope state.Scope) error {
 		return fmt.Errorf("reset scope %s: %w", scope, err)
 	}
 	c.index.RemoveScope(serviceName, scope)
+	delete(c.scopes, scope)
 	return nil
+}
+
+// lifecycleRules returns the lifecycle rules of each bucket in every scope
+// that has any.
+func (c *Catalog) lifecycleRules() map[state.Scope]map[string][]bucketconfig.Rule {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	found := map[state.Scope]map[string][]bucketconfig.Rule{}
+	for scope := range c.scopes {
+		_ = c.store.With(scope, func(value *projectState) error {
+			for name, bucket := range value.Buckets {
+				var metadata struct {
+					Lifecycle struct {
+						Rule []bucketconfig.Rule `json:"rule"`
+					} `json:"lifecycle"`
+				}
+				if json.Unmarshal([]byte(bucket.Metadata), &metadata) == nil && len(metadata.Lifecycle.Rule) > 0 {
+					if found[scope] == nil {
+						found[scope] = map[string][]bucketconfig.Rule{}
+					}
+					found[scope][name] = metadata.Lifecycle.Rule
+				}
+			}
+			return nil
+		})
+	}
+	return found
 }
 
 // Folder is one hierarchical-namespace folder entry; provider-owned because
@@ -294,6 +328,12 @@ type objectOverlay struct {
 	// storage-retention-holds "release-starts-retention").
 	released  time.Time
 	retention *bucketconfig.Retention
+	// customTime is zero until a patch sets it; it never decreases.
+	customTime time.Time
+	// storageClass is the class a lifecycle SetStorageClass action moved the
+	// generation to, at classUpdated; "" keeps the backend's.
+	storageClass string
+	classUpdated time.Time
 }
 
 // render writes the overlay's fields into an object document.
@@ -310,6 +350,22 @@ func (o objectOverlay) render(document map[string]any) {
 	if o.retention != nil {
 		document["retention"] = map[string]any{"mode": o.retention.Mode, "retainUntilTime": storageTime(o.retention.Until)}
 	}
+	if !o.customTime.IsZero() {
+		document["customTime"] = customTimeText(o.customTime)
+	}
+	if o.storageClass != "" {
+		document["storageClass"], document["timeStorageClassUpdated"] = o.storageClass, storageTime(o.classUpdated)
+	}
+}
+
+// customTimeText renders customTime as GCP does: whole seconds without a
+// fraction, otherwise milliseconds (recorded: storage-lifecycle-rules
+// "custom-time-set", "custom-time-later").
+func customTimeText(t time.Time) string {
+	if t.Nanosecond() == 0 {
+		return t.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	return storageTime(t)
 }
 
 // overlayKey names one object generation in memoryBackend.overlays.

@@ -782,3 +782,88 @@ func TestBucketLock(t *testing.T) {
 	expectf(t, nested(t, same, "retentionPolicy")["isLocked"] == true, "lock lost: %v", same)
 	f.request(admin, "DELETE", base, nil, 204)
 }
+
+// TestLifecycleConfiguration follows storage-lifecycle-rules: rules round-trip
+// as set, invalid ones are refused with GCP's errors, and no rules is no
+// lifecycle field.
+func TestLifecycleConfiguration(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "life", 200)
+	base := "/storage/v1/b/life"
+	rules := `[{"action":{"type":"Delete"},"condition":{"age":0,"matchesPrefix":["logs/"]}},` +
+		`{"action":{"storageClass":"NEARLINE","type":"SetStorageClass"},"condition":{"age":60,"matchesStorageClass":["STANDARD"]}},` +
+		`{"action":{"type":"Delete"},"condition":{"daysSinceNoncurrentTime":7,"isLive":false,"numNewerVersions":2}}]`
+	set := decodeBody(t, f.request(admin, "PATCH", base, []byte(`{"lifecycle":{"rule":`+rules+`}}`), 200).Body.Bytes())
+	read := decodeBody(t, f.request(admin, "GET", base, nil, 200).Body.Bytes())
+	for _, document := range []map[string]any{set, read} {
+		encoded := mustMarshal(t, nested(t, document, "lifecycle")["rule"])
+		expectf(t, string(encoded) == rules, "lifecycle %s, want %s", encoded, rules)
+	}
+	refused(t, f.request(admin, "PATCH", base, []byte(`{"lifecycle":{"rule":[{"action":{"type":"SetStorageClass","storageClass":"MULTI_REGIONAL"},"condition":{"age":1}}]}}`), 400).Body.String(),
+		"Project 123456 may not create storageClass MULTI_REGIONAL buckets with locationConstraint US-CENTRAL1.")
+	refused(t, f.request(admin, "PATCH", base, []byte(`{"lifecycle":{"rule":[{"condition":{"age":1}}]}}`), 400).Body.String(), "Lifecycle rules must have an action.")
+	// gcloud sends the bucket's name with each update.
+	f.request(admin, "PATCH", base, []byte(`{"name":"life","lifecycle":{"rule":`+rules+`}}`), 200)
+	refused(t, f.request(admin, "PATCH", base, []byte(`{"name":"other"}`), 400).Body.String(), "Bucket name does not match the patch target")
+	for _, cleared := range []string{`{"lifecycle":{"rule":[]}}`, `{"lifecycle":null}`} {
+		f.request(admin, "PATCH", base, []byte(`{"lifecycle":{"rule":`+rules+`}}`), 200)
+		patched := decodeBody(t, f.request(admin, "PATCH", base, []byte(cleared), 200).Body.Bytes())
+		_, kept := patched["lifecycle"]
+		expectf(t, !kept, "%s kept the lifecycle: %v", cleared, patched)
+	}
+	created := `{"name":"life-created","location":"US-CENTRAL1","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}},"lifecycle":{"rule":` + rules + `}}`
+	fresh := decodeBody(t, f.request(admin, "POST", "/storage/v1/b?project=project-a", []byte(created), 200).Body.Bytes())
+	encoded := mustMarshal(t, nested(t, fresh, "lifecycle")["rule"])
+	expectf(t, string(encoded) == rules, "created lifecycle %s", encoded)
+}
+
+// TestLifecycleCustomTime follows storage-lifecycle-rules: customTime moves
+// only forward and null leaves it.
+func TestLifecycleCustomTime(t *testing.T) {
+	f, _ := patchFixture(t)
+	set := decodeBody(t, f.request(admin, "PATCH", patchObjectPath, []byte(`{"customTime":"2026-01-01T00:00:00Z"}`), 200).Body.Bytes())
+	expectf(t, set[keyCustomTime] == "2026-01-01T00:00:00Z", "customTime: %v", set[keyCustomTime])
+	refused(t, f.request(admin, "PATCH", patchObjectPath, []byte(`{"customTime":"2025-01-01T00:00:00Z"}`), 400).Body.String(),
+		"Custom time cannot be decreased. Previously: 2026-01-01T00:00:00+00:00. Attempting to set: 2025-01-01T00:00:00+00:00.")
+	kept := decodeBody(t, f.request(admin, "PATCH", patchObjectPath, []byte(`{"customTime":null}`), 200).Body.Bytes())
+	expectf(t, kept[keyCustomTime] == "2026-01-01T00:00:00Z", "null changed customTime: %v", kept[keyCustomTime])
+	later := decodeBody(t, f.request(admin, "PATCH", patchObjectPath, []byte(`{"customTime":"2026-02-01T12:30:00.5Z"}`), 200).Body.Bytes())
+	expectf(t, later[keyCustomTime] == "2026-02-01T12:30:00.500Z", "customTime: %v", later[keyCustomTime])
+}
+
+// TestLifecycleSweep applies Delete and SetStorageClass on the provider's
+// clock, never to a held object, and deletes noncurrent generations by their
+// newer versions.
+func TestLifecycleSweep(t *testing.T) {
+	now := time.Now()
+	f := setupWithClock(t, func() time.Time { return now })
+	f.bucket(testProject, "swept", 200)
+	upload := "/upload/storage/v1/b/swept/o?uploadType=media&name="
+	for _, name := range []string{"logs/old", "logs/held", "keep"} {
+		f.request(admin, "POST", upload+name, []byte(name), 200)
+	}
+	f.request(admin, "PATCH", "/storage/v1/b/swept/o/logs%2Fheld", []byte(`{"temporaryHold":true}`), 200)
+	f.request(admin, "PATCH", "/storage/v1/b/swept", []byte(`{"lifecycle":{"rule":[`+
+		`{"action":{"type":"Delete"},"condition":{"age":1,"matchesPrefix":["logs/"]}},`+
+		`{"action":{"type":"SetStorageClass","storageClass":"NEARLINE"},"condition":{"age":2}}]}}`), 200)
+	f.p.sweepLifecycle(t.Context())
+	f.request(admin, "GET", "/storage/v1/b/swept/o/logs%2Fold", nil, 200)
+	now = now.Add(25 * time.Hour)
+	f.p.sweepLifecycle(t.Context())
+	f.request(admin, "GET", "/storage/v1/b/swept/o/logs%2Fold", nil, 404)
+	f.request(admin, "GET", "/storage/v1/b/swept/o/logs%2Fheld", nil, 200)
+	now = now.Add(24 * time.Hour)
+	f.p.sweepLifecycle(t.Context())
+	moved := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/swept/o/keep", nil, 200).Body.Bytes())
+	expectf(t, moved["storageClass"] == "NEARLINE" && moved["timeStorageClassUpdated"] == storageTime(now), "class not changed: %v", moved)
+
+	f.bucket(testProject, "pruned", 200)
+	f.request(admin, "PATCH", "/storage/v1/b/pruned", []byte(`{"versioning":{"enabled":true},"lifecycle":{"rule":[`+
+		`{"action":{"type":"Delete"},"condition":{"isLive":false,"numNewerVersions":1}}]}}`), 200)
+	for _, body := range []string{"one", "two", "three"} {
+		f.request(admin, "POST", "/upload/storage/v1/b/pruned/o?uploadType=media&name=doc", []byte(body), 200)
+	}
+	f.p.sweepLifecycle(t.Context())
+	listing := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/pruned/o?versions=true", nil, 200).Body.Bytes())
+	expectf(t, len(itemList(listing["items"])) == 1, "noncurrent generations kept: %v", listing)
+}

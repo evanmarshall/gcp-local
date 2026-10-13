@@ -87,7 +87,7 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 	if err := p.registerRoutes(registry); err != nil {
 		return nil, err
 	}
-	_ = ctx
+	go p.runLifecycle(ctx)
 	return p, nil
 }
 
@@ -1318,6 +1318,7 @@ const (
 	keyTemporaryHold  = "temporaryHold"
 	keyEventBasedHold = "eventBasedHold"
 	keyRetention      = "retention"
+	keyCustomTime     = "customTime"
 	// queryOverrideRetention is objects.patch overrideUnlockedRetention.
 	queryOverrideRetention = "overrideUnlockedRetention"
 	// queryObjectRetention is buckets.insert enableObjectRetention.

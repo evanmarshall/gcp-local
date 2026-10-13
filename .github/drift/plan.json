@@ -11,6 +11,7 @@
       "tests/conformance/storage/test_storage_replacement.py",
       "tests/conformance/storage/buckets/test_storage_bucket_updates.py",
       "tests/conformance/storage/buckets/test_storage_bucket_policy_only.py",
+      "tests/conformance/storage/buckets/test_storage_lifecycle.py",
       "tests/conformance/storage/clients/test_storage_rclone_objects.py",
       "tests/conformance/storage/protection/test_storage_versioning.py",
       "tests/conformance/storage/protection/test_storage_retention.py",

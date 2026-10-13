@@ -4,6 +4,7 @@ gcloud reads its endpoints and credentials from CLOUDSDK_* variables, so the
 whole configuration is the environment built here.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -42,6 +43,13 @@ def gcloud(*arguments, stdin=None):
     return run([*GCLOUD, *arguments], OWNER, stdin)
 
 
+# A lifecycle configuration gcloud round-trips: a Delete and a SetStorageClass rule.
+LIFECYCLE = [
+    {"action": {"type": "Delete"}, "condition": {"age": 30, "matchesPrefix": ["logs/"]}},
+    {"action": {"storageClass": "NEARLINE", "type": "SetStorageClass"}, "condition": {"age": 60}},
+]
+
+
 def run_storage():
     bucket = f"gs://gcloud-matrix-{PROJECT}"
     gcloud(
@@ -56,6 +64,14 @@ def run_storage():
         source = Path(directory, "hello.txt")
         source.write_text("hello from gcloud")
         gcloud("storage", "cp", str(source), f"{bucket}/hello.txt")
+        rules = Path(directory, "lifecycle.json")
+        rules.write_text(json.dumps({"rule": LIFECYCLE}))
+        gcloud("storage", "buckets", "update", bucket, f"--lifecycle-file={rules}")
+    described = json.loads(gcloud("storage", "buckets", "describe", bucket, "--format=json"))
+    assert described.get("lifecycle_config", {}).get("rule") == LIFECYCLE, "lifecycle round trip"
+    gcloud("storage", "buckets", "update", bucket, "--clear-lifecycle")
+    described = json.loads(gcloud("storage", "buckets", "describe", bucket, "--format=json"))
+    assert "lifecycle_config" not in described, "lifecycle cleared"
     assert gcloud("storage", "cat", f"{bucket}/hello.txt") == "hello from gcloud", "cat"
     assert gcloud("storage", "ls", bucket).split() == [f"{bucket}/hello.txt"], "ls"
     expect_denied("ungranted cat", [*GCLOUD, "storage", "cat", f"{bucket}/hello.txt"], DENIED)
