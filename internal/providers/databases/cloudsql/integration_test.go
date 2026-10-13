@@ -455,7 +455,9 @@ func TestPostgresDepth(t *testing.T) {
 	}
 	session.Close()
 	h.expect(h.invoke(adminToken, http.MethodDelete, testPath+"/backupRuns/"+id, nil), http.StatusOK)
-	h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/backupRuns/"+id, nil), http.StatusNotFound)
+	if run := h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/backupRuns/"+id, nil), http.StatusOK); run["status"] != "DELETED" {
+		t.Fatalf("deleted run = %v", run)
+	}
 }
 
 // TestMySQLDepth drives a real MySQL 8.4 server through a flag, TLS
