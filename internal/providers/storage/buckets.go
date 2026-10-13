@@ -2,9 +2,16 @@ package storage
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/url"
+	"slices"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -144,4 +151,108 @@ func nextMetageneration(metadata, current map[string]any, name string) {
 	metadata["etag"] = objectETag(name, next)
 	delete(metadata, "rpo")
 	metadata["updated"] = time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+// List paging (objects/list, buckets/list, folders/list). A GCP page token
+// resumes after the last entry of the page that issued it, so entries added
+// or removed between pages are neither repeated nor skipped; offset tokens
+// (provider.Page) would shift. Tokens are opaque: the list kind and the last
+// entry's name.
+const (
+	queryPageToken = "pageToken"
+	objectPages    = "objects"
+	bucketPages    = "buckets"
+	folderPages    = "folders"
+)
+
+// listToken is the page token that resumes a listing of kind after last.
+func listToken(kind, last string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(kind + "\x00" + last))
+}
+
+// listAfter decodes a page token of kind into the name to resume after. An
+// empty token starts the listing; valid is false for a token no listing of
+// kind issued.
+func listAfter(kind, token string) (string, bool) {
+	if token == "" {
+		return "", true
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	after, found := strings.CutPrefix(string(raw), kind+"\x00")
+	return after, err == nil && found
+}
+
+// listSize parses maxResults or pageSize, an unsigned integer that GCP caps
+// at 1000 (recorded: storage-list-paging "max-results-negative",
+// "max-results-text", "max-results-above-limit"). Absent is 1000; zero is the
+// method's own reading of it.
+func listSize(text string, zero int) (int, *gateway.RESTResponse) {
+	if text == "" {
+		return maxListResults, nil
+	}
+	value, err := strconv.ParseUint(text, 10, 32)
+	if err != nil {
+		return 0, wireError(400, "invalidParameter", "Invalid unsigned integer value: '"+text+"'.")
+	}
+	if value == 0 {
+		return zero, nil
+	}
+	return int(min(value, maxListResults)), nil
+}
+
+// pageAfter returns the entries named after after, at most limit of them,
+// and the token of the next page, "" on the last. entries are in name order.
+func pageAfter[T any](entries []T, name func(T) string, after string, limit int, kind string) ([]T, string) {
+	start := 0
+	if after != "" {
+		start = sort.Search(len(entries), func(i int) bool { return name(entries[i]) > after })
+	}
+	end := min(start+limit, len(entries))
+	if end == start || end == len(entries) {
+		return entries[start:end], ""
+	}
+	return entries[start:end], listToken(kind, name(entries[end-1]))
+}
+
+// listBuckets serves buckets.list: the scope's buckets in name order, paged
+// here, each merged with its catalog metadata. returnPartialSuccess=true
+// lists the same buckets: every bucket is reachable, so GCP's unreachable
+// list is empty and omitted (recorded: storage-go-client-projection
+// "bucket-list-partial-success").
+func (p *Provider) listBuckets(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	// maxResults=0 lists a full page (recorded: storage-list-paging
+	// "bucket-max-results-zero").
+	limit, refused := listSize(r.Query.Get(queryMaxResults), maxListResults)
+	if refused != nil {
+		return refused, nil
+	}
+	query := url.Values{}
+	if prefix := r.Query.Get(queryPrefix); prefix != "" {
+		query.Set(queryPrefix, prefix)
+	}
+	response, err := b.forward(ctx, http.MethodGet, "/storage/v1/b", query, nil, nil)
+	if err != nil || response.Status != http.StatusOK {
+		return response, err
+	}
+	body, err := jsonObject(response.JSON)
+	if err != nil {
+		return nil, err
+	}
+	buckets := itemList(body["items"])
+	slices.SortStableFunc(buckets, func(left, right map[string]any) int {
+		return cmp.Compare(documentName(left), documentName(right))
+	})
+	for _, item := range buckets {
+		p.bucketMetadata(scope, item)
+	}
+	after, valid := listAfter(bucketPages, r.Query.Get(queryPageToken))
+	if !valid {
+		// GCP lists nothing after a token it did not issue (recorded:
+		// storage-list-paging "bucket-invalid-page-token").
+		buckets = nil
+	}
+	page, next := pageAfter(buckets, documentName, after, limit, bucketPages)
+	result := provider.ListBody("items", page, next)
+	result[keyKind] = "storage#buckets"
+	return &gateway.RESTResponse{JSON: result}, nil
 }

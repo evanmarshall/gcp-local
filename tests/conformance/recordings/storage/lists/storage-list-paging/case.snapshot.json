@@ -1,0 +1,216 @@
+{
+  "storage-list-paging": {
+    "recorded-date": "13-10-2026, 00:39:03",
+    "recorded-content": {
+      "delimited-pages": [
+        {
+          "items": [],
+          "prefixes": [
+            "a-",
+            "b-"
+          ],
+          "has_next": true
+        },
+        {
+          "items": [
+            "c"
+          ],
+          "prefixes": [
+            "d-"
+          ],
+          "has_next": true
+        },
+        {
+          "items": [
+            "e"
+          ],
+          "prefixes": [
+            "f-"
+          ],
+          "has_next": false
+        }
+      ],
+      "delimited-pages-of-four": [
+        {
+          "items": [
+            "c"
+          ],
+          "prefixes": [
+            "a-",
+            "b-",
+            "d-"
+          ],
+          "has_next": true
+        },
+        {
+          "items": [
+            "e"
+          ],
+          "prefixes": [
+            "f-"
+          ],
+          "has_next": false
+        }
+      ],
+      "delimited-one-page": [
+        {
+          "items": [
+            "c",
+            "e"
+          ],
+          "prefixes": [
+            "a-",
+            "b-",
+            "d-",
+            "f-"
+          ],
+          "has_next": false
+        }
+      ],
+      "flat-pages": [
+        {
+          "items": [
+            "a-1",
+            "a-2",
+            "b-1"
+          ],
+          "prefixes": [],
+          "has_next": true
+        },
+        {
+          "items": [
+            "c",
+            "d-1",
+            "e"
+          ],
+          "prefixes": [],
+          "has_next": true
+        },
+        {
+          "items": [
+            "f-1"
+          ],
+          "prefixes": [],
+          "has_next": false
+        }
+      ],
+      "prefix-delimited": [
+        {
+          "items": [
+            "a-1",
+            "a-2"
+          ],
+          "prefixes": [],
+          "has_next": false
+        }
+      ],
+      "prefix-collapsed": [
+        {
+          "items": [],
+          "prefixes": [
+            "a-"
+          ],
+          "has_next": false
+        }
+      ],
+      "offsets-delimited": [
+        {
+          "items": [
+            "c"
+          ],
+          "prefixes": [
+            "b-",
+            "d-"
+          ],
+          "has_next": false
+        }
+      ],
+      "offsets-inside-prefix": [
+        {
+          "items": [
+            "c"
+          ],
+          "prefixes": [
+            "a-",
+            "b-"
+          ],
+          "has_next": false
+        }
+      ],
+      "invalid-page-token": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Next page token not valid: not-a-page-token",
+        "reasons": [
+          "invalid"
+        ],
+        "status": 400
+      },
+      "max-results-negative": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Invalid unsigned integer value: '-1'.",
+        "reasons": [
+          "invalidParameter"
+        ],
+        "status": 400
+      },
+      "max-results-text": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Invalid unsigned integer value: 'many'.",
+        "reasons": [
+          "invalidParameter"
+        ],
+        "status": 400
+      },
+      "max-results-zero": {
+        "count": 0,
+        "has_next": false,
+        "has_unreachable": false,
+        "status": 200
+      },
+      "max-results-above-limit": {
+        "count": 7,
+        "has_next": false,
+        "has_unreachable": false,
+        "status": 200
+      },
+      "bucket-page": {
+        "count": 1,
+        "has_next": false,
+        "has_unreachable": false,
+        "status": 200
+      },
+      "bucket-invalid-page-token": {
+        "count": 0,
+        "has_next": false,
+        "has_unreachable": false,
+        "status": 200
+      },
+      "bucket-max-results-zero": {
+        "count": 1,
+        "has_next": false,
+        "has_unreachable": false,
+        "status": 200
+      },
+      "bucket-max-results-negative": {
+        "code": 400,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "Invalid unsigned integer value: '-1'.",
+        "reasons": [
+          "invalidParameter"
+        ],
+        "status": 400
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

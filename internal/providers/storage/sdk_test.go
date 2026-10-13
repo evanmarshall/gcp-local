@@ -33,13 +33,13 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // goClient serves the fixture over HTTP and returns a Go Storage client with
-// default settings and the documented endpoint override.
-func goClient(t *testing.T, f *fixture, token string) *gcs.Client {
+// default settings and the documented endpoint override, calling as admin.
+func goClient(t *testing.T, f *fixture) *gcs.Client {
 	t.Helper()
 	server := httptest.NewServer(f.g)
 	t.Cleanup(server.Close)
 	client, err := gcs.NewClient(context.Background(), option.WithEndpoint(server.URL+"/storage/v1/"),
-		option.WithHTTPClient(&http.Client{Transport: bearer{token}}))
+		option.WithHTTPClient(&http.Client{Transport: bearer{admin}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func uniformBucket() *gcs.BucketAttrs {
 // default settings: it sends projection=full on reads, lists, and writes.
 func TestGoClientBucketAndObjectLifecycle(t *testing.T) {
 	f := setup(t)
-	client := goClient(t, f, admin)
+	client := goClient(t, f)
 	ctx := context.Background()
 	bucket := client.Bucket("go-bucket")
 	if err := bucket.Create(ctx, testProject, uniformBucket()); err != nil {
@@ -154,7 +154,7 @@ func readAll(t *testing.T, object *gcs.ObjectHandle) []byte {
 // it back over the XML API, and copies it with objects.rewrite.
 func TestGoClientResumableUploadAndRewrite(t *testing.T) {
 	f := setup(t)
-	client := goClient(t, f, admin)
+	client := goClient(t, f)
 	ctx := context.Background()
 	bucket := client.Bucket("go-large")
 	if err := bucket.Create(ctx, testProject, uniformBucket()); err != nil {
@@ -189,7 +189,7 @@ func TestGoClientResumableUploadAndRewrite(t *testing.T) {
 // answers 400, which the Go client does not retry, instead of hanging it.
 func TestGoClientGapFailsPromptly(t *testing.T) {
 	f := setup(t)
-	client := goClient(t, f, admin)
+	client := goClient(t, f)
 	f.bucket(testProject, "gap-bucket", 200)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -366,4 +366,66 @@ func TestSignedURLRefusals(t *testing.T) {
 	}
 	// Both a signature and a bearer token is ambiguous.
 	send(t, http.MethodGet, read, map[string]string{"Authorization": "Bearer " + admin}, nil, http.StatusBadRequest)
+}
+
+// TestGoClientListsAndMissingBucket drives the Go client's bucket list with
+// ReturnPartialSuccess, a delimited object listing across pages, and a media
+// read from a missing bucket, which must fail at once instead of retrying.
+func TestGoClientListsAndMissingBucket(t *testing.T) {
+	f := setup(t)
+	client := goClient(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	bucket := client.Bucket("go-lists")
+	if err := bucket.Create(ctx, testProject, uniformBucket()); err != nil {
+		t.Fatal(err)
+	}
+	buckets := client.Buckets(ctx, testProject)
+	buckets.ReturnPartialSuccess = true
+	if listed, err := buckets.Next(); err != nil || listed.Name != "go-lists" || len(buckets.Unreachable()) != 0 {
+		t.Fatalf("partial-success bucket list = %+v, %v", listed, err)
+	}
+	goWrite(t, bucket, "a/1", "a/2", "b", "c/1")
+	// Two entries a page: [a/ b], then [c/]; the client yields a page's
+	// objects before its prefixes.
+	if entries := goListing(t, bucket.Objects(ctx, &gcs.Query{Delimiter: "/"})); entries != "b a/ c/" {
+		t.Fatalf("delimited listing = %v", entries)
+	}
+	started := time.Now()
+	_, err := client.Bucket("go-missing-bucket").Object("x").NewReader(ctx)
+	if err == nil || time.Since(started) > 5*time.Second {
+		t.Fatalf("missing-bucket read after %s: %v", time.Since(started), err)
+	}
+}
+
+// goWrite writes each named object with its name as content.
+func goWrite(t *testing.T, bucket *gcs.BucketHandle, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		writer := bucket.Object(name).NewWriter(context.Background())
+		if _, err := writer.Write([]byte(name)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// goListing reads an object iterator two entries a page and joins each
+// object name or prefix.
+func goListing(t *testing.T, objects *gcs.ObjectIterator) string {
+	t.Helper()
+	objects.PageInfo().MaxSize = 2
+	var entries []string
+	for {
+		attrs, err := objects.Next()
+		if errors.Is(err, iterator.Done) {
+			return strings.Join(entries, " ")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, attrs.Name+attrs.Prefix)
+	}
 }

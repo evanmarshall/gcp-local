@@ -2,12 +2,14 @@
 package storage
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -192,6 +194,7 @@ func (c *Catalog) DeleteFolder(scope state.Scope, bucket, name string) (bool, er
 	return removed, nil
 }
 
+// Folders returns a bucket's folders in name order.
 func (c *Catalog) Folders(scope state.Scope, bucket string) ([]Folder, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -206,6 +209,7 @@ func (c *Catalog) Folders(scope state.Scope, bucket string) ([]Folder, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("list folders of %s: %w", bucket, err)
 	}
+	slices.SortFunc(items, func(left, right Folder) int { return cmp.Compare(left.Name, right.Name) })
 	return items, nil
 }
 

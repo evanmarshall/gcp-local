@@ -2,6 +2,8 @@ package storage
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -349,11 +351,13 @@ func TestSoftDeletedReads(t *testing.T) {
 		"/o/deleted.txt?softDeleted=true&ifGenerationMatch=1&generation=" + generation: "Storage coverage gap: softDeleted read with ifGenerationMatch",
 		"/o?softDeleted=true&delimiter=/":                                              "Storage coverage gap: softDeleted listing with delimiter",
 		"/o?softDeleted=true&versions=true":                                            "Storage coverage gap: softDeleted listing with versions",
-		"/o?softDeleted=true&maxResults=0":                                             "Invalid maxResults",
+		"/o?softDeleted=true&maxResults=-1":                                            "Invalid unsigned integer value: '-1'.",
 		"/o?softDeleted=maybe":                                                         "softDeleted must be a boolean",
 	} {
 		refused(t, f.request(admin, "GET", softBase+path, nil, 400).Body.String(), message)
 	}
+	empty := decodeBody(t, f.request(admin, "GET", softBase+"/o?softDeleted=true&maxResults=0", nil, 200).Body.Bytes())
+	expectf(t, len(itemList(empty["items"])) == 0, "maxResults=0 listing = %v", empty)
 	// Soft-deleted objects expire at their hard-delete time.
 	scope := state.Scope{Project: testProject, Location: state.Global}
 	expired := f.p.catalog.softDeletedObjects(scope, "soft-bucket", time.Now().Add(8*24*time.Hour))
@@ -580,4 +584,106 @@ func TestGcloudObjectRequests(t *testing.T) {
 	f.request(admin, "GET", "/storage/v1/b/gcloud-bucket/o?includeFoldersAsPrefixes=true", nil, 200)
 	refused(t, f.request(admin, "GET", "/storage/v1/b/gcloud-bucket/o?includeFoldersAsPrefixes=yes", nil, 400).Body.String(),
 		"includeFoldersAsPrefixes must be a boolean")
+}
+
+// listPage is one page of a Storage list: entry names, prefixes, and the
+// next page's token.
+type listPage struct {
+	items, prefixes []string
+	next            string
+}
+
+// listPages follows a listing's page tokens to its end.
+func listPages(t *testing.T, f *fixture, path string) []listPage {
+	t.Helper()
+	var pages []listPage
+	token := ""
+	for range 10 {
+		target := path
+		if token != "" {
+			target += "&pageToken=" + url.QueryEscape(token)
+		}
+		body := decodeBody(t, f.request(admin, "GET", target, nil, 200).Body.Bytes())
+		page := listPage{}
+		for _, item := range itemList(body["items"]) {
+			page.items = append(page.items, documentName(item))
+		}
+		prefixes, _ := body["prefixes"].([]any)
+		for _, prefix := range prefixes {
+			text, _ := prefix.(string)
+			page.prefixes = append(page.prefixes, text)
+		}
+		page.next, _ = body["nextPageToken"].(string)
+		pages = append(pages, page)
+		if token = page.next; token == "" {
+			return pages
+		}
+	}
+	t.Fatalf("%s did not end", path)
+	return nil
+}
+
+// TestObjectListPagingMatchesGCP replays storage-list-paging: a delimiter
+// prefix is one entry toward maxResults, no page repeats a prefix, offsets
+// select objects before they collapse, and GCP's refusals.
+func TestObjectListPagingMatchesGCP(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "list-bucket", 200)
+	for _, name := range []string{"e", "a-1", "d-1", "a-2", "c", "f-1", "b-1"} {
+		f.request(admin, "POST", "/upload/storage/v1/b/list-bucket/o?uploadType=media&name="+name, []byte(name), 200)
+	}
+	base := "/storage/v1/b/list-bucket/o?"
+	for query, want := range map[string]string{
+		"delimiter=-&maxResults=2":                  "[{[] [a- b-]} {[c] [d-]} {[e] [f-]}]",
+		"delimiter=-":                               "[{[c e] [a- b- d- f-]}]",
+		"maxResults=3":                              "[{[a-1 a-2 b-1] []} {[c d-1 e] []} {[f-1] []}]",
+		"prefix=a&delimiter=-":                      "[{[] [a-]}]",
+		"delimiter=-&startOffset=a-2&endOffset=d-1": "[{[c] [a- b-]}]",
+		"delimiter=--&prefix=a":                     "[{[a-1 a-2] []}]",
+		"maxResults=0":                              "[{[] []}]",
+		"maxResults=1001&delimiter=-&undefined=1":   "[{[c e] [a- b- d- f-]}]",
+	} {
+		pages := listPages(t, f, base+query)
+		got := make([]string, 0, len(pages))
+		for _, page := range pages {
+			got = append(got, fmt.Sprintf("{%v %v}", page.items, page.prefixes))
+		}
+		expectf(t, "["+strings.Join(got, " ")+"]" == want, "%s: pages %v, want %s", query, got, want)
+	}
+	for query, message := range map[string]string{
+		"pageToken=not-a-page-token": "Next page token not valid: not-a-page-token",
+		"maxResults=-1":              "Invalid unsigned integer value: '-1'.",
+		"maxResults=many":            "Invalid unsigned integer value: 'many'.",
+	} {
+		refused(t, f.request(admin, "GET", base+query, nil, 400).Body.String(), message)
+	}
+	// A token resumes after its last entry, so an object added before it
+	// does not shift the next page.
+	first := listPages(t, f, base+"maxResults=2")[0]
+	f.request(admin, "POST", "/upload/storage/v1/b/list-bucket/o?uploadType=media&name=0", []byte("0"), 200)
+	second := decodeBody(t, f.request(admin, "GET", base+"maxResults=2&pageToken="+url.QueryEscape(first.next), nil, 200).Body.Bytes())
+	expectf(t, documentName(itemList(second["items"])[0]) == "b-1", "page after a-2 = %v", second)
+}
+
+// TestBucketListPagingAndPartialSuccess pages buckets by name, lists nothing
+// after a foreign token as GCP does, and serves returnPartialSuccess=true.
+func TestBucketListPagingAndPartialSuccess(t *testing.T) {
+	f := setup(t)
+	for _, name := range []string{"page-c", "page-a", "page-b"} {
+		f.bucket(testProject, name, 200)
+	}
+	base := "/storage/v1/b?project=project-a"
+	pages := listPages(t, f, base+"&maxResults=2&projection=full&returnPartialSuccess=true")
+	got := make([]string, 0, len(pages))
+	for _, page := range pages {
+		got = append(got, fmt.Sprint(page.items))
+	}
+	expectf(t, fmt.Sprint(got) == "[[page-a page-b] [page-c]]", "bucket pages = %v", got)
+	all := decodeBody(t, f.request(admin, "GET", base+"&maxResults=0&prefix=page-", nil, 200).Body.Bytes())
+	_, unreachable := all["unreachable"]
+	expectf(t, len(itemList(all["items"])) == 3 && !unreachable && all["kind"] == "storage#buckets", "maxResults=0 = %v", all)
+	foreign := decodeBody(t, f.request(admin, "GET", base+"&pageToken=not-a-page-token", nil, 200).Body.Bytes())
+	expectf(t, len(itemList(foreign["items"])) == 0, "foreign token = %v", foreign)
+	refused(t, f.request(admin, "GET", base+"&maxResults=-1", nil, 400).Body.String(), "Invalid unsigned integer value: '-1'.")
+	refused(t, f.request(admin, "GET", base+"&returnPartialSuccess=maybe", nil, 400).Body.String(), "returnPartialSuccess must be a boolean")
 }

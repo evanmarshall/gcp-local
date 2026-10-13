@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:01:37.615359+00:00",
+  "recorded_at": "2026-10-13T00:39:10.533145+00:00",
   "scenario": {
     "id": "storage-go-client-projection",
     "service": "storage",
     "transport": "rest-json-v1",
-    "revision": "8f8e47e950cc8876a9d0a2cbaf3db9db2091118087388a1c9632ce6a776612f8",
+    "revision": "8598f6ed05730f8451ab1fd2205dfacaa0b343cd1d63e7669de0fc16a628e0b8",
     "versions": {
       "sdk": "cloud.google.com/go/storage/1.65.0 request shapes",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "9f1b2b31289093679879691c974cbf7157359bb22e5004b15d1885c0f480f601",
+  "snapshot_sha256": "0f9fd04fe070bf5484d6e374cd60d1a8e7e059d59d6ab36692d986596fbc0100",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",

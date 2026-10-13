@@ -5,7 +5,8 @@ alt=json and prettyPrint=false on every call, projection=full on bucket and
 object reads, lists, and patches, and the default list options shown below.
 The recording settles whether GCP returns acl, defaultObjectAcl, or owner
 under projection=full on a uniform bucket, and how GCP answers an option the
-emulator does not serve. Not recorded.
+emulator does not serve. It also lists buckets with returnPartialSuccess=true
+and reads an object of a missing bucket over the XML API, as the Go client does.
 """
 
 import pytest
@@ -63,6 +64,20 @@ def test_storage_go_client_projection(storage, gcp_snapshot):
             "count": len(items),
             "has_unreachable": "unreachable" in listed.json(),
             **acl_shape(items[0] if items else {}),
+        },
+    )
+    partial = transport.send(
+        "GET",
+        base,
+        actor="fixture",
+        query={**FULL, "project": storage.project, "returnPartialSuccess": "true"},
+    )
+    gcp_snapshot.match(
+        "bucket-list-partial-success",
+        {
+            "status": partial.status,
+            "names": [observed.text(item["name"]) for item in partial.json().get("items", [])],
+            "has_unreachable": "unreachable" in partial.json(),
         },
     )
     patched = transport.send(
@@ -127,5 +142,15 @@ def test_storage_go_client_projection(storage, gcp_snapshot):
         "GET", bucket, actor="fixture", query={**FULL, "unsupportedOption": "true"}
     )
     gcp_snapshot.match("unknown-option", {"status": unknown.status})
+    # The Go client reads media over the XML API; a missing bucket must not
+    # answer 5xx, which the client retries without a limit.
+    missing = transport.send(
+        "GET",
+        storage.client.endpoint + "/" + storage.bucket + "-gone/go-object.txt",
+        actor="fixture",
+    )
+    gcp_snapshot.match(
+        "xml-read-missing-bucket", {"status": missing.status, "code": missing.xml_code()}
+    )
     invalid = transport.send("GET", bucket, actor="fixture", query={**GO, "projection": "custom"})
     gcp_snapshot.match("invalid-projection", {"status": invalid.status})

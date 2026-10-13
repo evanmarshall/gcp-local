@@ -374,7 +374,7 @@ func TestFolderLifecycleAndAuthorization(t *testing.T) {
 	f.request(admin, "GET", folders+"/absent", nil, 404)
 	f.request(admin, "POST", folders, []byte(`{"name":"archive"}`), 200)
 	listed := decodeBody(t, f.request(admin, "GET", folders, nil, 200).Body.Bytes())
-	if items, _ := listed["folders"].([]any); len(items) != 2 {
+	if items, _ := listed["items"].([]any); len(items) != 2 || listed["kind"] != "storage#folders" {
 		t.Fatalf("folders = %v", listed)
 	}
 
@@ -386,7 +386,7 @@ func TestFolderLifecycleAndAuthorization(t *testing.T) {
 	// Folders in another project's bucket are unaffected by this bucket's state.
 	f.bucket(peerProject, "peer-bucket", 200)
 	peer := decodeBody(t, f.request("admin@project-b.test", "GET", "/storage/v1/b/peer-bucket/folders", nil, 200).Body.Bytes())
-	if items, _ := peer["folders"].([]any); len(items) != 0 {
+	if items, _ := peer["items"].([]any); len(items) != 0 {
 		t.Fatalf("another bucket listed these folders: %v", peer)
 	}
 
@@ -466,6 +466,33 @@ func TestCatalogFoldersStayInTheirProject(t *testing.T) {
 	if items, _ := catalog.Folders(a, catalogBucket); len(items) != 0 {
 		t.Fatal("reset retained folders")
 	}
+}
+
+// TestFolderListPaging lists folders in name order, pages them by pageSize,
+// filters by prefix, and refuses a foreign token and an unserved option.
+func TestFolderListPaging(t *testing.T) {
+	f := setup(t)
+	f.bucket(testProject, "folder-pages", 200)
+	folders := "/storage/v1/b/folder-pages/folders"
+	for _, name := range []string{"c/", "a/", "b/", "a/x/"} {
+		f.request(admin, "POST", folders, []byte(`{"name":"`+name+`","kind":"storage#folder"}`), 200)
+	}
+	pages := listPages(t, f, folders+"?pageSize=3")
+	got := make([]string, 0, len(pages))
+	for _, page := range pages {
+		got = append(got, fmt.Sprint(page.items))
+	}
+	if fmt.Sprint(got) != "[[a/ a/x/ b/] [c/]]" {
+		t.Fatalf("folder pages = %v", got)
+	}
+	prefixed := decodeBody(t, f.request(admin, "GET", folders+"?prefix=a/", nil, 200).Body.Bytes())
+	if len(itemList(prefixed["items"])) != 2 {
+		t.Fatalf("prefix listing = %v", prefixed)
+	}
+	refused(t, f.request(admin, "GET", folders+"?pageToken=x", nil, 400).Body.String(), "Next page token not valid: x")
+	refused(t, f.request(admin, "GET", folders+"?delimiter=/", nil, 400).Body.String(), "Storage coverage gap: unsupported query option delimiter")
+	refused(t, f.request(admin, "POST", folders, []byte(`{"name":"d/","pendingRenameInfo":{"operationId":"x"},"owner":"me"}`), 400).Body.String(), "owner")
+	refused(t, f.request(admin, "GET", folders+"/absent", nil, 404).Body.String(), `"reason":"notFound"`)
 }
 
 // errPayload stands for a non-status provider error whose text carries

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -684,17 +685,6 @@ func (p *Provider) executeObject(ctx context.Context, b *memoryBackend, req requ
 	return p.writeObject(ctx, b, req, current)
 }
 
-// listObjects serves objects.list, live or soft-deleted.
-func (p *Provider) listObjects(ctx context.Context, b *memoryBackend, req request, softDeleted bool) (*gateway.RESTResponse, error) {
-	if softDeleted {
-		return p.listSoftDeleted(req)
-	}
-	if refused := p.foldersAsPrefixes(req); refused != nil {
-		return nil, refused
-	}
-	return b.forward(ctx, "GET", "/storage/v1/b/"+url.PathEscape(req.bucket)+"/o", req.rest.Query, nil, nil)
-}
-
 // writeObject serves inserts (JSON, XML, and a resumable commit) and deletes,
 // which remove the live generation that a bucket with a soft-delete policy
 // keeps.
@@ -852,24 +842,6 @@ func policyBindsPublic(bindings []iam.Binding) bool {
 	return false
 }
 
-// listBuckets mirrors every returned bucket into the provider-owned catalog.
-func (p *Provider) listBuckets(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	response, err := b.forward(ctx, "GET", "/storage/v1/b", r.Query, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	if response.Status == 200 {
-		body, bodyErr := jsonObject(response.JSON)
-		if bodyErr != nil {
-			return nil, bodyErr
-		}
-		for _, item := range itemList(body["items"]) {
-			p.bucketMetadata(scope, item)
-		}
-	}
-	return response, nil
-}
-
 // getBucket reads one bucket and mirrors its metadata into the catalog.
 func (p *Provider) getBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, path string) (*gateway.RESTResponse, error) {
 	response, err := b.forward(ctx, "GET", path, r.Query, nil, nil)
@@ -957,46 +929,45 @@ func (p *Provider) executeFolder(method string, r *gateway.RESTRequest, scope st
 	case MethodFoldersGet:
 		return p.getFolder(scope, bucket, r.Path["folder"])
 	case MethodFoldersList:
-		return p.listFolders(scope, bucket)
+		return p.listFolders(r, scope, bucket)
 	default:
 		return p.deleteFolder(scope, bucket, r.Path["folder"])
 	}
 }
 
-// folderDocument is the wire shape of one folder.
+// folderDocument is the wire shape of one folder (folders resource).
 func folderDocument(folder Folder) map[string]any {
-	return map[string]any{keyName: folder.Name, keyBucket: folder.Bucket}
-}
-
-// folderErrorBody is the Storage Control error body, which has no errors[] list.
-type folderErrorBody struct {
-	Error struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-func folderError(code int, message string) *gateway.RESTResponse {
-	var body folderErrorBody
-	body.Error.Code, body.Error.Message = code, message
-	return &gateway.RESTResponse{Status: code, JSON: body}
+	return map[string]any{keyKind: "storage#folder", keyName: folder.Name, keyBucket: folder.Bucket}
 }
 
 func folderMissing(id string) *gateway.RESTResponse {
-	return folderError(404, "No such object: folders/"+id)
+	return wireError(404, "notFound", "No such object: folders/"+id)
+}
+
+// folderRequest is a folders.insert body. The folders resource's other
+// fields are output-only.
+type folderRequest struct {
+	Name   string `json:"name"`
+	Bucket string `json:"bucket"`
 }
 
 func (p *Provider) createFolder(r *gateway.RESTRequest, scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
-	var body struct {
-		Name string `json:"name"`
+	var body folderRequest
+	if err := provider.DecodeJSON(r.JSON, "", &body, gap, provider.Fields{OutputOnly: []string{
+		"createTime", "id", keyKind, "metageneration", "pendingRenameInfo", "selfLink", "updateTime",
+	}}); err != nil {
+		return nil, err
 	}
-	if json.Unmarshal(r.JSON, &body) != nil || body.Name == "" {
+	if body.Name == "" {
 		return nil, provider.Invalid("Expected a folder name")
+	}
+	if body.Bucket != "" && body.Bucket != bucket {
+		return nil, provider.Invalid("Folder bucket does not match the request")
 	}
 	if _, exists, err := p.catalog.Folder(scope, bucket, body.Name); err != nil {
 		return nil, err
 	} else if exists {
-		return folderError(409, "Folder already exists"), nil
+		return wireError(409, "conflict", "Folder already exists"), nil
 	}
 	folder := Folder{Bucket: bucket, Name: body.Name}
 	if err := p.catalog.PublishFolder(scope, folder); err != nil {
@@ -1016,16 +987,32 @@ func (p *Provider) getFolder(scope state.Scope, bucket, id string) (*gateway.RES
 	return &gateway.RESTResponse{JSON: folderDocument(folder)}, nil
 }
 
-func (p *Provider) listFolders(scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
+// listFolders serves folders.list in name order, paged as the other Storage
+// lists are; pageSize is the folders resource's page size.
+func (p *Provider) listFolders(r *gateway.RESTRequest, scope state.Scope, bucket string) (*gateway.RESTResponse, error) {
+	limit, refused := listSize(r.Query.Get("pageSize"), maxListResults)
+	if refused != nil {
+		return refused, nil
+	}
+	after, valid := listAfter(folderPages, r.Query.Get(queryPageToken))
+	if !valid {
+		return wireError(400, "invalid", "Next page token not valid: "+r.Query.Get(queryPageToken)), nil
+	}
 	folders, err := p.catalog.Folders(scope, bucket)
 	if err != nil {
 		return nil, err
 	}
-	documents := []any{}
-	for _, folder := range folders {
+	folders = slices.DeleteFunc(folders, func(folder Folder) bool {
+		return !strings.HasPrefix(folder.Name, r.Query.Get(queryPrefix))
+	})
+	page, next := pageAfter(folders, func(folder Folder) string { return folder.Name }, after, limit, folderPages)
+	documents := make([]map[string]any, 0, len(page))
+	for _, folder := range page {
 		documents = append(documents, folderDocument(folder))
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{"folders": documents}}, nil
+	result := provider.ListBody("items", documents, next)
+	result[keyKind] = "storage#folders"
+	return &gateway.RESTResponse{JSON: result}, nil
 }
 
 func (p *Provider) deleteFolder(scope state.Scope, bucket, id string) (*gateway.RESTResponse, error) {

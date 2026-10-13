@@ -44,6 +44,7 @@ type uploadRequest struct {
 // Query parameter names that appear in more than one option list.
 const (
 	queryProject              = "project"
+	queryPartialSuccess       = "returnPartialSuccess"
 	queryIfGenerationMatch    = "ifGenerationMatch"
 	queryIfGenerationNotMatch = "ifGenerationNotMatch"
 	queryIfMetaMatch          = "ifMetagenerationMatch"
@@ -53,7 +54,7 @@ const (
 // queryOptions lists the documented query parameters each method may carry.
 var queryOptions = map[string][]string{
 	MethodBucketsInsert:       {queryProject},
-	MethodBucketsList:         {queryProject, queryPrefix, queryMaxResults, "pageToken"},
+	MethodBucketsList:         {queryProject, queryPrefix, queryMaxResults, queryPageToken, queryPartialSuccess},
 	MethodBucketsGetIamPolicy: {"optionsRequestedPolicyVersion"},
 	MethodBucketsPatch:        {queryIfMetaMatch, queryIfMetaNotMatch},
 	MethodObjectsInsert:       {queryUploadType, keyName, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
@@ -63,7 +64,9 @@ var queryOptions = map[string][]string{
 	// Rewrite preconditions apply to the destination. maxBytesRewrittenPerCall
 	// is accepted and not enforced: every rewrite here finishes in one call.
 	MethodObjectsRewrite: {"sourceGeneration", "maxBytesRewrittenPerCall", queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
-	MethodObjectsList:    {queryPrefix, "delimiter", queryMaxResults, "pageToken", "startOffset", "endOffset", queryVersions, querySoftDeleted, queryFoldersAsPrefixes},
+	MethodObjectsList:    {queryPrefix, "delimiter", queryMaxResults, queryPageToken, "startOffset", "endOffset", queryVersions, querySoftDeleted, queryFoldersAsPrefixes},
+	// folders/list: delimiter and the offsets are gaps.
+	MethodFoldersList: {queryPrefix, "pageSize", queryPageToken},
 	// objects/restore: generation names the soft-deleted version; the
 	// preconditions apply to the live object it would replace.
 	MethodObjectsRestore: {keyGeneration, queryIfGenerationMatch, queryIfGenerationNotMatch, queryIfMetaMatch, queryIfMetaNotMatch},
@@ -71,13 +74,12 @@ var queryOptions = map[string][]string{
 
 // defaultOnlyOptions are options accepted only at their documented default,
 // which is the behavior served; any other value is a gap. The Go client sends
-// them on every call (storage/docs/json_api/v1/objects/list, buckets/list),
+// them on every call (storage/docs/json_api/v1/objects/list),
 // and gcloud sends enableObjectRetention=False on every bucket insert
 // (buckets/insert: true permanently enables object retention, which is not
 // modeled). copySourceAcl copies ACLs, which uniform buckets do not have.
 var defaultOnlyOptions = map[string]map[string]string{
 	MethodBucketsInsert:  {"enableObjectRetention": valueFalse},
-	MethodBucketsList:    {"returnPartialSuccess": valueFalse},
 	MethodObjectsList:    {"matchGlob": "", "includeTrailingDelimiter": valueFalse},
 	MethodObjectsRestore: {"copySourceAcl": valueFalse},
 }
@@ -184,7 +186,7 @@ func validateOptionValues(query url.Values) error {
 	if projection := query.Get("projection"); projection != "" && projection != "noAcl" && projection != "full" {
 		return gap("projection " + projection)
 	}
-	for _, key := range []string{queryVersions, querySoftDeleted, queryFoldersAsPrefixes} {
+	for _, key := range []string{queryVersions, querySoftDeleted, queryFoldersAsPrefixes, queryPartialSuccess} {
 		if _, err := booleanOption(query, key); err != nil {
 			return err
 		}

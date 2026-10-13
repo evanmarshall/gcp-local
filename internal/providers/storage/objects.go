@@ -717,6 +717,111 @@ func (p *Provider) retainLive(ctx context.Context, b *memoryBackend, scope state
 	}, nil
 }
 
+// listObjects serves objects.list, live or soft-deleted.
+func (p *Provider) listObjects(ctx context.Context, b *memoryBackend, req request, softDeleted bool) (*gateway.RESTResponse, error) {
+	if softDeleted {
+		return p.listSoftDeleted(req)
+	}
+	if refused := p.foldersAsPrefixes(req); refused != nil {
+		return nil, refused
+	}
+	query := req.rest.Query
+	limit, refused := listSize(query.Get(queryMaxResults), 0)
+	if refused != nil {
+		return refused, nil
+	}
+	after, valid := listAfter(objectPages, query.Get(queryPageToken))
+	if !valid {
+		// Recorded: storage-list-paging "invalid-page-token".
+		return wireError(400, "invalid", "Next page token not valid: "+query.Get(queryPageToken)), nil
+	}
+	objects, refused, err := listedObjects(ctx, b, req.bucket, query)
+	if refused != nil || err != nil {
+		return refused, err
+	}
+	page, next := pageAfter(objectEntries(objects, query), func(entry listEntry) string { return entry.name }, after, limit, objectPages)
+	items, prefixes := []map[string]any{}, []string{}
+	for _, entry := range page {
+		if entry.object == nil {
+			prefixes = append(prefixes, entry.name)
+		} else {
+			items = append(items, entry.object)
+		}
+	}
+	result := provider.ListBody("items", items, next)
+	result[keyKind] = kindObjects
+	if len(prefixes) > 0 {
+		result["prefixes"] = prefixes
+	}
+	return &gateway.RESTResponse{JSON: result}, nil
+}
+
+// listedObjects reads every object of a bucket under the listing's prefix
+// from the backend, in name order. Paging, offsets, and the delimiter are
+// the provider's (objectEntries, pageAfter), as GCP applies them.
+func listedObjects(ctx context.Context, b *memoryBackend, bucket string, query url.Values) ([]map[string]any, *gateway.RESTResponse, error) {
+	backendQuery := url.Values{}
+	for _, key := range []string{queryPrefix, queryVersions} {
+		if value := query.Get(key); value != "" {
+			backendQuery.Set(key, value)
+		}
+	}
+	listed, err := b.forward(ctx, http.MethodGet, "/storage/v1/b/"+url.PathEscape(bucket)+"/o", backendQuery, nil, nil)
+	if err != nil || listed.Status != http.StatusOK {
+		return nil, listed, err
+	}
+	body, err := jsonObject(listed.JSON)
+	if err != nil {
+		return nil, nil, err
+	}
+	objects := itemList(body["items"])
+	slices.SortStableFunc(objects, func(left, right map[string]any) int {
+		return cmp.Compare(documentName(left), documentName(right))
+	})
+	return objects, nil, nil
+}
+
+// documentName is the name of a bucket or object document.
+func documentName(document map[string]any) string {
+	name, _ := document[keyName].(string)
+	return name
+}
+
+// listEntry is one objects.list entry: an object, or a prefix that stands for
+// every object under it when the listing has a delimiter.
+type listEntry struct {
+	name   string
+	object map[string]any
+}
+
+// objectEntries applies startOffset, endOffset, and the delimiter to a
+// prefix's objects, in name order. As GCP does, the offsets select objects
+// before they collapse: a prefix is listed when any object under it is in
+// range, and it is one entry toward maxResults (recorded:
+// storage-list-paging "delimited-pages", "offsets-inside-prefix").
+func objectEntries(objects []map[string]any, query url.Values) []listEntry {
+	prefix, delimiter := query.Get(queryPrefix), query.Get("delimiter")
+	start, end := query.Get("startOffset"), query.Get("endOffset")
+	entries := make([]listEntry, 0, len(objects))
+	for _, object := range objects {
+		name := documentName(object)
+		rest, matched := strings.CutPrefix(name, prefix)
+		if !matched || name < start || (end != "" && name >= end) {
+			continue
+		}
+		if index := strings.Index(rest, delimiter); delimiter != "" && index >= 0 {
+			// Objects under one prefix are adjacent in name order.
+			collapsed := name[:len(prefix)+index+len(delimiter)]
+			if len(entries) == 0 || entries[len(entries)-1].name != collapsed {
+				entries = append(entries, listEntry{name: collapsed})
+			}
+			continue
+		}
+		entries = append(entries, listEntry{name: name, object: object})
+	}
+	return entries
+}
+
 // softDeletedOptions are the objects.list options served with
 // softDeleted=true; any other documented option is a gap.
 var softDeletedOptions = []string{querySoftDeleted, queryPrefix, queryMaxResults, "projection", queryVersions, "prettyPrint", "fields", queryAlt}
@@ -740,9 +845,13 @@ func (p *Provider) listSoftDeleted(req request) (*gateway.RESTResponse, error) {
 		}
 	}
 	if len(items) > limit {
+		if limit == 0 {
+			// maxResults=0 lists nothing, as a live listing does.
+			return &gateway.RESTResponse{JSON: map[string]any{keyKind: kindObjects}}, nil
+		}
 		return nil, gap("soft-deleted listings longer than one page")
 	}
-	body := map[string]any{keyKind: "storage#objects"}
+	body := map[string]any{keyKind: kindObjects}
 	if len(items) > 0 {
 		body["items"] = items
 	}
@@ -760,24 +869,15 @@ func softDeletedLimit(query url.Values) (int, *gateway.RESTResponse, error) {
 	if versions, _ := booleanOption(query, queryVersions); versions {
 		return 0, nil, gap("softDeleted listing with versions")
 	}
-	text := query.Get(queryMaxResults)
-	if text == "" {
-		return maxListResults, nil, nil
-	}
-	if parsed, ok := positiveInt(text); ok {
-		return min(parsed, maxListResults), nil, nil
-	}
-	return 0, wireError(400, "invalid", "Invalid maxResults"), nil
+	limit, refused := listSize(query.Get(queryMaxResults), 0)
+	return limit, refused, nil
 }
 
-// maxListResults is the largest objects.list page.
+// maxListResults is the largest page of a Storage list.
 const maxListResults = 1000
 
-// positiveInt parses a positive decimal integer.
-func positiveInt(text string) (int, bool) {
-	value, err := strconv.Atoi(text)
-	return value, err == nil && value > 0
-}
+// kindObjects is the kind of an objects.list response.
+const kindObjects = "storage#objects"
 
 // getSoftDeleted serves objects.get with softDeleted=true, which names one
 // generation (objects/get: "generation must be set" with softDeleted).

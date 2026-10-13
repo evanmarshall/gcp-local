@@ -1,6 +1,6 @@
 {
   "storage-go-client-projection": {
-    "recorded-date": "12-10-2026, 17:01:37",
+    "recorded-date": "13-10-2026, 00:39:10",
     "recorded-content": {
       "bucket-get": {
         "has_acl": false,
@@ -14,6 +14,13 @@
         "has_default_object_acl": false,
         "has_owner": false,
         "has_unreachable": false,
+        "status": 200
+      },
+      "bucket-list-partial-success": {
+        "has_unreachable": false,
+        "names": [
+          "<bucket>"
+        ],
         "status": 200
       },
       "bucket-patch": {
@@ -52,6 +59,10 @@
       },
       "unknown-option": {
         "status": 200
+      },
+      "xml-read-missing-bucket": {
+        "code": "NoSuchBucket",
+        "status": 404
       },
       "invalid-projection": {
         "status": 400
