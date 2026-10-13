@@ -1,0 +1,420 @@
+{
+  "run-traffic": {
+    "recorded-date": "13-10-2026, 04:07:55",
+    "recorded-content": {
+      "created": {
+        "generation": "1",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "latest_created": "<rev1>",
+        "latest_ready": "<rev1>",
+        "terminal_state": "CONDITION_SUCCEEDED",
+        "traffic": [
+          {
+            "percent": 100,
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "type"
+            ],
+            "percent": 100,
+            "revision": "<rev1>",
+            "tag": "",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+            "uri_is_tag_url": false
+          }
+        ]
+      },
+      "invoker-granted": {
+        "http_status": 200
+      },
+      "split": {
+        "generation": "2",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "latest_created": "<rev2>",
+        "latest_ready": "<rev2>",
+        "terminal_state": "CONDITION_SUCCEEDED",
+        "traffic": [
+          {
+            "percent": 50,
+            "revision": "<rev1>",
+            "tag": "blue",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+          },
+          {
+            "percent": 50,
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "tag",
+              "type",
+              "uri"
+            ],
+            "percent": 50,
+            "revision": "<rev1>",
+            "tag": "blue",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+            "uri_is_tag_url": true
+          },
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "type"
+            ],
+            "percent": 50,
+            "revision": "<rev2>",
+            "tag": "",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+            "uri_is_tag_url": false
+          }
+        ]
+      },
+      "delete-split-revision": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Revision \"<rev1>\" cannot be directly deleted because it is actively serving.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "retagged": {
+        "generation": "3",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "latest_created": "<rev2>",
+        "latest_ready": "<rev2>",
+        "terminal_state": "CONDITION_SUCCEEDED",
+        "traffic": [
+          {
+            "percent": 100,
+            "revision": "<rev2>",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+          },
+          {
+            "revision": "<rev1>",
+            "tag": "blue",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+          },
+          {
+            "revision": "<rev2>",
+            "tag": "green",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "fields": [
+              "revision",
+              "tag",
+              "type",
+              "uri"
+            ],
+            "percent": null,
+            "revision": "<rev1>",
+            "tag": "blue",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+            "uri_is_tag_url": true
+          },
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "tag",
+              "type",
+              "uri"
+            ],
+            "percent": 100,
+            "revision": "<rev2>",
+            "tag": "green",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+            "uri_is_tag_url": true
+          }
+        ]
+      },
+      "invoke-service": {
+        "answered_by": [
+          "<rev2>"
+        ],
+        "http_status": 200
+      },
+      "invoke-tag": {
+        "answered_by": [],
+        "http_status": 401
+      },
+      "invoke-tag-service-audience": {
+        "answered_by": [
+          "<rev1>"
+        ],
+        "http_status": 200
+      },
+      "invoke-tag-anonymous": {
+        "answered_by": [],
+        "http_status": 403
+      },
+      "delete-latest-revision": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "The latest created Revision \"<rev2>\" cannot be directly deleted.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "delete-tagged-revision": {
+        "done": true,
+        "error": null,
+        "http_status": 200
+      },
+      "after-tagged-delete": {
+        "generation": "4",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "latest_created": "<rev2>",
+        "latest_ready": "<rev2>",
+        "terminal_state": "CONDITION_SUCCEEDED",
+        "traffic": [
+          {
+            "percent": 100,
+            "revision": "<rev2>",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+          },
+          {
+            "revision": "<rev2>",
+            "tag": "green",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "tag",
+              "type",
+              "uri"
+            ],
+            "percent": 100,
+            "revision": "<rev2>",
+            "tag": "green",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+            "uri_is_tag_url": true
+          }
+        ]
+      },
+      "traffic-sum-90": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "traffic percentage adds to 90, should be 100",
+                "field": "traffic[].percent"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "traffic[].percent: traffic percentage adds to 90, should be 100",
+        "status": "INVALID_ARGUMENT"
+      },
+      "traffic-unknown-revision": {
+        "http_status": 200,
+        "operation_code": 9,
+        "operation_message": "Revision '<run>-b-99999-zzz' does not exist or is deleted. Update all traffic to route to currently available revisions."
+      },
+      "traffic-duplicate-tag": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "may not contain a duplicate tag.",
+                "field": "spec.traffic"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "spec.traffic: may not contain a duplicate tag.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "scaling-min-above-max": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "must be greater or equal than min_instance_count.",
+                "field": "Violation in UpdateServiceRequest.service.template.scaling.max_instance_count"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Violation in UpdateServiceRequest.service.template.scaling.max_instance_count: must be greater or equal than min_instance_count.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "concurrency-too-high": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Must be a number between 0 and 1000.",
+                "field": "Violation in UpdateServiceRequest.service.template.max_instance_request_concurrency"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Violation in UpdateServiceRequest.service.template.max_instance_request_concurrency: Must be a number between 0 and 1000.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "after-refusals": {
+        "generation": "5",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "latest_created": "<rev2>",
+        "latest_ready": "<rev2>",
+        "terminal_state": "CONDITION_FAILED",
+        "traffic": [
+          {
+            "percent": 100,
+            "revision": "<run>-b-99999-zzz",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "tag",
+              "type",
+              "uri"
+            ],
+            "percent": 100,
+            "revision": "<rev2>",
+            "tag": "green",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION",
+            "uri_is_tag_url": true
+          }
+        ]
+      },
+      "scaling-defaults": {
+        "max_instance_request_concurrency": 80,
+        "scaling": null
+      },
+      "scaled": {
+        "generation": "6",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "latest_created": "<rev3>",
+        "latest_ready": "<rev3>",
+        "max_instance_request_concurrency": 10,
+        "revision": {
+          "max_instance_request_concurrency": 10,
+          "scaling": {
+            "maxInstanceCount": 2
+          }
+        },
+        "scaling": {
+          "maxInstanceCount": 2
+        },
+        "terminal_state": "CONDITION_SUCCEEDED",
+        "traffic": [
+          {
+            "percent": 100,
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "type"
+            ],
+            "percent": 100,
+            "revision": "<rev3>",
+            "tag": "",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+            "uri_is_tag_url": false
+          }
+        ]
+      },
+      "revisions": [
+        "<run>-b-00003",
+        "<run>-b-00002"
+      ],
+      "ingress-internal-only": {
+        "anonymous_status": 404,
+        "generation": "7",
+        "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+        "invoke_status": 404,
+        "latest_created": "<rev3>",
+        "latest_ready": "<rev3>",
+        "terminal_state": "CONDITION_SUCCEEDED",
+        "traffic": [
+          {
+            "percent": 100,
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "type"
+            ],
+            "percent": 100,
+            "revision": "<rev3>",
+            "tag": "",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+            "uri_is_tag_url": false
+          }
+        ]
+      },
+      "ingress-internal-load-balancer": {
+        "anonymous_status": 404,
+        "generation": "8",
+        "ingress": "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER",
+        "invoke_status": 404,
+        "latest_created": "<rev3>",
+        "latest_ready": "<rev3>",
+        "terminal_state": "CONDITION_SUCCEEDED",
+        "traffic": [
+          {
+            "percent": 100,
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "fields": [
+              "percent",
+              "revision",
+              "type"
+            ],
+            "percent": 100,
+            "revision": "<rev3>",
+            "tag": "",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+            "uri_is_tag_url": false
+          }
+        ]
+      },
+      "cleanup": {
+        "services_absent": true
+      }
+    }
+  }
+}
