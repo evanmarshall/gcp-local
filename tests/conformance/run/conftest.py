@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from gcp_validation.services.run import (
+from gcp_validation.services.run.service import (
     LIVE_ENDPOINT,
     SERVICE,
     RunClient,

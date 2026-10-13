@@ -2,7 +2,7 @@
 
 import pytest
 
-from gcp_validation.services.run_traffic import run_scenario
+from gcp_validation.services.run.traffic import run_scenario
 
 
 @pytest.mark.gcp_scenario(
@@ -16,8 +16,8 @@ from gcp_validation.services.run_traffic import run_scenario
     },
     contract_files=(
         "gcp_validation/errors.py",
-        "gcp_validation/services/run.py",
-        "gcp_validation/services/run_traffic.py",
+        "gcp_validation/services/run/service.py",
+        "gcp_validation/services/run/traffic.py",
         "gcp_validation/live_rest.py",
         "gcp_validation/live_paths.py",
         "gcp_validation/sandbox.py",

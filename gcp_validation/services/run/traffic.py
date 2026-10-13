@@ -16,7 +16,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 from gcp_validation.errors import detailed
 from gcp_validation.evidence import Inconclusive
 from gcp_validation.live_rest import Observations, Response
-from gcp_validation.services.run import ServicesFixture
+from gcp_validation.services.run.service import ServicesFixture
 from gcp_validation.services.storage.client import NoRedirects
 
 CREDENTIALS_ENDPOINT = "https://iamcredentials.googleapis.com"
