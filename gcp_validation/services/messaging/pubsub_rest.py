@@ -14,14 +14,15 @@ from collections.abc import Callable
 from pathlib import Path
 
 from gcp_validation.config import Target
+from gcp_validation.errors import detailed
 from gcp_validation.evidence import Inconclusive, SnapshotCase, now
 from gcp_validation.live_rest import LiveScope, Observations, OwnedRun, Response, RestClient
 from gcp_validation.sandbox import Sandbox
 
 SERVICE = "pubsub-rest"
 LIMITS = {
-    "max_topics": 1,
-    "max_subscriptions": 1,
+    "max_topics": 2,
+    "max_subscriptions": 2,
     "max_messages": 4,
     "max_message_bytes": 1024,
     "max_run_seconds": 900,
@@ -31,6 +32,17 @@ PAYLOAD = b"gcp-local rest data plane"
 HTTP_ERROR = 400
 
 Resource = Callable[..., Response]
+# ErrorInfo metadata that differs on every denial; the first also encodes the project ID.
+VOLATILE_METADATA = ("error_info_id", "troubleshooter_url")
+
+
+def denial(observe: Observations, response: Response) -> dict:
+    """Select an error with its message and details, without per-request ErrorInfo metadata."""
+    selected = detailed(observe, response)
+    for detail in selected["details"]:
+        for key in VOLATILE_METADATA:
+            detail.get("metadata", {}).pop(key, None)
+    return selected
 
 
 def load_scope(filename: str, sandbox: Sandbox, mode: str) -> LiveScope:
@@ -39,7 +51,10 @@ def load_scope(filename: str, sandbox: Sandbox, mode: str) -> LiveScope:
 
 
 class DataPlaneFixture(OwnedRun):
-    """One topic and one pull subscription named for the run."""
+    """Two topics and two pull subscriptions named for the run.
+
+    The second pair's name sorts before the first's, so list order is observable.
+    """
 
     def __init__(self, client: RestClient, state_dir: Path, *, manifest: str | None = None) -> None:
         """Bind the run manifest and the topic and subscription paths."""
@@ -56,6 +71,7 @@ class DataPlaneFixture(OwnedRun):
         self.name = self.manifest["name"]
         self.topic_path = f"/v1/projects/{self.project}/topics/{self.name}"
         self.sub_path = f"/v1/projects/{self.project}/subscriptions/{self.name}"
+        self.second = "gk-" + self.manifest["run_id"][:12]
 
     def send(self, path: str, method: str, suffix: str, actor: str, body: dict | None) -> Response:
         """Send one request; custom methods carry gcloud's alt=json."""
@@ -123,18 +139,19 @@ class DataPlaneFixture(OwnedRun):
         self.acquire()
         try:
             self.client.verify_project()
-            for path, kind in ((self.sub_path, "subscriptions"), (self.topic_path, "topics")):
-                self.remove(path, kind)
+            for name in (self.name, self.second):
+                for kind in ("subscriptions", "topics"):
+                    self.remove(f"/v1/projects/{self.project}/{kind}/{name}", kind, name)
             self.manifest.update(cleanup="passed", finished_at=now())
             self.save()
         finally:
             self.release()
 
-    def remove(self, path: str, kind: str) -> None:
+    def remove(self, path: str, kind: str, name: str) -> None:
         """Delete one owned resource if it exists and confirm it is absent."""
         current = self.client.request("fixture", "GET", path)
         if current.status == 200:
-            if not current.json().get("name", "").endswith(f"/{kind}/{self.name}"):
+            if not current.json().get("name", "").endswith(f"/{kind}/{name}"):
                 raise ValueError("Refusing Pub/Sub cleanup: ownership does not match the manifest")
             deleted = self.client.request("fixture", "DELETE", path)
             if deleted.status not in {200, 404}:
@@ -207,6 +224,7 @@ def run_scenario(
     client = fixture.client
     observe = Observations(
         {
+            fixture.second: "<second>",
             fixture.name: "<name>",
             fixture.manifest["run_id"]: "<run>",
             fixture.project: "<project>",
@@ -219,6 +237,8 @@ def run_scenario(
     authorize_and_deliver(fixture, snapshot, observe)
     conditional_policy(fixture, snapshot, observe)
     probe_requests(fixture, snapshot, observe)
+    observe_lists(fixture, snapshot, observe)
+    observe_decoding(fixture, snapshot, observe)
     snapshot.match("subscription-deleted", {"http_status": fixture.sub("DELETE").status})
     # GCP accepted a publish sent just after the topic delete while this
     # scenario was drafted, so a post-delete publish is not a stable observation.
@@ -229,7 +249,7 @@ def authorize_and_deliver(
     fixture: DataPlaneFixture, snapshot: SnapshotCase, observe: Observations
 ) -> None:
     """Grant publisher then subscriber, and deliver, nack, redeliver, and ack one message."""
-    snapshot.match("denied-publish", observe.error(fixture.publish(actor="denied")))
+    snapshot.match("denied-publish", denial(observe, fixture.publish(actor="denied")))
     granted = grant(fixture, fixture.topic, "roles/pubsub.publisher")
     snapshot.match("publisher-granted", observe.select(granted, ("bindings",)))
     published = fixture.wait_until(lambda: fixture.publish(actor="allowed"), {403}, 180)
@@ -339,6 +359,70 @@ def probe_requests(
     snapshot.match("pull-without-max-messages", outcome(observe, unbounded))
     named = fixture.publish(extra={"topic": f"projects/{fixture.project}/topics/{fixture.name}"})
     snapshot.match("publish-body-names-topic", outcome(observe, named))
+
+
+def observe_lists(
+    fixture: DataPlaneFixture, snapshot: SnapshotCase, observe: Observations
+) -> None:
+    """Create the second topic and subscription, then observe list order and paging.
+
+    Other runs may share the sandbox project; only the owned pair's order is recorded.
+    """
+    second_topic = f"/v1/projects/{fixture.project}/topics/{fixture.second}"
+    second_sub = f"/v1/projects/{fixture.project}/subscriptions/{fixture.second}"
+    topic = fixture.send(second_topic, "PUT", "", "fixture", {})
+    if topic.status != 200:
+        raise Inconclusive(f"Second topic create returned HTTP {topic.status}")
+    name = f"projects/{fixture.project}/topics/{fixture.second}"
+    sub = fixture.send(second_sub, "PUT", "", "fixture", {"topic": name, "ackDeadlineSeconds": 10})
+    if sub.status != 200:
+        raise Inconclusive(f"Second subscription create returned HTTP {sub.status}")
+    owned = {fixture.name, fixture.second}
+    for kind in ("topics", "subscriptions"):
+        path = f"/v1/projects/{fixture.project}/{kind}"
+
+        def listing(path: str = path, **query: str) -> Response:
+            return fixture.client.request(
+                "fixture", "GET", path, query=query or None, timeout=fixture.remaining()
+            )
+
+        everything = listing()
+        items = everything.json().get(kind, [])
+        names = [item.get("name", "").rsplit("/", 1)[-1] for item in items]
+        first = listing(pageSize="1")
+        token = first.json().get("nextPageToken", "")
+        second = listing(pageSize="1", pageToken=token)
+        # Topics list in name order; subscriptions in an order GCP doesn't
+        # document (neither name nor creation), so only membership is recorded.
+        listed = [observe.text(n) for n in names if n in owned]
+        snapshot.match(f"{kind}-list", {
+            "http_status": everything.status, "fields": sorted(everything.json()),
+            **({"owned_order": listed} if kind == "topics" else {"owned": sorted(listed)}),
+            "first_status": first.status, "first_count": len(first.json().get(kind, [])),
+            "first_has_next": bool(token), "second_status": second.status,
+            "second_count": len(second.json().get(kind, [])),
+        })
+        snapshot.match(f"{kind}-list-invalid-token",
+                       denial(observe, listing(pageToken="not-a-page-token")))
+        snapshot.match(f"{kind}-list-negative-size", denial(observe, listing(pageSize="-1")))
+    deletes = (("second-subscription-deleted", second_sub), ("second-topic-deleted", second_topic))
+    for label, path in deletes:
+        snapshot.match(label, {"http_status": fixture.client.request(
+            "fixture", "DELETE", path, timeout=fixture.remaining()).status})
+
+
+def observe_decoding(
+    fixture: DataPlaneFixture, snapshot: SnapshotCase, observe: Observations
+) -> None:
+    """Observe refused topic bodies: an unknown name and a mistyped value.
+
+    Each reuses the second pair's deleted name; a refused creation leaves nothing.
+    """
+    path = f"/v1/projects/{fixture.project}/topics/{fixture.second}"
+    unknown = fixture.send(path, "PUT", "", "fixture", {"unknownField": "x"})
+    snapshot.match("unknown-field", denial(observe, unknown))
+    mistyped = fixture.send(path, "PUT", "", "fixture", {"labels": "x"})
+    snapshot.match("mistyped-field", denial(observe, mistyped))
 
 
 def main(argv: list[str] | None = None) -> None:

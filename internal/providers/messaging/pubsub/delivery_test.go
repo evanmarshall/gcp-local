@@ -20,6 +20,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -37,10 +38,19 @@ const (
 	reader          = "serviceAccount:reader@project-a.iam.gserviceaccount.com"
 )
 
-// expectRefusal asserts both the code and the message of a refusal.
+// expectRefusal asserts both the code and the message of a refusal. A
+// denial's message names no permission (recorded); "Missing permission: X"
+// then matches the permission its ErrorInfo names.
 func expectRefusal(t *testing.T, name string, err error, code codes.Code, message string) {
 	t.Helper()
-	if status.Code(err) != code || !strings.Contains(status.Convert(err).Message(), message) {
+	var text strings.Builder
+	text.WriteString(status.Convert(err).Message())
+	for _, detail := range status.Convert(err).Details() {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok {
+			text.WriteString(" Missing permission: " + info.GetMetadata()["permission"])
+		}
+	}
+	if status.Code(err) != code || !strings.Contains(text.String(), message) {
 		t.Errorf("%s: got %v (%v), want %v containing %q", name, status.Code(err), err, code, message)
 	}
 }
@@ -410,8 +420,10 @@ func TestRESTDeliveryFields(t *testing.T) {
 		code       int
 		message    string
 	}{
-		{"/v1/projects/project-a/subscriptions/rest-unknown", `{"topic":"rest-topic","notAField":1}`, http.StatusBadRequest, "Invalid subscription body"},
-		{"/v1/projects/project-a/topics/rest-unknown", `{"notAField":1}`, http.StatusBadRequest, "Invalid request body"},
+		{"/v1/projects/project-a/subscriptions/rest-unknown", `{"topic":"rest-topic","notAField":1}`, http.StatusBadRequest, `Invalid JSON payload received. Unknown name "notAField": Cannot find field.`},
+		{"/v1/projects/project-a/topics/rest-unknown", `{"notAField":1}`, http.StatusBadRequest, `Invalid JSON payload received. Unknown name "notAField": Cannot find field.`},
+		// Recorded in pubsub-rest-data-plane.
+		{"/v1/projects/project-a/topics/rest-mistyped", `{"labels":"x"}`, http.StatusBadRequest, `Invalid value at 'labels' (type.googleapis.com/google.pubsub.v1.Topic.LabelsEntry), "x"`},
 		{"/v1/projects/project-a/subscriptions/rest-bq", `{"topic":"rest-topic","bigqueryConfig":{"table":"p.d.t"}}`, http.StatusNotImplemented, "Pub/Sub coverage gap: field bigquery_config"},
 		{"/v1/projects/project-a/topics/rest-kms", `{"kmsKeyName":"projects/p/locations/l/keyRings/r/cryptoKeys/k"}`, http.StatusNotImplemented, "Pub/Sub coverage gap: field kms_key_name"},
 	}

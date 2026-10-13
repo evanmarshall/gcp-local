@@ -1,6 +1,6 @@
 {
   "pubsub-rest-data-plane": {
-    "recorded-date": "12-10-2026, 22:47:04",
+    "recorded-date": "13-10-2026, 00:58:54",
     "recorded-content": {
       "topic-created": {
         "http_status": 200,
@@ -14,7 +14,19 @@
       },
       "denied-publish": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "pubsub.topics.publish",
+              "resource": "projects/<project>/topics/<name>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "User not authorized to perform this action.",
         "status": "PERMISSION_DENIED"
       },
       "publisher-granted": {
@@ -207,6 +219,103 @@
           "messageIds"
         ],
         "http_status": 200
+      },
+      "topics-list": {
+        "fields": [
+          "topics"
+        ],
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "http_status": 200,
+        "owned_order": [
+          "<name>",
+          "<second>"
+        ],
+        "second_count": 1,
+        "second_status": 200
+      },
+      "topics-list-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page token given (token=not-a-page-token).",
+        "status": "INVALID_ARGUMENT"
+      },
+      "topics-list-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "The value for page_size is out of bounds. You passed -1 in the request, but the value must be between 0 and 1000.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "subscriptions-list": {
+        "fields": [
+          "subscriptions"
+        ],
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "http_status": 200,
+        "owned": [
+          "<name>",
+          "<second>"
+        ],
+        "second_count": 1,
+        "second_status": 200
+      },
+      "subscriptions-list-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page token given (token=not-a-page-token).",
+        "status": "INVALID_ARGUMENT"
+      },
+      "subscriptions-list-negative-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "The value for page_size is out of bounds. You passed -1 in the request, but the value must be between 0 and 1000.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "second-subscription-deleted": {
+        "http_status": 200
+      },
+      "second-topic-deleted": {
+        "http_status": 200
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "mistyped-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'labels' (type.googleapis.com/google.pubsub.v1.Topic.LabelsEntry), \"x\"",
+                "field": "labels"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'labels' (type.googleapis.com/google.pubsub.v1.Topic.LabelsEntry), \"x\"",
+        "status": "INVALID_ARGUMENT"
       },
       "subscription-deleted": {
         "http_status": 200

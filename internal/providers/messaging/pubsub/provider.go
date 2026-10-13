@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 var gap = provider.CoverageGap("Pub/Sub")
@@ -42,9 +46,14 @@ var errProviderShape = errors.New("pub/sub requires registry, backend manager, i
 const serviceName = "pubsub"
 
 type Provider struct {
-	manager  *backend.Manager
-	index    *state.Index
-	iam      *iam.Engine
+	manager *backend.Manager
+	index   *state.Index
+	iam     *iam.Engine
+	gate    provider.Gate
+	// locks holds no state: its scope lock guards every index change of the
+	// scope's resources, which authorization holds while it picks and checks
+	// a target (provider.Nearest).
+	locks    *state.Store[struct{}]
 	poisoned sync.Map // unresolved control-plane mutations, cleared only on reset
 	tokens   *identity.IDTokens
 	pushes   sync.Map // canonical subscription -> provider-owned immutable config and worker
@@ -55,6 +64,10 @@ type Provider struct {
 	schemas sync.Map
 	// canonical topic -> its binding to a provider-owned schema
 	topicSchemas sync.Map
+	// canonical subscription -> its message retention (time.Duration), which
+	// the emulator ignores; expire applies it on the provider clock.
+	retentions sync.Map
+	clock      func() time.Time
 }
 
 func New(registry *gateway.Registry, manager *backend.Manager, index *state.Index, engine *iam.Engine, config Config) (*Provider, error) {
@@ -73,7 +86,11 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	p := &Provider{manager: manager, index: index, iam: engine}
+	// Pub/Sub supplies no IAM Conditions resource attributes: Google's
+	// attribute reference lists only Pub/Sub Lite.
+	p := &Provider{manager: manager, index: index, iam: engine,
+		gate:  provider.Gate{Engine: engine, Index: index, Message: provider.NotAuthorized, Domain: "iam.googleapis.com"},
+		locks: state.NewStore(func() struct{} { return struct{}{} }, state.GlobalScope), clock: time.Now}
 	if err := provider.RegisterPermissions(engine, permissions); err != nil {
 		return nil, fmt.Errorf("pubsub permissions: %w", err)
 	}
@@ -92,7 +109,7 @@ func (p *Provider) afterReset(scope state.Scope) error {
 		return err
 	}
 	prefix := canonical("projects/" + scope.Project + "/")
-	for _, owned := range []*sync.Map{&p.labels, &p.deliveries, &p.schemas, &p.topicSchemas} {
+	for _, owned := range []*sync.Map{&p.labels, &p.deliveries, &p.schemas, &p.topicSchemas, &p.retentions} {
 		owned.Range(func(key, _ any) bool {
 			if name, ok := key.(string); ok && strings.HasPrefix(name, prefix) {
 				owned.Delete(key)
@@ -100,8 +117,13 @@ func (p *Provider) afterReset(scope state.Scope) error {
 			return true
 		})
 	}
-	p.iam.ClearScope(serviceName, scope)
-	p.index.RemoveScope(serviceName, scope)
+	if err := p.locks.With(scope, func(*struct{}) error {
+		p.iam.ClearScope(serviceName, scope)
+		p.index.RemoveScope(serviceName, scope)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("clear the Pub/Sub scope: %w", err)
+	}
 	p.poisoned.Delete(scope)
 	return nil
 }
@@ -233,16 +255,21 @@ func (p *Provider) authorizeOn(call gateway.Call, name, kind, method string) err
 	}
 	related := call
 	related.Method, related.Resource = method, name
-	decision, err := p.iam.Authorize(related, iam.Target{Name: resource.Name}, nil)
-	if _, still := p.index.Get(resource.Name); provider.Unverified(err) && !still {
-		// A concurrent delete unindexed it between the lookup and Authorize.
-		return status.Error(codes.NotFound, strings.ToUpper(kind[:1])+kind[1:]+" does not exist")
+	var decision iam.Decision
+	err = p.locks.With(scopeOf(call), func(*struct{}) error {
+		// Checked under the lock deletes unindex under, so a concurrent
+		// delete reads as missing, never as an unverified target.
+		if _, still := p.index.Get(resource.Name); !still {
+			return status.Error(codes.NotFound, strings.ToUpper(kind[:1])+kind[1:]+" does not exist")
+		}
+		var checkErr error
+		decision, checkErr = p.gate.Check(related, iam.Target{Name: resource.Name}, name)
+		return checkErr
+	})
+	if decision.ID != "" {
+		_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-"+kind+"-decision-id", decision.ID))
 	}
-	_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-"+kind+"-decision-id", decision.ID))
-	if err != nil {
-		return fmt.Errorf("authorize %s for %s: %w", kind, call.Method, err)
-	}
-	return nil
+	return err //nolint:wrapcheck // NotFound, the gate's denial, or its wrapped refusal
 }
 
 // checkTarget rejects pulls from push subscriptions and calls on resources the
@@ -264,44 +291,39 @@ func (p *Provider) checkTarget(call gateway.Call) error {
 
 // authorizeCall checks the method permission against the indexed resource, or
 // against its project for project-level methods and not-yet-indexed resources.
+// The target is picked and checked under the scope lock deletes unindex under.
 func (p *Provider) authorizeCall(call gateway.Call) error {
 	project, found := p.index.Get(provider.ProjectResource(call.Project))
 	if !found || project.Service != "resourcemanager" || project.Kind != "project" {
 		return gap("configure the resource project hierarchy")
 	}
-	target, err := p.callTarget(call, project)
+	candidates, reported, err := p.callCandidates(call, project)
 	if err != nil {
 		return err
 	}
-	decision, err := p.iam.Authorize(call, target, nil)
-	if provider.Unverified(err) && target.Name != project.Name {
-		// A concurrent delete can unindex the resource between callTarget and
-		// Authorize; authorize against what the index holds now.
-		if target, err = p.callTarget(call, project); err != nil {
-			return err
-		}
-		decision, err = p.iam.Authorize(call, target, nil)
+	decision, _, err := provider.Nearest(p.gate, p.locks, scopeOf(call), call, reported, candidates...)
+	if decision.ID != "" {
+		_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-decision-id", decision.ID))
 	}
-	_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-decision-id", decision.ID))
-	if err != nil {
-		return fmt.Errorf("authorize %s: %w", call.Method, err)
-	}
-	return nil
+	return err
 }
 
-// callTarget is the indexed resource a call names, or its project for
-// project-level methods and not-yet-indexed resources.
-func (p *Provider) callTarget(call gateway.Call, project state.Resource) (iam.Target, error) {
-	target := iam.Target{Name: project.Name}
-	if !projectMethod(call.Method) {
-		if resource, found := p.index.Get(canonical(call.Resource)); found {
-			if resource.Service != serviceName || resource.Scope != scopeOf(call) || resource.Parent != project.Name {
-				return target, gap("resource ownership disagrees with the index")
-			}
-			target.Name = resource.Name
+// callCandidates are a call's IAM targets, most specific first, and the
+// resource a denial names: the addressed resource, or the project for
+// project-level methods; a create names the resource it makes.
+func (p *Provider) callCandidates(call gateway.Call, project state.Resource) ([]string, string, error) {
+	if projectMethod(call.Method) {
+		reported := "projects/" + call.Project
+		if strings.Count(call.Resource, "/") == 3 {
+			reported = call.Resource
 		}
+		return []string{project.Name}, reported, nil
 	}
-	return target, nil
+	if resource, found := p.index.Get(canonical(call.Resource)); found &&
+		(resource.Service != serviceName || resource.Scope != scopeOf(call) || resource.Parent != project.Name) {
+		return nil, "", gap("resource ownership disagrees with the index")
+	}
+	return []string{canonical(call.Resource), project.Name}, call.Resource, nil
 }
 
 // authorizeAttachment checks that a subscription may attach to its topic and,
@@ -392,18 +414,8 @@ func (p *Provider) execute(call gateway.Call, request proto.Message, active back
 // afterwards so a grant revoked while the pull blocked does not release
 // messages.
 func (p *Provider) forward(call gateway.Call, b driver, request, forwarded proto.Message) (proto.Message, error) {
-	switch r := forwarded.(type) {
-	case *pb.PullRequest:
-		if err := p.syncDeadLetter(call.Context, b, call, r.GetSubscription()); err != nil {
-			return nil, err
-		}
-	case *pb.ModifyAckDeadlineRequest:
-		if err := p.syncDeadLetter(call.Context, b, call, r.GetSubscription()); err != nil {
-			return nil, err
-		}
-		return p.forwardModifyAckDeadline(call.Context, b, r)
-	case *pb.AcknowledgeRequest:
-		return p.forwardAcknowledge(call.Context, b, r)
+	if response, handled, err := p.forwardOwned(call, b, forwarded); handled || err != nil {
+		return response, err
 	}
 	response, err := invoke(call.Context, b, call.Method, forwarded)
 	if subscription, ok := request.(*pb.Subscription); ok && subscription.GetFilter() != "" && status.Code(err) == codes.Unknown {
@@ -413,13 +425,36 @@ func (p *Provider) forward(call gateway.Call, b driver, request, forwarded proto
 	if err != nil {
 		return response, err
 	}
-	return response, p.afterDelivery(call, request, response)
+	return response, p.afterDelivery(call, b, request, response)
+}
+
+// forwardOwned serves the calls the provider shapes itself: a pull first
+// syncs the dead-letter policy; nacks, acks, and lists are the provider's.
+// handled is false when the plain emulator call should follow.
+func (p *Provider) forwardOwned(call gateway.Call, b driver, forwarded proto.Message) (proto.Message, bool, error) {
+	switch r := forwarded.(type) {
+	case *pb.PullRequest:
+		return nil, false, p.syncDeadLetter(call.Context, b, call, r.GetSubscription())
+	case *pb.ModifyAckDeadlineRequest:
+		if err := p.syncDeadLetter(call.Context, b, call, r.GetSubscription()); err != nil {
+			return nil, true, err
+		}
+		response, err := p.forwardModifyAckDeadline(call.Context, b, r)
+		return response, true, err
+	case *pb.AcknowledgeRequest:
+		response, err := p.forwardAcknowledge(call.Context, b, r)
+		return response, true, err
+	case pageable:
+		response, err := list(call.Context, b, call.Method, r)
+		return response, true, err
+	}
+	return nil, false, nil
 }
 
 // afterDelivery re-authorizes a pull that may have blocked while a grant was
 // revoked, then tracks the delivered messages for retry backoff and
 // dead-letter attempt counts.
-func (p *Provider) afterDelivery(call gateway.Call, request, response proto.Message) error {
+func (p *Provider) afterDelivery(call gateway.Call, b driver, request, response proto.Message) error {
 	r, ok := request.(*pb.PullRequest)
 	if !ok {
 		return nil
@@ -428,6 +463,7 @@ func (p *Provider) afterDelivery(call gateway.Call, request, response proto.Mess
 		return err
 	}
 	if pulled, ok := response.(*pb.PullResponse); ok {
+		pulled.ReceivedMessages = p.expire(call.Context, b, r.GetSubscription(), pulled.GetReceivedMessages())
 		p.track(r.GetSubscription(), pulled.GetReceivedMessages())
 	}
 	return nil
@@ -544,9 +580,7 @@ func (p *Provider) commitMutation(session context.Context, call gateway.Call, re
 	switch r := request.(type) {
 	case *pb.Subscription:
 		labels = r.GetLabels()
-		if d := newDelivery(r); d != nil {
-			p.deliveries.Store(canonical(call.Resource), d)
-		}
+		p.storeDelivery(canonical(call.Resource), r)
 	case *pb.CreateSnapshotRequest:
 		labels = r.GetLabels() // The emulator drops snapshot labels.
 	case *pb.Topic:
@@ -557,6 +591,17 @@ func (p *Provider) commitMutation(session context.Context, call gateway.Call, re
 	}
 	p.restorePush(response)
 	return nil
+}
+
+// storeDelivery records a created subscription's provider-owned delivery
+// policy and message retention.
+func (p *Provider) storeDelivery(name string, subscription *pb.Subscription) {
+	if retention := subscription.GetMessageRetentionDuration(); retention != nil {
+		p.retentions.Store(name, retention.AsDuration())
+	}
+	if d := newDelivery(subscription); d != nil {
+		p.deliveries.Store(name, d)
+	}
 }
 
 // resolveMutation re-reads an ambiguous mutation's resource to decide whether
@@ -587,6 +632,110 @@ func (p *Provider) mutationLanded(call gateway.Call) bool {
 	return found
 }
 
+// pageable is a Pub/Sub list request.
+type pageable interface {
+	proto.Message
+	GetPageSize() int32
+	GetPageToken() string
+}
+
+// list serves one list request with listPage.
+func list(ctx context.Context, b driver, method string, request pageable) (proto.Message, error) {
+	switch r := request.(type) {
+	case *pb.ListTopicsRequest:
+		return listPage(ctx, b, method, r, func(page *pb.ListTopicsResponse) []*pb.Topic { return page.GetTopics() },
+			func(items []*pb.Topic, next string) proto.Message {
+				return &pb.ListTopicsResponse{Topics: items, NextPageToken: next}
+			})
+	case *pb.ListSubscriptionsRequest:
+		return listPage(ctx, b, method, r, func(page *pb.ListSubscriptionsResponse) []*pb.Subscription { return page.GetSubscriptions() },
+			func(items []*pb.Subscription, next string) proto.Message {
+				return &pb.ListSubscriptionsResponse{Subscriptions: items, NextPageToken: next}
+			})
+	case *pb.ListSnapshotsRequest:
+		return listPage(ctx, b, method, r, func(page *pb.ListSnapshotsResponse) []*pb.Snapshot { return page.GetSnapshots() },
+			func(items []*pb.Snapshot, next string) proto.Message {
+				return &pb.ListSnapshotsResponse{Snapshots: items, NextPageToken: next}
+			})
+	default:
+		return invoke(ctx, b, method, request) // the schema lists page in the emulator
+	}
+}
+
+// errPageToken marks a page token listPage didn't issue.
+var errPageToken = status.Error(codes.InvalidArgument, "page token")
+
+// maxPageSize is Pub/Sub's page size bound, from GCP's recorded refusal (0
+// through 1000).
+const maxPageSize = 1000
+
+// listPaging pages lists; the default size is a local choice.
+var listPaging = provider.Paging{Default: maxPageSize, Max: maxPageSize, InvalidToken: errPageToken}
+
+// listPage reads every page of a list from the emulator, orders the items by
+// name, and returns the page the request asks for, with GCP's recorded
+// refusals (pubsub-rest-data-plane). GCP lists topics by name; subscriptions
+// and snapshots come in an order it doesn't document, and name order is the
+// local choice.
+func listPage[R pageable, P proto.Message, T interface {
+	proto.Message
+	GetName() string
+}](ctx context.Context, b driver, method string, request R, items func(P) []T, build func([]T, string) proto.Message) (proto.Message, error) {
+	size, token := request.GetPageSize(), request.GetPageToken()
+	if size < 0 || size > maxPageSize {
+		return nil, provider.Invalid(fmt.Sprintf("The value for page_size is out of bounds. You passed %d in the request, but the value must be between 0 and %d.", size, maxPageSize))
+	}
+	all, err := listAll(ctx, b, method, request, items)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(all, func(a, b T) int { return strings.Compare(a.GetName(), b.GetName()) })
+	query := url.Values{}
+	if size > 0 {
+		query.Set("pageSize", strconv.Itoa(int(size)))
+	}
+	if token != "" {
+		query.Set("pageToken", token)
+	}
+	page, next, err := provider.Page(all, query, listPaging, gap)
+	if errors.Is(err, errPageToken) {
+		return nil, provider.Invalid("Invalid page token given (token=" + token + ").")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return build(page, next), nil
+}
+
+// listAll reads every page of a list from the emulator.
+func listAll[R pageable, P proto.Message, T proto.Message](ctx context.Context, b driver, method string, request R, items func(P) []T) ([]T, error) {
+	backend, err := cloneMessage(request)
+	if err != nil {
+		return nil, err
+	}
+	reflected := backend.ProtoReflect()
+	// The emulator reads page_size 0 as no items; ask for its largest page.
+	reflected.Set(reflected.Descriptor().Fields().ByName("page_size"), protoreflect.ValueOfInt32(maxPageSize))
+	reflected.Clear(reflected.Descriptor().Fields().ByName("page_token"))
+	var all []T
+	for {
+		response, err := invoke(ctx, b, method, backend)
+		if err != nil {
+			return nil, err
+		}
+		page, ok := response.(P)
+		if !ok {
+			return nil, status.Error(codes.Internal, "Unexpected Pub/Sub list response")
+		}
+		all = append(all, items(page)...)
+		next := page.ProtoReflect().Get(page.ProtoReflect().Descriptor().Fields().ByName("next_page_token")).String()
+		if next == "" {
+			return all, nil
+		}
+		reflected.Set(reflected.Descriptor().Fields().ByName("page_token"), protoreflect.ValueOfString(next))
+	}
+}
+
 // maxPushSubscriptions bounds the push workers one project may hold.
 const maxPushSubscriptions = 32
 
@@ -611,7 +760,9 @@ func (p *Provider) publish(call gateway.Call) error {
 	case strings.Contains(call.Resource, "/schemas/"):
 		kind = "schema"
 	}
-	if err := p.index.Put(serviceName, state.Resource{Name: canonical(call.Resource), Service: serviceName, Kind: kind, Parent: provider.ProjectResource(call.Project), Scope: scopeOf(call)}); err != nil {
+	if err := p.locks.With(scopeOf(call), func(*struct{}) error {
+		return p.index.Put(serviceName, state.Resource{Name: canonical(call.Resource), Service: serviceName, Kind: kind, Parent: provider.ProjectResource(call.Project), Scope: scopeOf(call)})
+	}); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return status.Error(codes.FailedPrecondition, "Backend mutation could not be indexed; reset this scope")
 	}
@@ -621,11 +772,14 @@ func (p *Provider) forget(call gateway.Call) error {
 	p.labels.Delete(canonical(call.Resource))
 	p.deliveries.Delete(canonical(call.Resource))
 	p.topicSchemas.Delete(canonical(call.Resource))
+	p.retentions.Delete(canonical(call.Resource))
 	if err := p.stopPush(canonical(call.Resource)); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return err
 	}
-	if err := p.index.Remove(serviceName, scopeOf(call), canonical(call.Resource)); err != nil {
+	if err := p.locks.With(scopeOf(call), func(*struct{}) error {
+		return p.index.Remove(serviceName, scopeOf(call), canonical(call.Resource))
+	}); err != nil {
 		p.poisoned.Store(scopeOf(call), true)
 		return status.Error(codes.FailedPrecondition, "Backend deletion could not be indexed; reset this scope")
 	}

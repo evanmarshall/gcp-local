@@ -1194,3 +1194,31 @@ func TestPushResetAndShutdownCancelReceiversAndNeverFollowRedirects(t *testing.T
 		t.Fatal("shutdown left HTTP delivery active")
 	}
 }
+
+// TestListsPageThroughEmulator lists topics against the real emulator, which
+// reads page_size 0 as no items: the provider reads every emulator page and
+// serves its own pages in name order.
+func TestListsPageThroughEmulator(t *testing.T) {
+	f := running(t)
+	publisher := pb.NewPublisherClient(f.connection)
+	for _, id := range []string{"list-c", "list-a", "list-b"} {
+		_, err := publisher.CreateTopic(f.owner, &pb.Topic{Name: "projects/project-a/topics/" + id})
+		must(t, err)
+	}
+	all, err := publisher.ListTopics(f.owner, &pb.ListTopicsRequest{Project: "projects/project-a"})
+	must(t, err)
+	if len(all.GetTopics()) != 3 || all.GetTopics()[0].GetName() != "projects/project-a/topics/list-a" || all.GetNextPageToken() != "" {
+		t.Fatalf("all topics = %v", all)
+	}
+	first, err := publisher.ListTopics(f.owner, &pb.ListTopicsRequest{Project: "projects/project-a", PageSize: 2})
+	must(t, err)
+	second, err := publisher.ListTopics(f.owner, &pb.ListTopicsRequest{Project: "projects/project-a", PageSize: 2, PageToken: first.GetNextPageToken()})
+	must(t, err)
+	if len(first.GetTopics()) != 2 || len(second.GetTopics()) != 1 || second.GetTopics()[0].GetName() != "projects/project-a/topics/list-c" {
+		t.Fatalf("pages = %v %v", first, second)
+	}
+	for _, id := range []string{"list-a", "list-b", "list-c"} {
+		_, err := publisher.DeleteTopic(f.owner, &pb.DeleteTopicRequest{Topic: "projects/project-a/topics/" + id})
+		must(t, err)
+	}
+}

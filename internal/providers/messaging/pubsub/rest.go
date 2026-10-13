@@ -173,8 +173,8 @@ func (p *Provider) handleRestPolicy(call gateway.Call, request *gateway.RESTRequ
 		protoRequest = &iampb.GetIamPolicyRequest{Resource: call.Resource}
 	} else {
 		set := &iampb.SetIamPolicyRequest{}
-		if protojson.Unmarshal(request.JSON, set) != nil {
-			return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+		if err := restBody(request, "", set); err != nil {
+			return nil, err
 		}
 		set.Resource = call.Resource
 		protoRequest = set
@@ -211,7 +211,7 @@ func (p *Provider) buildRestProto(twin, project string, request *gateway.RESTReq
 	case publisher + "CreateTopic":
 		// The v2 CreateTopic call takes the Topic message directly.
 		topic := &pb.Topic{}
-		if err := restBody(request, topic); err != nil {
+		if err := restBody(request, "", topic); err != nil {
 			return nil, err
 		}
 		topic.Name = restTopicName(project, request.Path["topic"])
@@ -221,7 +221,8 @@ func (p *Provider) buildRestProto(twin, project string, request *gateway.RESTReq
 	case publisher + "DeleteTopic":
 		return &pb.DeleteTopicRequest{Topic: restTopicName(project, request.Path["topic"])}, nil
 	case publisher + "ListTopics":
-		return &pb.ListTopicsRequest{Project: "projects/" + project}, nil
+		size, err := restPageSize(request)
+		return &pb.ListTopicsRequest{Project: "projects/" + project, PageSize: size, PageToken: request.Query.Get("pageToken")}, err
 	default:
 		return nil, fmt.Errorf("%w: %s", errRestNoProtoMapping, twin)
 	}
@@ -238,7 +239,8 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	case subscriber + "ModifyAckDeadline":
 		return restPathBound(request, &pb.ModifyAckDeadlineRequest{}, "subscription", name)
 	case subscriber + "ListSubscriptions":
-		return &pb.ListSubscriptionsRequest{Project: "projects/" + project}, nil
+		size, err := restPageSize(request)
+		return &pb.ListSubscriptionsRequest{Project: "projects/" + project, PageSize: size, PageToken: request.Query.Get("pageToken")}, err
 	case subscriber + "CreateSubscription":
 		subscription, err := subscriptionFromREST(project, request)
 		if err != nil {
@@ -254,6 +256,20 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 	}
 }
 
+// restPageSize reads a list's pageSize query parameter as GCP's transcoder
+// does.
+func restPageSize(request *gateway.RESTRequest) (int32, error) {
+	text := request.Query.Get("pageSize")
+	if text == "" {
+		return 0, nil
+	}
+	size, err := strconv.ParseInt(text, 10, 32)
+	if err != nil {
+		return 0, provider.FieldViolation("page_size", "Invalid value at 'page_size' (TYPE_INT32), "+strconv.Quote(text))
+	}
+	return int32(size), nil
+}
+
 // restPathBound decodes a data-plane body (publish, pull, acknowledge,
 // modifyAckDeadline) and binds the resource from the path. The REST
 // reference's request bodies omit the topic or subscription, which the path
@@ -261,7 +277,7 @@ func (p *Provider) buildSubscriptionProto(twin, project string, request *gateway
 // pubsub-rest-data-plane); a body naming a different resource is unrecorded,
 // so it is refused rather than silently resolved either way.
 func restPathBound(request *gateway.RESTRequest, message proto.Message, field protoreflect.Name, name string) (proto.Message, error) {
-	if err := restBody(request, message); err != nil {
+	if err := restBody(request, "", message); err != nil {
 		return nil, err
 	}
 	reflected := message.ProtoReflect()
@@ -297,17 +313,13 @@ func restDataWire(response proto.Message) (*gateway.RESTResponse, error) {
 	return &gateway.RESTResponse{JSON: json.RawMessage(encoded)}, nil
 }
 
-// restBody decodes a REST body with Google's JSON mapping of the proto.
-// Unknown JSON fields are rejected, as GCP does; known fields the provider does
-// not implement are refused afterwards by validate as coverage gaps.
-func restBody(request *gateway.RESTRequest, message proto.Message) error {
-	if len(request.JSON) == 0 {
-		return nil
-	}
-	if err := protojson.Unmarshal(request.JSON, message); err != nil {
-		return status.Error(codes.InvalidArgument, "Invalid request body")
-	}
-	return nil
+// restBody decodes a REST body with Google's JSON mapping of the proto, root
+// naming the request field the body binds ("" for the whole request). Unknown
+// and mistyped fields are GCP's 400 with a BadRequest (recorded in
+// pubsub-rest-data-plane); known fields the provider does not implement are
+// refused afterwards by validation as coverage gaps.
+func restBody(request *gateway.RESTRequest, root string, message proto.Message) error {
+	return provider.DecodeProto(request.JSON, root, message, gap)
 }
 
 // subscriptionFromREST converts a REST CreateSubscription body. The v2
@@ -315,8 +327,8 @@ func restBody(request *gateway.RESTRequest, message proto.Message) error {
 // resolved in the request project; the ack deadline defaults to 10 seconds.
 func subscriptionFromREST(project string, request *gateway.RESTRequest) (*pb.Subscription, error) {
 	subscription := &pb.Subscription{}
-	if err := restBody(request, subscription); err != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid subscription body")
+	if err := restBody(request, "", subscription); err != nil {
+		return nil, err
 	}
 	if !strings.HasPrefix(subscription.GetTopic(), "projects/") {
 		subscription.Topic = restTopicName(project, subscription.GetTopic())
@@ -358,13 +370,13 @@ func restWire(_ string, response proto.Message) map[string]any {
 		for _, topic := range protoMessage.GetTopics() {
 			topics = append(topics, map[string]any{keyWireName: wireRestName(topic.GetName())})
 		}
-		return map[string]any{"topics": topics}
+		return provider.ListBody("topics", topics, protoMessage.GetNextPageToken())
 	case *pb.ListSubscriptionsResponse:
 		subs := []any{}
 		for _, sub := range protoMessage.GetSubscriptions() {
 			subs = append(subs, map[string]any{keyWireName: wireRestName(sub.GetName())})
 		}
-		return map[string]any{"subscriptions": subs}
+		return provider.ListBody("subscriptions", subs, protoMessage.GetNextPageToken())
 	default:
 		return map[string]any{}
 	}
@@ -520,12 +532,12 @@ func restSchemaProto(twin, resource string, request *gateway.RESTRequest) (proto
 		return nil, fmt.Errorf("%w: %s", errRestNoProtoMapping, twin)
 	}
 	message := rpc.NewRequest()
-	target := message
+	target, root := message, ""
 	if create, ok := message.(*pb.CreateSchemaRequest); ok {
 		create.Schema = &pb.Schema{}
-		target = create.GetSchema() // The create body is the Schema itself.
+		target, root = create.GetSchema(), "schema" // The create body is the Schema itself.
 	}
-	if err := restBody(request, target); err != nil {
+	if err := restBody(request, root, target); err != nil {
 		return nil, err
 	}
 	reflected := message.ProtoReflect()

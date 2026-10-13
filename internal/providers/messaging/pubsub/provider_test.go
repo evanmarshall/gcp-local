@@ -823,7 +823,7 @@ func TestRESTDataPlaneRefusals(t *testing.T) {
 	restRefusal(t, c, restPullPath, `{"subscription":"projects/project-a/subscriptions/other","maxMessages":1}`, http.StatusBadRequest, "the subscription differs from the request path")
 	restRefusal(t, c, restAckPath, `{"subscription":"x","ackIds":["a"]}`, http.StatusBadRequest, "the subscription differs from the request path")
 	restRefusal(t, c, restModAckPath, `{"subscription":"x","ackIds":["a"]}`, http.StatusBadRequest, "the subscription differs from the request path")
-	restRefusal(t, c, restPublishPath, `{"messages":[{"data":"eA=="}],"unknown":1}`, http.StatusBadRequest, "Invalid request body")
+	restRefusal(t, c, restPublishPath, `{"messages":[{"data":"eA=="}],"unknown":1}`, http.StatusBadRequest, `Unknown name "unknown": Cannot find field.`)
 	restRefusal(t, c, restPublishPath, `{"messages":[]}`, http.StatusBadRequest, "Supply one through 1000 messages")
 	restRefusal(t, c, restPublishPath, `{"messages":[{}]}`, http.StatusBadRequest, "Messages need data or attributes")
 	restRefusal(t, c, restPublishPath, `{"messages":[{"data":"eA==","publishTime":"2026-01-01T00:00:00Z"}]}`, http.StatusNotImplemented, "Pub/Sub coverage gap: field publish_time")
@@ -1520,6 +1520,7 @@ func (m *memoryPubSub) publish(r *pb.PublishRequest) (proto.Message, error) {
 			return nil, err
 		}
 		stored.MessageId = strconv.Itoa(m.nextID)
+		stored.PublishTime = timestamppb.Now()
 		response.MessageIds = append(response.MessageIds, stored.GetMessageId())
 		for name, subscription := range m.subscriptions {
 			if subscription.GetTopic() == r.GetTopic() {
@@ -1582,5 +1583,99 @@ func expectCode(t *testing.T, err error, want codes.Code) {
 	t.Helper()
 	if status.Code(err) != want {
 		t.Fatalf("got %v (%v), want %v", status.Code(err), err, want)
+	}
+}
+
+// TestRESTListsPageInNameOrder covers REST list paging with GCP's recorded
+// refusals (pubsub-rest-data-plane); the REST twins once dropped pageSize,
+// pageToken, and nextPageToken.
+func TestRESTListsPageInNameOrder(t *testing.T) {
+	_, registry, _ := memoryFixture(t)
+	c := newRESTClient(t, registry)
+	for _, name := range []string{"topic-c", "topic-a", "topic-b"} {
+		c.do(owner, http.MethodPut, "/v1/projects/project-a/topics/"+name, `{}`, 200)
+		c.do(owner, http.MethodPut, "/v1/projects/project-a/subscriptions/sub-"+name, `{"topic":"`+name+`"}`, 200)
+	}
+	for _, kind := range []string{"topics", "subscriptions"} {
+		path := "/v1/projects/project-a/" + kind
+		names := func(body map[string]any) []string {
+			items := provider.MapList(body[kind])
+			out := make([]string, 0, len(items))
+			for _, item := range items {
+				out = append(out, provider.LastSegment(provider.Text(item["name"])))
+			}
+			return out
+		}
+		if got := names(c.do(owner, http.MethodGet, path, "", 200)); strings.Join(got, ",") != strings.Join([]string{
+			map[string]string{"topics": "topic-a", "subscriptions": "sub-topic-a"}[kind],
+			map[string]string{"topics": "topic-b", "subscriptions": "sub-topic-b"}[kind],
+			map[string]string{"topics": "topic-c", "subscriptions": "sub-topic-c"}[kind]}, ",") {
+			t.Fatalf("%s order = %v", kind, got)
+		}
+		first := c.do(owner, http.MethodGet, path+"?pageSize=2", "", 200)
+		token := provider.Text(first["nextPageToken"])
+		second := c.do(owner, http.MethodGet, path+"?pageSize=2&pageToken="+token, "", 200)
+		if len(names(first)) != 2 || token == "" || len(names(second)) != 1 || second["nextPageToken"] != nil {
+			t.Fatalf("%s pages = %v %v", kind, first, second)
+		}
+	}
+}
+
+// TestRESTListRefusals checks GCP's recorded page refusals.
+func TestRESTListRefusals(t *testing.T) {
+	_, registry, _ := memoryFixture(t)
+	c := newRESTClient(t, registry)
+	for _, kind := range []string{"topics", "subscriptions"} {
+		for query, message := range map[string]string{
+			"pageToken=not-a-page-token": "Invalid page token given (token=not-a-page-token).",
+			"pageSize=-1":                "The value for page_size is out of bounds. You passed -1 in the request, but the value must be between 0 and 1000.",
+			"pageSize=1001":              "The value for page_size is out of bounds. You passed 1001 in the request, but the value must be between 0 and 1000.",
+			"pageSize=x":                 `Invalid value at 'page_size' (TYPE_INT32), "x"`,
+		} {
+			body := c.do(owner, http.MethodGet, "/v1/projects/project-a/"+kind+"?"+query, "", http.StatusBadRequest)
+			if detail, _ := body["error"].(map[string]any); detail["message"] != message {
+				t.Errorf("%s?%s: %v, want %q", kind, query, body["error"], message)
+			}
+		}
+	}
+}
+
+// TestDenialMatchesTheRecording checks the recorded 403: a fixed message and
+// an ErrorInfo naming the permission and the relative resource.
+func TestDenialMatchesTheRecording(t *testing.T) {
+	_, c, _ := restDataFixture(t, "")
+	body := c.do(other, http.MethodPost, restPublishPath, `{"messages":[{"data":"eA=="}]}`, http.StatusForbidden)
+	detail, _ := body["error"].(map[string]any)
+	details := provider.MapList(detail["details"])
+	if detail["message"] != "User not authorized to perform this action." || len(details) != 1 {
+		t.Fatalf("denial = %v", detail)
+	}
+	metadata, _ := details[0]["metadata"].(map[string]any)
+	if details[0]["reason"] != "IAM_PERMISSION_DENIED" || details[0]["domain"] != "iam.googleapis.com" ||
+		metadata["permission"] != "pubsub.topics.publish" || metadata["resource"] != "projects/project-a/topics/rest-topic" {
+		t.Fatalf("details = %v", details)
+	}
+}
+
+// TestRetentionExpiresMessages proves a subscription's message retention,
+// which the emulator ignores, is applied: a message older than it by the
+// provider clock is acknowledged in the backend and never delivered.
+func TestRetentionExpiresMessages(t *testing.T) {
+	p, registry, b := memoryFixture(t)
+	c := newRESTClient(t, registry)
+	c.do(owner, http.MethodPut, restTopicPath, `{}`, 200)
+	c.do(owner, http.MethodPut, restSubPath, `{"topic":"rest-topic","messageRetentionDuration":"3600s"}`, 200)
+	c.do(owner, http.MethodPut, "/v1/projects/project-a/subscriptions/default-retention", `{"topic":"rest-topic"}`, 200)
+	c.do(owner, http.MethodPost, restPublishPath, `{"messages":[{"data":"b2xk"}]}`, 200)
+	p.clock = func() time.Time { return time.Now().Add(2 * time.Hour) }
+	if got := received(t, c.do(owner, http.MethodPost, restPullPath, `{"maxMessages":1,"returnImmediately":true}`, 200)); len(got) != 0 {
+		t.Fatalf("an expired message was delivered: %v", got)
+	}
+	if len(b.acked) != 1 {
+		t.Fatalf("the expired message was not acknowledged in the backend: %v", b.acked)
+	}
+	// The default retention is seven days.
+	if got := received(t, c.do(owner, http.MethodPost, "/v1/projects/project-a/subscriptions/default-retention:pull", `{"maxMessages":1}`, 200)); len(got) != 1 {
+		t.Fatalf("default retention dropped a two-hour-old message: %v", got)
 	}
 }

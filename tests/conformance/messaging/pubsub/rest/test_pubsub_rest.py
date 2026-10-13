@@ -14,6 +14,7 @@ from gcp_validation.services.messaging.pubsub_rest import run_scenario
     },
     contract_files=(
         "gcp_validation/services/messaging/pubsub_rest.py",
+        "gcp_validation/errors.py",
         "gcp_validation/live_rest.py",
         "gcp_validation/sandbox.py",
         "tests/conformance/messaging/pubsub/rest/conftest.py",

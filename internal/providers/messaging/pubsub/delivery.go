@@ -620,7 +620,38 @@ func (p *Provider) pullForDelivery(ctx context.Context, b driver, call gateway.C
 	if !ok {
 		return nil, true
 	}
-	return pulled.GetReceivedMessages(), true
+	return p.expire(ctx, b, call.Resource, pulled.GetReceivedMessages()), true
+}
+
+// defaultRetention is a subscription's message retention when it sets none
+// (Subscription reference).
+const defaultRetention = 7 * 24 * time.Hour
+
+// expire drops pulled messages published longer ago than the subscription's
+// message retention, by the provider clock, and acknowledges them in the
+// emulator, which keeps every message until acknowledged; GCP deletes them.
+// A failed acknowledgment leaves them for the next pull, which drops them
+// again.
+func (p *Provider) expire(ctx context.Context, b driver, subscription string, received []*pb.ReceivedMessage) []*pb.ReceivedMessage {
+	retention := defaultRetention
+	if value, ok := p.retentions.Load(canonical(subscription)); ok {
+		retention, _ = value.(time.Duration)
+	}
+	cutoff := p.clock().Add(-retention)
+	kept := received[:0:0]
+	var expired []string
+	for _, message := range received {
+		if published := message.GetMessage().GetPublishTime(); published != nil && published.AsTime().Before(cutoff) {
+			expired = append(expired, message.GetAckId())
+			continue
+		}
+		kept = append(kept, message)
+	}
+	if len(expired) > 0 {
+		_, _ = invoke(context.WithoutCancel(ctx), b, subscriber+"Acknowledge", &pb.AcknowledgeRequest{Subscription: subscription, AckIds: expired})
+		p.acknowledged(subscription, expired)
+	}
+	return kept
 }
 
 // pushMessage posts one message to the endpoint and reports whether the
@@ -735,7 +766,7 @@ func (p *Provider) relayStream(session context.Context, call gateway.Call, downs
 	_ = grpc.SendHeader(call.Context, nil) //nolint:contextcheck // the session context is this request's context by design
 	failures := make(chan error, 2)
 	go p.relayDownstream(call, b, first.GetSubscription(), downstream, upstream, failures)
-	go p.relayUpstream(call, upstream, downstream, failures, first)
+	go p.relayUpstream(call, b, upstream, downstream, failures, first)
 	// Returning releases gRPC's blocked downstream Recv/Send calls. Neither
 	// relay mutates provider state; the cancelled upstream context terminates
 	// pending backend work before its owned connection is closed on reset.
@@ -797,7 +828,7 @@ func finishDownstream(err error, upstream pb.Subscriber_StreamingPullClient, fai
 
 // relayUpstream forwards backend responses downstream; every response batch is
 // re-authorized against the subscription that opened the stream.
-func (p *Provider) relayUpstream(call gateway.Call, upstream pb.Subscriber_StreamingPullClient, downstream gateway.Stream, failures chan<- error, first *pb.StreamingPullRequest) {
+func (p *Provider) relayUpstream(call gateway.Call, b driver, upstream pb.Subscriber_StreamingPullClient, downstream gateway.Stream, failures chan<- error, first *pb.StreamingPullRequest) {
 	for {
 		response, err := upstream.Recv()
 		if err != nil {
@@ -808,7 +839,11 @@ func (p *Provider) relayUpstream(call gateway.Call, upstream pb.Subscriber_Strea
 			failures <- err
 			return
 		}
+		response.ReceivedMessages = p.expire(call.Context, b, first.GetSubscription(), response.GetReceivedMessages())
 		p.track(first.GetSubscription(), response.GetReceivedMessages())
+		if len(response.GetReceivedMessages()) == 0 {
+			continue
+		}
 		if err := downstream.Send(response); err != nil {
 			failures <- err
 			return
