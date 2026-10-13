@@ -28,7 +28,25 @@ const (
 	// (recording secretmanager-access-lifecycle) and IAM's, without the
 	// per-call Troubleshooter link GCP appends.
 	PermissionDeniedUnnamed = "Permission '%[1]s' denied on resource (or it may not exist)."
+	// MissingPermission is Bigtable admin's; it names no resource (recording
+	// bigtable-instance-table-admin).
+	MissingPermission = "Access denied. Missing IAM permission: %s.%.0s"
 )
+
+// CredentialsMissing is GCP's 401 for a request without credentials: an
+// ErrorInfo CREDENTIALS_MISSING naming the API host and the RPC, as
+// "google.bigtable.admin.v2.BigtableInstanceAdmin.GetInstance" (recordings
+// bigtable-instance-table-admin and bigquery-api-surface). An empty rpc is
+// left out.
+func CredentialsMissing(service, rpc string) error {
+	metadata := map[string]string{"service": service}
+	if rpc != "" {
+		metadata["method"] = rpc
+	}
+	return ErrorInfo(codes.Unauthenticated, "Request is missing required authentication credential. Expected OAuth 2 access token,"+
+		" login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+		"CREDENTIALS_MISSING", "googleapis.com", metadata)
+}
 
 // Authorizer is the IAM engine's authorization entry point; *iam.Engine
 // implements it.

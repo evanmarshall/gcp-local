@@ -165,3 +165,21 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestOperationsNamedAndImmediate(t *testing.T) {
+	ops := newTestOperations(time.Hour).Named(func(_ state.Scope, target, id string) string { return "operations/" + target + "/operations/" + id })
+	id, err := ops.StartImmediate(regionA, "projects/p/instances/i", "update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops.Finish(regionA, id, map[string]any{"@type": "test.Instance"}, nil)
+	body, err := ops.Get(regionA, id)
+	if err != nil || body["done"] != true || body["name"] != "operations/projects/p/instances/i/operations/"+id {
+		t.Fatalf("an immediate operation is done once finished: %v %v", body, err)
+	}
+	slow, _ := ops.Start(regionA, "projects/p/instances/j", "create")
+	ops.Finish(regionA, slow, map[string]any{}, nil)
+	if body, _ := ops.Get(regionA, slow); body["done"] != false {
+		t.Fatalf("Start keeps the store's latency: %v", body)
+	}
+}

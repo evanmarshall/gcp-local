@@ -35,6 +35,7 @@ type Operations struct {
 	store    *state.Store[operationLog]
 	latency  time.Duration
 	metadata func(Operation) map[string]any
+	name     func(scope state.Scope, target, id string) string
 	changed  chan struct{} // closed and replaced on every Finish or Cancel
 	mu       sync.Mutex    // guards changed
 }
@@ -47,7 +48,8 @@ type operationLog struct {
 type operationRecord struct {
 	Operation
 	finished bool
-	doneAt   time.Time // when a finished operation reports done
+	latency  time.Duration // the minimum time from Start to done
+	doneAt   time.Time     // when a finished operation reports done
 	response map[string]any
 	failure  *status.Status
 }
@@ -61,18 +63,38 @@ func NewOperations(validate func(state.Scope) error, latency time.Duration, meta
 			return operationLog{records: map[string]*operationRecord{}}
 		}, validate),
 		latency: latency, metadata: metadata, changed: make(chan struct{}),
+		name: func(scope state.Scope, _, id string) string { return OperationName(scope, id) },
 	}
 }
 
+// Named replaces OperationName as the operation name, for an API that names
+// operations after their resource: Bigtable's are
+// "operations/projects/P/instances/I/locations/Z/operations/ID".
+func (o *Operations) Named(name func(scope state.Scope, target, id string) string) *Operations {
+	o.name = name
+	return o
+}
+
 // Start records a running operation on target and returns its ID; its name
-// is OperationName(scope, id).
+// is OperationName(scope, id) unless Named replaced it.
 func (o *Operations) Start(scope state.Scope, target, verb string) (string, error) {
+	return o.start(scope, target, verb, o.latency)
+}
+
+// StartImmediate is Start for a method GCP answers with an operation that is
+// already done once its work finished, with no minimum latency (Bigtable's
+// partial instance and table updates, recording bigtable-instance-table-admin).
+func (o *Operations) StartImmediate(scope state.Scope, target, verb string) (string, error) {
+	return o.start(scope, target, verb, 0)
+}
+
+func (o *Operations) start(scope state.Scope, target, verb string, latency time.Duration) (string, error) {
 	raw := make([]byte, 8)
 	_, _ = rand.Read(raw)
 	now := time.Now().UTC()
 	id := "operation-" + strconv.FormatInt(now.UnixMilli(), 10) + "-" + hex.EncodeToString(raw)
 	err := o.store.With(scope, func(log *operationLog) error {
-		log.records[id] = &operationRecord{Operation: Operation{Name: OperationName(scope, id), Target: target, Verb: verb, Created: now}}
+		log.records[id] = &operationRecord{Operation: Operation{Name: o.name(scope, target, id), Target: target, Verb: verb, Created: now}, latency: latency}
 		log.order = append(log.order, id)
 		log.trim()
 		return nil
@@ -87,7 +109,7 @@ func (o *Operations) Finish(scope state.Scope, id string, response map[string]an
 	_ = o.store.With(scope, func(log *operationLog) error {
 		if record := log.records[id]; record != nil && !record.finished {
 			record.finished, record.response = true, response
-			record.doneAt = record.Created.Add(o.latency)
+			record.doneAt = record.Created.Add(record.latency)
 			if now := time.Now(); now.After(record.doneAt) {
 				record.doneAt = now
 			}

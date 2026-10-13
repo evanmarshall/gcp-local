@@ -173,3 +173,15 @@ func TestGateDenialWithAFixedMessage(t *testing.T) {
 		t.Fatalf("fixed message: %v %v", err, s.Details())
 	}
 }
+
+func TestCredentialsMissingNamesTheRPC(t *testing.T) {
+	s := status.Convert(CredentialsMissing("x.googleapis.com", "google.x.v1.Service.Get"))
+	info, ok := s.Details()[0].(*errdetails.ErrorInfo)
+	if s.Code() != codes.Unauthenticated || !ok || info.GetReason() != "CREDENTIALS_MISSING" || info.GetDomain() != "googleapis.com" ||
+		info.GetMetadata()["method"] != "google.x.v1.Service.Get" || info.GetMetadata()["service"] != "x.googleapis.com" {
+		t.Fatalf("credentials missing: %v %v", s, s.Details())
+	}
+	if info, _ := status.Convert(CredentialsMissing("x.googleapis.com", "")).Details()[0].(*errdetails.ErrorInfo); len(info.GetMetadata()) != 1 {
+		t.Fatalf("an empty rpc is left out: %v", info)
+	}
+}
