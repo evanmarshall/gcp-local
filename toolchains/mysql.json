@@ -1,6 +1,6 @@
 {
   "name": "MySQL Community Server binaries for the Cloud SQL backend",
-  "distribution": "Oracle's generic Linux (glibc 2.28) MySQL Community Server tarballs from dev.mysql.com/downloads, served by cdn.mysql.com; downloaded, not vendored. md5 is the digest dev.mysql.com publishes; sha256 was computed from the same download. scripts/install/mysql.py extracts the server, its private libraries, the ICU data, one component, English error messages, and character sets, then drops non-loadable ELF sections (debug information and symbol tables); binaries holds the digest of the result",
+  "distribution": "Oracle's generic Linux (glibc 2.28) MySQL Community Server tarballs from dev.mysql.com/downloads, served by cdn.mysql.com; downloaded, not vendored. md5 is the digest dev.mysql.com publishes; sha256 was computed from the same download. scripts/install/mysql.py extracts the server, its private libraries, the ICU data, one component, the clone plugin, English error messages, and character sets, then drops non-loadable ELF sections (debug information and symbol tables); binaries holds the digest of the result",
   "project": "https://dev.mysql.com/downloads/mysql/",
   "license": "GPL-2.0 with the Universal FOSS Exception for the server; the bundled OpenSSL, protobuf, Abseil, and ICU libraries keep their own licenses (LICENSE file in each tarball)",
   "retrieved_at": "2026-10-12",
@@ -17,7 +17,8 @@
           "prefix": "mysql-8.4.11-linux-glibc2.28-aarch64",
           "upstream_mysqld_sha256": "62a5584f39fff8e659d63c87043fac29a0d85d4ea381ffcb58487dcb600a8f43",
           "binaries": {
-            "bin/mysqld": "c572ff8332cd2f9600fb59cdcd472958f7cd8d755e7c030e5c7647769bcdf7ee"
+            "bin/mysqld": "c572ff8332cd2f9600fb59cdcd472958f7cd8d755e7c030e5c7647769bcdf7ee",
+            "lib/plugin/mysql_clone.so": "09a80e3bd2a220e5410cd25488336328cd6a41408f9d1fca5ffda68705b4f4cc"
           }
         },
         "linux/amd64": {
@@ -28,7 +29,8 @@
           "prefix": "mysql-8.4.11-linux-glibc2.28-x86_64",
           "upstream_mysqld_sha256": "0ae85e8c4efb8457e9230e42a1b54b9b542a3b27a711f0ac4b190649bc857dc9",
           "binaries": {
-            "bin/mysqld": "b4f8367f8edb7ddc68db48803982aa800562d0f3e7009eb3ee17abd92948c31d"
+            "bin/mysqld": "b4f8367f8edb7ddc68db48803982aa800562d0f3e7009eb3ee17abd92948c31d",
+            "lib/plugin/mysql_clone.so": "3a9bd142cd937dc8fd4351f7eaffea8890c1aaca813aecbcb7a6b366e0ca9f56"
           }
         }
       }
@@ -44,7 +46,8 @@
           "prefix": "mysql-8.0.46-linux-glibc2.28-aarch64",
           "upstream_mysqld_sha256": "9aec6970e0bb196926993a2e1169e5825c58acf6c5ba9e62f0e4766daf55161a",
           "binaries": {
-            "bin/mysqld": "c90066c4c334253e2a3bd87063388a40259602a9b26d36e78f7ce5e5f5b3120b"
+            "bin/mysqld": "c90066c4c334253e2a3bd87063388a40259602a9b26d36e78f7ce5e5f5b3120b",
+            "lib/plugin/mysql_clone.so": "3ddaf66d7821442fdb941d23390454f72c42d8c7b20e18b2d199c3deebd7a510"
           }
         },
         "linux/amd64": {
@@ -55,7 +58,8 @@
           "prefix": "mysql-8.0.46-linux-glibc2.28-x86_64",
           "upstream_mysqld_sha256": "2c3420d4307fb65e537a1458abcb8d66ea4e5a173a264cb4332797a3df7ca719",
           "binaries": {
-            "bin/mysqld": "eb80259f78723db02f2bfeab0a39a9b10464a33176da4319c562297bbaae2d0a"
+            "bin/mysqld": "eb80259f78723db02f2bfeab0a39a9b10464a33176da4319c562297bbaae2d0a",
+            "lib/plugin/mysql_clone.so": "6822fc2f0744d66b6bd264c9c69ca7e7cdb18985569d89bdffc497e42cb6a8f5"
           }
         }
       }

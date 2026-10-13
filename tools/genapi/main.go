@@ -1160,10 +1160,13 @@ func redisRoutes() []byte {
 // cloudSQLMethods is the Cloud SQL Admin slice served from the pinned
 // discovery document. Listing a method grants no provider support.
 var cloudSQLMethods = []string{
-	"sql.instances.insert", "sql.instances.get", "sql.instances.list", "sql.instances.patch", "sql.instances.delete",
+	"sql.instances.insert", "sql.instances.get", "sql.instances.list", "sql.instances.patch", "sql.instances.update", "sql.instances.delete",
 	"sql.databases.insert", "sql.databases.get", "sql.databases.list", "sql.databases.delete",
 	"sql.users.insert", "sql.users.list", "sql.users.delete",
 	"sql.operations.get", "sql.operations.list", "sql.operations.cancel",
+	"sql.instances.restoreBackup", "sql.instances.failover",
+	"sql.backupRuns.insert", "sql.backupRuns.get", "sql.backupRuns.list", "sql.backupRuns.delete",
+	"sql.sslCerts.insert", "sql.sslCerts.get", "sql.sslCerts.list", "sql.sslCerts.delete", "sql.connect.get",
 }
 
 // cloudSQLRoutes generates the Cloud SQL Admin v1beta4 route slice from the

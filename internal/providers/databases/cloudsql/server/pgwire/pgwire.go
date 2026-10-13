@@ -11,6 +11,7 @@ import (
 	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
@@ -61,22 +62,58 @@ type Conn struct {
 
 // Dial opens and authenticates one session over a dialed connection.
 func Dial(ctx context.Context, network, address, user, database, password string) (*Conn, error) {
+	return DialTLS(ctx, network, address, user, database, password, nil)
+}
+
+// errNoTLS reports a server that declined an SSLRequest.
+var errNoTLS = errors.New("PostgreSQL server declined TLS")
+
+// DialTLS is Dial with TLS negotiated by an SSLRequest when secure is set,
+// as libpq's sslmode=verify-ca or verify-full does with secure's roots.
+func DialTLS(ctx context.Context, network, address, user, database, password string, secure *tls.Config) (*Conn, error) {
 	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, network, address)
+	raw, err := dialer.DialContext(ctx, network, address)
 	if err != nil {
 		return nil, fmt.Errorf("dial PostgreSQL: %w", err)
 	}
 	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
+		_ = raw.SetDeadline(deadline)
 	}
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = raw.Close() })
 	defer stop()
+	conn := raw
+	if secure != nil {
+		if conn, err = negotiateTLS(ctx, raw, secure); err != nil {
+			_ = raw.Close()
+			return nil, err
+		}
+	}
 	session := &Conn{conn: conn, reader: bufio.NewReader(conn)}
 	if err := session.startup(user, database, password); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 	return session, nil
+}
+
+// negotiateTLS sends an SSLRequest and starts TLS when the server accepts.
+func negotiateTLS(ctx context.Context, raw net.Conn, secure *tls.Config) (net.Conn, error) {
+	request := binary.BigEndian.AppendUint32(binary.BigEndian.AppendUint32(nil, 8), SSLRequestCode)
+	if _, err := raw.Write(request); err != nil {
+		return nil, fmt.Errorf("write the SSLRequest: %w", err)
+	}
+	answer := make([]byte, 1)
+	if _, err := io.ReadFull(raw, answer); err != nil {
+		return nil, fmt.Errorf("read the SSLRequest answer: %w", err)
+	}
+	if answer[0] != 'S' {
+		return nil, errNoTLS
+	}
+	conn := tls.Client(raw, secure)
+	if err := conn.HandshakeContext(ctx); err != nil {
+		return nil, fmt.Errorf("PostgreSQL TLS handshake: %w", err)
+	}
+	return conn, nil
 }
 
 // startup sends the startup packet and completes authentication.

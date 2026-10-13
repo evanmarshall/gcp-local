@@ -14,8 +14,8 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
-	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/mysqlwire"
-	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/pgwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/mysqlwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/pgwire"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
@@ -34,26 +34,28 @@ const loopbackAny = "127.0.0.1:0"
 // the connector answers.
 func dialConnector(t *testing.T, connector *Connector, user string) []byte {
 	t.Helper()
-	return dialStartup(t, connector.listener.Addr().String(), user)
+	return dialStartup(t, connector.listener.Addr().String(), user, true)
 }
 
-// dialStartup sends an SSL request and a startup packet to address and
-// returns the answer.
-func dialStartup(t *testing.T, address, user string) []byte {
+// dialStartup sends a startup packet to address, after an SSL request the
+// connector declines when ssl, and returns the answer.
+func dialStartup(t *testing.T, address, user string, ssl bool) []byte {
 	t.Helper()
 	dialer := net.Dialer{Timeout: time.Second}
 	conn, err := dialer.DialContext(t.Context(), "tcp", address)
 	must(t, err)
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	ssl := binary.BigEndian.AppendUint32(binary.BigEndian.AppendUint32(nil, 8), pgwire.SSLRequestCode)
-	_, err = conn.Write(ssl)
-	must(t, err)
-	answer := make([]byte, 1)
-	_, err = io.ReadFull(conn, answer)
-	must(t, err)
-	if answer[0] != 'N' {
-		t.Fatalf("SSL answer = %q", answer)
+	if ssl {
+		request := binary.BigEndian.AppendUint32(binary.BigEndian.AppendUint32(nil, 8), pgwire.SSLRequestCode)
+		_, err = conn.Write(request)
+		must(t, err)
+		answer := make([]byte, 1)
+		_, err = io.ReadFull(conn, answer)
+		must(t, err)
+		if answer[0] != 'N' {
+			t.Fatalf("SSL answer = %q", answer)
+		}
 	}
 	_, err = conn.Write(startupPacket(user))
 	must(t, err)
@@ -171,10 +173,10 @@ func TestPublicAddressForwardsWithoutIAM(t *testing.T) {
 	address := h.publishedAddress(testInstance)
 	server := h.fleet().server(testInstance)
 
-	if reply := dialStartup(t, address, adminRole); len(reply) == 0 || reply[0] != 'E' || !bytes.Contains(reply, []byte("administrative role")) {
+	if reply := dialStartup(t, address, adminRole, false); len(reply) == 0 || reply[0] != 'E' || !bytes.Contains(reply, []byte("administrative role")) {
 		t.Fatalf("admin role reply = %q", reply)
 	}
-	dialStartup(t, address, defaultUser)
+	dialStartup(t, address, defaultUser, false)
 	select {
 	case got := <-server.received:
 		if !bytes.Equal(got, startupPacket(defaultUser)) {
@@ -256,10 +258,8 @@ func TestMySQLPublicAddress(t *testing.T) {
 	server := h.fleet().server(testMySQL)
 
 	hello, reply := dialMySQLHandshake(t, address, adminRole)
-	// The connector forwards the server greeting intact except for its TLS capability.
-	want := fakeGreeting()
-	mysqlwire.WithoutTLS(want)
-	if flags := binary.LittleEndian.Uint16(hello[bytes.IndexByte(hello, 0)+14:]); flags&mysqlwire.CapSSL != 0 || !bytes.Equal(hello, want) {
+	// The published port forwards the server greeting and offers the TLS it terminates.
+	if flags := binary.LittleEndian.Uint16(hello[bytes.IndexByte(hello, 0)+14:]); flags&mysqlwire.CapSSL == 0 || !bytes.Equal(hello, fakeGreeting()) {
 		t.Fatalf("greeting = %x", hello)
 	}
 	if !bytes.Equal(reply, mysqlwire.ErrorPacket(2, mysqlwire.AccessDenied, "28000", "gcp-local: the internal administrative role is not reachable through the connector")) {

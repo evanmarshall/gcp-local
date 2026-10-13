@@ -15,4 +15,4 @@ for root in "$GCP_LOCAL_POSTGRES_ROOT" "$GCP_LOCAL_MYSQL_ROOT"; do
     fi
 done
 sh scripts/go.sh test -c -tags=cloudsqlintegration -race -o bin/cloudsql-integration ./internal/providers/databases/cloudsql
-python3 scripts/run/isolated.py --timeout 300 -- bin/cloudsql-integration -test.v -test.run 'TestPostgresThroughConnector|TestMySQLThroughConnector'
+python3 scripts/run/isolated.py --timeout 300 -- bin/cloudsql-integration -test.v -test.run 'TestPostgresThroughConnector|TestMySQLThroughConnector|TestPostgresDepth|TestMySQLDepth'

@@ -34,12 +34,14 @@ ARCHITECTURES = {
 CHUNK = 1 << 20
 MAX_TREE = 1 << 30
 # The server, the private libraries it links (OpenSSL, protobuf-lite, Abseil), the
-# ICU data REGEXP loads, the component its default manifest names, English error
-# messages, and character-set definitions. Clients, tools, debug builds, test
-# plugins, and the LDAP/Kerberos/FIDO client libraries are not extracted.
+# ICU data REGEXP loads, the component its default manifest names, the clone plugin
+# Cloud SQL backups use, English error messages, and character-set definitions.
+# Clients, tools, debug builds, test plugins, and the LDAP/Kerberos/FIDO client
+# libraries are not extracted.
 KEEP = re.compile(
     r"bin/mysqld"
     r"|lib/plugin/component_reference_cache\.so"
+    r"|lib/plugin/mysql_clone\.so"
     r"|lib/private/(libssl\.so\.3|libcrypto\.so\.3|libprotobuf-lite\.so\.[0-9.]+|libabsl_[a-z0-9_]+\.so)"
     r"|lib/private/icudt[0-9]+l(/.*)?"
     r"|share/english/errmsg\.sys"

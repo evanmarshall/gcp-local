@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"slices"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
@@ -27,11 +29,25 @@ var (
 	instanceNamePattern = regexp.MustCompile(`^[a-z]([-a-z0-9]{0,95}[a-z0-9])?$`)
 	regionPattern       = regexp.MustCompile(`^[a-z]+-[a-z]+[0-9]+$`)
 	tierPattern         = regexp.MustCompile(`^db-[a-z0-9-]+$`)
+	startTimePattern    = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+)
+
+// Availability types.
+const (
+	availabilityZonal    = "ZONAL"
+	availabilityRegional = "REGIONAL"
+)
+
+// TLS modes of settings.ipConfiguration.sslMode.
+const (
+	sslAllow        = "ALLOW_UNENCRYPTED_AND_ENCRYPTED"
+	sslEncrypted    = "ENCRYPTED_ONLY"
+	sslTrustedCerts = "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"
+	sslUnspecified  = "SSL_MODE_UNSPECIFIED"
 )
 
 // settingsBody is the Settings subset the provider models. Pointers mark
-// the fields a patch may name; the enum fields accept only the value the
-// local server has (ZONAL, ALWAYS, PER_USE) and refuse the others as gaps.
+// the fields a patch may name.
 type settingsBody struct {
 	Kind                      string             `json:"kind"`
 	Tier                      *string            `json:"tier"`
@@ -44,75 +60,98 @@ type settingsBody struct {
 	PricingPlan               *string            `json:"pricingPlan"`
 	BackupConfiguration       *backupBody        `json:"backupConfiguration"`
 	IPConfiguration           *ipBody            `json:"ipConfiguration"`
+	DatabaseFlags             *[]flagBody        `json:"databaseFlags"`
 }
 
-// backupBody accepts a backup configuration that enables nothing; #91 models
-// backups. Enabling one is a gap, never a stored claim.
+// backupBody is settings.backupConfiguration. Patch merges the named fields.
 type backupBody struct {
-	Kind                       string `json:"kind"`
-	Enabled                    bool   `json:"enabled"`
-	PointInTimeRecoveryEnabled bool   `json:"pointInTimeRecoveryEnabled"`
-	BinaryLogEnabled           bool   `json:"binaryLogEnabled"`
+	Kind                        string  `json:"kind"`
+	Enabled                     *bool   `json:"enabled"`
+	StartTime                   *string `json:"startTime"`
+	Location                    *string `json:"location"`
+	PointInTimeRecoveryEnabled  *bool   `json:"pointInTimeRecoveryEnabled"`
+	BinaryLogEnabled            *bool   `json:"binaryLogEnabled"`
+	TransactionLogRetentionDays *int    `json:"transactionLogRetentionDays"`
+	// ReplicationLogArchivingEnabled is reported with PostgreSQL point-in-time
+	// recovery (observed live) and accepted only as that.
+	ReplicationLogArchivingEnabled *bool          `json:"replicationLogArchivingEnabled"`
+	BackupRetentionSettings        *retentionBody `json:"backupRetentionSettings"`
 }
 
-// ipBody is the IP configuration subset the provider models. requireSsl and
-// authorizedNetworks are accepted only empty (Unmodeled); sslMode only as the
-// default that requires no TLS.
+// retentionBody is backupConfiguration.backupRetentionSettings.
+type retentionBody struct {
+	RetainedBackups *int    `json:"retainedBackups"`
+	RetentionUnit   *string `json:"retentionUnit"`
+}
+
+// ipBody is the IP configuration subset the provider models. Patch merges
+// the named fields and replaces authorizedNetworks whole (observed live).
 type ipBody struct {
-	IPv4Enabled    *bool  `json:"ipv4Enabled"`
-	PrivateNetwork string `json:"privateNetwork"`
-	SSLMode        string `json:"sslMode"`
+	IPv4Enabled                   *bool       `json:"ipv4Enabled"`
+	PrivateNetwork                *string     `json:"privateNetwork"`
+	SSLMode                       *string     `json:"sslMode"`
+	RequireSSL                    *bool       `json:"requireSsl"`
+	AuthorizedNetworks            *[]aclEntry `json:"authorizedNetworks"`
+	ServerCaMode                  *string     `json:"serverCaMode"`
+	ServerCertificateRotationMode *string     `json:"serverCertificateRotationMode"`
+}
+
+// flagBody is one settings.databaseFlags entry.
+type flagBody struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // instanceBody is the DatabaseInstance subset the provider models.
 type instanceBody struct {
-	Kind            string        `json:"kind"`
-	Name            string        `json:"name"`
-	Project         string        `json:"project"`
-	Region          *string       `json:"region"`
-	DatabaseVersion *string       `json:"databaseVersion"`
-	RootPassword    *string       `json:"rootPassword"`
-	BackendType     *string       `json:"backendType"`
-	InstanceType    *string       `json:"instanceType"`
-	Settings        *settingsBody `json:"settings"`
+	Kind            string  `json:"kind"`
+	Name            string  `json:"name"`
+	Project         string  `json:"project"`
+	Region          *string `json:"region"`
+	DatabaseVersion *string `json:"databaseVersion"`
+	RootPassword    *string `json:"rootPassword"`
+	BackendType     *string `json:"backendType"`
+	InstanceType    *string `json:"instanceType"`
+	// MaintenanceVersion is accepted only as the version the instance reports.
+	MaintenanceVersion *string       `json:"maintenanceVersion"`
+	Settings           *settingsBody `json:"settings"`
 }
 
 // instanceFields lists the v1beta4 DatabaseInstance fields instanceBody
 // lacks (api/discovery/sqladmin-v1beta4.json): unmodeled ones are a gap
 // unless empty, output-only ones are dropped. Fields the discovery document
 // doesn't mark output-only but the service reports (state, ipAddresses,
-// selfLink) are dropped too.
+// selfLink, and the settings stand-ins) are dropped too.
 var instanceFields = provider.Fields{
 	Unmodeled: []string{"databaseCenterIntegrationEnabled", "diskEncryptionConfiguration", "failoverReplica",
-		"includeReplicasForMajorVersionUpgrade", "maintenanceVersion", "masterInstanceName", "nodeCount",
+		"includeReplicasForMajorVersionUpgrade", "masterInstanceName", "nodeCount",
 		"onPremisesConfiguration", "replicaConfiguration", "replicaNames", "replicationCluster", "sqlNetworkArchitecture",
 		"switchTransactionLogsToCloudStorageEnabled", "tags",
 		"settings.acceleratedReplicaMode", "settings.activeDirectoryConfig", "settings.advancedMachineFeatures",
-		"settings.authorizedGaeApplications", "settings.autoUpgradeEnabled", "settings.collation",
-		"settings.connectionPoolConfig", "settings.connectorEnforcement", "settings.crashSafeReplicationEnabled",
+		"settings.autoUpgradeEnabled", "settings.collation",
+		"settings.connectionPoolConfig", "settings.crashSafeReplicationEnabled",
 		"settings.dataApiAccess", "settings.dataCacheConfig", "settings.dataDiskProvisionedIops",
-		"settings.dataDiskProvisionedThroughput", "settings.dataDiskSizeGb", "settings.dataDiskType",
-		"settings.databaseFlags", "settings.databaseReplicationEnabled", "settings.denyMaintenancePeriods",
-		"settings.enableDataplexIntegration", "settings.enableGoogleMlIntegration", "settings.entraidConfig",
-		"settings.finalBackupConfig", "settings.insightsConfig", "settings.locationPreference",
+		"settings.dataDiskProvisionedThroughput",
+		"settings.databaseReplicationEnabled", "settings.denyMaintenancePeriods",
+		"settings.enableGoogleMlIntegration", "settings.entraidConfig",
+		"settings.finalBackupConfig", "settings.insightsConfig",
 		"settings.maintenanceWindow", "settings.passwordValidationPolicy", "settings.performanceCaptureConfig",
-		"settings.readPoolAutoScaleConfig", "settings.replicationLagMaxSeconds", "settings.replicationType",
-		"settings.retainBackupsOnDelete", "settings.sqlServerAuditConfig", "settings.storageAutoResize",
-		"settings.storageAutoResizeLimit", "settings.timeZone",
-		"settings.backupConfiguration.backupRetentionSettings", "settings.backupConfiguration.location",
-		"settings.backupConfiguration.replicationLogArchivingEnabled", "settings.backupConfiguration.startTime",
-		"settings.backupConfiguration.transactionLogRetentionDays",
-		"settings.ipConfiguration.allocatedIpRange", "settings.ipConfiguration.authorizedNetworks",
-		"settings.ipConfiguration.customSubjectAlternativeNames",
+		"settings.readPoolAutoScaleConfig", "settings.sqlServerAuditConfig", "settings.timeZone",
+		"settings.retainBackupsOnDelete",
+		"settings.ipConfiguration.allocatedIpRange", "settings.ipConfiguration.customSubjectAlternativeNames",
 		"settings.ipConfiguration.enablePrivatePathForGoogleCloudServices", "settings.ipConfiguration.pscConfig",
-		"settings.ipConfiguration.requireSsl", "settings.ipConfiguration.serverCaMode",
-		"settings.ipConfiguration.serverCaPool", "settings.ipConfiguration.serverCertificateRotationMode"},
-	OutputOnly: []string{"availableMaintenanceVersions", "connectionName", "createTime", "currentDiskSize",
+		"settings.ipConfiguration.serverCaPool"},
+	OutputOnly: []string{"availableMaintenanceVersions", keyConnectionName, keyCreateTime, "currentDiskSize",
 		"databaseInstalledVersion", "deploymentInfo", "diskEncryptionStatus", "dnsName", "dnsNames", keyETag, "gceZone",
-		"geminiConfig", "ipAddresses", "ipv6Address", "maxDiskSize", "nodes", "outOfDiskReport", "primaryDnsName",
+		"geminiConfig", keyIPAddresses, "ipv6Address", "maxDiskSize", "nodes", "outOfDiskReport", "primaryDnsName",
 		"pscServiceAttachmentLink", "satisfiesPzi", "satisfiesPzs", "scheduledMaintenance", "secondaryGceZone",
-		"selfLink", "serverCaCert", "serviceAccountEmailAddress", "state", "suspensionReason",
+		"selfLink", keyServerCaCert, "serviceAccountEmailAddress", "state", "suspensionReason",
 		"upgradableDatabaseVersions", "writeEndpoint",
+		// Stand-ins the instance reports (settingsWire); clients send them back.
+		"settings.authorizedGaeApplications", "settings.connectorEnforcement", "settings.dataDiskSizeGb",
+		"settings.dataDiskType", "settings.enableDataplexIntegration", "settings.locationPreference",
+		"settings.replicationLagMaxSeconds", "settings.replicationType", "settings.storageAutoResize",
+		"settings.storageAutoResizeLimit",
 		"settings.backupConfiguration.backupTier", "settings.backupConfiguration.transactionalLogStorageState"},
 	IgnoreUnknown: true,
 }
@@ -131,56 +170,44 @@ func decodeInstance(raw []byte, project string) (instanceBody, error) {
 	return body, nil
 }
 
-// settingsChoices are the modeled values of the settings enums: the local
-// value and the unspecified spelling. Every other documented value is a gap.
-var settingsChoices = []struct {
-	field             string
+// settingsEnums are the modeled values of the plain settings enums, with the
+// transcoder's field path and enum type for an unknown value (observed live
+// shape: cloudsql-postgres-connectivity). Every other documented value is a gap.
+var settingsEnums = []struct {
+	field, path, enum string
 	value             func(*settingsBody) *string
-	modeled, fallback string
-	others            []string
+	modeled, others   []string
 }{
-	{"availabilityType", func(s *settingsBody) *string { return s.AvailabilityType }, "ZONAL", "SQL_AVAILABILITY_TYPE_UNSPECIFIED", []string{"REGIONAL"}},
-	{"activationPolicy", func(s *settingsBody) *string { return s.ActivationPolicy }, "ALWAYS", "SQL_ACTIVATION_POLICY_UNSPECIFIED", []string{"NEVER", "ON_DEMAND"}},
-	{"pricingPlan", func(s *settingsBody) *string { return s.PricingPlan }, "PER_USE", "SQL_PRICING_PLAN_UNSPECIFIED", []string{"PACKAGE"}},
+	{"activationPolicy", "activation_policy", "SqlActivationPolicy", func(s *settingsBody) *string { return s.ActivationPolicy },
+		[]string{"ALWAYS", "SQL_ACTIVATION_POLICY_UNSPECIFIED"}, []string{"NEVER", "ON_DEMAND"}},
+	{"pricingPlan", "pricing_plan", "SqlPricingPlan", func(s *settingsBody) *string { return s.PricingPlan },
+		[]string{"PER_USE", "SQL_PRICING_PLAN_UNSPECIFIED"}, []string{"PACKAGE"}},
+	{"availabilityType", "availability_type", "SqlAvailabilityType", func(s *settingsBody) *string { return s.AvailabilityType },
+		[]string{availabilityZonal, availabilityRegional, "SQL_AVAILABILITY_TYPE_UNSPECIFIED"}, nil},
+	{"edition", "edition", "Settings.Edition", func(s *settingsBody) *string { return s.Edition },
+		[]string{"ENTERPRISE", "ENTERPRISE_PLUS", "EDITION_UNSPECIFIED"}, nil},
 }
 
-// checkSettings refuses settings the local server can't honor: another
-// availability type, activation policy, or pricing plan, backups, or TLS
-// enforcement. Each refusal names its field.
-func checkSettings(settings *settingsBody) error {
-	if settings == nil {
+// checkEnums refuses an enum value the transcoder rejects and a documented
+// value the local server can't honor.
+func checkEnums(settings *settingsBody) error {
+	for _, enum := range settingsEnums {
+		value := deref(enum.value(settings))
+		switch {
+		case value == "" || slices.Contains(enum.modeled, value):
+		case slices.Contains(enum.others, value):
+			return gap(fmt.Sprintf("settings.%s %s", enum.field, value))
+		default:
+			return enumInvalid("body.settings."+enum.path, enum.enum, value)
+		}
+	}
+	if settings.IPConfiguration == nil {
 		return nil
 	}
-	for _, choice := range settingsChoices {
-		if err := choose(choice.field, choice.value(settings), choice.modeled, choice.fallback, choice.others); err != nil {
-			return err
-		}
-	}
-	if backup := settings.BackupConfiguration; backup != nil {
-		for field, enabled := range map[string]bool{"enabled": backup.Enabled,
-			"pointInTimeRecoveryEnabled": backup.PointInTimeRecoveryEnabled, "binaryLogEnabled": backup.BinaryLogEnabled} {
-			if enabled {
-				return gap("settings.backupConfiguration." + field + " (backups are not modeled)")
-			}
-		}
-	}
-	if ip := settings.IPConfiguration; ip != nil && !slices.Contains([]string{"", "SSL_MODE_UNSPECIFIED", "ALLOW_UNENCRYPTED_AND_ENCRYPTED"}, ip.SSLMode) {
-		return gap("settings.ipConfiguration.sslMode " + ip.SSLMode + " (TLS is not served)")
+	if mode := deref(settings.IPConfiguration.SSLMode); mode != "" && !slices.Contains([]string{sslAllow, sslEncrypted, sslTrustedCerts, sslUnspecified}, mode) {
+		return enumInvalid("body.settings.ip_configuration.ssl_mode", "IpConfiguration.SslMode", mode)
 	}
 	return nil
-}
-
-// choose accepts an unset, modeled, or unspecified enum value, refuses
-// another documented one as a gap, and any other as invalid.
-func choose(field string, value *string, modeled, fallback string, others []string) error {
-	switch {
-	case value == nil || *value == "" || *value == modeled || *value == fallback:
-		return nil
-	case slices.Contains(others, *value):
-		return gap(fmt.Sprintf("settings.%s %s", field, *value))
-	default:
-		return provider.Invalid(fmt.Sprintf("Invalid value for settings.%s: %q", field, *value))
-	}
 }
 
 // check refuses an insert body the provider cannot honor. The tier is
@@ -199,11 +226,13 @@ func (p *Provider) check(body instanceBody) error {
 		return gap(fmt.Sprintf("databaseVersion %q (installed: %s)", version, strings.Join(sortedKeys(p.releases), ", ")))
 	case body.Settings.SettingsVersion != nil:
 		return provider.Invalid("settingsVersion applies to updates only.")
+	case deref(body.MaintenanceVersion) != "":
+		return gap("maintenanceVersion is not modeled")
 	}
 	if err := checkTopology(body); err != nil {
 		return err
 	}
-	if err := checkSettings(body.Settings); err != nil {
+	if err := checkEnums(body.Settings); err != nil {
 		return err
 	}
 	return checkFields(body)
@@ -211,7 +240,7 @@ func (p *Provider) check(body instanceBody) error {
 
 // checkTopology refuses another backend or instance type.
 func checkTopology(body instanceBody) error {
-	if backend := deref(body.BackendType); backend != "" && backend != "SECOND_GEN" {
+	if backend := deref(body.BackendType); backend != "" && backend != secondGen {
 		return gap("backendType " + backend)
 	}
 	if kind := deref(body.InstanceType); kind != "" && kind != "CLOUD_SQL_INSTANCE" {
@@ -244,25 +273,224 @@ func (p *Provider) record(body instanceBody) (instanceRecord, error) {
 	if err := p.check(body); err != nil {
 		return instanceRecord{}, err
 	}
-	settings := body.Settings
+	created := p.clock()
 	record := instanceRecord{Name: body.Name, Region: cmp.Or(deref(body.Region), defaultRegion), Version: deref(body.DatabaseVersion),
-		Tier: deref(settings.Tier), Edition: deref(settings.Edition), IPv4: true, SettingsVersion: 1, Created: p.clock()}
+		IPv4: true, SettingsVersion: 1, Created: created, Availability: availabilityZonal, SSLMode: sslAllow,
+		Backup: defaultBackup(created)}
+	if ip := body.Settings.IPConfiguration; ip != nil {
+		if ip.IPv4Enabled != nil {
+			record.IPv4 = *ip.IPv4Enabled
+		}
+		record.PrivateNetwork = deref(ip.PrivateNetwork)
+	}
+	if err := applySettings(&record, body.Settings, p.clock()); err != nil {
+		return instanceRecord{}, err
+	}
+	if !record.IPv4 && record.PrivateNetwork == "" {
+		return instanceRecord{}, provider.Invalid("At least one of public IP or private IP must be enabled.")
+	}
+	return record, nil
+}
+
+// applySettings validates settings against record and applies them, as an
+// insert does over the defaults and a patch over the stored instance.
+// Named fields replace stored ones; databaseFlags and authorizedNetworks
+// replace the whole list (observed live).
+func applySettings(record *instanceRecord, settings *settingsBody, now time.Time) error {
+	if settings == nil {
+		return nil
+	}
+	applyScalars(record, settings)
+	if err := checkEdition(*record); err != nil {
+		return err
+	}
+	if err := applyIP(record, settings.IPConfiguration, now); err != nil {
+		return err
+	}
+	if err := applyBackup(record, settings.BackupConfiguration); err != nil {
+		return err
+	}
+	if settings.DatabaseFlags != nil {
+		flags, err := checkFlags(record.Version, *settings.DatabaseFlags)
+		if err != nil {
+			return err
+		}
+		record.Flags = flags
+	}
+	return nil
+}
+
+// applyScalars applies the settings a patch names that need no validation beyond decoding.
+func applyScalars(record *instanceRecord, settings *settingsBody) {
+	if settings.Tier != nil {
+		record.Tier = *settings.Tier
+	}
+	if settings.Edition != nil && *settings.Edition != "EDITION_UNSPECIFIED" {
+		record.Edition = *settings.Edition
+	}
 	if settings.UserLabels != nil {
 		record.Labels = maps.Clone(*settings.UserLabels)
 	}
 	if settings.DeletionProtectionEnabled != nil {
 		record.DeletionProtection = *settings.DeletionProtectionEnabled
 	}
-	if ip := settings.IPConfiguration; ip != nil {
-		if ip.IPv4Enabled != nil {
-			record.IPv4 = *ip.IPv4Enabled
+	if value := deref(settings.AvailabilityType); value == availabilityZonal || value == availabilityRegional {
+		record.Availability = value
+	}
+}
+
+// checkEdition refuses an Enterprise Plus instance without a performance-optimized tier (observed live).
+func checkEdition(record instanceRecord) error {
+	if record.Edition != "ENTERPRISE_PLUS" || strings.HasPrefix(record.Tier, "db-perf-optimized-N-") {
+		return nil
+	}
+	engine := "postgres"
+	if isMySQL(record.Version) {
+		engine = "mysql"
+	}
+	return invalid(fmt.Sprintf("Invalid request: Invalid Tier (%s) for (ENTERPRISE_PLUS) Edition. Use a predefined Tier like "+
+		"db-perf-optimized-N-* instead. Learn more at https://cloud.google.com/sql/docs/%s/create-instance#machine-types.", record.Tier, engine))
+}
+
+// applyIP applies settings.ipConfiguration: the TLS mode, the legacy
+// requireSsl, and authorized networks. The CA mode and certificate rotation
+// accept only the served values.
+func applyIP(record *instanceRecord, ip *ipBody, now time.Time) error {
+	if ip == nil {
+		return nil
+	}
+	if err := checkCAModes(ip); err != nil {
+		return err
+	}
+	if ip.AuthorizedNetworks != nil {
+		networks, err := checkNetworks(*ip.AuthorizedNetworks, now)
+		if err != nil {
+			return err
 		}
-		record.PrivateNetwork = ip.PrivateNetwork
+		record.Networks = networks
 	}
-	if !record.IPv4 && record.PrivateNetwork == "" {
-		return instanceRecord{}, provider.Invalid("At least one of public IP or private IP must be enabled.")
+	applySSL(record, ip)
+	return nil
+}
+
+// checkCAModes accepts only the served server CA mode and certificate rotation.
+func checkCAModes(ip *ipBody) error {
+	if mode := deref(ip.ServerCaMode); mode != "" && mode != serverCaMode && mode != "CA_MODE_UNSPECIFIED" {
+		return gap("settings.ipConfiguration.serverCaMode " + mode)
 	}
-	return record, nil
+	if mode := deref(ip.ServerCertificateRotationMode); mode != "" && mode != rotationUnspecified {
+		return gap("settings.ipConfiguration.serverCertificateRotationMode " + mode)
+	}
+	return nil
+}
+
+// applySSL applies sslMode and the legacy requireSsl; sslMode wins (Cloud
+// SQL Admin API reference), and requireSsl alone sets or clears the client
+// certificate requirement.
+func applySSL(record *instanceRecord, ip *ipBody) {
+	if ip.RequireSSL != nil {
+		record.RequireSSL = *ip.RequireSSL
+	}
+	switch mode := deref(ip.SSLMode); {
+	case mode != "" && mode != sslUnspecified:
+		record.SSLMode = mode
+	case ip.RequireSSL == nil:
+	case *ip.RequireSSL:
+		record.SSLMode = sslTrustedCerts
+	case record.SSLMode == sslTrustedCerts:
+		record.SSLMode = sslAllow
+	}
+}
+
+// aclEntry is one authorized network, a CIDR range or a single address.
+type aclEntry struct {
+	Kind           string `json:"kind"`
+	Name           string `json:"name"`
+	Value          string `json:"value"`
+	ExpirationTime string `json:"expirationTime"`
+	prefix         netip.Prefix
+	expires        time.Time
+}
+
+// wire renders an sql#aclEntry.
+func (a aclEntry) wire() map[string]any {
+	value := map[string]any{keyKind: "sql#aclEntry", "value": a.Value}
+	if a.Name != "" {
+		value[keyName] = a.Name
+	}
+	if a.ExpirationTime != "" {
+		value["expirationTime"] = a.ExpirationTime
+	}
+	return value
+}
+
+// admits reports whether the entry admits an address at now; an expired
+// entry admits nothing.
+func (a aclEntry) admits(address netip.Addr, now time.Time) bool {
+	return a.prefix.Contains(address.Unmap()) && (a.expires.IsZero() || now.Before(a.expires))
+}
+
+// checkNetworks parses authorized networks: an IPv4 CIDR with no host bits
+// set, or one address. Anything else is GCP's refusal (observed live).
+func checkNetworks(entries []aclEntry, _ time.Time) ([]aclEntry, error) {
+	parsed := make([]aclEntry, 0, len(entries))
+	for _, entry := range entries {
+		refused := invalid("Invalid request: Network (" + entry.Value + ")..")
+		prefix, err := netip.ParsePrefix(entry.Value)
+		if err != nil {
+			address, addressErr := netip.ParseAddr(entry.Value)
+			if addressErr != nil {
+				return nil, refused
+			}
+			prefix = netip.PrefixFrom(address, address.BitLen())
+		}
+		if !prefix.Addr().Is4() || prefix.Masked() != prefix {
+			return nil, refused
+		}
+		entry.prefix = prefix
+		if entry.ExpirationTime != "" {
+			expires, err := time.Parse(time.RFC3339Nano, entry.ExpirationTime)
+			if err != nil {
+				return nil, invalid("Invalid request: Invalid expiration time (" + entry.ExpirationTime + ").")
+			}
+			entry.expires = expires
+		}
+		entry.Kind = ""
+		parsed = append(parsed, entry)
+	}
+	// Observed live: GCP returns the entries ordered by value.
+	slices.SortStableFunc(parsed, func(a, b aclEntry) int { return strings.Compare(a.Value, b.Value) })
+	return parsed, nil
+}
+
+// errFlagName is GCP's refusal of a flag it doesn't support (observed live:
+// cloudsql-mysql-backups-flags), a 404.
+var errFlagName = failure{code: http.StatusNotFound, reason: "invalidFlagName", domain: domainGlobal,
+	message: "The requested flag is either misspelled or unsupported by Cloud SQL."}
+
+// checkFlags validates database flags for the instance's engine. A flag
+// Cloud SQL documents but the local server doesn't model is a gap.
+func checkFlags(version string, flags []flagBody) ([]server.Flag, error) {
+	checked := make([]server.Flag, 0, len(flags))
+	for _, flag := range flags {
+		candidate := server.Flag{Name: flag.Name, Value: flag.Value}
+		if slices.ContainsFunc(checked, func(f server.Flag) bool { return f.Name == flag.Name }) {
+			return nil, invalid("Invalid request: Duplicate flag (" + flag.Name + ").")
+		}
+		check, reason := server.CheckFlag(version, candidate)
+		switch check {
+		case server.FlagUnmodeled:
+			return nil, gap("database flag " + flag.Name)
+		case server.FlagUnknown:
+			return nil, errFlagName
+		case server.FlagInvalidValue:
+			return nil, failure{code: http.StatusBadRequest, reason: "invalidFlagValue", domain: domainGlobal,
+				message: "Value requested is not valid. Failed to set " + flag.Name + ": " + reason}
+		default:
+			checked = append(checked, candidate)
+		}
+	}
+	return checked, nil
 }
 
 // insertInstance creates the server, then publishes the reference and metadata.
@@ -272,6 +500,10 @@ func (p *Provider) insertInstance(call gateway.Call, request *gateway.RESTReques
 		return nil, err
 	}
 	record, err := p.record(body)
+	if err != nil {
+		return nil, err
+	}
+	record.TLS, err = newAuthority(project, record.Name, record.Created)
 	if err != nil {
 		return nil, err
 	}
@@ -301,8 +533,8 @@ func (p *Provider) insertInstance(call gateway.Call, request *gateway.RESTReques
 // start creates the instance's server and published port, then indexes and
 // stores the instance. A failure removes whatever was started.
 func (p *Provider) start(ctx context.Context, fleet driver, project string, record instanceRecord, rootPassword string) error {
-	if err := fleet.create(ctx, serverSpec{Instance: record.Name, Version: record.Version, RootPassword: rootPassword}); err != nil {
-		return err
+	if err := fleet.Create(ctx, server.Spec{Instance: record.Name, Version: record.Version, RootPassword: rootPassword, Flags: record.Flags}); err != nil {
+		return err //nolint:wrapcheck // the fleet's errors are descriptive
 	}
 	listener, err := p.openPublic(ctx, project, record)
 	if err == nil && listener != nil {
@@ -315,10 +547,11 @@ func (p *Provider) start(ctx context.Context, fleet driver, project string, reco
 		if listener != nil {
 			listener.Close()
 		}
-		_ = fleet.remove(context.WithoutCancel(ctx), record.Name)
+		_ = fleet.Remove(context.WithoutCancel(ctx), record.Name)
 		return err
 	}
 	p.trackPublic(project, record.Name, listener)
+	p.scheduleBackups(ctx, project, record.Name, record.Backup.Enabled)
 	return nil
 }
 
@@ -373,37 +606,42 @@ func (p *Provider) listInstances(_ gateway.Call, request *gateway.RESTRequest, p
 	return &gateway.RESTResponse{JSON: listBody("", items, next)}, nil
 }
 
-// decodePatch strictly decodes a patch body and refuses a field that would
-// change something other than tier, labels, and deletion protection. The
-// settings enums and the backup and IP configurations may only restate what
-// the instance already has.
+// decodePatch strictly decodes a patch or update body.
 func decodePatch(raw []byte, project, instance string) (instanceBody, error) {
 	body, err := decodeInstance(raw, project)
 	if err != nil {
 		return instanceBody{}, err
 	}
-	if field := unpatchable(body); field != "" {
-		return instanceBody{}, gap("instances.patch field " + field)
-	}
 	switch {
 	case body.Name != "" && body.Name != instance:
 		return instanceBody{}, provider.Invalid("Invalid instance name.")
+	case body.RootPassword != nil:
+		return instanceBody{}, gap("instances.patch field rootPassword")
 	case body.Settings == nil:
 		return body, nil
 	case body.Settings.Tier != nil && !tierPattern.MatchString(*body.Settings.Tier):
 		return instanceBody{}, provider.Invalid("Invalid tier.")
 	default:
-		return body, checkSettings(body.Settings)
+		return body, checkEnums(body.Settings)
 	}
 }
 
-// unpatchable names the first field a patch may not change, or "".
-func unpatchable(body instanceBody) string {
-	present := map[string]bool{"region": body.Region != nil, "databaseVersion": body.DatabaseVersion != nil,
-		"rootPassword": body.RootPassword != nil, "backendType": body.BackendType != nil, "instanceType": body.InstanceType != nil}
+// unpatchable names the first field a patch would change that the local
+// server can't, or "". Clients that send the whole instance, as Terraform
+// does, restate these unchanged.
+func unpatchable(body instanceBody, record instanceRecord) string {
+	changed := func(value *string, current ...string) bool {
+		return value != nil && *value != "" && !slices.Contains(current, *value)
+	}
+	present := map[string]bool{keyRegion: changed(body.Region, record.Region), "databaseVersion": changed(body.DatabaseVersion, record.Version),
+		"backendType": changed(body.BackendType, secondGen), "instanceType": changed(body.InstanceType, "CLOUD_SQL_INSTANCE"),
+		"maintenanceVersion": changed(body.MaintenanceVersion, record.Version+"_LOCAL")}
 	if settings := body.Settings; settings != nil {
-		present["settings.edition"] = settings.Edition != nil
-		present["settings.ipConfiguration"] = settings.IPConfiguration != nil
+		present["settings.edition"] = changed(settings.Edition, record.Edition, "EDITION_UNSPECIFIED")
+		if ip := settings.IPConfiguration; ip != nil {
+			present["settings.ipConfiguration.ipv4Enabled"] = ip.IPv4Enabled != nil && *ip.IPv4Enabled != record.IPv4
+			present["settings.ipConfiguration.privateNetwork"] = changed(ip.PrivateNetwork, record.PrivateNetwork)
+		}
 	}
 	for _, field := range sortedKeys(present) {
 		if present[field] {
@@ -413,60 +651,87 @@ func unpatchable(body instanceBody) string {
 	return ""
 }
 
-// apply updates a record with a decoded patch's settings.
-func apply(settings *settingsBody, record *instanceRecord) {
-	if settings != nil {
-		if settings.Tier != nil {
-			record.Tier = *settings.Tier
-		}
-		if settings.UserLabels != nil {
-			record.Labels = maps.Clone(*settings.UserLabels)
-		}
-		if settings.DeletionProtectionEnabled != nil {
-			record.DeletionProtection = *settings.DeletionProtectionEnabled
+// patched applies a patch to a copy of record; the public and private IP
+// settings may only restate what the instance has. An update (PUT) also
+// clears the labels, flags, and authorized networks it omits, as replacing
+// the settings does (Cloud SQL Admin API reference; not recorded).
+func (p *Provider) patched(record instanceRecord, body instanceBody, replace bool) (instanceRecord, error) {
+	if field := unpatchable(body, record); field != "" {
+		return instanceRecord{}, gap("instances.patch field " + field)
+	}
+	settings := body.Settings
+	updated := record.clone()
+	if replace {
+		updated.Labels, updated.Flags = nil, nil
+		if settings == nil || settings.IPConfiguration == nil || settings.IPConfiguration.AuthorizedNetworks == nil {
+			updated.Networks = nil
 		}
 	}
-	record.SettingsVersion++
+	if err := applySettings(&updated, settings, p.clock()); err != nil {
+		return instanceRecord{}, err
+	}
+	updated.SettingsVersion++
+	return updated, nil
 }
 
-// patchInstance updates provider-owned settings. A tier change is recorded
-// without resizing the local server.
+// patchInstance serves instances.patch and instances.update: it updates
+// provider-owned settings and restarts the server when its flags change. A
+// tier change is recorded without resizing it.
 func (p *Provider) patchInstance(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	name, started := request.Path[pathInstance], p.clock()
 	patch, err := decodePatch(request.JSON, project, name)
 	if err != nil {
 		return nil, err
 	}
-	var version *string
-	if patch.Settings != nil {
-		version = patch.Settings.SettingsVersion
-	}
-	var failure *gateway.RESTResponse
-	err = p.use(call.Context, project, func(context.Context, driver) error {
-		return p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
-			record, ok := c.instances[name]
-			switch {
-			case !ok:
-				failure = notFound()
-			case version != nil && *version != strconv.FormatInt(record.SettingsVersion, 10):
-				failure = apiError(http.StatusPreconditionFailed, "FAILED_PRECONDITION", "", "Precondition check failed.")
-			default:
-				record = record.clone()
-				apply(patch.Settings, &record)
-				c.instances[name] = record
-			}
-			return nil
-		})
+	err = p.use(call.Context, project, func(ctx context.Context, fleet driver) error {
+		return p.applyPatch(ctx, fleet, project, name, patch, call.Method == methodInstancesUpdate)
 	})
-	if err != nil || failure != nil {
-		return failure, err
+	if err != nil {
+		return nil, err
 	}
 	return p.complete(call, project, "UPDATE", name, started)
 }
 
-// deleteInstance stops and removes the server, then the reference and metadata.
+// applyPatch validates a patch against the stored instance, restarts the
+// server when the flags change, and stores the result.
+func (p *Provider) applyPatch(ctx context.Context, fleet driver, project, name string, patch instanceBody, replace bool) error {
+	record, ok := p.lookup(project, name)
+	if !ok {
+		return errInstanceMissing
+	}
+	if patch.Settings != nil && patch.Settings.SettingsVersion != nil && *patch.Settings.SettingsVersion != strconv.FormatInt(record.SettingsVersion, 10) {
+		return failure{code: http.StatusPreconditionFailed, message: "Precondition check failed."}
+	}
+	updated, err := p.patched(record, patch, replace)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(updated.Flags, record.Flags) {
+		if err := fleet.Configure(ctx, name, updated.Flags); err != nil {
+			return fmt.Errorf("apply the database flags: %w", err)
+		}
+	}
+	if updated.Backup != record.Backup {
+		defer p.scheduleBackups(ctx, project, name, updated.Backup.Enabled)
+	}
+	return p.catalog.With(provider.ProjectScope(project), func(c *catalog) error { //nolint:wrapcheck // the store returns scope validation only
+		c.instances[name] = updated
+		return nil
+	})
+}
+
+// failover is an explicit gap: a REGIONAL instance is one local server with
+// no standby, so there is nothing to fail over to.
+func failover(gateway.Call, *gateway.RESTRequest, string) (*gateway.RESTResponse, error) {
+	return nil, gap("instances.failover (REGIONAL availability is stored, but one local server serves the instance and there is no standby)")
+}
+
+// deleteInstance stops and removes the server, then the reference, metadata, and backup runs.
 func (p *Provider) deleteInstance(call gateway.Call, request *gateway.RESTRequest, project string) (*gateway.RESTResponse, error) {
 	name, started := request.Path[pathInstance], p.clock()
+	if final, _ := strconv.ParseBool(request.Query.Get("enableFinalBackup")); final {
+		return nil, gap("instances.delete enableFinalBackup (final backups are not modeled)")
+	}
 	var failure *gateway.RESTResponse
 	err := p.use(call.Context, project, func(ctx context.Context, fleet driver) error {
 		record, ok := p.lookup(project, name)
@@ -481,11 +746,13 @@ func (p *Provider) deleteInstance(call gateway.Call, request *gateway.RESTReques
 			return nil
 		}
 		p.closePublic(project, name)
-		if err := fleet.remove(ctx, name); err != nil {
-			return err
+		p.scheduleBackups(ctx, project, name, false)
+		if err := fleet.Remove(ctx, name); err != nil {
+			return err //nolint:wrapcheck // the fleet's errors are descriptive
 		}
 		return p.catalog.With(provider.ProjectScope(project), func(c *catalog) error {
 			delete(c.instances, name)
+			delete(c.backups, name)
 			if err := p.index.Remove(serviceName, provider.ProjectScope(project), instanceResource(project, name)); err != nil {
 				return fmt.Errorf("remove the instance reference: %w", err)
 			}

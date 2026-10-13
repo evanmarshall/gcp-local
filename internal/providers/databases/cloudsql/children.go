@@ -12,8 +12,9 @@ import (
 	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/mysqlwire"
-	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/pgwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/mysqlwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/pgwire"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
@@ -65,8 +66,10 @@ func (p *Provider) sqlOn(ctx context.Context, project, instance string, mysql bo
 			return nil
 		}
 		var err error
-		rows, err = fleet.exec(ctx, instance, "postgres", sql)
-		return err
+		if rows, err = fleet.Exec(ctx, instance, "postgres", sql); err != nil {
+			return fmt.Errorf("run the administrative SQL: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		failure, err := backendFailure(err)
@@ -328,7 +331,7 @@ func (p *Provider) insertUser(call gateway.Call, request *gateway.RESTRequest, p
 	}
 	var sql string
 	if mysql {
-		sql = mysqlCreateUser(body.Name, cmp.Or(body.Host, mysqlAnyHost), body.Password)
+		sql = server.MySQLCreateUser(body.Name, cmp.Or(body.Host, mysqlAnyHost), body.Password)
 	} else {
 		password := "NULL"
 		if body.Password != "" {
@@ -394,7 +397,7 @@ func (p *Provider) deleteUser(call gateway.Call, request *gateway.RESTRequest, p
 	case mysql && (!mysqlName(name, 32) || !mysqlHostPattern.MatchString(host)):
 		return nil, provider.Invalid("Invalid user name.")
 	case mysql:
-		sql = "DROP USER " + mysqlAccount(name, host)
+		sql = "DROP USER " + server.MySQLAccount(name, host)
 	case !objectName(name) || strings.HasPrefix(name, "pg_"):
 		return nil, provider.Invalid("Invalid user name.")
 	}
@@ -480,3 +483,15 @@ func (p *Provider) cancelOperation(_ gateway.Call, request *gateway.RESTRequest,
 
 // operationIDPattern is the UUID shape of Cloud SQL operation names.
 var operationIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// MySQL account names the provider lists and addresses.
+const (
+	mysqlRootUser = server.MySQLRootUser
+	mysqlAnyHost  = server.MySQLAnyHost
+)
+
+// mysqlHidden are the accounts users.list never shows.
+var mysqlHidden = []string{adminRole, superuserRole, "mysql.sys", "mysql.session", "mysql.infoschema"}
+
+// mysqlSystemSchemas are the schemas databases.delete refuses to drop.
+var mysqlSystemSchemas = map[string]bool{"mysql": true, "information_schema": true, "performance_schema": true, "sys": true}

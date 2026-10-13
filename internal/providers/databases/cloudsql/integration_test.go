@@ -18,8 +18,8 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
-	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/mysqlwire"
-	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/pgwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/mysqlwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/pgwire"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 )
@@ -327,4 +327,183 @@ func TestMySQLThroughConnector(t *testing.T) {
 		t.Fatal("a public-IP session survived instance deletion")
 	}
 	expectRefused(t, peerAddress)
+}
+
+// depthSettings adds backups, a flag, TLS, and the loopback network to an insert body.
+func depthSettings(t *testing.T, body map[string]any, flag string) map[string]any {
+	t.Helper()
+	settings := object(t, body[keySettings])
+	settings["backupConfiguration"] = map[string]any{"enabled": true, "startTime": "03:00"}
+	settings["databaseFlags"] = []any{map[string]any{"name": "max_connections", "value": flag}}
+	settings["ipConfiguration"] = map[string]any{"sslMode": sslEncrypted, "authorizedNetworks": []any{map[string]any{"value": "127.0.0.1/32"}}}
+	return body
+}
+
+// backupID takes an on-demand backup and returns its run ID.
+func (h *harness) backupID(instance string) string {
+	h.t.Helper()
+	operation := h.expect(h.invoke(adminToken, http.MethodPost, testInstances+"/"+instance+"/backupRuns", map[string]any{"description": "test"}), http.StatusOK)
+	id, _ := object(h.t, operation["backupContext"])["backupId"].(string)
+	if operation["operationType"] != "BACKUP_VOLUME" || id == "" {
+		h.t.Fatalf("backup operation = %v", operation)
+	}
+	return id
+}
+
+// restore restores backup id of source into target.
+func (h *harness) restore(target, source, id string) {
+	h.t.Helper()
+	body := map[string]any{"restoreBackupContext": map[string]any{"backupRunId": id, "instanceId": source, "project": testProject}}
+	if operation := h.expect(h.invoke(adminToken, http.MethodPost, testInstances+"/"+target+"/restoreBackup", body), http.StatusOK); operation["operationType"] != "RESTORE_VOLUME" {
+		h.t.Fatalf("restore operation = %v", operation)
+	}
+}
+
+// patchIP patches settings.ipConfiguration.
+func (h *harness) patchIP(instance string, ip map[string]any) {
+	h.t.Helper()
+	h.expect(h.invoke(adminToken, http.MethodPatch, testInstances+"/"+instance, settingsBodyOf(map[string]any{"ipConfiguration": ip})), http.StatusOK)
+}
+
+// issueCert creates a client certificate and returns the insert response's clientCert.
+func (h *harness) issueCert(instance, name string) map[string]any {
+	h.t.Helper()
+	inserted := h.expect(h.invoke(adminToken, http.MethodPost, testInstances+"/"+instance+"/sslCerts", map[string]any{"commonName": name}), http.StatusOK)
+	return object(h.t, inserted["clientCert"])
+}
+
+// TestPostgresDepth drives a real PostgreSQL server through flags applied at
+// startup and on patch, TLS required on the published port (ENCRYPTED_ONLY,
+// then TRUSTED_CLIENT_CERTIFICATE_REQUIRED with an sslCerts certificate that
+// stops working when deleted), authorized networks by source address, and an
+// on-demand physical backup restored in place and into a second instance.
+func TestPostgresDepth(t *testing.T) {
+	h := realHarness(t, "16420-16423")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, depthSettings(t, insertBody(), "37")), http.StatusOK)
+	instance := h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)
+	ca, _ := object(t, instance["serverCaCert"])["cert"].(string)
+	published, secure := h.publishedAddress(testInstance), clientTLS(t, ca, nil)
+
+	var refused *pgwire.Error
+	if _, err := pgwire.Dial(ctx, "tcp", published, defaultUser, "postgres", "root-secret"); !errors.As(err, &refused) || refused.Code != "28000" {
+		t.Fatalf("cleartext login under ENCRYPTED_ONLY = %v", err)
+	}
+	session, err := pgwire.DialTLS(ctx, "tcp", published, defaultUser, "postgres", "root-secret", secure)
+	must(t, err)
+	rows, err := session.Query(ctx, "SHOW max_connections; SELECT ssl::text FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
+	if err != nil || rows[0][0] != "37" {
+		t.Fatalf("flag = %v, %v", rows, err)
+	}
+	if _, err := session.Query(ctx, "CREATE TABLE items (id int); INSERT INTO items VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+	id := h.backupID(testInstance)
+	if _, err := session.Query(ctx, "INSERT INTO items VALUES (2)"); err != nil {
+		t.Fatal(err)
+	}
+	h.restore(testInstance, testInstance, id)
+	if _, err := session.Query(ctx, "SELECT 1"); err == nil {
+		t.Fatal("a session survived the restore's restart")
+	}
+	session.Close()
+	session, err = pgwire.DialTLS(ctx, "tcp", published, defaultUser, "postgres", "root-secret", secure)
+	must(t, err)
+	if rows, err := session.Query(ctx, "SELECT count(*) FROM items; SHOW max_connections"); err != nil || rows[0][0] != "1" || rows[1][0] != "37" {
+		t.Fatalf("restored rows = %v, %v", rows, err)
+	}
+	session.Close()
+
+	copyBody := insertBody()
+	copyBody[keyName], copyBody["rootPassword"] = "demo-pg-copy", "copy-secret"
+	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, copyBody), http.StatusOK)
+	h.restore("demo-pg-copy", testInstance, id)
+	copied, err := pgwire.Dial(ctx, "tcp", h.publishedAddress("demo-pg-copy"), defaultUser, "postgres", "root-secret")
+	must(t, err)
+	if rows, err := copied.Query(ctx, "SELECT count(*) FROM items"); err != nil || rows[0][0] != "1" {
+		t.Fatalf("rows restored into another instance = %v, %v", rows, err)
+	}
+	copied.Close()
+
+	h.patchIP(testInstance, map[string]any{"sslMode": sslTrustedCerts})
+	if _, err := pgwire.DialTLS(ctx, "tcp", published, defaultUser, "postgres", "root-secret", secure); err == nil {
+		t.Fatal("TRUSTED_CLIENT_CERTIFICATE_REQUIRED admitted a connection without a client certificate")
+	}
+	cert := h.issueCert(testInstance, "app")
+	trusted := clientTLS(t, ca, cert)
+	session, err = pgwire.DialTLS(ctx, "tcp", published, defaultUser, "postgres", "root-secret", trusted)
+	must(t, err)
+	session.Close()
+	fingerprint, _ := object(t, cert["certInfo"])["sha1Fingerprint"].(string)
+	h.expect(h.invoke(adminToken, http.MethodDelete, testPath+"/sslCerts/"+fingerprint, nil), http.StatusOK)
+	if _, err := pgwire.DialTLS(ctx, "tcp", published, defaultUser, "postgres", "root-secret", trusted); err == nil {
+		t.Fatal("a deleted client certificate still connects")
+	}
+
+	h.patchIP(testInstance, map[string]any{"sslMode": sslEncrypted, "authorizedNetworks": []any{map[string]any{"value": "10.0.0.0/8"}}})
+	if _, err := pgwire.DialTLS(ctx, "tcp", published, defaultUser, "postgres", "root-secret", secure); err == nil {
+		t.Fatal("a source outside the authorized networks connected")
+	}
+	h.patchIP(testInstance, map[string]any{"authorizedNetworks": []any{map[string]any{"value": "127.0.0.0/8"}}})
+	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{
+		"databaseFlags": []any{map[string]any{"name": "max_connections", "value": "41"}}})), http.StatusOK)
+	session, err = pgwire.DialTLS(ctx, "tcp", published, defaultUser, "postgres", "root-secret", secure)
+	must(t, err)
+	if rows, err := session.Query(ctx, "SHOW max_connections"); err != nil || rows[0][0] != "41" {
+		t.Fatalf("patched flag = %v, %v", rows, err)
+	}
+	session.Close()
+	h.expect(h.invoke(adminToken, http.MethodDelete, testPath+"/backupRuns/"+id, nil), http.StatusOK)
+	h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/backupRuns/"+id, nil), http.StatusNotFound)
+}
+
+// TestMySQLDepth drives a real MySQL 8.4 server through a flag, TLS
+// terminated on the published port with the handshake renumbered, a
+// client certificate, and a clone backup restored in place.
+func TestMySQLDepth(t *testing.T) {
+	h := realHarness(t, "16430-16431")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	body := depthSettings(t, mysqlInsertBody(), "37")
+	body["databaseVersion"] = "MYSQL_8_4"
+	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, body), http.StatusOK)
+	instance := h.expect(h.invoke(adminToken, http.MethodGet, testMySQLPath, nil), http.StatusOK)
+	ca, _ := object(t, instance["serverCaCert"])["cert"].(string)
+	published, secure := h.publishedAddress(testMySQL), clientTLS(t, ca, nil)
+
+	var refused *mysqlwire.Error
+	if _, err := mysqlwire.Dial(ctx, "tcp", published, mysqlRootUser, "root-secret"); !errors.As(err, &refused) || refused.Code != secureTransportRequired {
+		t.Fatalf("cleartext login under ENCRYPTED_ONLY = %v", err)
+	}
+	session, err := mysqlwire.DialTLS(ctx, "tcp", published, mysqlRootUser, "root-secret", secure)
+	must(t, err)
+	rows, err := session.Query(ctx, "SELECT @@max_connections")
+	if err != nil || rows[0][0] != "37" {
+		t.Fatalf("flag = %v, %v", rows, err)
+	}
+	if _, err := session.Query(ctx, "CREATE DATABASE app; CREATE TABLE app.items (id int PRIMARY KEY); INSERT INTO app.items VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+	id := h.backupID(testMySQL)
+	if _, err := session.Query(ctx, "INSERT INTO app.items VALUES (2)"); err != nil {
+		t.Fatal(err)
+	}
+	session.Close()
+	h.restore(testMySQL, testMySQL, id)
+	session, err = mysqlwire.DialTLS(ctx, "tcp", published, mysqlRootUser, "root-secret", secure)
+	must(t, err)
+	if rows, err := session.Query(ctx, "SELECT count(*) FROM app.items"); err != nil || rows[0][0] != "1" {
+		t.Fatalf("restored rows = %v, %v", rows, err)
+	}
+	session.Close()
+
+	h.patchIP(testMySQL, map[string]any{"sslMode": sslTrustedCerts})
+	if _, err := mysqlwire.DialTLS(ctx, "tcp", published, mysqlRootUser, "root-secret", secure); err == nil {
+		t.Fatal("TRUSTED_CLIENT_CERTIFICATE_REQUIRED admitted a connection without a client certificate")
+	}
+	session, err = mysqlwire.DialTLS(ctx, "tcp", published, mysqlRootUser, "root-secret", clientTLS(t, ca, h.issueCert(testMySQL, "app")))
+	must(t, err)
+	session.Close()
+	h.expect(h.invoke(adminToken, http.MethodDelete, testMySQLPath+"/backupRuns/"+id, nil), http.StatusOK)
 }

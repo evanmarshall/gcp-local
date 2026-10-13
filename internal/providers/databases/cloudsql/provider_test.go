@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +20,9 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/mysqlwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/pgwire"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider/providertest"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -175,9 +182,6 @@ func count(body map[string]any) int {
 	return len(items)
 }
 
-// flags is a non-empty databaseFlags value, which is a gap.
-var flags = []any{map[string]any{"name": "max_connections", "value": "20"}}
-
 // settingsBodyOf wraps settings fields in a patch body.
 func settingsBodyOf(fields map[string]any) map[string]any {
 	return map[string]any{keySettings: fields}
@@ -238,7 +242,7 @@ func TestInstancePatch(t *testing.T) {
 	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{
 		keyDeletionProtection: true, "userLabels": map[string]string{"team": "data"}, keySettingsVersion: "1"})), http.StatusOK)
 	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier, keySettingsVersion: "1"})), http.StatusPreconditionFailed)
-	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"databaseFlags": flags})), http.StatusNotImplemented)
+	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, map[string]any{"region": "europe-west1"}), http.StatusNotImplemented)
 	settings := object(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings])
 	if settings[keyDeletionProtection] != true || settings[keySettingsVersion] != "2" || object(t, settings["userLabels"])["team"] != "data" {
 		t.Fatalf("settings = %v", settings)
@@ -328,7 +332,7 @@ func TestProjectIsolationAndReset(t *testing.T) {
 func TestPatchIsAtomic(t *testing.T) {
 	h := newHarness(t)
 	h.createInstance()
-	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier, "databaseFlags": flags})), http.StatusNotImplemented)
+	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{"tier": smallTier, "maintenanceWindow": map[string]any{"day": 1}})), http.StatusNotImplemented)
 	settings := object(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings])
 	if settings["tier"] != "db-f1-micro" || settings[keySettingsVersion] != "1" {
 		t.Fatalf("a rejected patch changed the instance: %v", settings)
@@ -424,8 +428,8 @@ func TestMySQLInstance(t *testing.T) {
 	h := newHarness(t)
 	h.expect(h.invoke(viewerToken, http.MethodPost, testInstances, mysqlInsertBody()), http.StatusForbidden)
 	flagged := mysqlInsertBody()
-	object(t, flagged[keySettings])["databaseFlags"] = []any{map[string]any{"name": "max_connections", "value": "20"}}
-	h.expectError(http.MethodPost, testInstances, flagged, http.StatusNotImplemented, "Cloud SQL coverage gap: settings.databaseFlags is not modeled")
+	object(t, flagged[keySettings])["databaseFlags"] = []any{map[string]any{"name": "cloudsql_iam_authentication", "value": "on"}}
+	h.expectError(http.MethodPost, testInstances, flagged, http.StatusNotImplemented, "Cloud SQL coverage gap: database flag cloudsql_iam_authentication")
 	if h.fleet() != nil {
 		t.Fatal("a refused insert started a backend")
 	}
@@ -512,23 +516,16 @@ func withSettings(extra map[string]any) map[string]any {
 	return body
 }
 
-// TestSettingsAreModeledOrRefused covers every setting the audit found
-// accepted and ignored: each is now a gap naming its field, and the default
-// that matches the local server is accepted.
+// TestSettingsAreModeledOrRefused covers the settings that stay gaps, each
+// naming its field, and the defaults the local server accepts.
 func TestSettingsAreModeledOrRefused(t *testing.T) {
 	h := newHarness(t)
 	gaps := map[string]map[string]any{
-		"Cloud SQL coverage gap: settings.backupConfiguration.enabled (backups are not modeled)": {"backupConfiguration": map[string]any{"enabled": true}},
-		"Cloud SQL coverage gap: settings.backupConfiguration.pointInTimeRecoveryEnabled (backups are not modeled)": {
-			"backupConfiguration": map[string]any{"pointInTimeRecoveryEnabled": true}},
-		"Cloud SQL coverage gap: settings.backupConfiguration.startTime is not modeled": {"backupConfiguration": map[string]any{"startTime": "03:00"}},
-		"Cloud SQL coverage gap: settings.availabilityType REGIONAL":                    {"availabilityType": "REGIONAL"},
-		"Cloud SQL coverage gap: settings.ipConfiguration.requireSsl is not modeled":    {"ipConfiguration": map[string]any{"requireSsl": true}},
-		"Cloud SQL coverage gap: settings.ipConfiguration.sslMode ENCRYPTED_ONLY (TLS is not served)": {
-			"ipConfiguration": map[string]any{"sslMode": "ENCRYPTED_ONLY"}},
-		"Cloud SQL coverage gap: settings.ipConfiguration.authorizedNetworks is not modeled": {
-			"ipConfiguration": map[string]any{"authorizedNetworks": []any{map[string]any{"value": "10.0.0.0/8"}}}},
+		"Cloud SQL coverage gap: settings.activationPolicy NEVER":           {"activationPolicy": "NEVER"},
+		"Cloud SQL coverage gap: settings.pricingPlan PACKAGE":              {"pricingPlan": "PACKAGE"},
 		"Cloud SQL coverage gap: settings.maintenanceWindow is not modeled": {"maintenanceWindow": map[string]any{"day": 1, "hour": 3}},
+		"Cloud SQL coverage gap: settings.ipConfiguration.pscConfig is not modeled": {
+			"ipConfiguration": map[string]any{"pscConfig": map[string]any{"pscEnabled": true}}},
 	}
 	for message, extra := range gaps {
 		h.expectError(http.MethodPost, testInstances, withSettings(extra), http.StatusNotImplemented, message)
@@ -541,22 +538,19 @@ func TestSettingsAreModeledOrRefused(t *testing.T) {
 	if h.fleet() != nil {
 		t.Fatal("a refused insert started a backend")
 	}
-	// The defaults the local server has are accepted and reported as requested.
+	// The defaults are accepted and reported as requested.
 	h.expect(h.invoke(adminToken, http.MethodPost, testInstances, withSettings(map[string]any{
 		"availabilityType": "ZONAL", "activationPolicy": "ALWAYS", "pricingPlan": "PER_USE",
 		"backupConfiguration": map[string]any{"enabled": false, "binaryLogEnabled": false},
-		"ipConfiguration":     map[string]any{"ipv4Enabled": true, "requireSsl": false, "authorizedNetworks": []any{}, "sslMode": "ALLOW_UNENCRYPTED_AND_ENCRYPTED"},
+		"ipConfiguration": map[string]any{"ipv4Enabled": true, "requireSsl": false, "authorizedNetworks": []any{}, "sslMode": "ALLOW_UNENCRYPTED_AND_ENCRYPTED",
+			"serverCaMode": serverCaMode, "serverCertificateRotationMode": rotationUnspecified},
 	})), http.StatusOK)
 	settings := object(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath, nil), http.StatusOK)[keySettings])
 	if settings["availabilityType"] != "ZONAL" || settings["activationPolicy"] != "ALWAYS" || settings["pricingPlan"] != "PER_USE" {
 		t.Fatalf("settings = %v", settings)
 	}
-	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"availabilityType": "REGIONAL"}), http.StatusNotImplemented,
-		"Cloud SQL coverage gap: settings.availabilityType REGIONAL")
-	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"backupConfiguration": map[string]any{"enabled": true}}),
-		http.StatusNotImplemented, "Cloud SQL coverage gap: settings.backupConfiguration.enabled (backups are not modeled)")
-	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"ipConfiguration": map[string]any{"ipv4Enabled": true}}),
-		http.StatusNotImplemented, "Cloud SQL coverage gap: instances.patch field settings.ipConfiguration")
+	h.expectError(http.MethodPatch, testPath, settingsBodyOf(map[string]any{"ipConfiguration": map[string]any{"privateNetwork": "projects/p/global/networks/n"}}),
+		http.StatusNotImplemented, "Cloud SQL coverage gap: instances.patch field settings.ipConfiguration.privateNetwork")
 	h.expectError(http.MethodGet, testPath+"?location=us-central1", nil, http.StatusNotImplemented, "Cloud SQL coverage gap: the location query parameter")
 }
 
@@ -671,4 +665,267 @@ func TestConditionsSeeTheInstance(t *testing.T) {
 	h.expect(h.invoke("reader", http.MethodGet, testPath, nil), http.StatusOK)
 	h.expect(h.invoke("reader", http.MethodGet, testInstances+"/other-pg", nil), http.StatusForbidden)
 	h.expect(h.invoke("reader", http.MethodGet, testInstances, nil), http.StatusForbidden)
+}
+
+// fakeFleet stands in for the PostgreSQL fleet. It records administrative SQL
+// and serves each instance's "socket" with a Unix listener that captures the
+// bytes a connector forwards. It does not interpret SQL beyond the catalog
+// queries the provider issues.
+type fakeFleet struct {
+	mu        sync.Mutex
+	started   bool
+	stops     int
+	directory string
+	servers   map[string]*fakeServer
+	statement []string
+	// flags, backups, and restores record the fleet calls they name.
+	flags    map[string][]server.Flag
+	backups  map[string][]string
+	restores []string
+}
+
+type fakeServer struct {
+	listener  net.Listener
+	socket    string
+	done      chan struct{}
+	databases []string
+	users     []string
+	received  chan []byte
+	// greeting is the MySQL handshake a MySQL server sends first; nil for PostgreSQL.
+	greeting []byte
+}
+
+func newFakeFleet() *fakeFleet {
+	return &fakeFleet{servers: map[string]*fakeServer{}, flags: map[string][]server.Flag{}, backups: map[string][]string{}}
+}
+
+func (f *fakeFleet) Start(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	directory, err := os.MkdirTemp("", "cloudsql-fake-")
+	if err != nil {
+		return err //nolint:wrapcheck // test double
+	}
+	f.directory, f.started = directory, true
+	return nil
+}
+
+func (f *fakeFleet) Ready(context.Context) error { return nil }
+
+func (f *fakeFleet) Stop(context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for name, fake := range f.servers {
+		fake.close()
+		delete(f.servers, name)
+	}
+	if f.started {
+		f.stops++
+		_ = os.RemoveAll(f.directory)
+	}
+	f.started = false
+	return nil
+}
+
+func (f *fakeFleet) Reset(ctx context.Context) error { return f.Stop(ctx) }
+
+func (f *fakeFleet) Create(ctx context.Context, spec server.Spec) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	socket := filepath.Join(f.directory, spec.Instance+".sock")
+	var listen net.ListenConfig
+	listener, err := listen.Listen(ctx, "unix", socket)
+	if err != nil {
+		return err //nolint:wrapcheck // test double
+	}
+	fake := &fakeServer{listener: listener, socket: socket, done: make(chan struct{}), databases: []string{"postgres"},
+		users: []string{defaultUser}, received: make(chan []byte, 8)}
+	if isMySQL(spec.Version) {
+		fake.databases, fake.users, fake.greeting = []string{"information_schema", "mysql"}, []string{mysqlRootUser}, fakeGreeting()
+	}
+	go fake.accept()
+	f.servers[spec.Instance] = fake
+	f.flags[spec.Instance] = spec.Flags
+	return nil
+}
+
+// accept captures the first bytes of each forwarded connection.
+func (s *fakeServer) accept() {
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			return
+		}
+		if s.greeting != nil {
+			_, _ = conn.Write(mysqlwire.Packet(0, s.greeting))
+		}
+		buffer := make([]byte, 4096)
+		n, _ := conn.Read(buffer)
+		if n > 0 { // a refused MySQL handshake closes the dialed socket without sending
+			s.received <- buffer[:n]
+		}
+		_ = conn.Close()
+	}
+}
+
+func (s *fakeServer) close() {
+	close(s.done)
+	_ = s.listener.Close()
+}
+
+func (f *fakeFleet) Remove(_ context.Context, instance string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fake := f.servers[instance]
+	if fake == nil {
+		return server.ErrServerMissing
+	}
+	fake.close()
+	delete(f.servers, instance)
+	return nil
+}
+
+func (f *fakeFleet) Exec(_ context.Context, instance, _, sql string) ([][]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fake := f.servers[instance]
+	if fake == nil {
+		return nil, server.ErrServerMissing
+	}
+	f.statement = append(f.statement, sql)
+	name := ""
+	if fields := strings.Fields(sql); len(fields) > 2 {
+		name, _, _ = strings.Cut(strings.Trim(fields[2], `"`+"`'"), "'")
+	}
+	switch {
+	case strings.HasPrefix(sql, "CREATE DATABASE "):
+		fake.databases = append(fake.databases, name)
+	case strings.HasPrefix(sql, "CREATE ROLE "), strings.HasPrefix(sql, "CREATE USER "):
+		fake.users = append(fake.users, name)
+	case strings.HasPrefix(sql, "SELECT datname"), strings.HasPrefix(sql, "SELECT SCHEMA_NAME"):
+		return fake.databaseRows(sql), nil
+	case strings.HasPrefix(sql, "SELECT rolname"):
+		return rowsOf(fake.users), nil
+	case strings.HasPrefix(sql, "DROP DATABASE ") && fake.greeting == nil:
+		return nil, &pgwire.Error{Severity: "ERROR", Code: "55006", Message: "database is being accessed by other users"}
+	default:
+		return fake.mysqlRows(sql)
+	}
+	return nil, nil
+}
+
+// mysqlRows answers the MySQL-only statements the provider issues.
+func (s *fakeServer) mysqlRows(sql string) ([][]string, error) {
+	switch {
+	case strings.HasPrefix(sql, "SELECT User, Host"):
+		rows := rowsOf(s.users)
+		for i := range rows {
+			rows[i] = append(rows[i], mysqlAnyHost)
+		}
+		return rows, nil
+	case strings.HasPrefix(sql, "DROP USER 'missing'"):
+		return nil, &mysqlwire.Error{Code: 1396, State: "HY000", Message: "Operation DROP USER failed for 'missing'@'%'"}
+	default:
+		return nil, nil
+	}
+}
+
+// fakeGreeting is a minimal MySQL 8 Handshake v10 that advertises TLS.
+func fakeGreeting() []byte {
+	payload := append([]byte{mysqlwire.ProtocolVersion}, "8.0.46\x00"...)
+	payload = append(payload, 1, 0, 0, 0)                                     // thread id
+	payload = append(payload, "abcdefgh"...)                                  // scramble part 1
+	payload = append(payload, 0, 0xff, 0xff)                                  // filler, capabilities (with CLIENT_SSL)
+	payload = append(payload, mysqlwire.CharsetUTF8MB4, 2, 0, 0xff, 0x0f, 21) // charset, status, capabilities, scramble length
+	payload = append(payload, make([]byte, 10)...)                            // reserved
+	payload = append(payload, "ijklmnopqrst\x00"...)                          // scramble part 2
+	return append(payload, mysqlwire.NativePassword+"\x00"...)
+}
+
+// databaseRows answers the provider's pg_database query.
+func (s *fakeServer) databaseRows(sql string) [][]string {
+	var rows [][]string
+	for _, name := range s.databases {
+		if !strings.Contains(sql, " = ") || strings.Contains(sql, "'"+name+"'") {
+			rows = append(rows, []string{name, "UTF8", "C"})
+		}
+	}
+	return rows
+}
+
+// rowsOf renders single-column rows.
+func rowsOf(values []string) [][]string {
+	rows := make([][]string, 0, len(values))
+	for _, value := range values {
+		rows = append(rows, []string{value})
+	}
+	return rows
+}
+
+func (f *fakeFleet) Endpoint(instance string) (string, <-chan struct{}, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fake := f.servers[instance]
+	if fake == nil {
+		return "", nil, server.ErrServerMissing
+	}
+	return fake.socket, fake.done, nil
+}
+
+// statements returns the recorded administrative SQL.
+func (f *fakeFleet) statements() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.statement...)
+}
+
+// server returns one fake server, or nil.
+func (f *fakeFleet) server(instance string) *fakeServer {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.servers[instance]
+}
+
+func (f *fakeFleet) Configure(_ context.Context, instance string, flags []server.Flag) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.servers[instance] == nil {
+		return server.ErrServerMissing
+	}
+	f.flags[instance] = flags
+	return nil
+}
+
+func (f *fakeFleet) Backup(_ context.Context, instance, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.servers[instance] == nil {
+		return server.ErrServerMissing
+	}
+	f.backups[instance] = append(f.backups[instance], id)
+	return nil
+}
+
+func (f *fakeFleet) Restore(_ context.Context, target, source, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.servers[target] == nil || f.servers[source] == nil {
+		return server.ErrServerMissing
+	}
+	if !slices.Contains(f.backups[source], id) {
+		return server.ErrBackupMissing
+	}
+	f.restores = append(f.restores, source+"/"+id+">"+target)
+	return nil
+}
+
+func (f *fakeFleet) DeleteBackup(_ context.Context, instance, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	index := slices.Index(f.backups[instance], id)
+	if index < 0 {
+		return server.ErrBackupMissing
+	}
+	f.backups[instance] = slices.Delete(f.backups[instance], index, index+1)
+	return nil
 }

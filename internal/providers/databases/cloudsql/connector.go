@@ -3,11 +3,14 @@ package cloudsql
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,8 +19,8 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/dataplane"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
-	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/mysqlwire"
-	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/pgwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/mysqlwire"
+	"github.com/evanmarshall/gcp-local/internal/providers/databases/cloudsql/server/pgwire"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 )
 
@@ -102,7 +105,7 @@ func (p *Provider) OpenConnector(ctx context.Context, spec ConnectorSpec) (*Conn
 			if err != nil {
 				return
 			}
-			connector.wait.Go(func() { p.serve(lifetime, target, conn, p.admit) })
+			connector.wait.Go(func() { p.serve(lifetime, target, conn) })
 		}
 	})
 	return connector, nil
@@ -112,34 +115,75 @@ func (p *Provider) OpenConnector(ctx context.Context, spec ConnectorSpec) (*Conn
 // returns a SQLSTATE and message on refusal.
 type admission func(ctx context.Context, target connectorTarget, user string) (string, string)
 
-// serve admits and forwards one client connection.
-func (p *Provider) serve(ctx context.Context, target connectorTarget, client net.Conn, admit admission) {
+// serve admits and forwards one connector connection: IAM is checked and
+// TLS is declined, as the Cloud SQL Auth Proxy's local listener does.
+func (p *Provider) serve(ctx context.Context, target connectorTarget, client net.Conn) {
+	p.forward(ctx, target, client, p.admit, nil)
+}
+
+// forward admits and forwards one client connection. With a policy (the
+// published port) it offers TLS and enforces the instance's TLS mode.
+func (p *Provider) forward(ctx context.Context, target connectorTarget, client net.Conn, admit admission, policy *tlsPolicy) {
 	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(startupTimeout))
 	if mysql, _ := p.engineOf(target.project, target.instance); mysql {
-		p.serveMySQL(ctx, target, client, admit)
+		p.serveMySQL(ctx, target, client, admit, policy)
 		return
 	}
-	reader := bufio.NewReader(client)
-	startup, user, err := pgwire.ReadStartup(reader, client)
-	if err != nil {
+	conn, reader, startup, user, ok := readPostgresStartup(ctx, client, policy)
+	if !ok {
 		return
 	}
 	if code, message := admit(ctx, target, user); code != "" {
-		_, _ = client.Write(pgwire.ErrorResponse(code, message))
+		_, _ = conn.Write(pgwire.ErrorResponse(code, message))
 		return
 	}
 	_ = client.SetDeadline(time.Time{})
-	err = p.session(ctx, target, func(ctx context.Context, server net.Conn, removed <-chan struct{}) error {
+	err := p.session(ctx, target, func(ctx context.Context, server net.Conn, removed <-chan struct{}) error {
 		if _, err := server.Write(startup); err != nil {
 			return fmt.Errorf("forward the startup packet: %w", err)
 		}
-		pipe(ctx, removed, client, reader, server)
+		pipe(ctx, removed, conn, reader, server)
 		return nil
 	})
 	if err != nil {
-		_, _ = client.Write(pgwire.ErrorResponse("08006", unavailable))
+		_, _ = conn.Write(pgwire.ErrorResponse("08006", unavailable))
 	}
+}
+
+// readPostgresStartup reads a PostgreSQL startup packet, inside TLS when the
+// client asks for it on the published port, and refuses a cleartext startup
+// the instance's TLS mode forbids. ok is false when the connection ends.
+func readPostgresStartup(ctx context.Context, client net.Conn, policy *tlsPolicy) (net.Conn, *bufio.Reader, []byte, string, bool) {
+	conn := client
+	reader := bufio.NewReader(conn)
+	startup, user, encrypt, err := pgwire.ReadStartup(reader, conn, policy != nil)
+	if err == nil && encrypt {
+		secure := tls.Server(client, policy.config)
+		if err := secure.HandshakeContext(ctx); err != nil {
+			return nil, nil, nil, "", false
+		}
+		conn, reader = secure, bufio.NewReader(secure)
+		startup, user, _, err = pgwire.ReadStartup(reader, conn, false)
+	}
+	if err != nil {
+		return nil, nil, nil, "", false
+	}
+	if policy != nil && policy.encrypted && !encrypt {
+		_, _ = conn.Write(pgwire.ErrorResponse("28000", "gcp-local: the instance's sslMode "+policy.mode+" requires TLS (sslmode=require)"))
+		return nil, nil, nil, "", false
+	}
+	return conn, reader, startup, user, true
+}
+
+// tlsPolicy is the published listener's TLS for one connection: the
+// instance's server certificate and client CA, and whether its sslMode
+// requires encryption (ENCRYPTED_ONLY or TRUSTED_CLIENT_CERTIFICATE_REQUIRED,
+// which also requires a client certificate from sslCerts).
+type tlsPolicy struct {
+	config    *tls.Config
+	mode      string
+	encrypted bool
 }
 
 // unavailable is the refusal when the instance's server cannot be reached.
@@ -154,9 +198,9 @@ func (p *Provider) session(ctx context.Context, target connectorTarget, forward 
 		if err != nil {
 			return err
 		}
-		socket, removed, err := fleet.endpoint(target.instance)
+		socket, removed, err := fleet.Endpoint(target.instance)
 		if err != nil {
-			return err
+			return err //nolint:wrapcheck // the fleet's errors are descriptive
 		}
 		var dialer net.Dialer
 		server, err := dialer.DialContext(ctx, "unix", socket)
@@ -173,24 +217,26 @@ func (p *Provider) session(ctx context.Context, target connectorTarget, forward 
 }
 
 // serveMySQL admits and forwards one MySQL client connection. MySQL servers
-// speak first, so the instance is authorized before its socket is dialed;
-// the server's greeting is forwarded without its TLS capability, and the
-// client's handshake response is read for its user before any credential
-// reaches the server.
-func (p *Provider) serveMySQL(ctx context.Context, target connectorTarget, client net.Conn, admit admission) {
+// speak first, so the instance is authorized before its socket is dialed.
+// The connector forwards the greeting without its TLS capability; the
+// published port offers TLS and terminates it here. Either way the client's
+// handshake response is read for its user before any credential reaches
+// the server.
+func (p *Provider) serveMySQL(ctx context.Context, target connectorTarget, client net.Conn, admit admission, policy *tlsPolicy) {
 	if code, message := admit(ctx, target, ""); code != "" {
 		_, _ = client.Write(mysqlwire.ErrorPacket(0, mysqlRefusal(code), code, message))
 		return
 	}
 	sent := false
 	err := p.session(ctx, target, func(ctx context.Context, server net.Conn, removed <-chan struct{}) error {
-		reader, forwarded, err := relayMySQLHandshake(client, server, &sent)
+		relay := mysqlRelay{client: client, server: server, policy: policy, sent: &sent}
+		conn, reader, forwarded, err := relay.handshake(ctx)
 		if err != nil || !forwarded {
 			return err
 		}
 		_ = client.SetDeadline(time.Time{})
 		_ = server.SetDeadline(time.Time{})
-		pipe(ctx, removed, client, reader, server)
+		pipe(ctx, removed, conn, reader, server)
 		return nil
 	})
 	if err != nil && !sent {
@@ -198,40 +244,156 @@ func (p *Provider) serveMySQL(ctx context.Context, target connectorTarget, clien
 	}
 }
 
-// relayMySQLHandshake forwards the server greeting without its TLS capability,
-// reads the client's handshake response, and forwards it unless it is
-// malformed or names the administrative account, which it refuses. sent
-// reports whether the greeting reached the client.
-func relayMySQLHandshake(client, server net.Conn, sent *bool) (*bufio.Reader, bool, error) {
-	_ = server.SetDeadline(time.Now().Add(startupTimeout))
-	hello, _, err := mysqlwire.ReadPacket(server)
+// mysqlRelay carries one MySQL connection through its handshake.
+type mysqlRelay struct {
+	client, server net.Conn
+	policy         *tlsPolicy
+	// sent reports whether the greeting reached the client.
+	sent *bool
+}
+
+// errMySQLAuthRelay reports an authentication exchange the relay can't follow.
+var errMySQLAuthRelay = errors.New("unexpected MySQL authentication packet")
+
+// handshake forwards the server greeting, offering TLS on the published
+// port, reads the client's handshake response (inside TLS when the client
+// asked for it), and forwards it unless it is malformed, names the
+// administrative account, or skips TLS the instance requires. Inside TLS
+// the client's sequence numbers run one ahead of the server's, which never
+// saw the SSLRequest, so the authentication exchange is renumbered. It
+// returns the client side to pipe, which is the TLS stream when one started.
+func (r mysqlRelay) handshake(ctx context.Context) (net.Conn, *bufio.Reader, bool, error) {
+	_ = r.server.SetDeadline(time.Now().Add(startupTimeout))
+	hello, _, err := mysqlwire.ReadPacket(r.server)
 	if err != nil {
-		return nil, false, fmt.Errorf("read the MySQL greeting: %w", err)
+		return nil, nil, false, fmt.Errorf("read the MySQL greeting: %w", err)
 	}
-	if !mysqlwire.WithoutTLS(hello) {
-		return nil, false, mysqlwire.ErrPacket
+	if !mysqlwire.SetTLS(hello, r.policy != nil) {
+		return nil, nil, false, mysqlwire.ErrPacket
 	}
-	if _, err := client.Write(mysqlwire.Packet(0, hello)); err != nil {
-		return nil, false, nil //nolint:nilerr // the client went away; nothing to report
+	if _, err := r.client.Write(mysqlwire.Packet(0, hello)); err != nil {
+		return nil, nil, false, nil //nolint:nilerr // the client went away; nothing to report
 	}
-	*sent = true
-	reader := bufio.NewReader(client)
+	*r.sent = true
+	conn, reader, response, sequence, encrypted, ok := r.readResponse(ctx)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	if refused := r.refusal(response, encrypted); refused != nil {
+		_, _ = conn.Write(mysqlwire.ErrorPacket(sequence+1, refused.Code, refused.State, refused.Message))
+		return nil, nil, false, nil //nolint:nilerr // the refusal is the client's answer, not a failure
+	}
+	shift := byte(0)
+	if encrypted {
+		shift = 1
+	}
+	if _, err := r.server.Write(mysqlwire.Packet(sequence-shift, response)); err != nil {
+		return nil, nil, false, fmt.Errorf("forward the handshake response: %w", err)
+	}
+	if shift == 0 {
+		return conn, reader, true, nil
+	}
+	return conn, reader, true, renumberAuth(r.server, conn, reader)
+}
+
+// bufferedConn reads what a bufio.Reader already took from Conn first.
+type bufferedConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (b bufferedConn) Read(p []byte) (int, error) { return b.reader.Read(p) } //nolint:wrapcheck // a transparent reader
+
+// readResponse reads the client's handshake response, inside TLS when the
+// client sends an SSLRequest the published port accepts. ok is false when
+// the client went away or its TLS handshake failed; neither has a reply.
+func (r mysqlRelay) readResponse(ctx context.Context) (net.Conn, *bufio.Reader, []byte, byte, bool, bool) {
+	conn := r.client
+	reader := bufio.NewReader(conn)
 	response, sequence, err := mysqlwire.ReadPacket(reader)
 	if err != nil {
-		return nil, false, nil //nolint:nilerr // the client went away; nothing to report
+		return nil, nil, nil, 0, false, false
 	}
-	if user, ok := mysqlwire.HandshakeUser(response); !ok || user == adminRole {
-		message := "gcp-local: the Cloud SQL connector requires a MySQL 4.1 handshake without TLS"
-		if ok {
-			message = "gcp-local: the internal administrative role is not reachable through the connector"
+	if r.policy == nil || !mysqlwire.IsSSLRequest(response) {
+		return conn, reader, response, sequence, false, true
+	}
+	// A MySQL client starts TLS right after its SSLRequest, so the
+	// handshake may already sit in reader's buffer.
+	secure := tls.Server(bufferedConn{Conn: r.client, reader: reader}, r.policy.config)
+	if err := secure.HandshakeContext(ctx); err != nil {
+		return nil, nil, nil, 0, false, false
+	}
+	reader = bufio.NewReader(secure)
+	if response, sequence, err = mysqlwire.ReadPacket(reader); err != nil {
+		return nil, nil, nil, 0, false, false
+	}
+	return secure, reader, mysqlwire.WithoutSSLFlag(response), sequence, true, true
+}
+
+// secureTransportRequired is MySQL's ER_SECURE_TRANSPORT_REQUIRED, which
+// Cloud SQL's require_secure_transport answers a cleartext login with.
+const secureTransportRequired uint16 = 3159
+
+// refusal returns why a handshake response may not reach the server, or nil.
+func (r mysqlRelay) refusal(response []byte, encrypted bool) *mysqlwire.Error {
+	user, ok := mysqlwire.HandshakeUser(response)
+	switch {
+	case !ok:
+		return &mysqlwire.Error{Code: mysqlwire.AccessDenied, State: "28000", Message: "gcp-local: the Cloud SQL connector requires a MySQL 4.1 handshake"}
+	case user == adminRole:
+		return &mysqlwire.Error{Code: mysqlwire.AccessDenied, State: "28000",
+			Message: "gcp-local: the internal administrative role is not reachable through the connector"}
+	case r.policy != nil && r.policy.encrypted && !encrypted:
+		return &mysqlwire.Error{Code: secureTransportRequired, State: "HY000",
+			Message: "Connections using insecure transport are prohibited while --require_secure_transport=ON."}
+	default:
+		return nil
+	}
+}
+
+// renumberAuth relays the authentication exchange after a TLS handshake,
+// one packet at a time with the sequence numbers shifted, until the server's
+// OK or ERR; afterwards every command restarts its own numbering.
+func renumberAuth(server net.Conn, client net.Conn, reader *bufio.Reader) error {
+	for {
+		payload, sequence, err := mysqlwire.ReadPacket(server)
+		if err != nil {
+			return fmt.Errorf("read the MySQL authentication reply: %w", err)
 		}
-		_, _ = client.Write(mysqlwire.ErrorPacket(sequence+1, mysqlwire.AccessDenied, "28000", message))
-		return nil, false, nil
+		if _, err := client.Write(mysqlwire.Packet(sequence+1, payload)); err != nil {
+			return nil //nolint:nilerr // the client went away; nothing to report
+		}
+		done, answer, err := authDone(payload)
+		if done {
+			return err
+		}
+		if !answer {
+			continue
+		}
+		answerPacket, sequence, err := mysqlwire.ReadPacket(reader)
+		if err != nil {
+			return nil //nolint:nilerr // the client went away; nothing to report
+		}
+		if _, err := server.Write(mysqlwire.Packet(sequence-1, answerPacket)); err != nil {
+			return fmt.Errorf("forward the authentication answer: %w", err)
+		}
 	}
-	if _, err := server.Write(mysqlwire.Packet(sequence, response)); err != nil {
-		return nil, false, fmt.Errorf("forward the handshake response: %w", err)
+}
+
+// authDone classifies a server authentication packet: done at OK or ERR,
+// and answer when the client replies to it. caching_sha2_password's fast
+// authentication (0x01 0x03) is followed by OK without a reply.
+func authDone(payload []byte) (bool, bool, error) {
+	switch {
+	case len(payload) == 0:
+		return true, false, errMySQLAuthRelay
+	case payload[0] == 0x00, payload[0] == 0xff:
+		return true, false, nil
+	case payload[0] == 0x01 && len(payload) == 2 && payload[1] == 3:
+		return false, false, nil
+	default:
+		return false, true, nil
 	}
-	return reader, true, nil
 }
 
 // mysqlRefusal maps a connector refusal's SQLSTATE onto a MySQL error number.
@@ -317,22 +479,80 @@ func pipe(ctx context.Context, removed <-chan struct{}, client net.Conn, buffere
 func publicKey(project, instance string) string { return project + "/" + instance }
 
 // openPublic gives a public-IP instance a port from the data-plane range,
-// the local stand-in for its public address. Connections reach PostgreSQL's
-// own password authentication with no IAM check, as public-IP connections
-// in Cloud SQL do; the internal administrative role is refused. It returns
-// nil when publishing is disabled or the instance has no public IP.
+// the local stand-in for its public address. Connections reach the server's
+// own password authentication with no IAM check, as public-IP connections in
+// Cloud SQL do; the listener enforces the instance's authorized networks and
+// TLS mode first, and the internal administrative role is refused. It
+// returns nil when publishing is disabled or the instance has no public IP.
 func (p *Provider) openPublic(ctx context.Context, project string, record instanceRecord) (*dataplane.Listener, error) {
 	if p.pool == nil || !record.IPv4 {
 		return nil, nil //nolint:nilnil // nothing to publish is the valid empty case
 	}
 	target := connectorTarget{project: project, region: record.Region, instance: record.Name}
 	listener, err := p.pool.Open(ctx, func(ctx context.Context, conn net.Conn) {
-		p.serve(ctx, target, conn, p.reachable)
+		p.servePublic(ctx, target, conn)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("publish the instance address: %w", err)
 	}
 	return listener, nil
+}
+
+// servePublic admits one published-port connection by source address,
+// then forwards it with the instance's current TLS policy.
+func (p *Provider) servePublic(ctx context.Context, target connectorTarget, conn net.Conn) {
+	record, ok := p.lookup(target.project, target.instance)
+	if !ok {
+		p.forward(ctx, target, conn, p.reachable, nil)
+		return
+	}
+	if !p.authorized(record, conn.RemoteAddr()) {
+		p.refuseNetwork(conn, record, conn.RemoteAddr())
+		return
+	}
+	// sslMode wins over requireSsl, which applySettings folds into it.
+	mode := record.SSLMode
+	encrypted := mode == sslEncrypted || mode == sslTrustedCerts
+	config, err := p.serverConfig(target.project, target.instance, mode == sslTrustedCerts)
+	if err != nil {
+		_ = conn.Close()
+		return
+	}
+	p.forward(ctx, target, conn, p.reachable, &tlsPolicy{config: config, mode: mode, encrypted: encrypted})
+}
+
+// authorized reports whether a connection's source address may reach the
+// instance: every address when it has no authorized networks (a local
+// divergence: GCP then admits no direct public-IP connection), otherwise
+// only addresses inside an unexpired entry.
+func (p *Provider) authorized(record instanceRecord, remote net.Addr) bool {
+	if len(record.Networks) == 0 {
+		return true
+	}
+	address, err := netip.ParseAddrPort(remote.String())
+	if err != nil {
+		return false
+	}
+	now := p.clock()
+	return slices.ContainsFunc(record.Networks, func(entry aclEntry) bool { return entry.admits(address.Addr(), now) })
+}
+
+// refuseNetwork answers a connection from an unauthorized address in the
+// engine's protocol, before any server is dialed: GCP's firewall drops it
+// instead, so the client would time out.
+func (p *Provider) refuseNetwork(conn net.Conn, record instanceRecord, remote net.Addr) {
+	defer conn.Close()
+	host, _, _ := net.SplitHostPort(remote.String())
+	message := "gcp-local: " + host + " is not in the authorized networks of instance " + record.Name
+	if isMySQL(record.Version) {
+		_, _ = conn.Write(mysqlwire.ErrorPacket(0, mysqlwire.HostRefused, "HY000", message))
+		return
+	}
+	_ = conn.SetDeadline(time.Now().Add(startupTimeout))
+	reader := bufio.NewReader(conn)
+	if _, _, _, err := pgwire.ReadStartup(reader, conn, false); err == nil {
+		_, _ = conn.Write(pgwire.ErrorResponse("28000", message))
+	}
 }
 
 // trackPublic records an instance's listener so delete and reset can close it.

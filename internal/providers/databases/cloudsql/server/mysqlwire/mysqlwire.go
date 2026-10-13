@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha1" //nolint:gosec // mysql_native_password is defined over SHA-1
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -113,8 +114,9 @@ func ParseError(payload []byte) error {
 
 // greeting is the parsed part of a server's initial handshake.
 type greeting struct {
-	scramble []byte
-	plugin   string
+	scramble     []byte
+	plugin       string
+	capabilities uint16
 }
 
 // parseGreeting decodes a Handshake v10 payload.
@@ -142,21 +144,42 @@ func parseGreeting(payload []byte) (greeting, error) {
 	if name := bytes.IndexByte(plugin, 0); name >= 0 {
 		plugin = plugin[:name]
 	}
-	return greeting{scramble: scramble, plugin: string(plugin)}, nil
+	return greeting{scramble: scramble, plugin: string(plugin), capabilities: binary.LittleEndian.Uint16(rest[13:])}, nil
 }
 
-// WithoutTLS clears the server's SSL capability in a greeting, so the client
-// sends its credentials in clear over the loopback hop, as the PostgreSQL
-// connector declines TLS. It reports false for a payload that is not a greeting.
-func WithoutTLS(payload []byte) bool {
+// SetTLS sets or clears the server's SSL capability in a greeting: cleared,
+// the client sends its credentials in clear over the loopback hop, as the
+// PostgreSQL connector declines TLS; set, the client may start TLS with
+// whoever terminates it. It reports false for a payload that is not a greeting.
+func SetTLS(payload []byte, offer bool) bool {
 	version := bytes.IndexByte(payload, 0)
 	if len(payload) == 0 || payload[0] != ProtocolVersion || version < 0 || len(payload) < version+1+15 {
 		return false
 	}
 	offset := version + 1 + 13 // thread id, scramble part 1, filler
 	flags := binary.LittleEndian.Uint16(payload[offset:]) &^ CapSSL
+	if offer {
+		flags |= CapSSL
+	}
 	binary.LittleEndian.PutUint16(payload[offset:], flags)
 	return true
+}
+
+// IsSSLRequest reports whether a client's first packet is the 32-byte
+// SSLRequest that precedes the TLS handshake.
+func IsSSLRequest(payload []byte) bool {
+	return len(payload) == 32 && binary.LittleEndian.Uint32(payload)&(CapSSL|CapProtocol41) == CapSSL|CapProtocol41
+}
+
+// WithoutSSLFlag clears CLIENT_SSL in a HandshakeResponse read inside TLS,
+// so the server, which has no TLS, takes it as a plain 4.1 response.
+func WithoutSSLFlag(payload []byte) []byte {
+	if len(payload) < 4 {
+		return payload
+	}
+	response := append([]byte(nil), payload...)
+	binary.LittleEndian.PutUint32(response, binary.LittleEndian.Uint32(response)&^CapSSL)
+	return response
 }
 
 // HandshakeUser extracts the user of a 4.1 HandshakeResponse. It refuses an
@@ -212,10 +235,21 @@ type Conn struct {
 	reader   *bufio.Reader
 	sequence byte
 	network  string
+	// secure reports a TLS session, which may carry a cleartext password.
+	secure bool
 }
 
 // Dial opens and authenticates one session as user.
 func Dial(ctx context.Context, network, address, user, password string) (*Conn, error) {
+	return DialTLS(ctx, network, address, user, password, nil)
+}
+
+// errNoTLS reports a server whose greeting offers no TLS.
+var errNoTLS = errors.New("MySQL server does not offer TLS")
+
+// DialTLS is Dial with TLS started by an SSLRequest when secure is set, as
+// the mysql client's --ssl-mode=VERIFY_CA does with secure's roots.
+func DialTLS(ctx context.Context, network, address, user, password string, secure *tls.Config) (*Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, network, address)
 	if err != nil {
@@ -227,15 +261,17 @@ func Dial(ctx context.Context, network, address, user, password string) (*Conn, 
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	session := &Conn{conn: conn, reader: bufio.NewReader(conn), network: network}
-	if err := session.handshake(user, password); err != nil {
+	if err := session.handshake(ctx, user, password, secure); err != nil {
+		_ = session.conn.Close()
 		_ = conn.Close()
 		return nil, err
 	}
 	return session, nil
 }
 
-// handshake answers the server greeting and completes authentication.
-func (c *Conn) handshake(user, password string) error {
+// handshake answers the server greeting, starting TLS first when secure is
+// set, and completes authentication.
+func (c *Conn) handshake(ctx context.Context, user, password string, secure *tls.Config) error {
 	payload, err := c.receive()
 	if err != nil {
 		return err
@@ -249,6 +285,15 @@ func (c *Conn) handshake(user, password string) error {
 	plugin := NativePassword
 	auth := authResponse(plugin, hello.scramble, password)
 	flags := uint32(capLongPassword | CapProtocol41 | capTransactions | CapSecureConnection | capMultiStatements | capMultiResults | CapPluginAuth)
+	if secure != nil {
+		if hello.capabilities&CapSSL == 0 {
+			return errNoTLS
+		}
+		flags |= CapSSL
+		if err := c.startTLS(ctx, flags, secure); err != nil {
+			return err
+		}
+	}
 	response := binary.LittleEndian.AppendUint32(nil, flags)
 	response = binary.LittleEndian.AppendUint32(response, MaxPacket)
 	response = append(response, CharsetUTF8MB4)
@@ -260,6 +305,22 @@ func (c *Conn) handshake(user, password string) error {
 		return err
 	}
 	return c.authenticate(password)
+}
+
+// startTLS sends the SSLRequest and switches the session to TLS.
+func (c *Conn) startTLS(ctx context.Context, flags uint32, secure *tls.Config) error {
+	request := binary.LittleEndian.AppendUint32(nil, flags)
+	request = binary.LittleEndian.AppendUint32(request, MaxPacket)
+	request = append(request, CharsetUTF8MB4)
+	if err := c.send(append(request, make([]byte, 23)...)); err != nil {
+		return err
+	}
+	conn := tls.Client(c.conn, secure)
+	if err := conn.HandshakeContext(ctx); err != nil {
+		return fmt.Errorf("MySQL TLS handshake: %w", err)
+	}
+	c.conn, c.reader, c.secure = conn, bufio.NewReader(conn), true
+	return nil
 }
 
 // authResponse computes the auth data for one plugin.
@@ -318,7 +379,7 @@ func (c *Conn) moreData(payload []byte, password string) error {
 	switch {
 	case len(payload) == 2 && payload[1] == 3:
 		return nil
-	case len(payload) == 2 && payload[1] == 4 && c.network == "unix":
+	case len(payload) == 2 && payload[1] == 4 && (c.network == "unix" || c.secure):
 		return c.send(append([]byte(password), 0))
 	default:
 		return ErrAuth
