@@ -23,23 +23,28 @@ import (
 )
 
 // useEngine runs one operation on the scope's engine under the backend gate,
-// starting it on first use. Callers have already authorized.
+// starting it on first use, after dropping the tables that expired. Callers
+// have already authorized.
 func (p *Provider) useEngine(ctx context.Context, scope state.Scope, operation func(context.Context, *engineBackend) error) error {
 	return p.manager.Use(ctx, backend.Key{Service: serviceName, Scope: scope}, func(ctx context.Context, driver backend.Backend) error { //nolint:wrapcheck // wire statuses pass through
 		engine, err := engineOf(driver)
 		if err != nil {
 			return err
 		}
+		if err := p.dropExpired(ctx, engine, scope); err != nil {
+			return err
+		}
 		return operation(ctx, engine)
 	})
 }
 
-// tableCopy returns a copy of one table taken under the scope lock, or nil;
-// callers render the copy, never the stored record.
+// tableCopy returns a copy of one live table taken under the scope lock, or
+// nil; an expired table reads as gone. Callers render the copy, never the
+// stored record.
 func (p *Provider) tableCopy(scope state.Scope, dataset, table string) *tableRecord {
 	var copied *tableRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		if record := s.tables[tableKey(dataset, table)]; record != nil {
+		if record := s.tables[tableKey(dataset, table)]; record != nil && !record.expired(p.clock()) {
 			copied = record.clone()
 		}
 		return nil
@@ -47,26 +52,27 @@ func (p *Provider) tableCopy(scope state.Scope, dataset, table string) *tableRec
 	return copied
 }
 
-// clone copies a table record; the schema document is replaced, never
-// changed in place, so it is shared.
+// clone copies a table record. The schema document and the partitioning
+// records are replaced, never changed in place, so they are shared.
 func (t *tableRecord) clone() *tableRecord {
 	copied := *t
 	copied.Labels = maps.Clone(t.Labels)
 	copied.ViewRefs = slices.Clone(t.ViewRefs)
+	copied.Clustering = slices.Clone(t.Clustering)
 	return &copied
 }
 
 // tableFields lists the Table schema fields the provider doesn't model
 // (BigQuery v2 discovery, Table, TableSchema, TableFieldSchema), each refused
-// with a gap when set: partitioning, clustering, expiration, CMEK, external
-// and materialized tables, and column options. Its output-only fields are
-// dropped. Names the schema lacks are ignored, as GCP ignores them.
+// with a gap when set: CMEK, external and materialized tables, and column
+// options. Its output-only fields are dropped. Names the schema lacks are
+// ignored, as GCP ignores them.
 var tableFields = provider.Fields{
 	Unmodeled: append([]string{
-		"rangePartitioning", "expirationTime", "encryptionConfiguration", "managedTableType", "timePartitioning",
-		"biglakeConfiguration", "resourceTags", "materializedView", "requirePartitionFilter", "externalCatalogTableOptions",
+		"encryptionConfiguration", "managedTableType",
+		"biglakeConfiguration", "resourceTags", "materializedView", "externalCatalogTableOptions",
 		"defaultRoundingMode", "model", "tableConstraints", "tableReplicationInfo", "maxStaleness",
-		"externalDataConfiguration", "clustering", "defaultCollation", "schema.foreignTypeInfo",
+		"externalDataConfiguration", "defaultCollation", "schema.foreignTypeInfo",
 	}, columnOptions()...),
 	OutputOnly: []string{
 		"numLongTermLogicalBytes", "numLongTermPhysicalBytes", keyLocation, "replicas", "numActivePhysicalBytes",
@@ -136,11 +142,16 @@ type tableBody struct {
 	Fields *struct {
 		Fields []columnSchema `json:"fields"`
 	} `json:"schema"`
-	Labels       map[string]*string `json:"labels"`
-	FriendlyName patchText          `json:"friendlyName"`
-	Description  patchText          `json:"description"`
-	View         json.RawMessage    `json:"view"`
-	Schema       map[string]any     `json:"-"`
+	Labels                 map[string]*string     `json:"labels"`
+	FriendlyName           patchText              `json:"friendlyName"`
+	Description            patchText              `json:"description"`
+	View                   json.RawMessage        `json:"view"`
+	TimePartitioning       *timePartitioningBody  `json:"timePartitioning"`
+	RangePartitioning      *rangePartitioningBody `json:"rangePartitioning"`
+	Clustering             clusteringBody         `json:"clustering"`
+	RequirePartitionFilter *bool                  `json:"requirePartitionFilter"`
+	ExpirationTime         optionalInt            `json:"expirationTime"`
+	Schema                 map[string]any         `json:"-"`
 }
 
 // decodeTableBody strictly decodes a table body and keeps its schema as sent.
@@ -178,7 +189,7 @@ func (p *Provider) decodeTable(request *gateway.RESTRequest, scope state.Scope) 
 	if err != nil {
 		return body, "", err
 	}
-	table := cmp.Or(request.Path["tableId"], body.TableReference.TableID)
+	table := cmp.Or(request.Path[keyTableID], body.TableReference.TableID)
 	switch dataset := request.Path[keyDatasetID]; {
 	case !validTableID(table):
 		return body, "", invalidTableID(table)
@@ -192,14 +203,15 @@ func (p *Provider) decodeTable(request *gateway.RESTRequest, scope state.Scope) 
 	return body, table, nil
 }
 
-// tablesCreate creates one table in the engine and stores its metadata.
+// tablesCreate creates one table in the engine and stores its metadata. An
+// ingestion-time partitioned table gets the hidden partition-time column.
 func (p *Provider) tablesCreate(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	dataset := request.Path[keyDatasetID]
 	body, table, err := p.decodeTable(request, scope)
 	if err != nil {
 		return nil, err
 	}
-	definitions, err := columnDefinitions(schemaFields(body.Schema))
+	definitions, shape, err := p.tableDefinition(body)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +224,7 @@ func (p *Provider) tablesCreate(call gateway.Call, request *gateway.RESTRequest,
 			return err
 		}
 		var err error
-		if created, err = p.storeTable(scope, dataset, table, body); err == nil {
+		if created, err = p.storeTable(scope, dataset, table, body, shape); err == nil {
 			return nil
 		}
 		// No metadata names the new engine table; drop it so a later create
@@ -225,12 +237,31 @@ func (p *Provider) tablesCreate(call gateway.Call, request *gateway.RESTRequest,
 	if err != nil {
 		return nil, err
 	}
-	return &gateway.RESTResponse{JSON: p.tableWire(scope, dataset, table, created)}, nil
+	return &gateway.RESTResponse{JSON: p.tableWire(scope, dataset, table, created, false)}, nil
+}
+
+// tableDefinition validates a new table's columns and layout and renders its
+// engine columns, the hidden pseudo-column of an ingestion-time table
+// included.
+func (p *Provider) tableDefinition(body tableBody) (string, layout, error) {
+	fields := schemaFields(body.Schema)
+	definitions, err := columnDefinitions(fields)
+	if err != nil {
+		return "", layout{}, err
+	}
+	shape, err := newLayout(body, fields, p.clock())
+	if err != nil {
+		return "", layout{}, err
+	}
+	if shape.time != nil && shape.time.Field == "" {
+		definitions += ", " + pseudoDefinition(shape.time)
+	}
+	return definitions, shape, nil
 }
 
 // storeTable indexes a table the engine created and stores its metadata,
-// returning a copy.
-func (p *Provider) storeTable(scope state.Scope, dataset, table string, body tableBody) (*tableRecord, error) {
+// with its dataset's default expirations, returning a copy.
+func (p *Provider) storeTable(scope state.Scope, dataset, table string, body tableBody, shape layout) (*tableRecord, error) {
 	var created *tableRecord
 	err := p.scopes.With(scope, func(s *scopeState) error {
 		owner := s.datasets[dataset]
@@ -243,6 +274,8 @@ func (p *Provider) storeTable(scope state.Scope, dataset, table string, body tab
 		now := p.clock()
 		record := &tableRecord{Dataset: dataset, ID: table, Type: typeTable, Schema: body.Schema, Labels: setLabels(nil, body.Labels),
 			FriendlyName: body.FriendlyName.Value, Description: body.Description.Value, Location: owner.Location, CreatedAt: now, ModifiedAt: now}
+		shape.applyDefaults(owner, now)
+		shape.store(record)
 		s.tables[tableKey(dataset, table)] = record
 		created = record.clone()
 		return nil
@@ -285,14 +318,15 @@ func (p *Provider) indexTable(scope state.Scope, dataset, table string) error {
 
 // tableWire renders one table document from its already-fetched record; the
 // scope lock is held by the caller, so this must not re-enter the store.
-func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *tableRecord) map[string]any {
+// echoFilter is layoutWire's.
+func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *tableRecord, echoFilter bool) map[string]any {
 	document := map[string]any{
 		keyKind:     "bigquery#table",
 		"id":        scope.Project + ":" + dataset + "." + table,
 		keyETag:     etagOf(cmp.Or(record.ModifiedAt, record.CreatedAt)),
 		keySelfLink: selfLink + scope.Project + "/datasets/" + dataset + "/tables/" + table,
 		"tableReference": map[string]any{
-			keyDatasetID: dataset, keyProjectID: scope.Project, "tableId": table,
+			keyDatasetID: dataset, keyProjectID: scope.Project, keyTableID: table,
 		},
 		keySchema:       record.Schema,
 		keyType:         cmp.Or(record.Type, typeTable),
@@ -300,6 +334,8 @@ func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *t
 		keyCreationTime: strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
 		keyLastModified: strconv.FormatInt(cmp.Or(record.ModifiedAt, record.CreatedAt).UnixMilli(), 10),
 	}
+	layoutWire(document, record, echoFilter)
+	partitionDefinition(document, record)
 	if record.Type == typeView {
 		document["view"] = map[string]any{keyQuery: record.ViewQuery, keyUseLegacySQL: false}
 	} else {
@@ -317,12 +353,12 @@ func (p *Provider) tablesGet(request *gateway.RESTRequest, scope state.Scope) (*
 	if err := refuseOptions(request.Query, "view", "selectedFields"); err != nil {
 		return nil, err
 	}
-	dataset, table := request.Path[keyDatasetID], request.Path["tableId"]
+	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
 	record := p.tableCopy(scope, dataset, table)
 	if record == nil {
 		return nil, tableNotFound(scope.Project, dataset, table)
 	}
-	return &gateway.RESTResponse{JSON: p.tableWire(scope, dataset, table, record)}, nil
+	return &gateway.RESTResponse{JSON: p.tableWire(scope, dataset, table, record, true)}, nil
 }
 
 // tablesList returns one page of the dataset's tables by ID, as GCP orders
@@ -337,7 +373,7 @@ func (p *Provider) tablesList(request *gateway.RESTRequest, scope state.Scope) (
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		var ids []string
 		for _, record := range s.tables {
-			if record.Dataset == dataset {
+			if record.Dataset == dataset && !record.expired(p.clock()) {
 				ids = append(ids, record.ID)
 			}
 		}
@@ -360,30 +396,34 @@ func (p *Provider) tablesList(request *gateway.RESTRequest, scope state.Scope) (
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// tableItem is one tables.list entry (recorded fields); a view carries its
-// legacy-SQL flag, as the reference documents.
+// tableItem is one tables.list entry (recorded fields, partitioning and
+// clustering included); a view carries its legacy-SQL flag, as the reference
+// documents.
 func tableItem(project string, record *tableRecord) map[string]any {
 	item := map[string]any{
 		keyKind: "bigquery#table", "id": project + ":" + record.Dataset + "." + record.ID,
-		"tableReference": map[string]any{keyDatasetID: record.Dataset, keyProjectID: project, "tableId": record.ID},
+		"tableReference": map[string]any{keyDatasetID: record.Dataset, keyProjectID: project, keyTableID: record.ID},
 		keyType:          cmp.Or(record.Type, typeTable),
 		keyCreationTime:  strconv.FormatInt(record.CreatedAt.UnixMilli(), 10),
 	}
 	if record.Type == typeView {
 		item["view"] = map[string]any{keyUseLegacySQL: false}
 	}
+	layoutWire(item, record, false)
 	addDescriptors(item, record.Labels, record.FriendlyName, "")
 	return item
 }
 
 // tablesUpdate is tables.patch: labels merge, and friendlyName and
-// description change only when the body names them (recorded). A schema is
-// accepted only unchanged; the whole body is validated first.
+// description change only when the body names them (recorded), as do
+// clustering, requirePartitionFilter, partition expiration, and
+// expirationTime. A schema is accepted only unchanged; the whole body is
+// validated first.
 func (p *Provider) tablesUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	if err := refuseOptions(request.Query, "autodetect_schema"); err != nil {
 		return nil, err
 	}
-	dataset, table := request.Path[keyDatasetID], request.Path["tableId"]
+	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
 	body, err := decodeTableBody(request.JSON)
 	if err != nil {
 		return nil, err
@@ -391,25 +431,39 @@ func (p *Provider) tablesUpdate(request *gateway.RESTRequest, scope state.Scope)
 	var document map[string]any
 	if err := p.scopes.With(scope, func(s *scopeState) error {
 		record := s.tables[tableKey(dataset, table)]
-		if record == nil {
+		if record == nil || record.expired(p.clock()) {
 			return tableNotFound(scope.Project, dataset, table)
 		}
-		if body.Schema != nil && !sameJSON(body.Schema, record.Schema) {
-			return gap("schema changes through tables.patch; use ALTER TABLE")
-		}
-		if len(body.View) > 0 && string(body.View) != jsonNull {
-			return gap("view changes through tables.patch; use CREATE OR REPLACE VIEW")
+		if err := p.patchTable(record, body); err != nil {
+			return err
 		}
 		record.Labels = setLabels(record.Labels, body.Labels)
 		body.FriendlyName.apply(&record.FriendlyName)
 		body.Description.apply(&record.Description)
 		record.ModifiedAt = p.clock()
-		document = p.tableWire(scope, dataset, table, record.clone())
+		document = p.tableWire(scope, dataset, table, record.clone(), true)
 		return nil
 	}); err != nil {
 		return nil, err //nolint:wrapcheck // the callback returns a wire status
 	}
 	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// patchTable checks a patch's schema and view, which may not change, and
+// applies its layout changes. The caller holds the scope lock.
+func (p *Provider) patchTable(record *tableRecord, body tableBody) error {
+	if body.Schema != nil && !sameJSON(body.Schema, record.Schema) {
+		return gap("schema changes through tables.patch; use ALTER TABLE")
+	}
+	if len(body.View) > 0 && string(body.View) != jsonNull {
+		return gap("view changes through tables.patch; use CREATE OR REPLACE VIEW")
+	}
+	shape, err := patchLayout(body, record, p.clock())
+	if err != nil {
+		return err
+	}
+	shape.store(record)
+	return nil
 }
 
 // sameJSON reports two JSON documents with the same value.
@@ -421,7 +475,7 @@ func sameJSON(a, b any) bool {
 
 // tablesDelete drops one table or view from the engine, then its metadata.
 func (p *Provider) tablesDelete(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	dataset, table := request.Path[keyDatasetID], request.Path["tableId"]
+	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
 	record := p.tableCopy(scope, dataset, table)
 	if record == nil {
 		return nil, tableNotFound(scope.Project, dataset, table)
@@ -478,7 +532,7 @@ type rowsBody struct {
 // with an invalid row inserts nothing: that row is reported invalid and the
 // others stopped. insertId deduplication is not modeled.
 func (p *Provider) rowsInsert(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	dataset, table := request.Path[keyDatasetID], request.Path["tableId"]
+	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
 	record := p.tableCopy(scope, dataset, table)
 	if record == nil {
 		return nil, tableNotFound(scope.Project, dataset, table)
@@ -573,7 +627,7 @@ func (p *Provider) rowsList(call gateway.Call, request *gateway.RESTRequest, sco
 	if err := validateRowsOptions(request.Query); err != nil {
 		return nil, err
 	}
-	dataset, table := request.Path[keyDatasetID], request.Path["tableId"]
+	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
 	record := p.tableCopy(scope, dataset, table)
 	if record == nil {
 		return nil, tableNotFound(scope.Project, dataset, table)
@@ -587,6 +641,9 @@ func (p *Provider) rowsList(call gateway.Call, request *gateway.RESTRequest, sco
 	}
 	var result *engineResult
 	if err := p.useEngine(call.Context, scope, func(ctx context.Context, engine *engineBackend) error {
+		if err := p.expirePartitions(ctx, engine, scope, []tableName{{dataset, table}}); err != nil {
+			return err
+		}
 		var err error
 		result, err = engine.query(ctx, "SELECT "+columnList(record.Schema)+" FROM "+canonicalPath(scope.Project, dataset, table), nil)
 		return err
@@ -632,7 +689,7 @@ func columnList(schema map[string]any) string {
 // tableIam reads or writes the table's own IAM policy, which inherits the
 // dataset's through the index ancestry; it never touches the dataset policy.
 func (p *Provider) tableIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	dataset, table := request.Path[keyDatasetID], request.Path["tableId"]
+	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
 	if p.tableCopy(scope, dataset, table) == nil {
 		return nil, tableNotFound(scope.Project, dataset, table)
 	}

@@ -55,6 +55,9 @@ type queryPlan struct {
 	// target is the table a single DML or CREATE statement writes; its
 	// schema is the response schema (recorded: bigquery-sql-engine).
 	target *tableName
+	// tables are the existing tables the script reads or writes, whose
+	// expired partitions go before it runs.
+	tables []tableName
 }
 
 // queryParameter is one jobs.query or jobs.insert query parameter.
@@ -97,6 +100,10 @@ type planner struct {
 	rewrites       []rewrite
 	plan           *queryPlan
 	seen           map[tableCheck]bool
+	// resolved maps a table path's start to the table it names; missing
+	// reports a path naming no table, which the engine refuses as 404.
+	resolved map[int]*tableRecord
+	missing  bool
 }
 
 type rewrite struct {
@@ -118,13 +125,9 @@ func planQuery(c *catalog, script, defaultDataset string, mode string, parameter
 	if len(refs.statements) == 0 {
 		return nil, invalidQuery("Syntax error: Unexpected end of script")
 	}
-	p := &planner{catalog: c, defaultDataset: defaultDataset, rangeVars: refs.rangeVars, ctes: refs.ctes, plan: &queryPlan{}, seen: map[tableCheck]bool{}}
-	for _, statement := range refs.statements {
-		if err := p.statement(script, statement); err != nil {
-			return nil, err
-		}
-	}
-	if err := p.bind(refs.parameters, mode, parameters); err != nil {
+	p := &planner{catalog: c, defaultDataset: defaultDataset, rangeVars: refs.rangeVars, ctes: refs.ctes, plan: &queryPlan{},
+		seen: map[tableCheck]bool{}, resolved: map[int]*tableRecord{}}
+	if err := p.resolveScript(script, refs, mode, parameters); err != nil {
 		return nil, err
 	}
 	p.plan.script = applyRewrites(script, p.rewrites)
@@ -135,17 +138,25 @@ func planQuery(c *catalog, script, defaultDataset string, mode string, parameter
 	return p.plan, nil
 }
 
-// statement resolves one statement's target and reads.
-func (p *planner) statement(script string, statement statementRefs) error {
-	var target tableName
-	var exists bool
-	if statement.target != nil {
-		var err error
-		if target, err = p.resolve(*statement.target); err != nil {
+// resolveScript resolves every statement, then the pseudo-columns and the
+// parameters.
+func (p *planner) resolveScript(script string, refs scriptRefs, mode string, parameters []queryParameter) error {
+	for _, statement := range refs.statements {
+		if err := p.statement(script, statement); err != nil {
 			return err
 		}
-		p.lastTarget = target
-		exists = p.catalog.tables[foldKey(target.dataset, target.table)] != nil
+	}
+	if err := p.pseudoColumns(script, refs); err != nil {
+		return err
+	}
+	return p.bind(refs.parameters, mode, parameters)
+}
+
+// statement resolves one statement's target and reads.
+func (p *planner) statement(script string, statement statementRefs) error {
+	target, record, err := p.target(statement)
+	if err != nil {
+		return err
 	}
 	var reads []tableName
 	for _, path := range statement.reads {
@@ -155,14 +166,19 @@ func (p *planner) statement(script string, statement statementRefs) error {
 		}
 		reads = append(reads, names...)
 	}
+	exists := record != nil
 	switch statement.kind {
-	case nodeInsert, nodeTruncate:
+	case nodeInsert:
+		p.check(checkQueryWrite, target, exists)
+		p.insertColumns(statement, record)
+	case nodeTruncate:
 		p.check(checkQueryWrite, target, exists)
 	case nodeUpdate, nodeDelete, nodeMerge:
 		p.check(checkQueryWrite, target, exists)
-		if err := p.readTable(target, 0); err != nil {
+		if err := requireFilter(record, statement.targetFilter); err != nil {
 			return err
 		}
+		return p.readTable(target, 0)
 	case nodeCreateTable, nodeCreateView:
 		return p.create(script, statement, target, exists, reads)
 	case nodeDrop:
@@ -170,6 +186,34 @@ func (p *planner) statement(script string, statement statementRefs) error {
 		p.plan.ddl = append(p.plan.ddl, ddlTarget{name: target})
 	}
 	return nil
+}
+
+// target resolves a statement's target table and returns its record, or nil
+// when it doesn't exist.
+func (p *planner) target(statement statementRefs) (tableName, *tableRecord, error) {
+	if statement.target == nil {
+		return tableName{}, nil, nil
+	}
+	target, err := p.resolve(*statement.target)
+	if err != nil {
+		return target, nil, err
+	}
+	p.lastTarget = target
+	record := p.catalog.tables[foldKey(target.dataset, target.table)]
+	if record != nil {
+		p.resolved[statement.target.start] = record
+		p.plan.tables = append(p.plan.tables, target)
+	}
+	return target, record, nil
+}
+
+// insertColumns names the columns of an INSERT into an ingestion-time table
+// that names none, so the hidden pseudo-column takes its default.
+func (p *planner) insertColumns(statement statementRefs, record *tableRecord) {
+	if record != nil && record.ingestionTime() && !statement.columnList {
+		end := statement.target.end
+		p.rewrites = append(p.rewrites, rewrite{start: end, end: end, text: " (" + columnList(record.Schema) + ")"})
+	}
 }
 
 // create checks a CREATE TABLE or CREATE VIEW target: bigquery.tables.create
@@ -261,7 +305,23 @@ func (p *planner) read(path tablePath) ([]tableName, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := p.noteRead(path, name); err != nil {
+		return nil, err
+	}
 	return []tableName{name}, p.readTable(name, 0)
+}
+
+// noteRead records the table a path reads, or that it reads none, and
+// checks its partition filter.
+func (p *planner) noteRead(path tablePath, name tableName) error {
+	record := p.catalog.tables[foldKey(name.dataset, name.table)]
+	if record == nil {
+		p.missing = true
+		return nil
+	}
+	p.resolved[path.start] = record
+	p.plan.tables = append(p.plan.tables, name)
+	return requireFilter(record, path.filter)
 }
 
 // maxViewDepth bounds view expansion.
@@ -285,6 +345,115 @@ func (p *planner) readTable(name tableName, depth int) error {
 		}
 	}
 	return nil
+}
+
+// requireFilter refuses a read of a partitioned table with
+// requirePartitionFilter whose filter doesn't name its partitioning column
+// (or, for an ingestion-time table, a pseudo-column), as GCP does
+// (recorded). GCP also wants the filter usable for partition elimination;
+// any mention of the column passes here. Filters a view or CTE applies
+// outside the SELECT that reads the table don't count.
+func requireFilter(record *tableRecord, filter []*astNode) error {
+	if record == nil || record.RequirePartitionFilter == nil || !*record.RequirePartitionFilter ||
+		(record.TimePartitioning == nil && record.RangePartitioning == nil) {
+		return nil
+	}
+	if mentions(filter, record.requiredFilterColumns()) {
+		return nil
+	}
+	return filterRequired(record)
+}
+
+// mentions reports whether a subtree names one of columns as a path's last
+// part.
+func mentions(nodes []*astNode, columns []string) bool {
+	for _, node := range nodes {
+		if node.kind == nodePath && len(node.children) > 0 {
+			name, err := identifierText(node.children[len(node.children)-1].payload)
+			if err == nil && slices.ContainsFunc(columns, func(column string) bool { return strings.EqualFold(column, name) }) {
+				return true
+			}
+		}
+		if mentions(node.children, columns) {
+			return true
+		}
+	}
+	return false
+}
+
+// pseudoColumns rewrites the script's _PARTITIONTIME and _PARTITIONDATE
+// references to the hidden column of the ingestion-time tables it reads, and
+// keeps the stars over those tables from expanding to it, as GCP excludes
+// pseudo-columns from SELECT * (recorded). A reference with no
+// ingestion-time table to answer it is GCP's unrecognized name (recorded);
+// _PARTITIONDATE needs a daily one.
+func (p *planner) pseudoColumns(script string, refs scriptRefs) error {
+	found, daily := p.ingestionTables()
+	if !found && p.missing {
+		// The engine refuses the missing table first, as GCP does.
+		return nil
+	}
+	for _, ref := range refs.pseudo {
+		if !found || (ref.name == namePartitionDate && !daily) {
+			return invalidQuery("Unrecognized name: " + ref.name + " at " + position(script, ref.last))
+		}
+		text := script[ref.start:ref.last] + pseudoColumn
+		if ref.name == namePartitionDate {
+			text = "DATE(" + text + ")"
+			if ref.named {
+				// Quoted, so the engine's own rewrite leaves the alias alone.
+				text += " AS `" + namePartitionDate + "`"
+			}
+		}
+		p.rewrites = append(p.rewrites, rewrite{start: ref.start, end: ref.end, text: text})
+	}
+	for _, query := range refs.selects {
+		p.excludePseudo(query)
+	}
+	return nil
+}
+
+// ingestionTables reports whether the script names an ingestion-time table,
+// and a daily one.
+func (p *planner) ingestionTables() (bool, bool) {
+	found, daily := false, false
+	for _, record := range p.resolved {
+		if record.ingestionTime() {
+			found, daily = true, daily || record.TimePartitioning.Type == partitionDay
+		}
+	}
+	return found, daily
+}
+
+// excludePseudo adds the pseudo-column to the EXCEPT list of each star of a
+// SELECT that reads an ingestion-time table: every * and that table's
+// alias.*.
+func (p *planner) excludePseudo(query *selectRefs) {
+	aliases := map[string]bool{}
+	for _, table := range query.tables {
+		if record := p.resolved[table.start]; record != nil && record.ingestionTime() {
+			aliases[table.alias] = true
+		}
+	}
+	if len(aliases) == 0 {
+		return
+	}
+	for _, star := range query.stars {
+		switch {
+		case star.alias != "" && !aliases[star.alias]:
+		case star.except >= 0:
+			p.rewrites = append(p.rewrites, rewrite{start: star.except, end: star.except, text: ", " + pseudoColumn})
+		default:
+			p.rewrites = append(p.rewrites, rewrite{start: star.insert, end: star.insert, text: " EXCEPT (" + pseudoColumn + ")"})
+		}
+	}
+}
+
+// position spells a byte offset as GoogleSQL's [line:column].
+func position(script string, offset int) string {
+	line := strings.Count(script[:offset], "\n") + 1
+	column := offset - strings.LastIndex(script[:offset], "\n")
+	return "[" + strconv.Itoa(line) + ":" + strconv.Itoa(column) + "]"
 }
 
 // check adds one IAM check: on the table when it exists, otherwise on its

@@ -513,6 +513,9 @@ func (p *Provider) runPlan(ctx context.Context, scope state.Scope, plan *queryPl
 		if err := p.requireDatasets(scope, plan); err != nil {
 			return err
 		}
+		if err := p.expirePartitions(ctx, engine, scope, plan.tables); err != nil {
+			return err
+		}
 		result, runErr := runStatements(ctx, engine, plan)
 		reconcileErr := p.reconcile(ctx, engine, scope, plan.ddl)
 		if runErr != nil {
@@ -621,6 +624,11 @@ func (p *Provider) applyTarget(s *scopeState, scope state.Scope, target ddlTarge
 	case !target.replaces(record):
 		return nil
 	}
+	// A DDL table or view is unpartitioned and unclustered (PARTITION BY and
+	// CLUSTER BY are gaps); it takes its dataset's default table expiration.
+	var shape layout
+	shape.applyDefaults(owner, p.clock())
+	shape.store(record)
 	fields := make([]any, 0, len(columns))
 	for _, column := range columns {
 		fields = append(fields, tableField(column.name, column.kind))
@@ -639,17 +647,19 @@ func (t ddlTarget) replaces(record *tableRecord) bool {
 	return t.create && t.replace && record != nil
 }
 
-// catalogOf copies the scope's datasets and tables for planning.
+// catalogOf copies the scope's datasets and live tables for planning; an
+// expired table is gone.
 func (p *Provider) catalogOf(scope state.Scope) *catalog {
 	c := &catalog{project: scope.Project, datasets: map[string]string{}, tables: map[string]*tableRecord{}}
+	now := p.clock()
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		for id := range s.datasets {
 			c.datasets[strings.ToLower(id)] = id
 		}
 		for _, record := range s.tables {
-			copied := *record
-			copied.ViewRefs = slices.Clone(record.ViewRefs)
-			c.tables[foldKey(record.Dataset, record.ID)] = &copied
+			if !record.expired(now) {
+				c.tables[foldKey(record.Dataset, record.ID)] = record.clone()
+			}
 		}
 		return nil
 	})
@@ -810,6 +820,7 @@ const (
 	keyUseLegacySQL = "useLegacySql"
 	keyLastModified = "lastModifiedTime"
 	keyDatasetID    = "datasetId"
+	keyTableID      = "tableId"
 	// optionMaxResults bounds a list or result page.
 	optionMaxResults = "maxResults"
 	// textTrue and jsonNull are the literal values options and bodies compare.

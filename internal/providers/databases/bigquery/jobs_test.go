@@ -784,3 +784,75 @@ func TestJobRetention(t *testing.T) {
 		t.Fatal("a job past the history stayed in memory")
 	}
 }
+
+// TestPartitionFilterAndPseudoColumns enforces requirePartitionFilter and
+// serves an ingestion-time table's _PARTITIONTIME and _PARTITIONDATE, which
+// SELECT * leaves out (recorded: bigquery-partitioning-expiration).
+func TestPartitionFilterAndPseudoColumns(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	h.createLayout("events", map[string]any{"timePartitioning": map[string]any{"field": "ts"}, "requirePartitionFilter": true})
+	h.createLayout("ingest", map[string]any{"timePartitioning": map[string]any{"type": "DAY"}, "requirePartitionFilter": true})
+	refused := "Cannot query over table '" + testDataset + ".events' without a filter over column(s) 'ts' that can be used for partition elimination"
+	ds := testDataset + "."
+	for step, sql := range map[string]string{
+		"select":           "SELECT name FROM " + ds + "events",
+		"filter elsewhere": "SELECT name FROM " + ds + "events WHERE name IN (SELECT name FROM " + ds + "ingest WHERE _PARTITIONTIME IS NULL)",
+		"delete":           "DELETE FROM " + ds + "events WHERE name = 'x'",
+		"update":           "UPDATE " + ds + "events SET ts = CURRENT_TIMESTAMP() WHERE n = 1",
+	} {
+		want(t, step, h.queryAs(testToken, sql, nil), 400, refused)
+		want(t, step+" reason", h.queryAs(testToken, sql, nil), 400, reasonInvalidQuery)
+	}
+	ingestRefused := "Cannot query over table '" + testDataset + ".ingest' without a filter over column(s) '_PARTITION_LOAD_TIME', '_PARTITIONDATE', '_PARTITIONTIME'"
+	want(t, "ingestion-time filter", h.queryAs(testToken, "SELECT name FROM "+ds+"ingest", nil), 400, ingestRefused)
+	h.rowsAre("filtered", h.queryAs(testToken, "SELECT name FROM "+ds+"events WHERE ts > TIMESTAMP '2000-01-01'", nil))
+	h.rowsAre("filtered delete", h.queryAs(testToken, "DELETE FROM "+ds+"events WHERE ts < TIMESTAMP '2000-01-01'", nil))
+	h.expect(http.MethodPatch, testDatasets+"/"+testDataset+"/tables/ingest", map[string]any{"requirePartitionFilter": false}, 200)
+
+	h.rowsAre("inserts", h.queryAs(testToken, "INSERT INTO "+ds+"ingest (name, n) VALUES ('now', 1); "+
+		"INSERT INTO "+ds+"ingest (_PARTITIONTIME, name, n) VALUES (TIMESTAMP '2020-01-01 00:00:00', 'past', 2); "+
+		"INSERT INTO "+ds+"ingest VALUES (TIMESTAMP '2021-01-01 00:00:00', NULL, 'listless', 3)", nil))
+	h.rowsAre("pseudo-columns", h.queryAs(testToken, "SELECT name, IF(n = 1, NULL, _PARTITIONTIME) AS pt, IF(n = 1, NULL, i._PARTITIONDATE), "+
+		"_PARTITIONTIME = TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), DAY) FROM "+ds+"ingest i WHERE _PARTITIONDATE < '2021-01-01' OR n = 1 ORDER BY n", nil),
+		"now,NULL,NULL,true", "past,1.5778368E9,2020-01-01,false")
+	star := h.queryAs(testToken, "SELECT * FROM "+ds+"ingest ORDER BY n", nil) //nolint:unqueryvet // tests SELECT * expansion
+	h.rowsAre("star", star, "NULL,NULL,now,1", "NULL,NULL,past,2", "1.6094592E9,NULL,listless,3")
+	if fields := fmt.Sprint(pick(documentOf(t, star), "schema", "fields")); strings.Contains(fields, "PARTITION") {
+		t.Errorf("SELECT * schema names a pseudo-column: %s", fields)
+	}
+	stars := "SELECT i.* EXCEPT (n), e.* FROM " + ds + "ingest i LEFT JOIN " + ds + "events e ON e.n = i.n WHERE i.n = 1 AND e.ts IS NULL" //nolint:unqueryvet // tests star expansion
+	h.rowsAre("qualified and modified stars", h.queryAs(testToken, stars, nil), "NULL,NULL,now,NULL,NULL,NULL,NULL")
+	named := documentOf(t, h.queryAs(testToken, "SELECT _PARTITIONDATE FROM "+ds+"ingest WHERE n = 2", nil))
+	if got := fmt.Sprint(pick(named, "schema", "fields", 0, "name")); got != "_PARTITIONDATE" {
+		t.Errorf("_PARTITIONDATE column name = %s", got)
+	}
+	want(t, "missing table first", h.queryAs(testToken, "SELECT _PARTITIONTIME FROM "+ds+"absent", nil), 404, "Not found: Table")
+	want(t, "pseudo-column on a column-partitioned table", h.queryAs(testToken, "SELECT _PARTITIONTIME FROM "+ds+"events WHERE ts > CURRENT_TIMESTAMP()", nil),
+		400, "Unrecognized name: _PARTITIONTIME at [1:8]")
+	h.createLayout("hourly", map[string]any{"timePartitioning": map[string]any{"type": "HOUR"}})
+	want(t, "_PARTITIONDATE on an hourly table", h.queryAs(testToken, "SELECT n,\n  _PARTITIONDATE FROM "+ds+"hourly", nil),
+		400, "Unrecognized name: _PARTITIONDATE at [2:3]")
+	want(t, "tabledata leaves the pseudo-column out", h.expect(http.MethodGet, testDatasets+"/"+testDataset+"/tables/ingest/data", nil, 200), 200, `"f":[{"v":null},{"v":null},{"v":"now"},{"v":"1"}]`)
+}
+
+// TestLayoutDDLIsAGap refuses DDL that would partition, cluster, or expire a
+// table, which DDL tables don't model, instead of dropping it.
+func TestLayoutDDLIsAGap(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	ds := testDataset + "."
+	for step, sql := range map[string]string{
+		"partition":  "CREATE TABLE " + ds + "p (d DATE) PARTITION BY d",
+		"cluster":    "CREATE TABLE " + ds + "c (d DATE) CLUSTER BY d",
+		"expiration": "CREATE TABLE " + ds + "e (d DATE) OPTIONS (expiration_timestamp = TIMESTAMP '2030-01-01')",
+		"view":       "CREATE VIEW " + ds + "v OPTIONS (expiration_timestamp = TIMESTAMP '2030-01-01') AS SELECT 1 AS x",
+	} {
+		want(t, step, h.queryAs(testToken, sql, nil), 501, "BigQuery coverage gap: ")
+	}
+	want(t, "partition gap names the clause", h.queryAs(testToken, "CREATE TABLE "+ds+"p (d DATE) PARTITION BY d", nil), 501,
+		"CREATE TABLE ... PARTITION BY and CLUSTER BY; create partitioned and clustered tables with tables.insert")
+	want(t, "option gap names the option", h.queryAs(testToken, "CREATE TABLE "+ds+"r (d DATE) OPTIONS (require_partition_filter = TRUE)", nil), 501,
+		"DDL option require_partition_filter")
+	h.rowsAre("other options run", h.queryAs(testToken, "CREATE TABLE "+ds+"o (d DATE) OPTIONS (description = 'kept')", nil))
+}

@@ -135,10 +135,12 @@ func readTree(dump string) (*astNode, error) {
 }
 
 // tablePath is one table reference as written: its unquoted name parts and
-// the source span to rewrite.
+// the source span to rewrite. filter is the WHERE clause of the SELECT that
+// reads it, or nil; requirePartitionFilter looks there.
 type tablePath struct {
 	parts      []string
 	start, end int
+	filter     []*astNode
 }
 
 // statementRefs is one statement of a script and the tables it names.
@@ -149,6 +151,44 @@ type statementRefs struct {
 	reads  []tablePath
 	// query is the span of a CREATE statement's AS query, or nil.
 	query *[2]int
+	// targetFilter is the condition of an UPDATE, DELETE, or MERGE: every
+	// child but the target and the SET list.
+	targetFilter []*astNode
+	// columnList reports an INSERT that names its columns.
+	columnList bool
+}
+
+// selectRefs is one SELECT: the tables its FROM clause reads directly, by
+// alias, and the stars of its select list. Stars over an ingestion-time
+// table must not expand to its pseudo-column.
+type selectRefs struct {
+	tables []aliasedPath
+	stars  []starRef
+}
+
+// aliasedPath is a table a SELECT reads and the lowercased name its columns
+// answer to.
+type aliasedPath struct {
+	start int
+	alias string
+}
+
+// starRef is one * or alias.* of a select list: alias is "" for *; insert is
+// where an EXCEPT list starts; except, when the star has one, is where a name
+// joins it (before its closing parenthesis), or -1.
+type starRef struct {
+	alias          string
+	insert, except int
+}
+
+// pseudoRef is one reference to _PARTITIONTIME or _PARTITIONDATE: the span
+// of its path, the offset of its last part, its name as written (upper
+// case), and whether it is a whole select column without an alias, which
+// keeps the pseudo-column's name.
+type pseudoRef struct {
+	start, end, last int
+	name             string
+	named            bool
 }
 
 // parameterRef is one query parameter occurrence: a lowercased name, or a
@@ -159,13 +199,16 @@ type parameterRef struct {
 	start, end int
 }
 
-// scriptRefs is a parsed script: its statements in order and every name that
-// can head a correlated path (aliases, CTE names, loop variables).
+// scriptRefs is a parsed script: its statements in order, every name that
+// can head a correlated path (aliases, CTE names, loop variables), its
+// SELECTs, and its pseudo-column references.
 type scriptRefs struct {
 	statements []statementRefs
 	rangeVars  map[string]bool
 	ctes       map[string]bool
 	parameters []parameterRef
+	selects    []*selectRefs
+	pseudo     []pseudoRef
 }
 
 // Node kinds the parse step reads.
@@ -269,14 +312,41 @@ func (refs *scriptRefs) scanStatement(statement *astNode) error {
 		return err
 	}
 	entry.query = createQuery(statement.kind, children)
+	entry.targetFilter, entry.columnList = targetShape(statement.kind, children)
 	position := len(refs.statements)
 	refs.statements = append(refs.statements, entry)
 	for _, child := range children {
-		if err := refs.scanNode(child, position); err != nil {
+		if err := refs.scanNode(child, scanContext{position: position}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// targetShape reads the condition of an UPDATE, DELETE, or MERGE, and
+// whether an INSERT names its columns.
+func targetShape(kind string, children []*astNode) ([]*astNode, bool) {
+	switch kind {
+	case nodeUpdate, nodeDelete, nodeMerge:
+		var filter []*astNode
+		for _, child := range children {
+			if child.kind != "UpdateItemList" {
+				filter = append(filter, child)
+			}
+		}
+		return filter, false
+	case nodeInsert:
+		return nil, len(children) > 0 && children[0].kind == nodeColumnList
+	}
+	return nil, false
+}
+
+// scanContext is where scanNode is: the statement's position, the WHERE
+// clause of the nearest SELECT, and that SELECT.
+type scanContext struct {
+	position int
+	filter   []*astNode
+	query    *selectRefs
 }
 
 // createQuery is the span of a CREATE statement's AS query, or nil.
@@ -307,15 +377,12 @@ func validateStatement(statement *astNode, rest []*astNode) error {
 		if strings.Contains(statement.payload, "is_temp") {
 			return gap("temporary tables")
 		}
-		for _, child := range rest {
-			if child.kind == nodePath {
-				return gap("CREATE TABLE ... LIKE")
-			}
-		}
+		return createTableClauses(rest)
 	case nodeCreateView:
 		if strings.Contains(statement.payload, "is_temp") {
 			return gap("temporary views")
 		}
+		return layoutOptions(rest)
 	case nodeDrop:
 		if !strings.HasPrefix(statement.payload, " TABLE") && !strings.HasPrefix(statement.payload, " VIEW") {
 			return gap("DROP" + strings.SplitN(statement.payload, "(", 2)[0])
@@ -324,10 +391,58 @@ func validateStatement(statement *astNode, rest []*astNode) error {
 	return nil
 }
 
+// createTableClauses refuses the CREATE TABLE clauses the provider doesn't
+// run: LIKE, PARTITION BY, CLUSTER BY, and the layout options.
+func createTableClauses(rest []*astNode) error {
+	for _, child := range rest {
+		switch child.kind {
+		case nodePath:
+			return gap("CREATE TABLE ... LIKE")
+		case "PartitionBy", "ClusterBy":
+			return gap("CREATE TABLE ... PARTITION BY and CLUSTER BY; create partitioned and clustered tables with tables.insert")
+		}
+	}
+	return layoutOptions(rest)
+}
+
+// layoutOptions refuses the DDL options that set a table's partitioning or
+// expiration, which DDL tables don't model; other options are ignored.
+func layoutOptions(children []*astNode) error {
+	for _, child := range children {
+		if child.kind != "OptionsList" {
+			continue
+		}
+		for _, option := range child.children {
+			if len(option.children) == 0 || option.children[0].kind != nodeIdentifier {
+				continue
+			}
+			name, err := identifierText(option.children[0].payload)
+			if err != nil {
+				return err
+			}
+			switch name = strings.ToLower(name); name {
+			case "expiration_timestamp", "partition_expiration_days", "require_partition_filter":
+				return gap("DDL option " + name + "; set it with tables.insert or tables.patch")
+			}
+		}
+	}
+	return nil
+}
+
+// Star node kinds of a select list, and an INSERT's column list.
+const (
+	nodeColumnList      = "ColumnList"
+	nodeStar            = "Star"
+	nodeStarModified    = "StarWithModifiers"
+	nodeDotStar         = "DotStar"
+	nodeDotStarModified = "DotStarWithModifiers"
+)
+
 // scanNode walks one subtree: table readers add reads to the statement at
-// position, parameters are recorded, and nested statement lists add their
-// own statements.
-func (refs *scriptRefs) scanNode(node *astNode, position int) error {
+// position, parameters and pseudo-column references are recorded, a SELECT
+// records its tables and stars, and nested statement lists add their own
+// statements.
+func (refs *scriptRefs) scanNode(node *astNode, at scanContext) error {
 	if reason, refused := refusedNodes[node.kind]; refused {
 		return gap(reason)
 	}
@@ -338,20 +453,147 @@ func (refs *scriptRefs) scanNode(node *astNode, position int) error {
 		parameter, err := parameterOf(node)
 		refs.parameters = append(refs.parameters, parameter)
 		return err
-	}
-	if tableReaders[node.kind] && len(node.children) > 0 && node.children[0].kind == nodePath {
-		read, err := pathOf(node.children[0])
-		if err != nil {
-			return err
+	case "SelectColumn":
+		if len(node.children) == 1 && node.children[0].kind == nodePath {
+			defer refs.namePseudo(node.children[0])
 		}
-		refs.statements[position].reads = append(refs.statements[position].reads, read)
+	}
+	if err := refs.visit(node, &at); err != nil {
+		return err
 	}
 	for _, child := range node.children {
-		if err := refs.scanNode(child, position); err != nil {
+		if err := refs.scanNode(child, at); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// visit records what one node adds: a SELECT's scope, a star, a
+// pseudo-column reference, or a table read.
+func (refs *scriptRefs) visit(node *astNode, at *scanContext) error {
+	switch node.kind {
+	case "Select":
+		at.query, at.filter = &selectRefs{}, whereOf(node)
+		refs.selects = append(refs.selects, at.query)
+	case nodeStar, nodeStarModified, nodeDotStar, nodeDotStarModified:
+		if at.query != nil {
+			at.query.stars = append(at.query.stars, starOf(node))
+		}
+	case nodePath, nodeColumnList:
+		return refs.scanPseudo(node)
+	}
+	if !tableReaders[node.kind] || len(node.children) == 0 || node.children[0].kind != nodePath {
+		return nil
+	}
+	read, err := pathOf(node.children[0])
+	if err != nil {
+		return err
+	}
+	read.filter = at.filter
+	refs.statements[at.position].reads = append(refs.statements[at.position].reads, read)
+	if at.query != nil {
+		at.query.tables = append(at.query.tables, aliasedPath{start: read.start, alias: aliasOf(node, read)})
+	}
+	return nil
+}
+
+// whereOf is a SELECT's WHERE clause, or nil.
+func whereOf(node *astNode) []*astNode {
+	for _, child := range node.children {
+		if child.kind == "WhereClause" {
+			return []*astNode{child}
+		}
+	}
+	return nil
+}
+
+// aliasOf names the alias a table read answers to: its explicit alias, or
+// its last name part.
+func aliasOf(node *astNode, read tablePath) string {
+	for _, child := range node.children {
+		if child.kind == "Alias" && len(child.children) > 0 {
+			if name, err := identifierText(child.children[0].payload); err == nil {
+				return strings.ToLower(name)
+			}
+		}
+	}
+	return strings.ToLower(read.parts[len(read.parts)-1])
+}
+
+// starOf reads one star of a select list. A star's * is its first byte; an
+// alias.*'s follows its path and a dot.
+func starOf(node *astNode) starRef {
+	star := starRef{insert: node.start + 1, except: -1}
+	if node.kind == nodeDotStar || node.kind == nodeDotStarModified {
+		path := node.children[0]
+		star.alias = lastName(path)
+		star.insert = path.end + 2
+		if node.kind == nodeDotStar {
+			star.insert = node.end
+		}
+	}
+	for _, child := range node.children {
+		if child.kind == "StarModifiers" {
+			for _, modifier := range child.children {
+				if modifier.kind == "StarExceptList" {
+					star.except = modifier.end - 1
+				}
+			}
+		}
+	}
+	return star
+}
+
+// lastName is a path's last part, lowercased, or "".
+func lastName(path *astNode) string {
+	if len(path.children) == 0 {
+		return ""
+	}
+	name, err := identifierText(path.children[len(path.children)-1].payload)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(name)
+}
+
+// scanPseudo records a path, or an INSERT column, naming _PARTITIONTIME or
+// _PARTITIONDATE.
+func (refs *scriptRefs) scanPseudo(node *astNode) error {
+	if node.kind == nodeColumnList {
+		for _, column := range node.children {
+			name, err := identifierText(column.payload)
+			if err != nil {
+				return err
+			}
+			if upper := strings.ToUpper(name); upper == namePartitionTime || upper == namePartitionDate {
+				refs.pseudo = append(refs.pseudo, pseudoRef{start: column.start, end: column.end, last: column.start, name: upper})
+			}
+		}
+		return nil
+	}
+	if len(node.children) == 0 {
+		return nil
+	}
+	last := node.children[len(node.children)-1]
+	name, err := identifierText(last.payload)
+	if err != nil {
+		return nil //nolint:nilerr // pathOf refuses an unreadable table path; other paths are columns
+	}
+	if upper := strings.ToUpper(name); upper == namePartitionTime || upper == namePartitionDate {
+		refs.pseudo = append(refs.pseudo, pseudoRef{start: node.start, end: node.end, last: last.start, name: upper})
+	}
+	return nil
+}
+
+// namePseudo marks a pseudo-column reference that is a whole select column
+// without an alias.
+func (refs *scriptRefs) namePseudo(path *astNode) {
+	for i := range refs.pseudo {
+		if refs.pseudo[i].start == path.start && refs.pseudo[i].end == path.end {
+			refs.pseudo[i].named = true
+		}
+	}
 }
 
 // parameterOf reads one ParameterExpr: @name, or a positional ? printed as

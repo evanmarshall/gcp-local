@@ -187,7 +187,7 @@ func resolveTarget(call gateway.Call, request *gateway.RESTRequest) (state.Scope
 	project := request.Path["project"]
 	scope := provider.ProjectScope(project)
 	target := iam.Target{Name: provider.ProjectResource(project)}
-	dataset, table := request.Path[keyDatasetID], request.Path["tableId"]
+	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
 	switch call.Method {
 	case methodDatasetsCreate, methodDatasetsList, methodJobsQuery, methodJobsResults, methodJobsInsert, methodJobsGet, methodJobsList:
 		// The collection-level create takes the dataset id from the body, and
@@ -534,16 +534,19 @@ const (
 )
 
 // datasetRecord is one stored BigQuery dataset. Patched records that a
-// patch ran: GCP then reports maxTimeTravelHours (recorded).
+// patch ran: GCP then reports maxTimeTravelHours (recorded). The default
+// expirations are in milliseconds, 0 for none.
 type datasetRecord struct {
-	ID           string
-	Labels       map[string]string
-	FriendlyName string
-	Description  string
-	Location     string
-	CreatedAt    time.Time
-	ModifiedAt   time.Time
-	Patched      bool
+	ID                           string
+	Labels                       map[string]string
+	FriendlyName                 string
+	Description                  string
+	Location                     string
+	CreatedAt                    time.Time
+	ModifiedAt                   time.Time
+	Patched                      bool
+	DefaultTableExpirationMs     int64
+	DefaultPartitionExpirationMs int64
 }
 
 // tableRecord is one table's metadata. Its columns and rows live in the
@@ -563,6 +566,12 @@ type tableRecord struct {
 	Location     string
 	CreatedAt    time.Time
 	ModifiedAt   time.Time
+	// The table's layout (partitions.go). Expiration is zero for none.
+	TimePartitioning       *timePartitioning
+	RangePartitioning      *rangePartitioning
+	Clustering             []string
+	RequirePartitionFilter *bool
+	Expiration             time.Time
 }
 
 // jobRecord is one stored query job with its materialized result. Principal

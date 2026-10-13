@@ -100,9 +100,9 @@ func (p *Provider) datasetCopy(scope state.Scope, dataset string) *datasetRecord
 // schema lacks (recorded), and so does the provider.
 var datasetFields = provider.Fields{
 	Unmodeled: []string{
-		"storageBillingModel", "isCaseInsensitive", "defaultTableExpirationMs", "resourceTags", "externalDatasetReference",
+		"storageBillingModel", "isCaseInsensitive", "resourceTags", "externalDatasetReference",
 		"defaultEncryptionConfiguration", "defaultCollation", "defaultRoundingMode", "externalCatalogDatasetOptions",
-		"linkedDatasetSource", "defaultPartitionExpirationMs",
+		"linkedDatasetSource",
 	},
 	OutputOnly: []string{
 		"kind", "satisfiesPzs", "type", "linkedDatasetMetadata", "id", "restrictions", keyLastModified, "selfLink",
@@ -119,12 +119,38 @@ type datasetBody struct {
 		ProjectID string `json:"projectId"`
 		DatasetID string `json:"datasetId"`
 	} `json:"datasetReference"`
-	Labels             map[string]*string `json:"labels"`
-	FriendlyName       patchText          `json:"friendlyName"`
-	Description        patchText          `json:"description"`
-	Location           string             `json:"location"`
-	Access             json.RawMessage    `json:"access"`
-	MaxTimeTravelHours json.RawMessage    `json:"maxTimeTravelHours"`
+	Labels                       map[string]*string `json:"labels"`
+	FriendlyName                 patchText          `json:"friendlyName"`
+	Description                  patchText          `json:"description"`
+	Location                     string             `json:"location"`
+	Access                       json.RawMessage    `json:"access"`
+	MaxTimeTravelHours           json.RawMessage    `json:"maxTimeTravelHours"`
+	DefaultTableExpirationMs     optionalInt        `json:"defaultTableExpirationMs"`
+	DefaultPartitionExpirationMs optionalInt        `json:"defaultPartitionExpirationMs"`
+}
+
+// minTableExpiration is the shortest default table expiration, in
+// milliseconds (recorded refusal).
+const minTableExpiration = 3_600_000
+
+// defaults applies the body's default expirations to record, after checking
+// both; null clears one.
+func (body datasetBody) defaults(record *datasetRecord) error {
+	table, partition := body.DefaultTableExpirationMs, body.DefaultPartitionExpirationMs
+	if table.present() && table.Value < minTableExpiration {
+		return failure(codes.InvalidArgument, reasonInvalid, "Table expiration is less than 3600000ms")
+	}
+	if partition.present() && partition.Value <= 0 {
+		// Not recorded.
+		return failure(codes.InvalidArgument, reasonInvalid, "Partition expiration must be positive")
+	}
+	if table.Set {
+		record.DefaultTableExpirationMs = table.Value
+	}
+	if partition.Set {
+		record.DefaultPartitionExpirationMs = partition.Value
+	}
+	return nil
 }
 
 // patchText is a string field of a patch: Set when the body names it, and
@@ -242,6 +268,9 @@ func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scop
 		ID: dataset, Labels: setLabels(nil, body.Labels), FriendlyName: body.FriendlyName.Value, Description: body.Description.Value,
 		Location: cmp.Or(body.Location, "US"), CreatedAt: now, ModifiedAt: now,
 	}
+	if err := body.defaults(created); err != nil {
+		return nil, err
+	}
 	var document map[string]any
 	err = p.scopes.With(scope, func(s *scopeState) error {
 		if s.datasets[dataset] != nil {
@@ -308,6 +337,12 @@ func datasetWire(project, dataset string, record *datasetRecord) map[string]any 
 	}
 	if record.Patched {
 		document["maxTimeTravelHours"] = defaultTimeTravel
+	}
+	if record.DefaultTableExpirationMs > 0 {
+		document["defaultTableExpirationMs"] = strconv.FormatInt(record.DefaultTableExpirationMs, 10)
+	}
+	if record.DefaultPartitionExpirationMs > 0 {
+		document["defaultPartitionExpirationMs"] = strconv.FormatInt(record.DefaultPartitionExpirationMs, 10)
 	}
 	addDescriptors(document, record.Labels, record.FriendlyName, record.Description)
 	return document
@@ -406,9 +441,9 @@ func datasetItem(project string, record *datasetRecord) map[string]any {
 	return item
 }
 
-// datasetsUpdate is datasets.patch: labels merge, and friendlyName and
-// description change only when the body names them (recorded). The whole
-// body is validated before anything changes.
+// datasetsUpdate is datasets.patch: labels merge, and friendlyName,
+// description, and the default expirations change only when the body names
+// them (recorded). The whole body is validated before anything changes.
 func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	if err := refuseOptions(request.Query, "updateMode"); err != nil {
 		return nil, err
@@ -430,8 +465,8 @@ func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scop
 		if record == nil {
 			return datasetNotFound(scope.Project, dataset)
 		}
-		if body.Location != "" && !strings.EqualFold(body.Location, record.Location) {
-			return failure(codes.InvalidArgument, reasonInvalid, "A dataset's location cannot change")
+		if err := patchDataset(record, body); err != nil {
+			return err
 		}
 		record.Labels = setLabels(record.Labels, body.Labels)
 		body.FriendlyName.apply(&record.FriendlyName)
@@ -443,6 +478,15 @@ func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scop
 		return nil, err //nolint:wrapcheck // the callback returns a wire status
 	}
 	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// patchDataset checks a patch's location, which cannot change, and applies
+// its default expirations after checking both.
+func patchDataset(record *datasetRecord, body datasetBody) error {
+	if body.Location != "" && !strings.EqualFold(body.Location, record.Location) {
+		return failure(codes.InvalidArgument, reasonInvalid, "A dataset's location cannot change")
+	}
+	return body.defaults(record)
 }
 
 // datasetsDelete removes one dataset. A dataset with tables is refused unless
@@ -500,7 +544,7 @@ func (p *Provider) datasetTables(scope state.Scope, dataset string) []*tableReco
 	var tables []*tableRecord
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		for key, table := range s.tables {
-			if strings.HasPrefix(key, dataset+"/") {
+			if strings.HasPrefix(key, dataset+"/") && !table.expired(p.clock()) {
 				tables = append(tables, table)
 			}
 		}

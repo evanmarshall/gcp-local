@@ -523,7 +523,6 @@ func TestUnmodeledFieldsAreGaps(t *testing.T) {
 		return copied
 	}
 	for field, value := range map[string]any{
-		"defaultTableExpirationMs": "3600000", "defaultPartitionExpirationMs": "3600000",
 		"defaultEncryptionConfiguration": map[string]any{"kmsKeyName": "k"}, "storageBillingModel": "PHYSICAL",
 	} {
 		want(t, field, h.invoke(http.MethodPost, testDatasets, with(dataset, field, value)), 501, "BigQuery coverage gap: "+field+" is not modeled")
@@ -536,10 +535,8 @@ func TestUnmodeledFieldsAreGaps(t *testing.T) {
 	want(t, "unknown name", h.invoke(http.MethodPost, testDatasets, with(dataset, "bogus", 1)), 200, `"datasetId":"second"`)
 	table := map[string]any{"tableReference": map[string]any{"tableId": "t"}, "schema": map[string]any{"fields": []any{map[string]any{"name": "a", "type": "STRING"}}}}
 	for field, value := range map[string]any{
-		"timePartitioning": map[string]any{"type": "DAY"}, "rangePartitioning": map[string]any{"field": "a"},
-		"clustering": map[string]any{"fields": []string{"a"}}, "expirationTime": "1800000000000",
 		"encryptionConfiguration": map[string]any{"kmsKeyName": "k"}, "externalDataConfiguration": map[string]any{"sourceUris": []string{"gs://b/o"}},
-		"materializedView": map[string]any{"query": "SELECT 1"}, "requirePartitionFilter": true,
+		"materializedView": map[string]any{"query": "SELECT 1"},
 	} {
 		want(t, field, h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", with(table, field, value)), 501, "BigQuery coverage gap: "+field+" is not modeled")
 	}
@@ -805,6 +802,13 @@ func TestConcurrentRequests(t *testing.T) {
 		return []providertest.Request{
 			{Method: http.MethodPost, Path: testDatasets, Body: map[string]any{"datasetReference": map[string]any{"datasetId": testDataset}}, Want: []int{200, 409}},
 			{Method: http.MethodPatch, Path: dataset, Body: map[string]any{"labels": map[string]string{"k": "v"}}, Want: []int{200, 404}},
+			{Method: http.MethodPatch, Path: dataset, Body: map[string]any{"defaultTableExpirationMs": "3600000"}, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: dataset + "/tables", Body: map[string]any{"tableReference": map[string]any{"tableId": "parted"}, "schema": map[string]any{
+				"fields": layoutFields}, "timePartitioning": map[string]any{"type": "DAY", "expirationMs": "3600000"}, "clustering": map[string]any{"fields": []string{"n"}}},
+				Want: []int{200, 404, 409}},
+			query("INSERT INTO "+testDataset+".parted (name) VALUES ('p')", 200, 404),
+			query("SELECT * FROM "+testDataset+".parted WHERE _PARTITIONTIME IS NOT NULL", 200, 404), //nolint:unqueryvet // star over a pseudo-column
+			{Method: http.MethodPatch, Path: dataset + "/tables/parted", Body: map[string]any{"clustering": nil, "expirationTime": nil}, Want: []int{200, 404}},
 			{Method: http.MethodPost, Path: dataset + "/tables", Body: map[string]any{"tableReference": map[string]any{"tableId": testTable}, "schema": schema}, Want: []int{200, 404, 409}},
 			{Method: http.MethodPost, Path: table + "/insertAll", Body: map[string]any{"rows": []any{map[string]any{"json": map[string]any{"title": "x"}}}}, Want: []int{200, 404}},
 			{Method: http.MethodPatch, Path: table, Body: map[string]any{"friendlyName": "w"}, Want: []int{200, 404}},
@@ -879,4 +883,194 @@ func TestQueryOnADeletedDataset(t *testing.T) {
 	}
 	h.dataset()
 	h.expect(http.MethodPost, testQueries, map[string]any{"query": ddl}, 200)
+}
+
+// documentOf decodes a successful response's document.
+func documentOf(t *testing.T, recorder *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	if recorder.Code != 200 {
+		t.Fatalf("status %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var document map[string]any
+	decode(t, recorder, &document)
+	return document
+}
+
+// layoutFields is the schema the partitioning tests share.
+var layoutFields = []any{
+	map[string]any{"name": "ts", "type": "TIMESTAMP"}, map[string]any{"name": "d", "type": "DATE"},
+	map[string]any{"name": "name", "type": "STRING"}, map[string]any{"name": "n", "type": "INTEGER"},
+}
+
+// createLayout creates one table of layoutFields in the fixture dataset
+// with the given layout fields.
+func (h *harness) createLayout(table string, fields map[string]any) *httptest.ResponseRecorder {
+	h.t.Helper()
+	body := map[string]any{"tableReference": map[string]any{"tableId": table}, "schema": map[string]any{"fields": layoutFields}}
+	maps.Copy(body, fields)
+	return h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", body)
+}
+
+// sameAs fails a step unless got prints as want.
+func sameAs(t *testing.T, step string, got any, want string) {
+	t.Helper()
+	if text := fmt.Sprint(got); text != want {
+		t.Errorf("%s = %s, want %s", step, text, want)
+	}
+}
+
+// fieldsOf selects a document's fields, in order.
+func fieldsOf(document map[string]any, keys ...string) []any {
+	values := make([]any, 0, len(keys))
+	for _, key := range keys {
+		values = append(values, document[key])
+	}
+	return values
+}
+
+// TestPartitioningAndClustering stores and returns each partitioning kind and
+// clustering as GCP does (recorded: bigquery-partitioning-expiration).
+func TestPartitioningAndClustering(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	tables := testDatasets + "/" + testDataset + "/tables"
+	created := documentOf(t, h.createLayout("events", map[string]any{
+		"timePartitioning":       map[string]any{"type": "DAY", "field": "ts", "expirationMs": "86400000"},
+		"requirePartitionFilter": true, "clustering": map[string]any{"fields": []string{"name", "n"}},
+	}))
+	sameAs(t, "created", fieldsOf(created, "timePartitioning", "clustering", "requirePartitionFilter", "partitionDefinition"),
+		"[map[expirationMs:86400000 field:ts type:DAY] map[fields:[name n]] true map[partitionedColumn:[map[field:ts]]]]")
+	read := documentOf(t, h.expect(http.MethodGet, tables+"/events", nil, 200))
+	sameAs(t, "read", read["timePartitioning"], "map[expirationMs:86400000 field:ts requirePartitionFilter:true type:DAY]")
+	ingest := documentOf(t, h.createLayout("ingest", map[string]any{"timePartitioning": map[string]any{"type": "HOUR"}}))
+	sameAs(t, "ingestion-time", fieldsOf(ingest, "timePartitioning", "partitionDefinition"), "[map[type:HOUR] <nil>]")
+	ranged := documentOf(t, h.createLayout("ranged", map[string]any{
+		"rangePartitioning": map[string]any{"field": "n", "range": map[string]any{"start": 0, "end": "100", "interval": "10"}},
+		"timePartitioning":  map[string]any{"type": "DAY", "field": "ts"},
+	}))
+	sameAs(t, "both partitionings keep the range", fieldsOf(ranged, "rangePartitioning", "timePartitioning"),
+		"[map[field:n range:map[end:100 interval:10 start:0]] <nil>]")
+	_, listing := h.listed(tables, "tables", "tableId")
+	item, _ := pick(listing, "tables", 0).(map[string]any)
+	sameAs(t, "list item", fieldsOf(item, "timePartitioning", "requirePartitionFilter"), "[map[expirationMs:86400000 field:ts type:DAY] true]")
+
+	patched := documentOf(t, h.expect(http.MethodPatch, tables+"/events", map[string]any{
+		"clustering": map[string]any{"fields": []string{"n"}}, "requirePartitionFilter": false,
+		"timePartitioning": map[string]any{"type": "DAY", "field": "ts", "expirationMs": "172800000"},
+	}, 200))
+	sameAs(t, "patched", fieldsOf(patched, "clustering", "requirePartitionFilter", "timePartitioning"),
+		"[map[fields:[n]] false map[expirationMs:172800000 field:ts type:DAY]]")
+	for path, body := range map[string]map[string]any{
+		"/events": {"timePartitioning": map[string]any{"type": "MONTH", "field": "ts"}},
+		"/ranged": {"rangePartitioning": map[string]any{"field": "n", "range": map[string]any{"start": "0", "end": "50", "interval": "10"}}},
+		"/ingest": {"timePartitioning": map[string]any{"type": "DAY"}},
+	} {
+		expectRefusal(t, "spec change "+path, h.invoke(http.MethodPatch, tables+path, body), 400, specFrozen, global(reasonInvalid, specFrozen))
+	}
+	cleared := documentOf(t, h.expect(http.MethodPatch, tables+"/events", map[string]any{"clustering": nil}, 200))
+	sameAs(t, "cleared clustering", cleared["clustering"], "<nil>")
+}
+
+// TestPartitioningRefusals refuses invalid partitioning and clustering with
+// GCP's messages (recorded: bigquery-partitioning-expiration).
+func TestPartitioningRefusals(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	invalid := func(step string, fields map[string]any, message string) {
+		t.Helper()
+		expectRefusal(t, step, h.createLayout("refused", fields), 400, message, global(reasonInvalid, message))
+	}
+	invalid("type", map[string]any{"timePartitioning": map[string]any{"type": "WEEK"}}, "Invalid value for timePartitioning.type: WEEK is not a valid value")
+	invalid("missing field", map[string]any{"timePartitioning": map[string]any{"field": "absent"}}, "The field specified for partitioning cannot be found in the schema.")
+	invalid("field type", map[string]any{"timePartitioning": map[string]any{"field": "name"}},
+		"The field specified for time partitioning can only be of type TIMESTAMP, DATE or DATETIME. The type found is: STRING.")
+	invalid("range type", map[string]any{"rangePartitioning": map[string]any{"field": "ts", "range": map[string]any{"end": "1", "interval": "1"}}},
+		"The field specified for integer range partitioning can only be of type INT64. The type found is: TIMESTAMP.")
+	invalid("range interval", map[string]any{"rangePartitioning": map[string]any{"field": "n", "range": map[string]any{"end": "1", "interval": "0"}}},
+		"Interval must be larger than 0 for range partition.")
+	invalid("range bounds", map[string]any{"rangePartitioning": map[string]any{"field": "n", "range": map[string]any{"end": "0", "interval": "1"}}},
+		"End must be larger than start for range partition.")
+	invalid("repeated clustering", map[string]any{"clustering": map[string]any{"fields": []string{"n", "N"}}},
+		"Field can only appear once in clustering fields. Invalid field: N.")
+	invalid("missing clustering", map[string]any{"clustering": map[string]any{"fields": []string{"absent"}}},
+		"The field specified for clustering cannot be found in the schema. Invalid field: absent.")
+	invalid("partition expiration", map[string]any{"timePartitioning": map[string]any{"expirationMs": "-1"}}, "Partition expiration must be positive")
+	five := map[string]any{"tableReference": map[string]any{"tableId": "five"}, "clustering": map[string]any{"fields": []string{"ts", "d", "name", "n", "e"}},
+		"schema": map[string]any{"fields": append(slices.Clone(layoutFields), map[string]any{"name": "e", "type": "STRING"})}}
+	expectRefusal(t, "five clustering fields", h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", five), 400,
+		"5 clustering fields specified, exceeding the limit of 4.", global(reasonInvalid, "5 clustering fields specified, exceeding the limit of 4."))
+	want(t, "mistyped expirationMs", h.createLayout("refused", map[string]any{"timePartitioning": map[string]any{"expirationMs": "soon"}}), 400, "invalid int64 value")
+}
+
+// TestTableExpiration expires a table on the provider's clock: it reads as
+// gone at once and a new table may take its name (recorded:
+// bigquery-partitioning-expiration for the expirationTime round trip).
+func TestTableExpiration(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now()
+	h.bq.clock = func() time.Time { return now }
+	h.dataset()
+	table := testDatasets + "/" + testDataset + "/tables/short"
+	in := func(d time.Duration) string { return strconv.FormatInt(now.Add(d).UnixMilli(), 10) }
+	expired := "Expiration time must be at least 1 seconds in the future"
+	expectRefusal(t, "past expiration", h.createLayout("past", map[string]any{"expirationTime": in(-time.Hour)}), 400, expired, global(reasonInvalid, expired))
+	sameAs(t, "expirationTime", documentOf(t, h.createLayout("short", map[string]any{"expirationTime": in(time.Hour)}))["expirationTime"], in(time.Hour))
+	h.expect(http.MethodPatch, table, map[string]any{"expirationTime": in(2 * time.Hour)}, 200)
+	sameAs(t, "cleared", documentOf(t, h.expect(http.MethodPatch, table, map[string]any{"expirationTime": nil}, 200))["expirationTime"], "<nil>")
+	expectRefusal(t, "past patch", h.invoke(http.MethodPatch, table, map[string]any{"expirationTime": in(0)}), 400, expired, global(reasonInvalid, expired))
+	h.expect(http.MethodPatch, table, map[string]any{"expirationTime": in(time.Hour)}, 200)
+
+	now = now.Add(time.Hour)
+	h.expect(http.MethodGet, table, nil, 404)
+	ids, _ := h.listed(testDatasets+"/"+testDataset+"/tables", "tables", "tableId")
+	sameAs(t, "listed", ids, "[]")
+	want(t, "query an expired table", h.queryAs(testToken, "SELECT 1 FROM "+testDataset+".short", nil), 404, "Not found: Table")
+	h.expect(http.MethodDelete, testDatasets+"/"+testDataset, nil, 204)
+}
+
+// TestDatasetDefaultExpiration applies a dataset's default expirations to
+// new tables: a partitioned table under a partition default gets no table
+// expiration (recorded: bigquery-partitioning-expiration).
+func TestDatasetDefaultExpiration(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now()
+	h.bq.clock = func() time.Time { return now }
+	h.dataset()
+	dataset := testDatasets + "/" + testDataset
+	day := strconv.FormatInt(now.Add(24*time.Hour).UnixMilli(), 10)
+	short := "Table expiration is less than 3600000ms"
+	expectRefusal(t, "short default", h.invoke(http.MethodPatch, dataset, map[string]any{"defaultTableExpirationMs": "1000"}), 400, short, global(reasonInvalid, short))
+	defaults := documentOf(t, h.expect(http.MethodPatch, dataset, map[string]any{"defaultTableExpirationMs": "86400000", "defaultPartitionExpirationMs": "172800000"}, 200))
+	sameAs(t, "defaults", fieldsOf(defaults, "defaultTableExpirationMs", "defaultPartitionExpirationMs"), "[86400000 172800000]")
+	partitioned := documentOf(t, h.createLayout("partitioned", map[string]any{"timePartitioning": map[string]any{"field": "ts"}}))
+	sameAs(t, "partitioned", fieldsOf(partitioned, "expirationTime", "timePartitioning"), "[<nil> map[expirationMs:172800000 field:ts type:DAY]]")
+	sameAs(t, "plain", documentOf(t, h.createLayout("plain", nil))["expirationTime"], day)
+	h.expect(http.MethodPost, testQueries, map[string]any{"query": "CREATE TABLE " + testDataset + ".ddl (x INT64)"}, 200)
+	sameAs(t, "DDL table", documentOf(t, h.expect(http.MethodGet, dataset+"/tables/ddl", nil, 200))["expirationTime"], day)
+	cleared := documentOf(t, h.expect(http.MethodPatch, dataset, map[string]any{"defaultTableExpirationMs": nil, "defaultPartitionExpirationMs": nil}, 200))
+	sameAs(t, "cleared", fieldsOf(cleared, "defaultTableExpirationMs", "defaultPartitionExpirationMs"), "[<nil> <nil>]")
+	sameAs(t, "after clearing", documentOf(t, h.createLayout("later", nil))["expirationTime"], "<nil>")
+}
+
+// TestPartitionExpiration drops an expired partition's rows before a read:
+// partitions expire their expirationMs after their start. The engine stamps
+// rows with the real time, so the clock moves from there.
+func TestPartitionExpiration(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now()
+	h.bq.clock = func() time.Time { return now }
+	h.dataset()
+	h.createLayout("days", map[string]any{"timePartitioning": map[string]any{"field": "ts", "expirationMs": "172800000"}})
+	h.createLayout("months", map[string]any{"timePartitioning": map[string]any{"type": "MONTH", "field": "d", "expirationMs": "3456000000"}})
+	h.createLayout("ingest", map[string]any{"timePartitioning": map[string]any{"type": "DAY", "expirationMs": "172800000"}})
+	ds := testDatasets + "/" + testDataset + "/tables/"
+	h.expect(http.MethodPost, testQueries, map[string]any{"query": "INSERT INTO " + testDataset + ".days (ts, name) VALUES " +
+		"(CURRENT_TIMESTAMP(), 'new'), (TIMESTAMP '2001-01-01 00:00:00', 'old'), (NULL, 'unpartitioned'); " +
+		"INSERT INTO " + testDataset + ".months (d, name) VALUES (CURRENT_DATE(), 'new'), (DATE '2001-01-01', 'old'); " +
+		"INSERT INTO " + testDataset + ".ingest (name) VALUES ('new')"}, 200)
+	h.rowsAre("expired partition unread", h.queryAs(testToken, "SELECT name FROM "+testDataset+".days ORDER BY name", nil), "new", "unpartitioned")
+	h.rowsAre("expired month unread", h.queryAs(testToken, "SELECT name FROM "+testDataset+".months", nil), "new")
+	now = now.Add(3 * 24 * time.Hour)
+	h.rowsAre("every dated partition expired", h.invoke(http.MethodGet, ds+"days/data", nil), "NULL,NULL,unpartitioned,NULL")
+	h.rowsAre("ingestion-time partition expired", h.queryAs(testToken, "SELECT name FROM "+testDataset+".ingest", nil))
 }
