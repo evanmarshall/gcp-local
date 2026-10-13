@@ -1,0 +1,166 @@
+{
+  "cloudkms-rotation-schedule": {
+    "recorded-date": "13-10-2026, 20:20:11",
+    "recorded-content": {
+      "purpose-missing": {
+        "code": 400,
+        "details": [
+          {
+            "domain": "cloudkms.googleapis.com",
+            "metadata": {
+              "field_name": "crypto_key.purpose"
+            },
+            "reason": "MISSING_REQUIRED_FIELD",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 400,
+        "message": "Request field crypto_key.purpose is required.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "period-without-next": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "next_rotation_time is required if rotation_schedule is set.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "period-too-short": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "rotation_period must be at least 24h",
+        "status": "INVALID_ARGUMENT"
+      },
+      "asymmetric-rotation": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Automatic rotation (via fields crypto_key.next_rotation_time and crypto_key.rotation_schedule) is not available for keys with purpose ASYMMETRIC_SIGN.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "scheduled-created": {
+        "destroyScheduledDuration": "86400s",
+        "fields": [
+          "createTime",
+          "destroyScheduledDuration",
+          "labels",
+          "name",
+          "nextRotationTime",
+          "primary",
+          "purpose",
+          "rotationPeriod",
+          "versionTemplate"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": true,
+        "next_rotation_text": "Z",
+        "primary": "1",
+        "purpose": "ENCRYPT_DECRYPT",
+        "rotationPeriod": "86400s"
+      },
+      "scheduled-read": {
+        "destroyScheduledDuration": "86400s",
+        "fields": [
+          "createTime",
+          "destroyScheduledDuration",
+          "labels",
+          "name",
+          "nextRotationTime",
+          "primary",
+          "purpose",
+          "rotationPeriod",
+          "versionTemplate"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": true,
+        "next_rotation_text": "Z",
+        "primary": "1",
+        "purpose": "ENCRYPT_DECRYPT",
+        "rotationPeriod": "86400s"
+      },
+      "period-patched": {
+        "destroyScheduledDuration": "86400s",
+        "fields": [
+          "createTime",
+          "destroyScheduledDuration",
+          "labels",
+          "name",
+          "nextRotationTime",
+          "primary",
+          "purpose",
+          "rotationPeriod",
+          "versionTemplate"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": true,
+        "next_rotation_text": "Z",
+        "primary": "1",
+        "purpose": "ENCRYPT_DECRYPT",
+        "rotationPeriod": "172800s"
+      },
+      "next-patched": {
+        "destroyScheduledDuration": "86400s",
+        "fields": [
+          "createTime",
+          "destroyScheduledDuration",
+          "labels",
+          "name",
+          "nextRotationTime",
+          "primary",
+          "purpose",
+          "rotationPeriod",
+          "versionTemplate"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": true,
+        "next_rotation_text": "Z",
+        "primary": "1",
+        "purpose": "ENCRYPT_DECRYPT",
+        "rotationPeriod": "172800s"
+      },
+      "next-cleared-alone": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "next_rotation_time is required if rotation_schedule is set.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "schedule-cleared": {
+        "destroyScheduledDuration": "86400s",
+        "fields": [
+          "createTime",
+          "destroyScheduledDuration",
+          "labels",
+          "name",
+          "primary",
+          "purpose",
+          "versionTemplate"
+        ],
+        "http_status": 200,
+        "next_rotation_echoed": null,
+        "next_rotation_text": null,
+        "primary": "1",
+        "purpose": "ENCRYPT_DECRYPT",
+        "rotationPeriod": null
+      },
+      "destroy-honors-duration": {
+        "destroy_in_a_day": true,
+        "fields": [
+          "algorithm",
+          "createTime",
+          "destroyTime",
+          "generateTime",
+          "name",
+          "protectionLevel",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DESTROY_SCHEDULED"
+      },
+      "cleanup": {
+        "key_versions_destroyed": true
+      }
+    }
+  }
+}

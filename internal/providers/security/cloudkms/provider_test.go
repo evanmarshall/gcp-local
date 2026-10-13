@@ -224,7 +224,7 @@ func TestMissingResourcesNeverTouchAncestors(t *testing.T) {
 	h := newHarness(t)
 	h.fails(h.invoke(http.MethodGet, testRingPath+":getIamPolicy", nil), "missing ring policy", 404, "NOT_FOUND")
 	h.fails(h.invoke(http.MethodPost, testRingPath+":setIamPolicy", map[string]any{"policy": map[string]any{}}), "missing ring set policy", 404, "NOT_FOUND")
-	h.fails(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{}), "key in missing ring", 404, "NOT_FOUND")
+	h.fails(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{"purpose": purposeEncryptDecrypt}), "key in missing ring", 404, "NOT_FOUND")
 	h.ring()
 	h.fails(h.invoke(http.MethodGet, testKeyPath, nil), "missing key", 404, "NOT_FOUND")
 	h.fails(h.invoke(http.MethodPost, testKeyPath+":setIamPolicy", map[string]any{"policy": map[string]any{}}), "missing key set policy", 404, "NOT_FOUND")
@@ -421,7 +421,7 @@ func TestCiphertextIsBoundToItsKey(t *testing.T) {
 	h.grant()
 	sealed := h.ok(h.encrypt(testAllowed), "encrypt")
 	other := testKeysPath + "/other"
-	h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId=other", map[string]any{}), "other key")
+	h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId=other", map[string]any{"purpose": purposeEncryptDecrypt}), "other key")
 	h.ok(h.invoke(http.MethodPost, other+":setIamPolicy", map[string]any{"policy": map[string]any{
 		"bindings": []any{encrypterBinding()},
 	}}), "grant other")
@@ -452,12 +452,17 @@ func TestEncryptChecksums(t *testing.T) {
 func TestKeyUpdateMaskAndRotation(t *testing.T) {
 	h := newHarness(t)
 	h.ring()
+	missing := h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{"rotationPeriod": testRotation})
+	h.failsWith(missing, "no purpose", 400, "INVALID_ARGUMENT", "Request field crypto_key.purpose is required.")
+	if !strings.Contains(missing.Body.String(), `"reason":"MISSING_REQUIRED_FIELD"`) {
+		t.Fatalf("no purpose = %s", missing.Body.String())
+	}
 	h.failsWith(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
 		"purpose": purposeEncryptDecrypt, "rotationPeriod": testRotation,
-	}), "period alone", 400, "INVALID_ARGUMENT", "nextRotationTime must be set when rotationPeriod is set.")
+	}), "period alone", 400, "INVALID_ARGUMENT", "next_rotation_time is required if rotation_schedule is set.")
 	h.failsWith(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
 		"purpose": purposeEncryptDecrypt, "rotationPeriod": "3600s", "nextRotationTime": "2030-01-01T00:00:00Z",
-	}), "short period", 400, "INVALID_ARGUMENT", `Invalid rotationPeriod "3600s": it must be between 24 hours and 876000 hours.`)
+	}), "short period", 400, "INVALID_ARGUMENT", "rotation_period must be at least 24h")
 	created := h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{
 		"purpose": purposeEncryptDecrypt}), "key")
 	if created["destroyScheduledDuration"] != defaultDestroyDuration {
@@ -473,10 +478,10 @@ func TestKeyUpdateMaskAndRotation(t *testing.T) {
 	}
 	h.failsWith(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=rotationPeriod",
 		map[string]any{"rotationPeriod": testRotation}), "period without a time", 400, "INVALID_ARGUMENT",
-		"nextRotationTime must be set when rotationPeriod is set.")
+		"next_rotation_time is required if rotation_schedule is set.")
 	scheduled := h.ok(h.invoke(http.MethodPatch, testKeyPath+"?updateMask=rotationPeriod,nextRotationTime",
 		map[string]any{"rotationPeriod": testRotation, "nextRotationTime": "2030-01-01T00:00:00Z"}), "schedule rotation")
-	if scheduled["rotationPeriod"] != testRotation || scheduled["nextRotationTime"] != "2030-01-01T00:00:00.000000000Z" {
+	if scheduled["rotationPeriod"] != testRotation || scheduled["nextRotationTime"] != "2030-01-01T00:00:00Z" {
 		t.Fatalf("scheduled = %v", scheduled)
 	}
 	// The released Terraform provider clears rotation this way on destroy.
@@ -504,7 +509,7 @@ func TestScheduledRotationCreatesPrimaryVersions(t *testing.T) {
 	key := h.ok(h.invoke(http.MethodGet, testKeyPath, nil), "rotated key")
 	primary, _ := key["primary"].(map[string]any)
 	if versionOf(primary[keyName]) != "3" || primary[keyCreateTime] != "2026-10-15T00:00:00.000000000Z" ||
-		key["nextRotationTime"] != "2026-10-16T00:00:00.000000000Z" {
+		key["nextRotationTime"] != "2026-10-16T00:00:00Z" {
 		t.Fatalf("key = %v", key)
 	}
 	if states := h.versionStates(); len(states) != 3 {
@@ -524,7 +529,7 @@ func TestScheduledRotationCreatesPrimaryVersions(t *testing.T) {
 func TestSkipInitialVersionCreation(t *testing.T) {
 	h := newHarness(t)
 	h.ring()
-	key := h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey+"&skipInitialVersionCreation=true", map[string]any{}), "empty key")
+	key := h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey+"&skipInitialVersionCreation=true", map[string]any{"purpose": purposeEncryptDecrypt}), "empty key")
 	if _, present := key["primary"]; present {
 		t.Fatalf("key = %v", key)
 	}

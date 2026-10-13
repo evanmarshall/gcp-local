@@ -164,8 +164,13 @@ def run_scenario(fixture: RotationFixture, snapshot: SnapshotCase) -> None:
     spare = fixture.manifest["key"] + "-refused"
     tomorrow = stamp(datetime.now(UTC) + timedelta(days=1))
     refusals = {
-        "period-without-next": {"rotationPeriod": f"{DAY}s"},
-        "period-too-short": {"rotationPeriod": "3600s", "nextRotationTime": tomorrow},
+        "purpose-missing": {"rotationPeriod": f"{DAY}s"},
+        "period-without-next": {"purpose": "ENCRYPT_DECRYPT", "rotationPeriod": f"{DAY}s"},
+        "period-too-short": {
+            "purpose": "ENCRYPT_DECRYPT",
+            "rotationPeriod": "3600s",
+            "nextRotationTime": tomorrow,
+        },
         "asymmetric-rotation": {
             "purpose": "ASYMMETRIC_SIGN",
             "versionTemplate": {"algorithm": "EC_SIGN_P256_SHA256"},

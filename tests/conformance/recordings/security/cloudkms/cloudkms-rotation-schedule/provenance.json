@@ -1,0 +1,51 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-13T20:20:11.507999+00:00",
+  "scenario": {
+    "id": "cloudkms-rotation-schedule",
+    "service": "cloudkms",
+    "transport": "rest-v1",
+    "revision": "e37c3ab5c18b2ef623784e94a8aefb7f1f1f7fad00d967c50320b2b799013660",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "d5c9825e49ec9bf7ff96ece82112b49702861ff23f9543970794949b729b7413",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/security/cloudkms_rotation.py": "0b0641cc51f9d42e7594ecedf864eff92b1a7441db3b4350b2d8358707545332",
+      "gcp_validation/services/security/cloudkms.py": "a358b3f7fabc872633e35e1de5748e95ff63c1fa133515216fecccc9e3f3d039",
+      "gcp_validation/services/security/refusals.py": "7e5c208b9472d70b50966390e74a6cea0d0f34de2ae5eb01121bf4ef526a8f7e",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/cloudkms/rotation/conftest.py": "c9a7118bcdd8a4e7decab57ac65796b77a64c2c1057f92839bb553e871c0fcc5"
+    },
+    "scope": {
+      "services": [
+        "cloudkms"
+      ],
+      "location": "global",
+      "limits": {
+        "max_key_rings": 1,
+        "max_crypto_keys": 1,
+        "max_key_versions": 1,
+        "max_run_seconds": 600
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

@@ -46,6 +46,8 @@
      "option": "--gcp-live-scope-file", "scope": "security/cloudkms.json"},
     {"name": "cloudkms-asymmetric", "tests": ["tests/conformance/security/cloudkms/asymmetric/test_cloudkms_asymmetric.py"],
      "option": "--gcp-live-scope-file", "scope": "security/cloudkms-asymmetric.json"},
+    {"name": "cloudkms-rotation", "tests": ["tests/conformance/security/cloudkms/rotation/test_cloudkms_rotation.py"],
+     "option": "--gcp-live-scope-file", "scope": "security/cloudkms-rotation.json"},
     {"name": "secretmanager", "tests": ["tests/conformance/security/secretmanager/test_secrets.py"],
      "option": "--gcp-secretmanager-scope", "scope": "security/secretmanager.json"},
     {"name": "secretmanager-policies", "tests": ["tests/conformance/security/secretmanager/policies/test_policies.py"],

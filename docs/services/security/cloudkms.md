@@ -1,6 +1,6 @@
 # Cloud KMS
 
-Cloud KMS v1 over REST and gRPC: key rings, crypto keys, versions, symmetric encrypt/decrypt, asymmetric sign and decrypt, HMAC, and scheduled rotation, with per-resource IAM. Recorded against GCP: symmetric keys (`cloudkms-symmetric-key-lifecycle`) and asymmetric sign and MAC keys (`cloudkms-asymmetric-mac-keys`, 2026-10-12).
+Cloud KMS v1 over REST and gRPC: key rings, crypto keys, versions, symmetric encrypt/decrypt, asymmetric sign and decrypt, HMAC, and scheduled rotation, with per-resource IAM. Recorded against GCP: symmetric keys (`cloudkms-symmetric-key-lifecycle`), asymmetric sign and MAC keys (`cloudkms-asymmetric-mac-keys`, 2026-10-12), and rotation schedules (`cloudkms-rotation-schedule`, 2026-10-13).
 
 ## Use
 
@@ -45,8 +45,9 @@ client, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint("127.0.0.1:45
 
 An `ENCRYPT_DECRYPT` key with `nextRotationTime` rotates on the process clock: at that time it gains a new version, created at the rotation time, that becomes primary, and `nextRotationTime` advances by `rotationPeriod`; without a period the schedule ends. Older versions still decrypt. A manual `versions.create` or `updatePrimaryVersion` doesn't move the schedule.
 
-- `rotationPeriod` is 24 to 876000 hours (`"86400s"`) and needs `nextRotationTime`; otherwise 400 `INVALID_ARGUMENT`.
-- A schedule on any other purpose is 400 `INVALID_ARGUMENT`, as the CryptoKey reference documents.
+- `rotationPeriod` is at least 24 hours (`"86400s"`) and needs `nextRotationTime`; otherwise 400 `INVALID_ARGUMENT` (recorded). The 876000-hour maximum is modeled.
+- A schedule on any other purpose is 400 `INVALID_ARGUMENT` (recorded).
+- `nextRotationTime` reads back as sent: a whole-second time has no fractional digits (recorded).
 - A `patch` mask naming a schedule field with the field unset clears it, as the released Terraform provider does on destroy.
 - Rotation is applied when the key is next read or used, so a key read late shows every rotation due since, up to 64, then skips ahead.
 
@@ -63,6 +64,7 @@ Bodies are decoded strictly against the request messages: an unknown or mistyped
 
 Refusals, modeled locally:
 
+- A create without `purpose` is 400 `Request field crypto_key.purpose is required.` with ErrorInfo `MISSING_REQUIRED_FIELD` (recorded).
 - A key use that the key's purpose does not allow is 400 `FAILED_PRECONDITION`. So is any use of a version that is not `ENABLED`, and `updatePrimaryVersion` on a non-symmetric key.
 - Missing `versionTemplate.algorithm` for a non-symmetric purpose, an algorithm of another purpose, both or neither of `digest` and `data`, a digest of the wrong hash or length, and any CRC32C mismatch are 400 `INVALID_ARGUMENT`.
 - Other purposes, algorithms, protection levels, and `publicKeyFormat` are 501 `UNIMPLEMENTED`, as are `importOnly`, `cryptoKeyBackend`, `keyAccessJustificationsPolicy`, and `externalProtectionLevelOptions` when set.
@@ -96,7 +98,7 @@ sh scripts/check/recordings.sh   # the symmetric recording
 sh scripts/check/sdk/cloudkms.sh         # google-cloud-kms over REST and gRPC, and the Go client over gRPC, with local ADC
 ```
 
-`cloudkms-rotation-schedule` (`tests/conformance/security/cloudkms/rotation/`) is written and runs locally but is not recorded: schedule refusals (a period alone, a 1-hour period, an asymmetric key), the schedule on create and get, period and time patches, clearing the time alone, clearing both, and a destroy honoring a 1-day `destroyScheduledDuration`. GCP rotates only after a period of at least a day, so an automatic rotation is not observed; the timing is modeled from the CryptoKey reference.
+`cloudkms-rotation-schedule` (`tests/conformance/security/cloudkms/rotation/`) was recorded and revalidated against GCP on 2026-10-13 and is in the weekly drift job: a create without `purpose`, schedule refusals (a period alone, a 1-hour period, an asymmetric key), the schedule on create and get, period and time patches, clearing the time alone, clearing both, and a destroy honoring a 1-day `destroyScheduledDuration`. GCP rotates only after a period of at least a day, so an automatic rotation is not observed; the timing is modeled from the CryptoKey reference. Each run leaves one key whose version is scheduled for destruction, since keys can't be deleted.
 
 `cloudkms-asymmetric-mac-keys` was recorded and revalidated against GCP on 2026-10-12 and matches locally (`sh scripts/check/recordings.sh`): sign by digest and data, public key PEM and CRC32C, HMAC sign and verify, CRC32C and digest refusals, wrong-purpose and disabled-version `FAILED_PRECONDITION`, destroy and restore. `TestLocalKMSKeyRingCryptoKey` passes ([Terraform](../../contributing/terraform-compatibility.md)).
 
@@ -105,6 +107,6 @@ sh scripts/check/sdk/cloudkms.sh         # google-cloud-kms over REST and gRPC, 
 - `ASYMMETRIC_DECRYPT` (RSA-OAEP) is modeled locally, not recorded.
 - Versions are `ENABLED` at once; GCP reports `PENDING_GENERATION` first for asymmetric keys.
 - No HSM, external, raw, PQC, or key-encapsulation algorithms; no RSA 3072/4096, SHA-512, or other HMAC hashes; no import jobs (`importOnly` is refused and the import job RPCs are `UNIMPLEMENTED`).
-- Rotation refusal messages and the `nextRotationTime` rendering are modeled, not recorded.
+- An automatic rotation happening is modeled, not recorded.
 - `locations.list` (`GET /v1/projects/{project}/locations`) reaches Secret Manager's location list on the shared host.
 - List filters and ordering are not served; key ring and location IAM conditions and gRPC denials are not recorded.

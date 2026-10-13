@@ -17,7 +17,7 @@ import (
 func TestPatchIsAtomic(t *testing.T) {
 	h := newHarness(t)
 	h.ok(h.invoke(http.MethodPost, testRingsPath+"?keyRingId="+testRing, map[string]any{}), "ring create")
-	h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{"labels": map[string]string{"phase": "before"}}), "key create")
+	h.ok(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId="+testKey, map[string]any{"purpose": purposeEncryptDecrypt, "labels": map[string]string{"phase": "before"}}), "key create")
 	recorder := h.invoke(http.MethodPatch, testKeyPath+"?updateMask=labels,bogus", map[string]any{"labels": map[string]string{"phase": "after"}})
 	if recorder.Code != 400 {
 		t.Fatalf("bad-mask patch status = %d", recorder.Code)
@@ -44,7 +44,7 @@ func TestConcurrentKeyRequests(t *testing.T) {
 		return []providertest.Request{
 			{Method: http.MethodPost, Path: testRingsPath + "?keyRingId=" + testRing, Body: map[string]any{}, Want: []int{200, 409}},
 			{Method: http.MethodGet, Path: testRingPath, Want: []int{200}},
-			{Method: http.MethodPost, Path: testKeysPath + "?cryptoKeyId=" + testKey, Body: map[string]any{}, Want: []int{200, 409}},
+			{Method: http.MethodPost, Path: testKeysPath + "?cryptoKeyId=" + testKey, Body: map[string]any{"purpose": purposeEncryptDecrypt}, Want: []int{200, 409}},
 			{Method: http.MethodGet, Path: testKeyPath, Want: []int{200}},
 			{Method: http.MethodGet, Path: testKeysPath, Want: []int{200}},
 			{Method: http.MethodPatch, Path: testKeyPath + "?updateMask=labels", Body: map[string]any{"labels": map[string]string{"worker": "w"}}, Want: []int{200}},
@@ -65,7 +65,7 @@ func TestConcurrentKeyRequests(t *testing.T) {
 		for round := range 20 {
 			key := testKeysPath + "/fresh-" + strconv.Itoa(round)
 			requests = append(requests,
-				providertest.Request{Method: http.MethodPost, Path: testKeysPath + "?cryptoKeyId=fresh-" + strconv.Itoa(round), Body: map[string]any{}, Want: []int{200, 409}},
+				providertest.Request{Method: http.MethodPost, Path: testKeysPath + "?cryptoKeyId=fresh-" + strconv.Itoa(round), Body: map[string]any{"purpose": purposeEncryptDecrypt}, Want: []int{200, 409}},
 				providertest.Request{Method: http.MethodPatch, Path: key + "?updateMask=labels", Body: map[string]any{"labels": map[string]string{"round": "r"}}, Want: []int{200}},
 				providertest.Request{Method: http.MethodPost, Path: key + "/cryptoKeyVersions", Body: map[string]any{}, Want: []int{200}},
 			)

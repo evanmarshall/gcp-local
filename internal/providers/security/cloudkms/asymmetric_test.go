@@ -260,7 +260,7 @@ func TestPurposeKeyCreateAndUpdateRefusals(t *testing.T) {
 	path := h.purposeKey("sign", purposeAsymmetricSign, algorithmP256)
 	h.failsWith(h.invoke(http.MethodPatch, path+"?updateMask=rotationPeriod,nextRotationTime", map[string]any{
 		"rotationPeriod": testRotation, "nextRotationTime": "2030-01-01T00:00:00Z"}), "patch rotation", 400, "INVALID_ARGUMENT",
-		"Automatic rotation is not supported for keys with purpose ASYMMETRIC_SIGN.")
+		"Automatic rotation (via fields crypto_key.next_rotation_time and crypto_key.rotation_schedule) is not available for keys with purpose ASYMMETRIC_SIGN.")
 	h.fails(h.invoke(http.MethodPatch, path+"?updateMask=versionTemplate.algorithm,labels", map[string]any{
 		"versionTemplate": map[string]any{keyAlgorithm: algorithmHMAC}, "labels": map[string]string{"a": "b"}}), "patch wrong algorithm", 400, "INVALID_ARGUMENT")
 	if key := h.ok(h.invoke(http.MethodGet, path, nil), "unchanged key"); key["labels"] != nil {
@@ -385,6 +385,6 @@ func TestNumericEnumsDecode(t *testing.T) {
 	}
 	h.fails(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId=raw", map[string]any{"purpose": 7}), "unimplemented numeric purpose", 501, "UNIMPLEMENTED")
 	h.fails(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId=hsm", map[string]any{
-		"versionTemplate": map[string]any{keyProtectionLevel: 2}}), "numeric HSM", 501, "UNIMPLEMENTED")
+		"purpose": 1, "versionTemplate": map[string]any{keyProtectionLevel: 2}}), "numeric HSM", 501, "UNIMPLEMENTED")
 	h.fails(h.invoke(http.MethodPost, testKeysPath+"?cryptoKeyId=bad", map[string]any{"purpose": true}), "non-enum purpose", 400, "INVALID_ARGUMENT")
 }

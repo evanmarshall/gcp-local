@@ -300,7 +300,8 @@ func cryptoKeyDocument(resource ref, record *cryptoKeyRecord) map[string]any {
 		document["labels"] = maps.Clone(record.Labels)
 	}
 	if !record.NextRotation.IsZero() {
-		document["nextRotationTime"] = stamp(record.NextRotation)
+		// Recorded: a whole-second time reads back without fractional digits.
+		document["nextRotationTime"] = protoStamp(record.NextRotation)
 	}
 	if record.RotationPeriod > 0 {
 		document["rotationPeriod"] = strconv.FormatInt(int64(record.RotationPeriod/time.Second), 10) + "s"
@@ -394,6 +395,22 @@ const (
 	maxRotationPeriod = 876000 * time.Hour
 )
 
+// protoStamp renders a timestamp as proto3 JSON does: 0, 3, 6, or 9
+// fractional digits.
+func protoStamp(moment time.Time) string {
+	text := moment.UTC().Format("2006-01-02T15:04:05")
+	switch nanos := moment.Nanosecond(); {
+	case nanos == 0:
+	case nanos%1_000_000 == 0:
+		text += fmt.Sprintf(".%03d", nanos/1_000_000)
+	case nanos%1_000 == 0:
+		text += fmt.Sprintf(".%06d", nanos/1_000)
+	default:
+		text += fmt.Sprintf(".%09d", nanos)
+	}
+	return text + "Z"
+}
+
 // parseRotation reads a rotation schedule; both texts may be empty.
 func parseRotation(next, period string) (time.Time, time.Duration, error) {
 	var at time.Time
@@ -406,22 +423,32 @@ func parseRotation(next, period string) (time.Time, time.Duration, error) {
 	}
 	if period != "" {
 		every, err = time.ParseDuration(period)
-		if err != nil || !strings.HasSuffix(period, "s") || every < minRotationPeriod || every > maxRotationPeriod {
-			return at, every, status.Errorf(codes.InvalidArgument, "Invalid rotationPeriod %q: it must be between 24 hours and 876000 hours.", period)
+		if err != nil || !strings.HasSuffix(period, "s") {
+			return at, every, status.Errorf(codes.InvalidArgument, "Invalid rotationPeriod %q", period)
+		}
+		// Recorded: cloudkms-rotation-schedule "period-too-short"; the
+		// maximum's wording is modeled on it.
+		if every < minRotationPeriod {
+			return at, every, status.Error(codes.InvalidArgument, "rotation_period must be at least 24h")
+		}
+		if every > maxRotationPeriod {
+			return at, every, status.Error(codes.InvalidArgument, "rotation_period must be at most 876000h")
 		}
 	}
 	return at, every, nil
 }
 
-// checkRotation applies the documented rules to a key's schedule: only
-// ENCRYPT_DECRYPT keys rotate automatically, and a period needs a next time.
+// checkRotation applies the recorded rules to a key's schedule: only
+// ENCRYPT_DECRYPT keys rotate automatically, and a period needs a next time
+// (cloudkms-rotation-schedule "asymmetric-rotation", "period-without-next").
 func checkRotation(record *cryptoKeyRecord) error {
 	scheduled := !record.NextRotation.IsZero() || record.RotationPeriod > 0
 	switch {
 	case scheduled && record.Purpose != purposeEncryptDecrypt:
-		return status.Errorf(codes.InvalidArgument, "Automatic rotation is not supported for keys with purpose %s.", record.Purpose)
+		return status.Errorf(codes.InvalidArgument, "Automatic rotation (via fields crypto_key.next_rotation_time and "+
+			"crypto_key.rotation_schedule) is not available for keys with purpose %s.", record.Purpose)
 	case record.RotationPeriod > 0 && record.NextRotation.IsZero():
-		return status.Error(codes.InvalidArgument, "nextRotationTime must be set when rotationPeriod is set.")
+		return status.Error(codes.InvalidArgument, "next_rotation_time is required if rotation_schedule is set.")
 	}
 	return nil
 }
@@ -601,7 +628,9 @@ func parseCryptoKeyBody(raw []byte) (cryptoKeyBody, error) {
 		return body, err
 	}
 	if body.Purpose == "" {
-		body.Purpose = purposeEncryptDecrypt
+		// Recorded: cloudkms-rotation-schedule "purpose-missing".
+		return body, provider.ErrorInfo(codes.InvalidArgument, "Request field crypto_key.purpose is required.",
+			"MISSING_REQUIRED_FIELD", "cloudkms.googleapis.com", map[string]string{"field_name": "crypto_key.purpose"})
 	}
 	if body.Template.Algorithm == "" && body.Purpose == purposeEncryptDecrypt {
 		body.Template.Algorithm = algorithmSymmetric
