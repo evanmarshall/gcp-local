@@ -1,0 +1,47 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-13T00:55:13.028158+00:00",
+  "scenario": {
+    "id": "resourcemanager-hierarchy-visibility",
+    "service": "resourcemanager",
+    "transport": "rest-v3",
+    "revision": "d80f5709f5a38ccacfddefd1825f65c96754e9330ecc8649ec8c6413d21a80a5",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "466e3695b6a892872ca40138fc28e2cc5b28dc47881d37107701ba8e7f878f58",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/security/hierarchy.py": "ebe486f3222743bb7c762cf7f15d3f2b052ae7b2a3d826496266c93878d16058",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/resourcemanager/hierarchy/conftest.py": "0286a26827ac9a0ad83f002c9f10d90f66e4d9c87fbc26d76b19e1bbb9c132ab"
+    },
+    "scope": {
+      "services": [
+        "resourcemanager-hierarchy"
+      ],
+      "location": "global",
+      "limits": {
+        "max_resource_writes": 0,
+        "max_run_seconds": 300
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

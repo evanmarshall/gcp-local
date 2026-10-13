@@ -39,6 +39,8 @@
     {"name": "serviceaccounts", "tests": ["tests/conformance/security/iam/test_accounts.py"],
      "option": "--gcp-live-scope-file", "scope": "security/serviceaccounts.json"},
     {"name": "iamcredentials", "tests": ["tests/conformance/security/iam/test_credentials.py"],
-     "option": "--gcp-live-scope-file", "scope": "security/iamcredentials.json"}
+     "option": "--gcp-live-scope-file", "scope": "security/iamcredentials.json"},
+    {"name": "resourcemanager-hierarchy", "tests": ["tests/conformance/security/resourcemanager/hierarchy/test_hierarchy.py"],
+     "option": "--gcp-live-scope-file", "scope": "security/resourcemanager-hierarchy.json"}
   ]
 }

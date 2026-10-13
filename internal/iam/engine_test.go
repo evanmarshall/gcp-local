@@ -837,3 +837,25 @@ func TestCustomRolesGrantUntilDeletedAndRetire(t *testing.T) {
 		t.Fatalf("foreign project role: %v", err)
 	}
 }
+
+// Permitted reports the tested permissions held through the ancestry,
+// without a permission of its own, and drops those the token's scopes don't
+// cover.
+func TestPermittedThroughAncestry(t *testing.T) {
+	engine, _ := setup(t)
+	set(t, engine, folder, "roles/storage.objectViewer", allowed)
+	c := call("permissions.test", allowed, testProject)
+	tested := []string{testObjectGet, "storage.objects.delete", testObjectGet, "resourcemanager.projects.get"}
+	held, decision, err := engine.Permitted(c, iam.Target{Name: projectA}, tested)
+	// roles/storage.objectViewer also carries resourcemanager.projects.get.
+	if err != nil || len(held) != 2 || held[0] != testObjectGet || len(decision.Checks) != 3 {
+		t.Fatalf("held = %v, %v, %+v", held, err, decision)
+	}
+	c.Principal.Scopes = []string{"https://www.googleapis.com/auth/pubsub"}
+	if held, _, err := engine.Permitted(c, iam.Target{Name: projectA}, tested); err != nil || len(held) != 0 {
+		t.Fatalf("out-of-scope held = %v, %v", held, err)
+	}
+	if _, _, err := engine.Permitted(c, iam.Target{Name: projectA + "-missing"}, tested); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("unindexed target = %v", err)
+	}
+}

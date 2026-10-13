@@ -1,6 +1,6 @@
 # Terraform compatibility
 
-17 Terraform acceptance cases pass against gcp-local across 14 services, with the released google provider 8.5.0, Terraform 1.16.5, and terraform-plugin-testing 1.15.0. Only 3 are extracted from the provider's upstream tests; the other 14 are written in gcp-local. The [selection manifest](../../tests/terraform/selection.json) lists both sets and pins the upstream source hashes; the [adapter audit](../../tests/terraform/audit.md) lists every change to the upstream cases.
+18 Terraform acceptance cases pass against gcp-local across 14 services, with the released google provider 8.5.0, Terraform 1.16.5, and terraform-plugin-testing 1.15.0. Only 3 are extracted from the provider's upstream tests; the other 15 are written in gcp-local. The [selection manifest](../../tests/terraform/selection.json) lists both sets and pins the upstream source hashes; the [adapter audit](../../tests/terraform/audit.md) lists every change to the upstream cases.
 
 ## Extracted from upstream (3)
 
@@ -12,7 +12,7 @@ Extracted by `scripts/dev/generate_terraform_tests.py` from `hashicorp/terraform
 | `TestAccStorageBucket_labels` | `google/services/storage/resource_storage_bucket_test.go` | Add, change, and remove labels with import checks and an empty plan after each step |
 | `TestAccStorageObject_recreate` | `google/services/storage/resource_storage_bucket_object_test.go` | Small multipart upload, CRC32C checks, replacement on content change |
 
-## Written locally (14)
+## Written locally (15)
 
 These have no upstream counterpart. Their configurations and assertions are gcp-local's own, in `tests/terraform/runner`.
 
@@ -31,6 +31,7 @@ These have no upstream counterpart. Their configurations and assertions are gcp-
 | `TestLocalServiceAccount` | Service account create, read, empty plan, destroy |
 | `TestLocalProjectIamCustomRole` | Project custom role and a project binding to it, title and permission update, empty plan, role reads back `deleted` after destroy |
 | `TestLocalCloudRunV2Service` | Cloud Run v2 service create, read, 404 after destroy |
+| `TestLocalFolderAndFolderIam` | Folder create through a polled operation under a seeded folder, folder IAM member, rename, import, empty plan, `DELETE_REQUESTED` after destroy |
 | `TestLocalProjectIamPolicy` | Project IAM policy replace; runs last because it replaces the whole policy |
 
 These cases prove the released provider accepts gcp-local's responses. They are not recorded from real GCP and never run against it; the API outcomes they rely on are recorded separately ([coverage](../coverage.md)).
@@ -70,5 +71,5 @@ Don't copy the test token into application configuration. For your own Terraform
 
 - Storage: only private us-central1 STANDARD buckets with uniform access, enforced public access prevention, no soft delete, and small objects. Labels are the only bucket update tested.
 - Imports need `project/bucket`; bare bucket names are not supported.
-- Selected mutations are synchronous; async polling is not tested.
+- Operation polling is tested only by the Artifact Registry and folder cases; other selected mutations are synchronous.
 - Not tested: other provider versions, lifecycle rules, object versioning, resumable uploads, Anywhere Cache, and resources not in the table.

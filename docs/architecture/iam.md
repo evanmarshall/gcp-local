@@ -14,7 +14,8 @@ Each provider registers its plans with `Engine.Register` when it starts (Storage
 
 ## Evaluation
 
-- The engine walks the target (or its validated anchor, such as a bucket) through the resource index to project, folder, and organization, and unions allow bindings.
+- The engine walks the target (or its validated anchor, such as a bucket) through the resource index to project, folder, and organization, and unions allow bindings. [Resource Manager](../services/security/resourcemanager.md) creates and moves folders and moves projects; a move changes the walk at once, and the moved node keeps its policy.
+- `Permitted` answers `testIamPermissions`: the tested permissions the caller holds, through the same walk, boundaries, deny rules, and bindings, limited to those its OAuth scopes cover. It needs no permission plan.
 - Caller project and resource project are separate. A role in the caller's project doesn't grant access to a foreign resource.
 - Missing parents, cycles, conflicting ownership, and unverified target shapes fail closed.
 - Members: exact `user:` and `serviceAccount:`, `allUsers`, `allAuthenticatedUsers`, and the [directory's](#groups-and-domains) `group:`, `principalSet://goog/group/`, and `domain:`. Absent credentials never become an administrator; unknown or expired tokens stay unauthenticated.
@@ -83,7 +84,7 @@ The IAM provider owns custom roles ([IAM roles](../services/security/iam-roles.m
 
 ## Role snapshots
 
-`internal/iam/roles/` holds 73 predefined roles read from GCP with `roles.get` (full view), and `testable-permissions.json`, the project's `queryTestablePermissions` result grouped by custom-role support level, all last recorded on 2026-10-12 UTC. `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. `roles.get` and `roles.list` serve these snapshots, and custom roles are validated against the testable permissions. Builds and tests never fetch roles.
+`internal/iam/roles/` holds 82 predefined roles read from GCP with `roles.get` (full view), and `testable-permissions.json`, the project's `queryTestablePermissions` result grouped by custom-role support level, recorded on 2026-10-12 and 2026-10-13 UTC (the nine folder, organization, and project-mover roles). `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. `roles.get` and `roles.list` serve these snapshots, and custom roles are validated against the testable permissions. Builds and tests never fetch roles.
 
 To propose a refresh (read-only; needs an authorized account and quota project):
 
@@ -106,7 +107,7 @@ Each run also records the quota project's testable permissions. Review permissio
 - `service_accounts`: optional local account email, project, and numeric unique ID, used for [Pub/Sub push](../services/messaging/pubsub.md) tokens.
 - `directory`: optional [groups and domains](#groups-and-domains).
 
-Providers publish their own resources after backend success. A failed load discards the whole file.
+Providers publish their own resources after backend success. The Resource Manager provider serves the declared organizations, folders, and projects; a declared folder's display name is its ID. A failed load discards the whole file.
 
 ```json
 {

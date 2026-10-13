@@ -56,7 +56,11 @@ def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
     }
     assert set(names["compute"]) == compute
     assert [entry.name for entry in alone] == ["security-resourcemanager-test_policy"]
-    assert all("resourcemanager" not in name for members in names.values() for name in members)
+    # The read-only hierarchy scenario shares no lock; only project IAM runs alone.
+    laned = [name for members in names.values() for name in members]
+    assert "security-resourcemanager-test_policy" not in laned
+    hierarchy = "security-resourcemanager-hierarchy-test_hierarchy"
+    assert names["resourcemanager-hierarchy"] == [hierarchy]
 
 
 def test_exclusive_entries_run_after_every_lane(tmp_path: Path, monkeypatch) -> None:

@@ -71,13 +71,26 @@ func main() {
 		"gcp-local-allowed@stitchwink.com": {"serviceAccount:allowed@gcp-local-test.iam.gserviceaccount.com"},
 		"gcp-local-nested@stitchwink.com":  {"group:gcp-local-allowed@stitchwink.com"},
 	}}))
+	// Mirrors the sandbox hierarchy: both projects sit directly under an
+	// organization where no scenario identity holds a role
+	// (resourcemanager-hierarchy-visibility). The Terraform folder case
+	// creates its folders under a seeded folder where the fixture holds
+	// folder admin; no recording reads that folder.
+	organization := "//cloudresourcemanager.googleapis.com/organizations/314159265358"
+	terraformFolder := "//cloudresourcemanager.googleapis.com/folders/271828182845"
+	must(index.Put("resourcemanager", state.Resource{Name: organization, Service: "resourcemanager", Kind: "organization", Scope: state.Scope{Location: state.Global}}))
+	must(index.Put("resourcemanager", state.Resource{Name: terraformFolder, Service: "resourcemanager", Kind: "folder", Parent: organization, Scope: state.Scope{Location: state.Global}}))
+	_, err = engine.SetPolicy(terraformFolder, iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/resourcemanager.folderAdmin", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
+	}})
+	must(err)
 	for i, project := range []string{"gcp-local-test", "synthetic-peer"} {
 		name := "//cloudresourcemanager.googleapis.com/projects/" + project
 		number := "000000000001"
 		if i == 1 {
 			number = "000000000002"
 		}
-		must(index.Put("resourcemanager", state.Resource{Name: name, Service: "resourcemanager", Kind: "project", Number: number, Scope: state.Scope{Project: project, Location: state.Global}}))
+		must(index.Put("resourcemanager", state.Resource{Name: name, Service: "resourcemanager", Kind: "project", Number: number, Parent: organization, Scope: state.Scope{Project: project, Location: state.Global}}))
 		_, err := engine.SetPolicy(name, iam.Policy{Bindings: []iam.Binding{
 			{Role: "roles/storage.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 			// The KMS acceptance case drives key rings and crypto keys with

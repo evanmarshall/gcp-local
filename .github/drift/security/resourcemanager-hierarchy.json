@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "approved": true,
+  "services": [
+    "resourcemanager-hierarchy"
+  ],
+  "project": "gcp-local-stitchwink-dev",
+  "project_number": "482773321601",
+  "location": "global",
+  "limits": {
+    "max_resource_writes": 0,
+    "max_run_seconds": 300
+  },
+  "cleanup_required": true,
+  "scheduled_runs": true
+}

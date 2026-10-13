@@ -2,6 +2,7 @@ package state
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -12,6 +13,7 @@ var (
 	errResourceOwner    = errors.New("invalid resource owner or canonical name")
 	errResourceConflict = errors.New("resource already belongs to another owner or hierarchy")
 	errResourceScope    = errors.New("resource belongs to another owner or scope")
+	errResourceMissing  = errors.New("resource is not indexed")
 )
 
 // Resource is a cross-service reference, not a second copy of backend data/IAM.
@@ -88,6 +90,39 @@ func (i *Index) ProjectByNumber(number string) (Resource, bool) {
 		}
 	}
 	return Resource{}, false
+}
+
+// Owned returns every resource service publishes, ordered by name.
+func (i *Index) Owned(service string) []Resource {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	var owned []Resource
+	for _, resource := range i.resources {
+		if resource.Service == service {
+			owned = append(owned, resource)
+		}
+	}
+	slices.SortFunc(owned, func(a, b Resource) int { return strings.Compare(a.Name, b.Name) })
+	return owned
+}
+
+// Reparent moves one of owner's resources under parent. The resource keeps
+// its name, so its policy stays attached and no removal hook runs: a moved
+// project or folder keeps its own bindings and inherits from its new
+// ancestors at once. The caller validates the new hierarchy.
+func (i *Index) Reparent(owner, name, parent string) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	existing, ok := i.resources[name]
+	switch {
+	case !ok:
+		return errResourceMissing
+	case existing.Service != owner:
+		return errResourceScope
+	}
+	existing.Parent = parent
+	i.resources[name] = existing
+	return nil
 }
 
 // OnRemove registers a hook that runs for every name Remove or RemoveScope

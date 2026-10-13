@@ -27,7 +27,7 @@ What each service supports and how it is verified. Every service authenticates c
 | `logging` | [Cloud Logging](services/logging.md) | gcp-local | 4 | — | Yes: write, filter, page, and delete log entries | logging-entries-lifecycle, logging-filter-precedence | none |
 | `artifactregistry` | [Artifact Registry](services/artifactregistry.md) | gcp-local | 7 | — | No: repositories only; no image push or pull | artifactregistry-repository-lifecycle | TestLocalArtifactRegistryRepository |
 | `iam` | [IAM service accounts](services/security/serviceaccounts.md) and [roles](services/security/iam-roles.md) | gcp-local | 29 | — | Partial: accounts, policies, keys; IAM Credentials impersonation (`generateAccessToken`, `generateIdToken`, `signJwt`, `signBlob`) with delegation and lifetime limits, tokens usable at every service; keys mint no tokens; keys not recorded; project and organization custom roles that grant in any allow policy; organization roles not recorded | serviceaccount-lifecycle-authorization, iamcredentials-impersonation, iam-custom-role-lifecycle | TestLocalServiceAccount, TestLocalProjectIamCustomRole |
-| `resourcemanager` | [Project IAM](services/security/project-iam.md) | gcp-local | 2 | — | Yes: project IAM policy | project-iam-policy-binding | TestLocalProjectIamPolicy |
+| `resourcemanager` | [Resource Manager](services/security/resourcemanager.md) and [project IAM](services/security/project-iam.md) | gcp-local | 29 | — | Yes: folders (create, rename, move, soft delete, undelete), project get, search, and move, organization reads, and IAM on all three, inherited down the hierarchy; success paths that need organization roles not recorded | project-iam-policy-binding, resourcemanager-hierarchy-visibility | TestLocalFolderAndFolderIam, TestLocalProjectIamPolicy |
 | `compute` | [VPC networking and Connectivity Tests](services/networking.md) | gcp-local | 38 | — | Analysis only: verdicts, no real traffic | vpc-firewall-connectivity, vm-connectivity-nat-peering, vm-firewall-service-accounts | TestLocalComputeNetworkAndSubnetwork |
 | `run` | [Cloud Run](services/cloudrun.md) | Local processes or Docker | 13 | — | Partial: your own images with `--cloud-run-docker`, workload identity, ID-token invocation; no egress, jobs, or volumes | none | TestLocalCloudRunV2Service |
 | `vertexai` | [Vertex AI](services/vertexai.md) | Deterministic stub or Ollama | 5 | — | Partial: generate, stream, count tokens, embed; answers come from the stub or Ollama, not Gemini | vertexai-inference-authorization | none |
@@ -44,6 +44,7 @@ Notes on counts:
 - Cloud Tasks also serves 15 of its 16 methods over gRPC `google.cloud.tasks.v2`; locations list is REST only. REST is v2beta3.
 - Cloud Scheduler serves its 8 job methods over REST and gRPC `google.cloud.scheduler.v1.CloudScheduler`.
 - Cloud KMS serves 25 of its 26 methods over gRPC as well; only the location list is REST only ([transport](services/security/cloudkms.md#transport)).
+- Resource Manager: 5 v1 methods (project get, IAM policy get, set, and test, operations get) and 24 v3 methods, all 24 also over gRPC (`google.cloud.resourcemanager.v3` and `google.longrunning.Operations` for `operations/*`).
 - Cloud Run serves its 13 methods over both REST and gRPC (`google.cloud.run.v2.Services`, `google.cloud.run.v2.Revisions`, and `google.longrunning.Operations` for Cloud Run operation names).
 
 ## Client compatibility
@@ -65,6 +66,7 @@ A recording proves only the requests it sends. This table lists the real clients
 | bigtable | Go `cloud.google.com/go/bigtable` 1.58.0 admin clients | gRPC | `internal/providers/databases/bigtable/admin_grpc_test.go` |
 | iam | Go `cloud.google.com/go/iam` 1.11.0 (`admin/apiv1`) | gRPC | `internal/providers/security/iam/grpc_test.go` |
 | iamcredentials | Go `cloud.google.com/go/iam` 1.11.0 (`credentials/apiv1`) | gRPC | `internal/providers/security/iam/credentials_test.go` |
+| resourcemanager | Go `cloud.google.com/go/resourcemanager` 1.17.0 (`apiv3`): folder operations, project move and search, permission tests | gRPC | `internal/providers/security/resourcemanager/grpc_test.go` |
 | logging | Python `google-cloud-logging` 3.17.0 | REST and gRPC | `internal/providers/logging/testdata/sdk.py` |
 | cloudkms | Python `google-cloud-kms` 3.18.0 | REST and gRPC | `internal/providers/security/cloudkms/testdata/sdk.py` |
 | cloudkms | Go `cloud.google.com/go/kms` 1.35.0 | gRPC | `internal/providers/security/cloudkms/grpc_test.go` |

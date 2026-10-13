@@ -11,12 +11,13 @@ Providers keep state in `internal/state` stores scoped by project and location, 
 | Canonical name, service, kind, project/location, parent | Shared resource index (`state.Index`) | Published after backend success; removed after confirmed deletion or reset |
 | Process status and readiness | Backend manager | Start, probe, reset, shutdown |
 
-The index exists for IAM ancestry and cross-service references. It never copies backend data or policy payloads.
+The index exists for IAM ancestry and cross-service references. It never copies backend data or policy payloads. The Resource Manager provider owns the organization, folder, and project entries; a move changes only the entry's parent (`Index.Reparent`), so no removal hook drops its policy.
 
 ## Stores
 
 - `state.Store` requires an explicit project and location and serializes mutations per scope. Each provider supplies its location validator.
 - Storage is global: a bucket's region is an attribute, not a namespace. The index enforces global bucket-name ownership across projects.
+- The resource hierarchy is global: organizations and folders belong to no project. Resource Manager serializes it under one provider lock instead of a scoped store, and resolves, authorizes, changes, and renders under that lock.
 - Store callbacks do short in-memory work, never retain mutable references, and never re-enter their store. Getters return copies.
 - A handler looks up, changes, and renders a record inside one `With` callback. Only rendered wire documents or copies leave it; no helper returns a pointer into the store. Wire documents clone record maps and slices.
 - A patch validates its whole mask and body before the callback and applies every field inside it, so a rejected patch changes nothing.

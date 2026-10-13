@@ -1,0 +1,406 @@
+{
+  "resourcemanager-hierarchy-visibility": {
+    "recorded-date": "13-10-2026, 00:55:13",
+    "recorded-content": {
+      "project-get": {
+        "fields": [
+          "createTime",
+          "displayName",
+          "etag",
+          "name",
+          "parent",
+          "projectId",
+          "state",
+          "updateTime"
+        ],
+        "http_status": 200,
+        "name": "projects/<project-number>",
+        "parent": "organizations/<organization>",
+        "projectId": "<project>",
+        "state": "ACTIVE",
+        "weak_etag": true
+      },
+      "project-get-v1": {
+        "lifecycleState": "ACTIVE",
+        "parent": {
+          "id": "<organization>",
+          "type": "organization"
+        },
+        "projectId": "<project>",
+        "projectNumber": "<project-number>"
+      },
+      "project-get-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.projects.get",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/<project>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.projects.get' denied on resource '//cloudresourcemanager.googleapis.com/projects/<project>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "project-get-missing": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.projects.get",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/gcp-local-missing-project",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.projects.get' denied on resource '//cloudresourcemanager.googleapis.com/projects/gcp-local-missing-project' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "project-search": {
+        "fields": [
+          "projects"
+        ],
+        "http_status": 200,
+        "sandbox_project": [
+          {
+            "fields": [
+              "createTime",
+              "displayName",
+              "etag",
+              "name",
+              "parent",
+              "projectId",
+              "state"
+            ],
+            "name": "projects/<project-number>",
+            "parent": "organizations/<organization>",
+            "projectId": "<project>",
+            "state": "ACTIVE",
+            "weak_etag": true
+          }
+        ]
+      },
+      "project-search-parent": {
+        "fields": [
+          "projects"
+        ],
+        "http_status": 200,
+        "sandbox_project": [
+          {
+            "fields": [
+              "createTime",
+              "displayName",
+              "etag",
+              "name",
+              "parent",
+              "projectId",
+              "state"
+            ],
+            "name": "projects/<project-number>",
+            "parent": "organizations/<organization>",
+            "projectId": "<project>",
+            "state": "ACTIVE",
+            "weak_etag": true
+          }
+        ]
+      },
+      "project-search-bad-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "project-search-negative-size": {
+        "code": 400,
+        "details": [
+          {
+            "type": "BadRequest",
+            "violations": [
+              [
+                "pageSize",
+                "invalid page size"
+              ]
+            ]
+          }
+        ],
+        "http_status": 400,
+        "message": "field [pageSize] has issue [invalid page size]",
+        "status": "INVALID_ARGUMENT"
+      },
+      "project-list-denied": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "The caller does not have permission",
+        "status": "PERMISSION_DENIED"
+      },
+      "project-list-no-parent": {
+        "code": 400,
+        "details": [
+          {
+            "type": "BadRequest",
+            "violations": [
+              [
+                "parent",
+                "invalid parent name"
+              ]
+            ]
+          }
+        ],
+        "http_status": 400,
+        "message": "field [parent] has issue [invalid parent name]",
+        "status": "INVALID_ARGUMENT"
+      },
+      "project-permissions": {
+        "http_status": 200,
+        "permissions": [
+          "resourcemanager.projects.get"
+        ]
+      },
+      "project-permissions-denied": {
+        "body": {},
+        "http_status": 200
+      },
+      "project-move-denied": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "The caller does not have permission",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-permissions": {
+        "body": {},
+        "http_status": 200
+      },
+      "organization-get-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.organizations.get",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.organizations.get' denied on resource '//cloudresourcemanager.googleapis.com/organizations/<organization>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-policy-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.organizations.getIamPolicy",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.organizations.getIamPolicy' denied on resource '//cloudresourcemanager.googleapis.com/organizations/<organization>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-search-fixture": {
+        "body": {},
+        "http_status": 200
+      },
+      "organization-search-denied": {
+        "body": {},
+        "http_status": 200
+      },
+      "organization-search-bad-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "folder-list-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.folders.list",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.folders.list' denied on resource '//cloudresourcemanager.googleapis.com/organizations/<organization>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-list-no-parent": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "The caller does not have permission",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-search-denied": {
+        "body": {},
+        "http_status": 200
+      },
+      "folder-create-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.folders.create",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.folders.create' denied on resource '//cloudresourcemanager.googleapis.com/organizations/<organization>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-create-no-parent": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "The caller does not have permission",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-create-unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "type": "BadRequest",
+            "violations": [
+              [
+                "folder",
+                "Invalid JSON payload received. Unknown name \"bogus\" at 'folder': Cannot find field."
+              ]
+            ]
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"bogus\" at 'folder': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "folder-get-missing": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.folders.get",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.folders.get' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-patch-missing": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.folders.update",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.folders.update' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-delete-missing": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.folders.delete",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.folders.delete' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-undelete-missing": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.folders.undelete",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.folders.undelete' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-policy-missing": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.folders.getIamPolicy",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.folders.getIamPolicy' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-set-policy-missing": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "resourcemanager.folders.setIamPolicy",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'resourcemanager.folders.setIamPolicy' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-move-missing": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "The caller does not have permission",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-permissions-missing": {
+        "body": {},
+        "http_status": 200
+      },
+      "operation-unknown-v1": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "operation-unknown-v3": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT"
+      }
+    }
+  }
+}

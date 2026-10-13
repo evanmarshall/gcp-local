@@ -182,6 +182,70 @@ func (e *Engine) Baseline(call gateway.Call, target Target) (Decision, error) {
 func (e *Engine) Authorize(call gateway.Call, target Target, features map[string]bool) (Decision, error) {
 	return e.evaluate(call, target, features, true)
 }
+
+// Permitted answers testIamPermissions: the subset of permissions, in request
+// order without repeats, that the caller holds on target through the same
+// ancestry, boundaries, deny rules, and bindings Authorize evaluates. GCP
+// requires no permission for the call itself, so a caller holding none gets
+// an empty list, not a denial. A permission the token's OAuth scopes don't
+// cover is not held. Credential refusals and an unverified hierarchy fail as
+// in Authorize.
+func (e *Engine) Permitted(call gateway.Call, target Target, permissions []string) ([]string, Decision, error) {
+	decision, err := newDecision(call, true)
+	if err != nil {
+		return nil, Decision{}, err
+	}
+	decision.conditions = conditionContext{ResourceName: target.Attributes.Name, ResourceType: target.Attributes.Type,
+		Service: target.Attributes.Service, Now: time.Now()}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	decision.memberships = e.directory.memberships(decision.Principal)
+	finish := func(outcome, reason string, code codes.Code) ([]string, Decision, error) {
+		decision.Outcome, decision.Reason = outcome, reason
+		e.remember(decision)
+		return nil, decision, refusal(code, reason)
+	}
+	if err := call.Context.Err(); err != nil {
+		return finish(outcomeCancelled, "Request context ended", status.FromContextError(err).Code())
+	}
+	if outcome, reason, code, refused := principalRefusal(decision.Principal); refused {
+		return finish(outcome, reason, code)
+	}
+	ancestors, reason, refused := e.ancestorGate(call, target)
+	if refused {
+		return finish(outcomeUnsupported, reason, codes.Unimplemented)
+	}
+	held := []string{}
+	if e.pabViolation(ancestors, decision.Principal) == "" {
+		held = e.heldPermissions(&decision, ancestors, permissions)
+	}
+	decision.Outcome, decision.Reason = outcomeAllow, "Tested permissions evaluated"
+	e.remember(decision)
+	return held, decision, nil
+}
+
+// heldPermissions records one check per distinct permission and returns
+// those allowed. A permission the token's scopes don't cover is not held.
+func (e *Engine) heldPermissions(decision *Decision, ancestors []state.Resource, permissions []string) []string {
+	held, seen := []string{}, map[string]bool{}
+	for _, permission := range permissions {
+		if seen[permission] {
+			continue
+		}
+		seen[permission] = true
+		check := e.evaluatePermission(decision, ancestors, permission, decision.Principal)
+		if decision.Principal.State == gateway.Authenticated && !scopesCover(decision.Principal.Scopes, []string{permission}) {
+			check.Allowed = false
+			check.Conditions = append(check.Conditions, scopeInsufficientMessage)
+		}
+		decision.Checks = append(decision.Checks, check)
+		if check.Allowed {
+			held = append(held, permission)
+		}
+	}
+	return held
+}
+
 func (e *Engine) evaluate(call gateway.Call, target Target, features map[string]bool, complete bool) (Decision, error) {
 	decision, err := newDecision(call, complete)
 	if err != nil {

@@ -1,6 +1,6 @@
 # Project IAM policy
 
-Resource Manager v1 `projects.getIamPolicy` and `projects.setIamPolicy` over REST, backed by the shared IAM engine. The scenario `project-iam-policy-binding` is recorded against GCP.
+Resource Manager v1 `projects.getIamPolicy`, `projects.setIamPolicy`, and `projects.testIamPermissions` over REST, backed by the shared IAM engine. The scenario `project-iam-policy-binding` is recorded against GCP. Folders, organizations, and the v3 project methods are in [Resource Manager](resourcemanager.md).
 
 ## Use
 
@@ -11,7 +11,8 @@ Select `-services ...,resourcemanager`. Routes are `POST /v1/projects/{project}:
 | Method | Notes |
 | --- | --- |
 | `projects.getIamPolicy` | Returns `bindings`, `etag`, `version` 1 |
-| `projects.setIamPolicy` | Replaces the policy; a stale `etag` is 409 `ABORTED` |
+| `projects.setIamPolicy` | Replaces the policy; a stale `etag` is 409 `ABORTED`; an `updateMask` must include `bindings` |
+| `projects.testIamPermissions` | The tested permissions the caller holds; needs no permission; not recorded on v1 |
 
 ## IAM
 

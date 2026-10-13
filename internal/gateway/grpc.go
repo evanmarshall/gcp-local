@@ -17,6 +17,7 @@ import (
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"cloud.google.com/go/run/apiv2/runpb"
 	"cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -34,6 +35,7 @@ import (
 	"github.com/evanmarshall/gcp-local/api/generated/run"
 	"github.com/evanmarshall/gcp-local/api/generated/security/cloudkms"
 	"github.com/evanmarshall/gcp-local/api/generated/security/iam"
+	"github.com/evanmarshall/gcp-local/api/generated/security/resourcemanager"
 	"github.com/evanmarshall/gcp-local/api/generated/security/secretmanager"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -65,6 +67,9 @@ func (g *Gateway) NewGRPCServer() *grpc.Server {
 	btadminpb.RegisterBigtableTableAdminServer(server, &bigtable.BigtableTableAdminServer{Dispatch: g})
 	iamadminpb.RegisterIAMServer(server, &iam.IAMServer{Dispatch: g})
 	credentialspb.RegisterIAMCredentialsServer(server, &iam.IAMCredentialsServer{Dispatch: g})
+	resourcemanagerpb.RegisterFoldersServer(server, &resourcemanager.FoldersServer{Dispatch: g})
+	resourcemanagerpb.RegisterOrganizationsServer(server, &resourcemanager.OrganizationsServer{Dispatch: g})
+	resourcemanagerpb.RegisterProjectsServer(server, &resourcemanager.ProjectsServer{Dispatch: g})
 	longrunningpb.RegisterOperationsServer(server, &mixin.OperationsServer{Dispatch: g})
 	return server
 }

@@ -323,19 +323,27 @@ func bindingRow(routes []route, m protoreflect.MethodDescriptor, id, restID stri
 	if len(unserved) > 0 {
 		others = "[]string{" + strings.Join(unserved, ",") + "}"
 	}
+	fieldName := ""
+	if field != "" {
+		fieldName = jsonName(m.Input(), strings.SplitN(field, ".", 2)[0])
+	}
 	return fmt.Sprintf("{RPC: %q, REST: %q, Verb: %q, Path: %q, Field: %q, Body: %q, Unserved: %s},\n", id, restID, verb, rulePath(rule),
-		jsonName(m.Input(), strings.SplitN(field, ".", 2)[0]), bodyName(m.Input(), rule.GetBody()), others)
+		fieldName, bodyName(m.Input(), rule.GetBody()), others)
 }
 
-// transcodedSelector reads a method's resource selector. A served method needs
-// exactly one resource variable. An unserved method only needs a selector for
-// its gap; one with no HTTP binding or no resource variable (IAM ListRoles,
-// Spanner InternalUpdateGraphOperation) has none and reaches the gap.
+// transcodedSelector reads a method's resource selector. A served method has
+// at most one resource variable; one with none (Resource Manager ListFolders
+// and SearchProjects at /v3/folders and /v3/projects:search) gets no
+// selector, and its provider authorizes the parent the request names. An
+// unserved method only needs a selector for its gap; one with no HTTP
+// binding or no resource variable (IAM ListRoles, Spanner
+// InternalUpdateGraphOperation) has none and reaches the gap.
 func transcodedSelector(id string, rule *annotations.HttpRule, served bool) (string, string) {
 	if served && rule == nil {
 		panic("Missing HTTP annotation for " + id)
 	}
-	if !served && (rule == nil || len(resourceVariable.FindAllStringSubmatch(rulePath(rule), -1)) != 1) {
+	variables := len(resourceVariable.FindAllStringSubmatch(rulePath(rule), -1))
+	if rule == nil || variables == 0 || !served && variables != 1 {
 		return "", ""
 	}
 	return bindingSelector(id, rule)

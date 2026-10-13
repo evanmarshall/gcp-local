@@ -99,6 +99,7 @@ func main() {
 	write("databases/bigtable/bigtable_table_admin_dispatch.go", transcodedDispatch(bigtableTableAdminRPC), *check)
 	write("security/iam/iam_admin_dispatch.go", transcodedDispatch(iamAdminRPC), *check)
 	write("security/iam/iam_credentials_dispatch.go", transcodedDispatch(iamCredentialsRPC), *check)
+	writeResourceManager(*check)
 	write("mixin/operations_dispatch.go", operationsDispatch(), *check)
 }
 
@@ -841,15 +842,6 @@ func artifactRegistryRoutes() []byte {
 		{"artifactregistry.repositories.setIamPolicy", http.MethodPost, base + "/repositories/{repository}:setIamPolicy", true, false},
 	}
 	return routeTable("ArtifactRegistryRoutes", "is the Artifact Registry v1 route table slice.", handWritten("main.go"), rows)
-}
-
-// resourceManagerRoutes generates the project IAM route slice.
-func resourceManagerRoutes() []byte {
-	rows := []route{
-		{"resourcemanager.projects.getIamPolicy", http.MethodPost, "/v1/projects/{project}:getIamPolicy", true, false},
-		{"resourcemanager.projects.setIamPolicy", http.MethodPost, "/v1/projects/{project}:setIamPolicy", true, false},
-	}
-	return routeTable("ResourceManagerRoutes", "is the project IAM route table slice.", handWritten("main.go"), rows)
 }
 
 // iamRoutes generates the IAM service-account and role route slice.

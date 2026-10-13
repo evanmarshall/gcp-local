@@ -364,7 +364,7 @@ func TestGRPCMapsProviderErrors(t *testing.T) {
 	// binds is a gap.
 	for name, message := range map[string]string{
 		"projects/demo-project/instances/i/operations/o": "Service spanner is not enabled on this server; add spanner to -services",
-		"operations/o": "No provider implements /google.longrunning.Operations/GetOperation",
+		"operations/o/p": "No provider implements /google.longrunning.Operations/GetOperation",
 	} {
 		_, err = operations.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: name})
 		if status.Code(err) != codes.Unimplemented || status.Convert(err).Message() != message {

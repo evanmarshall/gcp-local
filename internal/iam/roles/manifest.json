@@ -288,6 +288,51 @@
       "sha256": "4284d7aabd49fc9c9bd283cdf434cafbb65f1a5107096ff396d266b9f97c1385"
     },
     {
+      "file": "security/resourcemanager/resourcemanager.projectMover.json",
+      "name": "roles/resourcemanager.projectMover",
+      "sha256": "71f706f990154b070205bed9073a8920639665c62a57fe246022c30b231fc8fe"
+    },
+    {
+      "file": "security/resourcemanager/resourcemanager.folderAdmin.json",
+      "name": "roles/resourcemanager.folderAdmin",
+      "sha256": "204c01ee83ee01f1cfbc5f9382606e0753dec733fe47976145d809f206e91f65"
+    },
+    {
+      "file": "security/resourcemanager/resourcemanager.folderCreator.json",
+      "name": "roles/resourcemanager.folderCreator",
+      "sha256": "f044dddfb8fd87fd143d1452e175c06b7c684ac0af4d26c6abf98d776b8158ad"
+    },
+    {
+      "file": "security/resourcemanager/resourcemanager.folderEditor.json",
+      "name": "roles/resourcemanager.folderEditor",
+      "sha256": "1259fb06b3ca02a6697b4079b66792a712f06fc6a76013d8a9d7823d140ba1c4"
+    },
+    {
+      "file": "security/resourcemanager/resourcemanager.folderIamAdmin.json",
+      "name": "roles/resourcemanager.folderIamAdmin",
+      "sha256": "3ee757c41ddadbdd90cce01a9f8840446734758b62afc6625d636623ede5e520"
+    },
+    {
+      "file": "security/resourcemanager/resourcemanager.folderMover.json",
+      "name": "roles/resourcemanager.folderMover",
+      "sha256": "29d053f5a6ee933cefe860b4d8b9b486d343e842460e1d32a3ea586c95dfeb58"
+    },
+    {
+      "file": "security/resourcemanager/resourcemanager.folderViewer.json",
+      "name": "roles/resourcemanager.folderViewer",
+      "sha256": "945c813d480c41bf0b731306041fc019dae86c90115cf48b0d3ae4667b96e855"
+    },
+    {
+      "file": "security/resourcemanager/resourcemanager.organizationAdmin.json",
+      "name": "roles/resourcemanager.organizationAdmin",
+      "sha256": "5b6acd368de9d7b28d361d3e1d3e18d2be9009a69088967fb5f9fc7f9a573dfb"
+    },
+    {
+      "file": "security/resourcemanager/resourcemanager.organizationViewer.json",
+      "name": "roles/resourcemanager.organizationViewer",
+      "sha256": "79f5d56caed062e006444c1dea36b0bb78d24dbea8b1e3948668072ca58ae992"
+    },
+    {
       "file": "run/run.admin.json",
       "name": "roles/run.admin",
       "sha256": "e5ea7f0af28487fa9ba133a683309c7f5226b8446e3f6b360b2908eb1233086f"
