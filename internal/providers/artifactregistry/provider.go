@@ -2,8 +2,8 @@ package artifactregistry
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -15,12 +15,19 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// operationLatency is the minimum time from a request to its operation
+// reporting done. GCP's create and delete operations start not done
+// (recorded); local work finishes at once, so the latency makes clients poll.
+const operationLatency = 500 * time.Millisecond
+
 // Provider owns the Artifact Registry control plane and repository state.
 type Provider struct {
-	index  *state.Index
-	engine *iam.Engine
-	scopes *state.Store[scopeState]
-	clock  func() time.Time
+	index      *state.Index
+	engine     *iam.Engine
+	gate       provider.Gate
+	scopes     *state.Store[scopeState]
+	operations *provider.Operations
+	clock      func() time.Time
 }
 
 // New registers the Artifact Registry provider.
@@ -33,8 +40,11 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	p := &Provider{
 		index: index, engine: engine,
-		scopes: state.NewStore(newScopeState, state.GlobalScope),
-		clock:  time.Now,
+		gate:   provider.Gate{Engine: engine, Index: index, Message: denial, Domain: "artifactregistry.googleapis.com"},
+		scopes: state.NewStore(newScopeState, validLocation),
+		// Operation names share Memorystore's REST path; the prefix routes them.
+		operations: provider.NewOperations(validLocation, operationLatency, operationMetadata).WithPrefix(operationPrefix),
+		clock:      time.Now,
 	}
 	if err := p.registerBackend(manager, engine, index); err != nil {
 		return nil, err
@@ -47,10 +57,10 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	return p, nil
 }
 
-// registerBackend attaches the in-memory backend and its reset hook.
+// registerBackend attaches the metadata-only backend and its reset hook.
 func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine, index *state.Index) error {
 	if err := manager.Register(serviceName, backend.Definition{
-		Validate: state.GlobalScope,
+		Validate: validLocation,
 		New:      provider.NoBackend,
 		AfterReset: func(scope state.Scope) error {
 			if err := p.Reset(scope); err != nil {
@@ -66,12 +76,9 @@ func (p *Provider) registerBackend(manager *backend.Manager, engine *iam.Engine,
 	return nil
 }
 
-// Reset clears the scope's repositories.
+// Reset clears one location's repositories and operations.
 func (p *Provider) Reset(scope state.Scope) error {
-	if err := p.scopes.With(scope, func(s *scopeState) error {
-		s.reset()
-		return nil
-	}); err != nil {
+	if err := errors.Join(p.scopes.Reset(scope), p.operations.Reset(scope)); err != nil {
 		return fmt.Errorf("clear the artifactregistry scope: %w", err)
 	}
 	return nil
@@ -83,30 +90,13 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Artifact Registry request")
 	}
-	scope, target, err := p.resolve(call, request)
+	scope := state.Scope{Project: request.Path[pathProject], Location: request.Path[pathLocation]}
+	if err := validLocation(scope); err != nil {
+		return nil, gap(fmt.Sprintf("location %q", scope.Location))
+	}
+	decision, target, err := p.authorize(call, request, scope)
 	if err != nil {
 		return nil, err
-	}
-	// An addressed repository's existence check and authorization share one
-	// scope lock, and delete removes the index entry under that lock, so a
-	// request racing a delete sees NOT_FOUND rather than an unverified target.
-	var decision iam.Decision
-	var authorizeErr error
-	authorize := func(*scopeState, *repositoryRecord) error {
-		decision, authorizeErr = p.engine.Authorize(call, target, nil)
-		return nil
-	}
-	if target.Name == provider.ProjectResource(scope.Project) {
-		_ = authorize(nil, nil)
-	} else if err := p.withRepository(scope, request.Path["repository"], authorize); err != nil {
-		return nil, err
-	}
-	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-		}
-		return provider.Denied(decision, target.Name), nil
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -114,29 +104,66 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
-// resolve derives the scope and IAM target for one request.
-func (p *Provider) resolve(call gateway.Call, request *gateway.RESTRequest) (state.Scope, iam.Target, error) {
-	project := request.Path["project"]
-	scope := provider.ProjectScope(project)
-	target := iam.Target{Name: provider.ProjectResource(project)}
-	repository := request.Path["repository"]
+// authorize checks the call before any state changes. Create and list are
+// checked on the project and reported on the location (recorded); a
+// repository method is checked on the repository when it exists, else on the
+// project, under the scope lock delete also holds, so a missing repository
+// reads 404 only for a caller allowed to see it.
+func (p *Provider) authorize(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (iam.Decision, iam.Target, error) {
+	project := iam.Target{Name: provider.ProjectResource(scope.Project)}
 	switch call.Method {
 	case methodReposCreate, methodReposList:
-		return scope, target, nil
-	case methodReposGet, methodReposUpdate, methodReposDelete, methodReposGetIam, methodReposSetIam:
-		if !uid.MatchString(repository) {
-			return scope, target, status.Errorf(codes.InvalidArgument, "Invalid repository id %q", repository)
+		decision, err := p.gate.Check(call, project, provider.LocationName(scope))
+		return decision, project, err
+	case methodOpsGet:
+		decision, err := p.gate.Check(call, project, provider.LocationName(scope))
+		if status.Code(err) == codes.PermissionDenied {
+			err = operationDenied(scope, operationPrefix+request.Path[pathOperation])
 		}
-		target.Name = repositoryResource(project, repository)
-		return scope, target, nil
+		return decision, project, err
 	default:
-		return scope, target, status.Errorf(codes.Internal, "Unknown Artifact Registry method %s", call.Method)
+		repository := request.Path[pathRepository]
+		if !uid.MatchString(repository) {
+			return iam.Decision{}, project, status.Errorf(codes.InvalidArgument, "Invalid repository id %q", repository)
+		}
+		decision, target, err := provider.Nearest(p.gate, p.scopes, scope, call, repositoryName(scope, repository),
+			repositoryResource(scope, repository), project.Name)
+		return decision, target, err
+	}
+}
+
+// execute dispatches one authorized request.
+func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
+	repository := request.Path[pathRepository]
+	switch call.Method {
+	case methodReposCreate:
+		return p.repositoriesCreate(request, scope)
+	case methodReposGet:
+		return p.repositoriesGet(scope, repository)
+	case methodReposList:
+		return p.repositoriesList(request, scope)
+	case methodReposUpdate:
+		return p.repositoriesUpdate(request, scope)
+	case methodReposDelete:
+		return p.repositoriesDelete(scope, repository)
+	case methodOpsGet:
+		return p.operation(scope, operationPrefix+request.Path[pathOperation])
+	default:
+		// The policy is read or written under the repository's lock, so a
+		// racing delete cannot unregister it in between.
+		var response *gateway.RESTResponse
+		err := p.withRepository(scope, repository, func(*scopeState, *repositoryRecord) error {
+			var policyErr error
+			if call.Method == methodReposGetIam {
+				response, policyErr = p.getIam(target)
+			} else {
+				response, policyErr = p.setIam(request, target)
+			}
+			return policyErr
+		})
+		return response, err
 	}
 }

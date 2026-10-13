@@ -8,16 +8,16 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/providers/provider/providertest"
 )
 
-// TestPatchIsAtomic rejects a mask with one bad field without applying the
-// good one.
+// TestPatchIsAtomic refuses a mask with one unmodeled path without applying
+// the modeled one.
 func TestPatchIsAtomic(t *testing.T) {
 	h := newHarness(t)
 	repository := testBase + "/" + testRepo
 	if recorder := h.invoke(http.MethodPost, testBase+"?repositoryId="+testRepo, map[string]any{"format": "DOCKER", "description": "before"}); recorder.Code != 200 {
 		t.Fatalf("create status = %d", recorder.Code)
 	}
-	if recorder := h.invoke(http.MethodPatch, repository+"?updateMask=description,bogus", map[string]any{"description": "after"}); recorder.Code != 400 {
-		t.Fatalf("bad-mask patch status = %d", recorder.Code)
+	if recorder := h.invoke(http.MethodPatch, repository+"?updateMask=description,cleanupPolicies", map[string]any{"description": "after"}); recorder.Code != 501 {
+		t.Fatalf("unmodeled-mask patch status = %d", recorder.Code)
 	}
 	if body := h.invoke(http.MethodGet, repository, nil).Body.String(); !strings.Contains(body, `"description":"before"`) {
 		t.Fatalf("a rejected patch changed the repository: %s", body)
@@ -34,7 +34,8 @@ func TestConcurrentRepositoryRequests(t *testing.T) {
 			{Method: http.MethodPost, Path: testBase + "?repositoryId=" + testRepo, Body: map[string]any{"format": "DOCKER"}, Want: []int{200, 409}},
 			{Method: http.MethodGet, Path: repository, Want: []int{200, 404}},
 			{Method: http.MethodGet, Path: testBase, Want: []int{200}},
-			{Method: http.MethodPatch, Path: repository, Body: map[string]any{"description": "worker", "labels": map[string]string{"worker": "w"}}, Want: []int{200, 404}},
+			{Method: http.MethodPatch, Path: repository + "?updateMask=description,labels", Body: map[string]any{"description": "worker", "labels": map[string]string{"worker": "w"}}, Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: "/v1/projects/" + testProject + "/locations/us-east1/repositories", Want: []int{200}},
 			{Method: http.MethodGet, Path: repository + ":getIamPolicy", Want: []int{200, 404}},
 			{Method: http.MethodDelete, Path: repository, Want: []int{200, 404}},
 		}

@@ -1,7 +1,27 @@
 {
   "artifactregistry-repository-lifecycle": {
-    "recorded-date": "12-10-2026, 17:33:31",
+    "recorded-date": "13-10-2026, 01:36:18",
     "recorded-content": {
+      "create-started": {
+        "done": false,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.devtools.artifactregistry.v1.OperationMetadata"
+      },
+      "operation-get": {
+        "http_status": 200,
+        "same_name": true
+      },
+      "operation-missing": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission denied on operation <operation-prefix>000000000000 (or it may not exist)",
+        "status": "PERMISSION_DENIED"
+      },
       "create-operation": {
         "done": true,
         "error": null,
@@ -49,8 +69,98 @@
       },
       "denied-read": {
         "code": 403,
+        "details": [
+          {
+            "domain": "artifactregistry.googleapis.com",
+            "metadata": {
+              "permission": "artifactregistry.repositories.get",
+              "resource": "projects/<project>/locations/us-central1/repositories/<repository>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'artifactregistry.repositories.get' denied on resource '//artifactregistry.googleapis.com/projects/<project>/locations/us-central1/repositories/<repository>' (or it may not exist).",
         "status": "PERMISSION_DENIED"
+      },
+      "denied-list": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "artifactregistry.googleapis.com",
+            "metadata": {
+              "permission": "artifactregistry.repositories.list",
+              "resource": "projects/<project>/locations/us-central1"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'artifactregistry.repositories.list' denied on resource '//artifactregistry.googleapis.com/projects/<project>/locations/us-central1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "second-location-read": {
+        "fields": [
+          "createTime",
+          "description",
+          "format",
+          "labels",
+          "mode",
+          "name",
+          "registryUri",
+          "satisfiesPzi",
+          "updateTime",
+          "vulnerabilityScanningConfig"
+        ],
+        "http_status": 200,
+        "name": "projects/<project>/locations/us-east1/repositories/<repository>",
+        "registryUri": "us-east1-docker.pkg.dev/<project>/<repository>"
+      },
+      "list-first-location": {
+        "http_status": 200,
+        "names": [
+          "projects/<project>/locations/us-central1/repositories/<repository>",
+          "projects/<project>/locations/us-central1/repositories/<repository>-b"
+        ]
+      },
+      "list-second-location": {
+        "http_status": 200,
+        "names": [
+          "projects/<project>/locations/us-east1/repositories/<repository>"
+        ]
+      },
+      "pages": {
+        "first": [
+          "projects/<project>/locations/us-central1/repositories/<repository>"
+        ],
+        "first_has_next": true,
+        "second": [
+          "projects/<project>/locations/us-central1/repositories/<repository>-b"
+        ],
+        "second_has_next": false
+      },
+      "order-name-desc": {
+        "http_status": 200,
+        "names": [
+          "projects/<project>/locations/us-central1/repositories/<repository>-b",
+          "projects/<project>/locations/us-central1/repositories/<repository>"
+        ]
+      },
+      "bad-page-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Request contains an invalid argument.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "negative-page-size": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Invalid page size: -1",
+        "status": "INVALID_ARGUMENT"
       },
       "policy-read": {
         "bindings": null,
@@ -58,6 +168,13 @@
           "etag"
         ],
         "http_status": 200
+      },
+      "conditional-policy": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Can't set conditional policy on this resource",
+        "status": "INVALID_ARGUMENT"
       },
       "reader-granted": {
         "bindings": [
@@ -93,7 +210,19 @@
       },
       "allowed-cannot-update": {
         "code": 403,
+        "details": [
+          {
+            "domain": "artifactregistry.googleapis.com",
+            "metadata": {
+              "permission": "artifactregistry.repositories.update",
+              "resource": "projects/<project>/locations/us-central1/repositories/<repository>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'artifactregistry.repositories.update' denied on resource '//artifactregistry.googleapis.com/projects/<project>/locations/us-central1/repositories/<repository>' (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "patched": {
@@ -115,12 +244,56 @@
           "managed-by": "gcp-local"
         }
       },
+      "patch-unknown-mask": {
+        "description": "gcp-local renamed",
+        "fields": [
+          "createTime",
+          "description",
+          "format",
+          "labels",
+          "mode",
+          "name",
+          "satisfiesPzi",
+          "updateTime",
+          "vulnerabilityScanningConfig"
+        ],
+        "http_status": 200
+      },
+      "patch-without-mask": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Repository format cannot be changed",
+        "status": "INVALID_ARGUMENT"
+      },
       "duplicate-create": {
         "code": 409,
         "http_status": 409,
         "status": "ALREADY_EXISTS"
       },
       "invalid-format": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"notAField\" at 'repository': Cannot find field.",
+                "field": "repository"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"notAField\" at 'repository': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "mistyped-field": {
         "code": 400,
         "http_status": 400,
         "status": "INVALID_ARGUMENT"
@@ -142,7 +315,9 @@
       },
       "absent": {
         "code": 404,
+        "details": [],
         "http_status": 404,
+        "message": "Requested entity was not found.",
         "status": "NOT_FOUND"
       },
       "cleanup": {

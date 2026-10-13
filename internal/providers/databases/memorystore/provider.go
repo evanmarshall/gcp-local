@@ -120,7 +120,7 @@ func (p *Provider) authorize(call gateway.Call, path map[string]string, scope st
 	target := iam.Target{Name: provider.ProjectResource(scope.Project)}
 	switch call.Method {
 	case methodCreate, methodList:
-		target.Attributes = iam.ResourceAttributes{Name: locationName(scope), Service: redisService}
+		target.Attributes = iam.ResourceAttributes{Name: provider.LocationName(scope), Service: redisService}
 	case methodOperationGet, methodOperationList, methodOperationStop, methodOperationDrop:
 	default:
 		target.Attributes = iam.ResourceAttributes{Name: instanceName(scope, path[pathInstance]), Service: redisService}
@@ -133,9 +133,9 @@ func addressed(method string, path map[string]string) string {
 	scope := state.Scope{Project: path[pathProject], Location: path[pathLocation]}
 	switch method {
 	case methodCreate, methodOperationList:
-		return locationName(scope)
+		return provider.LocationName(scope)
 	case methodList:
-		return locationName(scope) + "/instances" // recorded
+		return provider.LocationName(scope) + "/instances" // recorded
 	case methodOperationGet, methodOperationStop, methodOperationDrop:
 		return provider.OperationName(scope, path[pathOperation])
 	default:

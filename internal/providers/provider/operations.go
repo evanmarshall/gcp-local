@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -44,6 +45,7 @@ type Operations struct {
 	newest   bool          // List renders the newest operation first
 	changed  chan struct{} // closed and replaced on every Finish or Cancel
 	mu       sync.Mutex    // guards changed
+	prefix   string        // starts every ID; "operation-" unless WithPrefix set it
 }
 
 type operationLog struct {
@@ -88,6 +90,16 @@ func (o *Operations) NewestFirst() *Operations {
 	return o
 }
 
+// WithPrefix makes Start issue IDs that begin with prefix rather than
+// "operation-". Two services whose operations share a REST path (Artifact
+// Registry and Memorystore both serve /v1/projects/*/locations/*/operations/*
+// on the path-only gateway) route each ID by its prefix. Call it before the
+// first Start.
+func (o *Operations) WithPrefix(prefix string) *Operations {
+	o.prefix = prefix
+	return o
+}
+
 // Launch describes one operation Start records: the resource and action its
 // metadata reports, an optional metadata payload the renderer sees as
 // Operation.Metadata (the store keeps the map, so the caller must not change
@@ -111,7 +123,7 @@ func (o *Operations) Start(scope state.Scope, launch Launch) (string, error) {
 	raw := make([]byte, 8)
 	_, _ = rand.Read(raw)
 	now := time.Now().UTC()
-	id := "operation-" + strconv.FormatInt(now.UnixMilli(), 10) + "-" + hex.EncodeToString(raw)
+	id := cmp.Or(o.prefix, "operation-") + strconv.FormatInt(now.UnixMilli(), 10) + "-" + hex.EncodeToString(raw)
 	err := o.store.With(scope, func(log *operationLog) error {
 		log.records[id] = &operationRecord{latency: latency, Operation: Operation{Name: o.name(scope, launch.Target, id),
 			Target: launch.Target, Verb: launch.Verb, Created: now, Metadata: launch.Metadata}}
@@ -120,6 +132,24 @@ func (o *Operations) Start(scope state.Scope, launch Launch) (string, error) {
 		return nil
 	})
 	return id, err //nolint:wrapcheck // the store's scope refusal is a wire status
+}
+
+// Run runs work as one operation on target: Start before it, Finish with
+// its response ("@type" included) after it. When work fails the operation is
+// deleted and the error returned, so a refused mutation leaves none. It
+// returns the operation's ID.
+func (o *Operations) Run(scope state.Scope, target, verb string, work func() (map[string]any, error)) (string, error) {
+	id, err := o.Start(scope, Launch{Target: target, Verb: verb})
+	if err != nil {
+		return "", err
+	}
+	response, err := work()
+	if err != nil {
+		_ = o.Delete(scope, id)
+		return "", err
+	}
+	o.Finish(scope, id, response, nil)
+	return id, nil
 }
 
 // Finish completes an operation's work with its response ("@type"

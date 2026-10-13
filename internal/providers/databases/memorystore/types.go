@@ -108,12 +108,7 @@ func validScope(scope state.Scope) error {
 var errRegion = errors.New("memorystore locations are regions")
 
 func instanceName(scope state.Scope, instance string) string {
-	return locationName(scope) + "/instances/" + instance
-}
-
-// locationName is the relative name of a region.
-func locationName(scope state.Scope) string {
-	return "projects/" + scope.Project + "/locations/" + scope.Location
+	return provider.LocationName(scope) + "/instances/" + instance
 }
 
 // redisService is the resource.service IAM Conditions see.

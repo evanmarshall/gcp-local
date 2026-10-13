@@ -5,7 +5,6 @@
 1	ANN202	gcp_validation/sandbox.py
 1	ANN202	gcp_validation/services/messaging/pubsub.py
 1	ANN202	gcp_validation/services/storage/sdk_slice.py
-1	ANN204	gcp_validation/services/artifactregistry.py
 1	ANN204	gcp_validation/services/compute/networking.py
 1	ANN204	gcp_validation/services/compute/vm_connectivity.py
 1	ANN204	gcp_validation/services/databases/bigquery.py
@@ -21,7 +20,6 @@
 1	ANN206	gcp_validation/sandbox.py
 1	ANN206	gcp_validation/services/messaging/pubsub_scope.py
 1	ANN206	gcp_validation/services/security/secretmanager.py
-1	ARG001	gcp_validation/services/artifactregistry.py
 1	BLE001	gcp_validation/sandbox.py
 1	C901	gcp_validation/sandbox.py
 1	C901	gcp_validation/services/compute/networking.py
@@ -38,7 +36,6 @@
 1	D103	gcp_validation/federation.py
 1	D103	gcp_validation/services/messaging/pubsub.py
 1	D103	gcp_validation/services/messaging/pubsub_scope.py
-1	D107	gcp_validation/services/artifactregistry.py
 1	D107	gcp_validation/services/compute/networking.py
 1	D107	gcp_validation/services/compute/vm_connectivity.py
 1	D107	gcp_validation/services/databases/bigquery.py
@@ -55,7 +52,6 @@
 1	D209	gcp_validation/services/compute/networking.py
 1	D209	gcp_validation/services/compute/vm_connectivity.py
 1	D209	gcp_validation/services/security/cloudkms.py
-1	D401	gcp_validation/services/artifactregistry.py
 1	D401	gcp_validation/services/compute/vm_connectivity.py
 1	D401	gcp_validation/services/databases/bigquery.py
 1	D401	gcp_validation/services/messaging/cloudtasks.py
@@ -124,10 +120,8 @@
 1	TRY004	gcp_validation/live_rest.py
 1	TRY004	gcp_validation/services/security/secretmanager.py
 1	TRY004	gcp_validation/services/storage/normalization.py
-10	ANN201	gcp_validation/services/artifactregistry.py
 10	ANN201	gcp_validation/services/security/projectiam.py
 10	ANN201	gcp_validation/services/security/secretmanager.py
-10	E501	gcp_validation/services/artifactregistry.py
 11	ANN201	gcp_validation/services/databases/bigquery.py
 11	ANN201	gcp_validation/services/security/cloudkms.py
 11	PLC0415	gcp_validation/services/messaging/pubsub.py
@@ -140,7 +134,6 @@
 17	ANN201	gcp_validation/services/compute/networking.py
 17	ANN201	gcp_validation/services/storage/client.py
 17	E501	gcp_validation/services/storage/client.py
-19	ANN001	gcp_validation/services/artifactregistry.py
 19	ANN001	gcp_validation/services/compute/vm_connectivity.py
 19	ANN001	gcp_validation/services/messaging/cloudtasks.py
 19	ANN001	gcp_validation/services/security/projectiam.py
@@ -182,7 +175,6 @@
 3	D102	gcp_validation/services/security/serviceaccounts.py
 3	D102	gcp_validation/services/storage/authorization.py
 3	D103	gcp_validation/sandbox.py
-3	D103	gcp_validation/services/artifactregistry.py
 3	D103	gcp_validation/services/storage/sdk_slice.py
 3	D107	gcp_validation/live_rest.py
 3	D107	gcp_validation/services/messaging/pubsub.py
@@ -217,7 +209,6 @@
 5	ANN201	gcp_validation/services/security/serviceaccounts.py
 5	ANN201	gcp_validation/services/storage/conditions.py
 5	ANN201	gcp_validation/services/storage/normalization.py
-5	D102	gcp_validation/services/artifactregistry.py
 5	D102	gcp_validation/services/compute/networking.py
 5	D102	gcp_validation/services/security/cloudkms.py
 5	D102	gcp_validation/services/security/projectiam.py

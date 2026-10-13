@@ -12,4 +12,5 @@ var ArtifactRegistryRoutes = []contract.Route{
 	{Method: "artifactregistry.repositories.delete", Verb: "DELETE", Path: "/v1/projects/{project}/locations/{location}/repositories/{repository}", JSONBody: false, Media: false},
 	{Method: "artifactregistry.repositories.getIamPolicy", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}/repositories/{repository}:getIamPolicy", JSONBody: false, Media: false},
 	{Method: "artifactregistry.repositories.setIamPolicy", Verb: "POST", Path: "/v1/projects/{project}/locations/{location}/repositories/{repository}:setIamPolicy", JSONBody: true, Media: false},
+	{Method: "artifactregistry.projects.locations.operations.get", Verb: "GET", Path: "/v1/projects/{project}/locations/{location}/operations/artifactregistry-{operation}", JSONBody: false, Media: false},
 }

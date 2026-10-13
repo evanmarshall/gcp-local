@@ -857,6 +857,9 @@ func artifactRegistryRoutes() []byte {
 		{"artifactregistry.repositories.delete", http.MethodDelete, base + "/repositories/{repository}", false, false},
 		{"artifactregistry.repositories.getIamPolicy", http.MethodGet, base + "/repositories/{repository}:getIamPolicy", false, false},
 		{"artifactregistry.repositories.setIamPolicy", http.MethodPost, base + "/repositories/{repository}:setIamPolicy", true, false},
+		// Memorystore serves the same path; the literal ID prefix, which the
+		// provider gives its operations, routes them here.
+		{"artifactregistry.projects.locations.operations.get", http.MethodGet, base + "/operations/artifactregistry-{operation}", false, false},
 	}
 	return routeTable("ArtifactRegistryRoutes", "is the Artifact Registry v1 route table slice.", handWritten("main.go"), rows)
 }

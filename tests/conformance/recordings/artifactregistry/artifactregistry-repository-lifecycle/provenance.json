@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:33:31.152784+00:00",
+  "recorded_at": "2026-10-13T01:36:18.062427+00:00",
   "scenario": {
     "id": "artifactregistry-repository-lifecycle",
     "service": "artifactregistry",
     "transport": "rest-v1",
-    "revision": "07c9f004e98a43461a05e9d9780a71e1155e48a6dba59f4490e4f223eaa72746",
+    "revision": "1966fda373ce4c3cdc7624d0c88d505361b12706da0fc8fb5f2ddaf473f7e317",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "ac549b90cbde71bbeee4e10bee52ec5b915acb3339970c5610d8c02b8f7d00ff",
+  "snapshot_sha256": "38f37e85a15ada6fc67091f1df0b6b10543c4c1616d8451e04f5a8cf2563a656",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,7 +22,9 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/artifactregistry.py": "5aeb3e7e82ee832c9af0eb237b0a1ab0709cde1ac4b52627046c8d03140210c6",
+      "gcp_validation/services/artifactregistry.py": "3795f12f69c29568412ff925fe22d7d7944ec4f0568dc9faec2622aaf188a6cb",
+      "gcp_validation/services/denials.py": "e84ffee7cc1328868f18c1b7ccfc55c27b604031bcc9344fae5ab8ae1cf9a3ea",
+      "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "tests/conformance/artifactregistry/conftest.py": "fce45579689ada01f839185961f4df2911ac85637cb647d54f6a57ebb31e57e8"
@@ -33,7 +35,7 @@
       ],
       "location": "global",
       "limits": {
-        "max_repositories": 1,
+        "max_repositories": 3,
         "max_artifacts": 0,
         "max_run_seconds": 600
       },

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,5 +203,34 @@ func TestOperationMetadataAndNewestFirst(t *testing.T) {
 	items, _ := listed["operations"].([]map[string]any)
 	if err != nil || len(items) != 2 || items[0]["name"] != OperationName(regionA, second) {
 		t.Fatalf("newest first = %v, %v", listed, err)
+	}
+}
+
+func TestOperationIDsTakeTheStorePrefix(t *testing.T) {
+	plain, err := newTestOperations(0).Start(regionA, Launch{Target: "target", Verb: "create"})
+	if err != nil || !strings.HasPrefix(plain, "operation-") {
+		t.Fatalf("default ID %q %v", plain, err)
+	}
+	prefixed, err := newTestOperations(0).WithPrefix("artifactregistry-").Start(regionA, Launch{Target: "target", Verb: "create"})
+	if err != nil || !strings.HasPrefix(prefixed, "artifactregistry-") {
+		t.Fatalf("prefixed ID %q %v", prefixed, err)
+	}
+}
+
+func TestRunKeepsOnlySucceededOperations(t *testing.T) {
+	ops := newTestOperations(0)
+	id, err := ops.Run(regionA, "target", "create", func() (map[string]any, error) {
+		return map[string]any{"@type": "test.Instance"}, nil
+	})
+	if body, getErr := ops.Get(regionA, id); err != nil || getErr != nil || body["done"] != true || body["response"] == nil {
+		t.Fatalf("succeeded run: %v %v %v", body, err, getErr)
+	}
+	refused := status.Error(codes.InvalidArgument, "refused")
+	if _, err := ops.Run(regionA, "target", "create", func() (map[string]any, error) { return nil, refused }); !errors.Is(err, refused) {
+		t.Fatalf("failed run returned %v", err)
+	}
+	body, _ := ops.List(regionA, url.Values{}, Paging{Default: 10, Max: 10}, nil)
+	if listed, _ := body["operations"].([]map[string]any); len(listed) != 1 {
+		t.Fatalf("a failed run left an operation: %v", body)
 	}
 }

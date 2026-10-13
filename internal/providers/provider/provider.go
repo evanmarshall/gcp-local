@@ -121,6 +121,11 @@ func InstanceName(project, instance string) string {
 	return "projects/" + project + "/instances/" + instance
 }
 
+// LocationName is the relative name of a project location.
+func LocationName(scope state.Scope) string {
+	return "projects/" + scope.Project + "/locations/" + scope.Location
+}
+
 // OperationName is the relative name of a long-running operation in a location.
 func OperationName(scope state.Scope, id string) string {
 	return "projects/" + scope.Project + "/locations/" + scope.Location + "/operations/" + id
