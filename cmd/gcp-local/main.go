@@ -38,6 +38,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/providers/messaging/pubsub"
 	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/security/cloudkms"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/security/iam"
+	orgpolicyprovider "github.com/evanmarshall/gcp-local/internal/providers/security/orgpolicy"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/resourcemanager"
 	secretmanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -141,7 +142,7 @@ func parseServeFlags(args []string, errors io.Writer) (serveOptions, bool) {
 	flags.StringVar(&options.grpcTLSDir, "grpc-tls-dir", "", "owner-only directory holding the gRPC TLS CA and server key; created with new material when missing")
 	flags.DurationVar(&options.shutdown, "shutdown-timeout", 10*time.Second, "maximum duration to drain requests")
 	flags.StringVar(&options.iamPath, "iam-config", "", "owner-only local hierarchy and IAM policy configuration")
-	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager,iam,logging,vertexai,cloudtasks,cloudscheduler")
+	flags.StringVar(&options.services, "services", "", "comma-separated explicit services: storage,pubsub,kms,firestore,bigquery,spanner,bigtable,artifactregistry,resourcemanager,orgpolicy,iam,logging,vertexai,cloudtasks,cloudscheduler")
 	flags.StringVar(&options.vertex.Backend, "vertex-backend", "stub", "Vertex AI model backend: stub (deterministic, default) or ollama")
 	flags.StringVar(&options.vertex.OllamaURL, "vertex-ollama-url", "", "Ollama server URL for -vertex-backend=ollama, e.g. http://127.0.0.1:11434")
 	flags.Var(modelMap{&options.vertex.Models}, "vertex-model", "Vertex AI model ID=Ollama model, e.g. gemini-2.5-flash=llama3.2; * matches any ID; repeatable")
@@ -331,6 +332,7 @@ var standardProviders = []standardProvider{
 	{"bigtable", "Bigtable", discard(bigtableprovider.New)},
 	{"artifactregistry", "Artifact Registry", discard(artifactregistryprovider.New)},
 	{"resourcemanager", "resourcemanager", discard(resourcemanagerprovider.New)},
+	{"orgpolicy", "Organization Policy", discard(orgpolicyprovider.New)},
 }
 
 // assembleStandard registers the selected standard providers.

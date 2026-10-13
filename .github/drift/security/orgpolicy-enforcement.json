@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "approved": true,
+  "services": [
+    "orgpolicy-enforcement"
+  ],
+  "project": "gcp-local-stitchwink-dev",
+  "project_number": "482773321601",
+  "location": "global",
+  "limits": {
+    "max_buckets": 1,
+    "max_service_accounts": 1,
+    "max_keys": 0,
+    "max_run_seconds": 900
+  },
+  "cleanup_required": true,
+  "scheduled_runs": true
+}

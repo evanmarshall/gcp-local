@@ -3,6 +3,7 @@ package iam_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -20,6 +23,7 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // mustMarshal encodes a fixture value or fails the test.
@@ -601,42 +605,188 @@ func TestDenyRulesOverrideAllowBindings(t *testing.T) {
 	}
 }
 
-func TestOrgPolicyAndVPCSCSignalDistinctFromIAMDenial(t *testing.T) {
-	engine, _ := setup(t)
-	// A granted user read plus a dry-run org-policy violation and a perimeter.
-	if err := engine.MarkOrgPolicy(projectA, "constraints/storage.publicAccessPrevention", true); err != nil {
+// declare stores one organization policy given in the v2 JSON form.
+func declare(t *testing.T, engine *iam.Engine, text string) {
+	t.Helper()
+	policy := &orgpolicypb.Policy{}
+	if err := protojson.Unmarshal([]byte(text), policy); err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.MarkPerimeter("local-perimeter", []string{projectA, object().Parent}); err != nil {
+	if err := engine.DeclareOrgPolicy(policy, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	read := call("storage.objects.get", fixture, testProject)
-	decision, err := engine.Authorize(read, object(), nil)
+}
+
+// signals returns the remembered decision's signals by verdict.
+func signals(t *testing.T, engine *iam.Engine, id string) map[string]iam.Signal {
+	t.Helper()
+	remembered, ok := engine.Decision(id)
+	if !ok {
+		t.Fatal("decision was not remembered")
+	}
+	byVerdict := map[string]iam.Signal{}
+	for _, signal := range remembered.Signals {
+		byVerdict[signal.Family+" "+signal.Verdict] = signal
+	}
+	return byVerdict
+}
+
+// memberWrites declares domain-restricted sharing on the organization over a
+// bucket that already grants allUsers, authorizes a policy write, and returns
+// the engine, the decision, and a write that adds members under it and
+// returns the violation (failing on any other error).
+func memberWrites(t *testing.T) (*iam.Engine, iam.Decision, func(...string) *iam.OrgPolicyError) {
+	t.Helper()
+	engine, index := setupWith(t, iam.Directory{CustomerID: "C0local01", Domains: []string{"example.com"}})
+	bucket := storage.BucketResource("bucket-a")
+	// A numbered project, whose Google-managed service agents belong too.
+	if err := index.Put(resourceManagerService, state.Resource{Name: "//cloudresourcemanager.googleapis.com/projects/project-c", Service: resourceManagerService,
+		Kind: kindProject, Number: "123456", Parent: org, Scope: state.Scope{Project: "project-c", Location: state.Global}}); err != nil {
+		t.Fatal(err)
+	}
+	// Not retroactive: a public member granted before the constraint stays.
+	if _, err := engine.SetPolicy(bucket, iam.Policy{Bindings: []iam.Binding{{Role: testViewerRole, Members: []string{"allUsers"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	declare(t, engine, `{"name":"organizations/local-org/policies/iam.allowedPolicyMemberDomains","spec":{"rules":[{"values":{"allowedValues":["C0local01"]}}]}}`)
+	decision, err := engine.Authorize(call("storage.buckets.setIamPolicy", fixture, testProject), iam.Target{Name: bucket}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The perimeter covers both the bucket and the project, so the bucket
-	// contributes one vpc-sc signal and the project contributes the org-policy
-	// violation plus a second perimeter signal.
-	if len(decision.Signals) != 3 {
-		t.Fatalf("signals = %+v", decision.Signals)
+	write := func(members ...string) *iam.OrgPolicyError {
+		current, err := engine.GetPolicy(bucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current.Bindings = append(current.Bindings, iam.Binding{Role: "roles/storage.objectUser", Members: members})
+		_, err = engine.SetPolicyFor(decision.ID, bucket, current)
+		violation, ok := errors.AsType[*iam.OrgPolicyError](err)
+		if err != nil && !ok {
+			t.Fatal(err)
+		}
+		return violation
 	}
-	byFamily := map[string]iam.Signal{}
-	for _, signal := range decision.Signals {
-		byFamily[signal.Family] = signal
+	return engine, decision, write
+}
+
+func TestMemberDomainsAdmitTheCustomersMembers(t *testing.T) {
+	_, _, write := memberWrites(t)
+	for _, member := range []string{"user:dev@example.com", peer, "serviceAccount:service-123456@gcp-sa-pubsub.iam.gserviceaccount.com",
+		"serviceAccount:service-123456@gs-project-accounts.iam.gserviceaccount.com", "serviceAccount:123456-compute@developer.gserviceaccount.com"} {
+		if violation := write(member); violation != nil {
+			t.Fatalf("%s: %v", member, violation)
+		}
 	}
-	if byFamily["org-policy"].Verdict != "dry-run violation" {
-		t.Fatalf("org-policy signal = %+v", byFamily["org-policy"])
+}
+
+func TestMemberDomainsRefuseAddedOutsidersAfterAuthorization(t *testing.T) {
+	engine, decision, write := memberWrites(t)
+	for _, member := range []string{"allAuthenticatedUsers", "user:someone@gmail.com", "serviceAccount:x@other-project.iam.gserviceaccount.com"} {
+		violation := write(member)
+		if violation == nil || violation.Value != member || violation.GRPCStatus().Code() != codes.FailedPrecondition ||
+			violation.GRPCStatus().Message() != iam.MemberDomainsMessage {
+			t.Fatalf("%s: %v", member, violation)
+		}
 	}
-	if byFamily["vpc-sc"].Detail != "local-perimeter" {
-		t.Fatalf("vpc-sc signal = %+v", byFamily["vpc-sc"])
+	// The IAM check allowed the write; the trace names the refusal apart.
+	traced := signals(t, engine, decision.ID)
+	if traced["org-policy violation"].Detail != "constraints/iam.allowedPolicyMemberDomains: serviceAccount:x@other-project.iam.gserviceaccount.com" ||
+		traced["org-policy violation"].Resource != storage.BucketResource("bucket-a") || !decision.Checks[0].Allowed {
+		t.Fatalf("signals = %+v", traced)
 	}
-	// The IAM check itself stays an allow: signals never replace IAM verdicts.
-	if decision.Checks[0].Allowed == false {
-		t.Fatalf("IAM check = %+v", decision.Checks[0])
+	// A project policy that resets the constraint admits public members below it.
+	declare(t, engine, `{"name":"projects/project-a/policies/iam.allowedPolicyMemberDomains","spec":{"reset":true}}`)
+	if violation := write("allAuthenticatedUsers"); violation != nil {
+		t.Fatal(violation)
 	}
-	// An unregistered constraint resource is refused.
-	if err := engine.MarkOrgPolicy("missing", "constraints/x", true); status.Code(err) != codes.NotFound {
+}
+
+func TestOrgPolicyDryRunOnlyTracesAndEnforcedSpecRefuses(t *testing.T) {
+	engine, _ := setup(t)
+	declare(t, engine, `{"name":"folders/local-folder/policies/gcp.resourceLocations",
+		"spec":{"rules":[{"values":{"allowedValues":["in:us-locations"]}}]},
+		"dryRunSpec":{"rules":[{"values":{"allowedValues":["us-east1"]}}]}}`)
+	decision, err := engine.Authorize(call("storage.buckets.insert", fixture, testProject), iam.Target{Name: projectA}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// us-central1 passes the spec and violates only the dry-run spec.
+	if err := engine.CheckOrgPolicy(decision.ID, projectA, "gcp.resourceLocations", "US-CENTRAL1"); err != nil {
+		t.Fatal(err)
+	}
+	traced := signals(t, engine, decision.ID)
+	if traced["org-policy dry-run violation"].Detail != "constraints/gcp.resourceLocations: US-CENTRAL1" || traced["org-policy allow"].Detail == "" {
+		t.Fatalf("signals = %+v", traced)
+	}
+	err = engine.CheckOrgPolicy(decision.ID, projectA, "gcp.resourceLocations", "EUROPE-WEST1")
+	if _, ok := errors.AsType[*iam.OrgPolicyError](err); !ok || status.Convert(err).Message() != "Request violates constraint 'constraints/gcp.resourceLocations'" {
+		t.Fatalf("enforced spec = %v", err)
+	}
+	// Project B sits directly under the organization, outside the folder.
+	if err := engine.CheckOrgPolicy(decision.ID, projectB, "gcp.resourceLocations", "EUROPE-WEST1"); err != nil {
+		t.Fatal(err)
+	}
+	effective, err := engine.EffectiveOrgPolicy(projectA, "gcp.resourceLocations")
+	if err != nil || strings.Join(effective.GetRules()[0].GetValues().GetAllowedValues(), ",") != "in:us-locations" {
+		t.Fatalf("effective = %v %v", effective, err)
+	}
+}
+
+func TestOrgPolicyStoreAndRemoval(t *testing.T) {
+	engine, index := setup(t)
+	declare(t, engine, `{"name":"folders/local-folder/policies/gcp.resourceLocations","spec":{"rules":[{"allowAll":true}]}}`)
+	stored, ok := engine.OrgPolicy(folder, "gcp.resourceLocations")
+	if !ok || stored.GetName() != "folders/local-folder/policies/gcp.resourceLocations" || stored.GetEtag() == "" {
+		t.Fatalf("stored = %v", stored)
+	}
+	if !engine.DeleteOrgPolicy(folder, "gcp.resourceLocations") || engine.DeleteOrgPolicy(folder, "gcp.resourceLocations") {
+		t.Fatal("delete must report whether a policy existed")
+	}
+	declare(t, engine, `{"name":"projects/project-b/policies/storage.uniformBucketLevelAccess","spec":{"rules":[{"enforce":true}]}}`)
+	if enforced, err := engine.OrgPolicyEnforced(projectB, "storage.uniformBucketLevelAccess"); err != nil || !enforced {
+		t.Fatalf("enforced = %v %v", enforced, err)
+	}
+	// Removing the project from the index takes its policies with it.
+	if err := index.Remove(resourceManagerService, state.Scope{Project: projectBName, Location: state.Global}, projectB); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := engine.OrgPolicy(projectB, "storage.uniformBucketLevelAccess"); ok {
+		t.Fatal("a removed project kept its organization policy")
+	}
+}
+
+func TestOrgPolicyRefusesUnenforcedConstraintsAndUnknownParents(t *testing.T) {
+	engine, _ := setup(t)
+	unenforced := &orgpolicypb.Policy{Name: "projects/project-a/policies/compute.vmExternalIpAccess",
+		Spec: &orgpolicypb.PolicySpec{Rules: []*orgpolicypb.PolicySpec_PolicyRule{{Kind: &orgpolicypb.PolicySpec_PolicyRule_DenyAll{DenyAll: true}}}}}
+	if err := engine.DeclareOrgPolicy(unenforced, time.Now()); status.Code(err) != codes.Unimplemented ||
+		!strings.Contains(err.Error(), "constraints/compute.vmExternalIpAccess is not enforced locally") {
+		t.Fatalf("unenforced constraint = %v", err)
+	}
+	unenforced.Name = "folders/missing/policies/storage.uniformBucketLevelAccess"
+	if err := engine.DeclareOrgPolicy(unenforced, time.Now()); err == nil || !strings.Contains(err.Error(), "is not declared") {
+		t.Fatalf("unknown parent = %v", err)
+	}
+	if _, err := engine.EffectiveOrgPolicy(projectA, "compute.vmExternalIpAccess"); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("effective unenforced = %v", err)
+	}
+}
+
+func TestVPCSCSignalStaysTraceOnly(t *testing.T) {
+	engine, _ := setup(t)
+	if err := engine.MarkPerimeter("local-perimeter", []string{projectA, object().Parent}); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := engine.Authorize(call("storage.objects.get", fixture, testProject), object(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The perimeter covers the bucket and the project: one signal each, and
+	// the IAM check stays an allow.
+	if len(decision.Signals) != 2 || decision.Signals[0].Detail != "local-perimeter" || !decision.Checks[0].Allowed {
+		t.Fatalf("decision = %+v", decision)
+	}
+	if err := engine.MarkPerimeter("p", []string{"missing"}); status.Code(err) != codes.NotFound {
 		t.Fatalf("missing resource = %v", err)
 	}
 }

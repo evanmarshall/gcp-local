@@ -1,0 +1,48 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-13T22:16:11.641346+00:00",
+  "scenario": {
+    "id": "orgpolicy-effective-visibility",
+    "service": "orgpolicy",
+    "transport": "rest-v2",
+    "revision": "27df6950b2f47d7b2000a3eaefbc036529cedced030ddc3f17f85d4ad04488d6",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "6212d2e69887bb332e4b383b3b1bd176ab75669855d19e4bf387715e5beed09d",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/security/orgpolicy/visibility.py": "51ba9b6c16e0f2a5ac4178e6bcff5dfb1148c66aaa559fb6ae9a65191dfdc277",
+      "gcp_validation/services/security/hierarchy.py": "ebe486f3222743bb7c762cf7f15d3f2b052ae7b2a3d826496266c93878d16058",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/orgpolicy/visibility/conftest.py": "5292e4fc7a8418df608ceb91f59dab567dcb6a5e65d4793d6fba6a0641c9fe61"
+    },
+    "scope": {
+      "services": [
+        "orgpolicy-visibility"
+      ],
+      "location": "global",
+      "limits": {
+        "max_resource_writes": 0,
+        "max_run_seconds": 300
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

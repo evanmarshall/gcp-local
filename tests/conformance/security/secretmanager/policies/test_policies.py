@@ -2,10 +2,10 @@
 
 import pytest
 
-from gcp_validation.services.security.secretmanager_policies import run_events, run_policies
+from gcp_validation.services.security.secretmanager.policies import run_events, run_policies
 
 CONTRACT = (
-    "gcp_validation/services/security/secretmanager_policies.py",
+    "gcp_validation/services/security/secretmanager/policies.py",
     "gcp_validation/services/security/refusals.py",
     "gcp_validation/live_rest.py",
     "gcp_validation/errors.py",

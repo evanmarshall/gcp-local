@@ -1,0 +1,391 @@
+{
+  "orgpolicy-effective-visibility": {
+    "recorded-date": "13-10-2026, 22:16:11",
+    "recorded-content": {
+      "fixture-permissions": {
+        "permissions": [
+          "orgpolicy.policy.get"
+        ]
+      },
+      "effective-gcp-resourcelocations": {
+        "fields": [
+          "name",
+          "spec"
+        ],
+        "http_status": 200,
+        "name": "projects/<project-number>/policies/gcp.resourceLocations",
+        "spec": {
+          "rules": [
+            {
+              "allowAll": true
+            }
+          ]
+        }
+      },
+      "effective-iam-allowedpolicymemberdomains": {
+        "fields": [
+          "name",
+          "spec"
+        ],
+        "http_status": 200,
+        "name": "projects/<project-number>/policies/iam.allowedPolicyMemberDomains",
+        "spec": {
+          "rules": [
+            {
+              "values": {
+                "allowedValues": [
+                  "<customer-0>"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "effective-iam-disableserviceaccountkeycreation": {
+        "fields": [
+          "name",
+          "spec"
+        ],
+        "http_status": 200,
+        "name": "projects/<project-number>/policies/iam.disableServiceAccountKeyCreation",
+        "spec": {
+          "rules": [
+            {
+              "enforce": false
+            }
+          ]
+        }
+      },
+      "effective-storage-uniformbucketlevelaccess": {
+        "fields": [
+          "name",
+          "spec"
+        ],
+        "http_status": 200,
+        "name": "projects/<project-number>/policies/storage.uniformBucketLevelAccess",
+        "spec": {
+          "rules": [
+            {
+              "enforce": true
+            }
+          ]
+        }
+      },
+      "effective-storage-publicaccessprevention": {
+        "fields": [
+          "name",
+          "spec"
+        ],
+        "http_status": 200,
+        "name": "projects/<project-number>/policies/storage.publicAccessPrevention",
+        "spec": {
+          "rules": [
+            {
+              "enforce": false
+            }
+          ]
+        }
+      },
+      "effective-iam-managed-disableserviceaccountkeycreation": {
+        "fields": [
+          "name",
+          "spec"
+        ],
+        "http_status": 200,
+        "name": "projects/<project-number>/policies/iam.managed.disableServiceAccountKeyCreation",
+        "spec": {
+          "rules": [
+            {
+              "enforce": true
+            }
+          ]
+        }
+      },
+      "effective-by-number": {
+        "fields": [
+          "name",
+          "spec"
+        ],
+        "http_status": 200,
+        "name": "projects/<project-number>/policies/gcp.resourceLocations",
+        "spec": {
+          "rules": [
+            {
+              "allowAll": true
+            }
+          ]
+        }
+      },
+      "get-unset": {
+        "code": 404,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": null,
+            "reason": "POLICY_NOT_FOUND",
+            "resource": "",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 404,
+        "message": "A Policy of constraint constraints/iam.allowedPolicyMemberDomains on resource projects/<project-number> does not exist.",
+        "status": "NOT_FOUND"
+      },
+      "effective-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": "orgpolicy.policy.get",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/<project>/policies/iam.allowedPolicyMemberDomains",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policy.get' denied on resource '//orgpolicy.googleapis.com/projects/<project>/policies/iam.allowedPolicyMemberDomains' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "project-list-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.policies.list",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/<project>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.list' denied on resource '//cloudresourcemanager.googleapis.com/projects/<project>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "project-constraints-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.constraints.list",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/<project>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.constraints.list' denied on resource '//cloudresourcemanager.googleapis.com/projects/<project>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "project-create-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.policies.create",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/<project>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.create' denied on resource '//cloudresourcemanager.googleapis.com/projects/<project>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "project-patch-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": "orgpolicy.policies.update",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/<project>/policies/gcp.resourceLocations",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.update' denied on resource '//orgpolicy.googleapis.com/projects/<project>/policies/gcp.resourceLocations' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "project-delete-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": "orgpolicy.policies.delete",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/<project>/policies/gcp.resourceLocations",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.delete' denied on resource '//orgpolicy.googleapis.com/projects/<project>/policies/gcp.resourceLocations' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-list-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.policies.list",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.list' denied on resource '//cloudresourcemanager.googleapis.com/organizations/<organization>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-constraints-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.constraints.list",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.constraints.list' denied on resource '//cloudresourcemanager.googleapis.com/organizations/<organization>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-create-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.policies.create",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.create' denied on resource '//cloudresourcemanager.googleapis.com/organizations/<organization>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-patch-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": "orgpolicy.policies.update",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>/policies/gcp.resourceLocations",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.update' denied on resource '//orgpolicy.googleapis.com/organizations/<organization>/policies/gcp.resourceLocations' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-delete-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": "orgpolicy.policies.delete",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>/policies/gcp.resourceLocations",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.delete' denied on resource '//orgpolicy.googleapis.com/organizations/<organization>/policies/gcp.resourceLocations' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "organization-effective-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": "orgpolicy.policy.get",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "organizations/<organization>/policies/gcp.resourceLocations",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policy.get' denied on resource '//orgpolicy.googleapis.com/organizations/<organization>/policies/gcp.resourceLocations' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-list-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.policies.list",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.list' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-constraints-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.constraints.list",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.constraints.list' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-create-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "cloudresourcemanager.googleapis.com",
+            "permission": "orgpolicy.policies.create",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policies.create' denied on resource '//cloudresourcemanager.googleapis.com/folders/1' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "folder-effective-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": "orgpolicy.policy.get",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "folders/1/policies/gcp.resourceLocations",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policy.get' denied on resource '//orgpolicy.googleapis.com/folders/1/policies/gcp.resourceLocations' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "missing-project-effective": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "orgpolicy.googleapis.com",
+            "permission": "orgpolicy.policy.get",
+            "reason": "IAM_PERMISSION_DENIED",
+            "resource": "projects/gcp-local-missing-project/policies/gcp.resourceLocations",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'orgpolicy.policy.get' denied on resource '//orgpolicy.googleapis.com/projects/gcp-local-missing-project/policies/gcp.resourceLocations' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      }
+    }
+  }
+}

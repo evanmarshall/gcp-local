@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 const admin = "admin@project-a.test"
@@ -487,7 +489,7 @@ func TestBucketSoftDeleteIsAGap(t *testing.T) {
 // TestPublicAccessPrevention covers allUsers and allAuthenticatedUsers on
 // uniform buckets. Enforced prevention refuses them with GCP's recorded 412
 // (storage-public-access-enforced) and overrides public grants inherited from
-// the project. Inherited prevention, with no organization policy modeled,
+// the project. Inherited prevention, with no organization policy declared,
 // accepts them and they grant access; that path is modeled locally, not
 // recorded.
 func TestPublicAccessPrevention(t *testing.T) {
@@ -529,6 +531,75 @@ func TestPublicAccessPrevention(t *testing.T) {
 	f.request("stranger@project-a.test", "GET", "/storage/v1/b/enforced-bucket/o/public.txt", nil, 403)
 	f.request("", "GET", "/storage/v1/b/public-bucket/o/public.txt", nil, 200)
 	f.request(admin, "GET", "/storage/v1/b/enforced-bucket/o/public.txt", nil, 200)
+}
+
+// declarePolicy stores one organization policy on project-a.
+func declarePolicy(t *testing.T, f *fixture, constraint, spec string) {
+	t.Helper()
+	policy := &orgpolicypb.Policy{}
+	if err := protojson.Unmarshal([]byte(`{"name":"projects/project-a/policies/`+constraint+`","spec":`+spec+`}`), policy); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.p.iam.DeclareOrgPolicy(policy, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOrganizationPoliciesAtTheMutation covers the Storage constraints after
+// IAM allows a request: uniform access on create and update and a policy
+// member outside the permitted customers (recorded:
+// orgpolicy-constraint-enforcement), and the bucket location (modeled). The
+// trace names each verdict apart from the IAM checks.
+func TestOrganizationPoliciesAtTheMutation(t *testing.T) {
+	f := setup(t)
+	declarePolicy(t, f, "storage.uniformBucketLevelAccess", `{"rules":[{"enforce":true}]}`)
+	declarePolicy(t, f, "gcp.resourceLocations", `{"rules":[{"values":{"allowedValues":["in:us-locations"]}}]}`)
+	declarePolicy(t, f, "iam.allowedPolicyMemberDomains", `{"rules":[{"values":{"allowedValues":["C0example"]}}]}`)
+	create := "/storage/v1/b?project=project-a"
+	disabled := `{"name":"disabled","location":"US-CENTRAL1","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":false}}}`
+	response := f.request(admin, "POST", create, []byte(disabled), 412)
+	refused(t, response.Body.String(), "Request violates constraint 'constraints/storage.uniformBucketLevelAccess'")
+	traced, _ := f.p.iam.Decision(response.Header().Get("X-Gcp-Local-Decision-Id"))
+	if len(traced.Signals) != 1 || traced.Signals[0].Verdict != "violation" || !traced.Checks[0].Allowed {
+		t.Fatalf("trace = %+v", traced)
+	}
+	omitted := `{"name":"omitted","location":"US-CENTRAL1","iamConfiguration":{"publicAccessPrevention":"inherited"},"softDeletePolicy":{"retentionDurationSeconds":"0"}}`
+	created := decodeBody(t, f.request(admin, "POST", create, []byte(omitted), 200).Body.Bytes())
+	access, _ := created["iamConfiguration"].(map[string]any)
+	uniform, _ := access["uniformBucketLevelAccess"].(map[string]any)
+	expectf(t, uniform["enabled"] == true && access["publicAccessPrevention"] == publicInherited, "omitted access = %v", access)
+	refused(t, f.request(admin, "POST", create, []byte(`{"name":"europe","location":"EUROPE-WEST1","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}}}`), 412).Body.String(),
+		"Request violates constraint 'constraints/gcp.resourceLocations'")
+	refused(t, f.request(admin, "PATCH", "/storage/v1/b/omitted", []byte(`{"iamConfiguration":{"uniformBucketLevelAccess":{"enabled":false}}}`), 412).Body.String(),
+		"Request violates constraint 'constraints/storage.uniformBucketLevelAccess'")
+	refused(t, f.request(admin, "PUT", "/storage/v1/b/omitted/iam", []byte(`{"bindings":[{"role":"roles/storage.objectViewer","members":["allUsers"]}]}`), 412).Body.String(),
+		"One or more users named in the policy do not belong to a permitted customer.")
+	// Without uniform access enforced, an omitted setting stays a coverage gap.
+	declarePolicy(t, f, "storage.uniformBucketLevelAccess", `{"reset":true}`)
+	refused(t, f.request(admin, "POST", create, []byte(`{"name":"gap","location":"US-CENTRAL1"}`), 400).Body.String(),
+		"explicit uniform bucket-level access is required")
+}
+
+// TestOrganizationPublicAccessPrevention covers storage.publicAccessPrevention
+// over buckets that inherit prevention (modeled, not recorded: the sandbox
+// doesn't enforce it): public members are refused and public grants grant
+// nothing until the policy is removed.
+func TestOrganizationPublicAccessPrevention(t *testing.T) {
+	f := setup(t)
+	f.request(admin, "POST", "/storage/v1/b?project=project-a", rcloneBucket("inherits"), 200)
+	f.request(admin, "POST", "/upload/storage/v1/b/inherits/o?uploadType=media&name=public.txt", []byte("public\n"), 200)
+	if _, err := f.p.iam.SetPolicy(BucketResource("inherits"), iam.Policy{Bindings: []iam.Binding{{Role: "roles/storage.objectViewer", Members: []string{"allUsers"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	f.request("", "GET", "/storage/v1/b/inherits/o/public.txt", nil, 200)
+	declarePolicy(t, f, "storage.publicAccessPrevention", `{"rules":[{"enforce":true}]}`)
+	f.request("", "GET", "/storage/v1/b/inherits/o/public.txt", nil, 401)
+	refused(t, f.request(admin, "PUT", "/storage/v1/b/inherits/iam", []byte(`{"bindings":[{"role":"roles/storage.objectViewer","members":["allAuthenticatedUsers"]}]}`), 412).Body.String(),
+		"The member bindings allUsers and allAuthenticatedUsers are not allowed since public access prevention is enforced.")
+	if !f.p.iam.DeleteOrgPolicy(provider.ProjectResource(testProject), "storage.publicAccessPrevention") {
+		t.Fatal("the policy was not stored")
+	}
+	f.request("", "GET", "/storage/v1/b/inherits/o/public.txt", nil, 200)
 }
 
 func softItems(t *testing.T, f *fixture, base string) []map[string]any {

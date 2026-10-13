@@ -75,7 +75,7 @@ With `topics` set, every change publishes a notification as the service agent th
 sh scripts/check/recordings.sh
 ```
 
-To re-record, get an approved scope (see `LiveScope` in `gcp_validation/services/security/secretmanager.py`); the fixture's standing `roles/secretmanager.admin` covers the run. It creates two secrets and six versions and deletes both secrets:
+To re-record, get an approved scope (see `LiveScope` in `gcp_validation/services/security/secretmanager/secrets.py`); the fixture's standing `roles/secretmanager.admin` covers the run. It creates two secrets and six versions and deletes both secrets:
 
 ```sh
 .venv-tools/bin/python -m pytest tests/conformance/security/secretmanager -q \
@@ -84,7 +84,7 @@ To re-record, get an approved scope (see `LiveScope` in `gcp_validation/services
   --gcp-allow-live --gcp-artifacts .artifacts/secretmanager-record
 ```
 
-After an interrupted run, `python -m gcp_validation.services.security.secretmanager cleanup --profile ... --scope ... --manifest ... --allow-live` deletes only the secrets in the manifest.
+After an interrupted run, `python -m gcp_validation.services.security.secretmanager.secrets cleanup --profile ... --scope ... --manifest ... --allow-live` deletes only the secrets in the manifest.
 
 The lifecycle scenarios are in `tests/conformance/security/secretmanager/policies/`, recorded and revalidated 2026-10-13, and in the weekly drift job:
 
@@ -93,7 +93,7 @@ The lifecycle scenarios are in `tests/conformance/security/secretmanager/policie
 | `secretmanager-secret-policies` | Topics without the agent's grant and a missing topic; rotation, expiration, alias, destroy-TTL, and replica refusals; user-managed replicas, topics, rotation, `ttl`, and `versionDestroyTtl` on create, get, and each version; alias set, get, access, and refusals; replication, expiration, topic, and rotation patches; delayed destroy, a second destroy, and cancel |
 | `secretmanager-rotation-events` | A 120 s `ttl` secret's deletion and a rotation 310 s ahead; every notification on one subscription (types, attribute names, data fields); the rotation schedule after `SECRET_ROTATE` |
 
-They need the sandbox's Secret Manager service agent (`gcloud beta services identity create --service=secretmanager.googleapis.com`); the run grants it `roles/pubsub.publisher` on its own topic only. Both run in about 6 minutes. Record with a `--gcp-live-scope-file` scope for service `secretmanager` (`LIMITS` in `gcp_validation/services/security/secretmanager_policies.py`).
+They need the sandbox's Secret Manager service agent (`gcloud beta services identity create --service=secretmanager.googleapis.com`); the run grants it `roles/pubsub.publisher` on its own topic only. Both run in about 6 minutes. Record with a `--gcp-live-scope-file` scope for service `secretmanager` (`LIMITS` in `gcp_validation/services/security/secretmanager/policies.py`).
 
 ## Gaps
 

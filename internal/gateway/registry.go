@@ -25,6 +25,7 @@ import (
 	"github.com/evanmarshall/gcp-local/api/generated/run"
 	"github.com/evanmarshall/gcp-local/api/generated/security/cloudkms"
 	"github.com/evanmarshall/gcp-local/api/generated/security/iam"
+	"github.com/evanmarshall/gcp-local/api/generated/security/orgpolicy"
 	"github.com/evanmarshall/gcp-local/api/generated/security/resourcemanager"
 	"github.com/evanmarshall/gcp-local/api/generated/security/secretmanager"
 	"github.com/evanmarshall/gcp-local/api/generated/storage"
@@ -109,6 +110,7 @@ func NewRegistry() *Registry {
 	r.registerData("resourcemanager", resourcemanager.FoldersMethods)
 	r.registerData("resourcemanager", resourcemanager.OrganizationsMethods)
 	r.registerData("resourcemanager", resourcemanager.ProjectsMethods)
+	r.registerData("orgpolicy", orgpolicy.OrgPolicyMethods)
 	return r
 }
 
@@ -131,6 +133,7 @@ func (r *Registry) registerRoutes() {
 		{artifactregistry.ArtifactRegistryRoutes, "artifactregistry"},
 		{resourcemanager.ResourceManagerRoutes, "resourcemanager"},
 		{iam.IAMRoutes, "iam"},
+		{orgpolicy.OrgPolicyRoutes, "orgpolicy"},
 		{cloudtasks.CloudTasksRoutes, "cloudtasks"},
 		{cloudscheduler.CloudSchedulerRoutes, "cloudscheduler"},
 		{cloudsql.CloudSQLRoutes, "cloudsql"},

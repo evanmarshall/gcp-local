@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from gcp_validation.services.security.secretmanager import (
+from gcp_validation.services.security.secretmanager.secrets import (
     LiveScope,
     SecretManagerClient,
     SecretManagerFixture,

@@ -13,12 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 const (
@@ -380,4 +382,56 @@ func TestAccountConditionsSeeNoResourceAttributes(t *testing.T) {
 	}
 	h.expectAs("reader", testBase+"/first-account", 403)
 	h.expectAs("reader", testBase+"/second-account", 200)
+}
+
+// declareConstraint stores one organization policy on the test project.
+func (h *harness) declareConstraint(constraint, spec string) {
+	h.t.Helper()
+	policy := &orgpolicypb.Policy{}
+	if err := protojson.Unmarshal([]byte(`{"name":"projects/`+testProject+`/policies/`+constraint+`","spec":`+spec+`}`), policy); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.engine.DeclareOrgPolicy(policy, time.Now()); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// TestOrganizationPoliciesRefuseKeysAndPublicMembers covers the IAM
+// constraints after authorization (recorded:
+// orgpolicy-constraint-enforcement): a public member on an account's policy
+// and key creation under the managed constraint, both naming the account by
+// unique ID, with an IAM denial first. The legacy constraint is modeled.
+func TestOrganizationPoliciesRefuseKeysAndPublicMembers(t *testing.T) {
+	h := newHarness(t)
+	h.expect(http.MethodPost, testBase, map[string]any{"accountId": testAccount}, http.StatusOK)
+	resource, _ := h.index.Get(accountResource(testProject, accountEmail(testProject, testAccount)))
+	name := "projects/-/serviceAccounts/" + resource.Number
+	path := testBase + "/" + accountEmail(testProject, testAccount)
+	h.declareConstraint("iam.allowedPolicyMemberDomains", `{"rules":[{"values":{"allowedValues":["C0example"]}}]}`)
+	public := map[string]any{"policy": map[string]any{"bindings": []any{map[string]any{"role": "roles/iam.serviceAccountUser", "members": []string{"allUsers"}}}}}
+	body := h.expect(http.MethodPost, path+":setIamPolicy", public, http.StatusBadRequest).Body.String()
+	for _, want := range []string{iam.MemberDomainsMessage, "FAILED_PRECONDITION", `"subject":"orgpolicy:` + name + `?configvalue=allUsers"`,
+		`"description":"User allUsers is not in permitted organization."`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("public member refusal %s lacks %s", body, want)
+		}
+	}
+	h.declareConstraint("iam.managed.disableServiceAccountKeyCreation", `{"rules":[{"enforce":true}]}`)
+	if denied := h.invokeAs("stranger", http.MethodPost, path+"/keys", map[string]any{}); denied.Code != http.StatusForbidden {
+		t.Fatalf("an IAM denial must come first: %d %s", denied.Code, denied.Body)
+	}
+	body = h.expect(http.MethodPost, path+"/keys", map[string]any{}, http.StatusBadRequest).Body.String()
+	for _, want := range []string{`Operation denied by org policy on resource '` + name + `': [\"constraints/iam.managed.disableServiceAccountKeyCreation\": \"This constraint, when enforced, blocks service account key creation.\"].`,
+		`"reason":"CUSTOM_ORG_POLICY_VIOLATION"`, `"resource":"` + name + `"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("managed key refusal %s lacks %s", body, want)
+		}
+	}
+	h.declareConstraint("iam.managed.disableServiceAccountKeyCreation", `{"reset":true}`)
+	h.declareConstraint("iam.disableServiceAccountKeyCreation", `{"rules":[{"enforce":true}]}`)
+	if body := h.expect(http.MethodPost, path+"/keys", map[string]any{}, http.StatusBadRequest).Body.String(); !strings.Contains(body, "Key creation is not allowed on this service account.") {
+		t.Fatalf("legacy key refusal = %s", body)
+	}
+	h.declareConstraint("iam.disableServiceAccountKeyCreation", `{"rules":[{"enforce":false}]}`)
+	h.expect(http.MethodPost, path+"/keys", map[string]any{}, http.StatusOK)
 }

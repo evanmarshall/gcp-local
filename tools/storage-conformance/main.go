@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
@@ -44,6 +45,7 @@ import (
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	"github.com/evanmarshall/gcp-local/internal/providers/security/cloudkms"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/security/iam"
+	orgpolicyprovider "github.com/evanmarshall/gcp-local/internal/providers/security/orgpolicy"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/resourcemanager"
 	secretmanager "github.com/evanmarshall/gcp-local/internal/providers/security/secretmanager"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage"
@@ -56,6 +58,9 @@ func main() {
 	bigqueryprovider.RequireUTC()
 	trace := flag.Bool("trace", false, "Log request methods, paths, query parameter names (never values), and status codes")
 	fault := flag.Bool("fault-rpo", false, "Inject incorrect bucket RPO to verify acceptance-test failures")
+	// TestLocalServiceAccount creates a key, which the sandbox organization
+	// refuses, so the Terraform runs start without its policies.
+	sandboxPolicies := flag.Bool("sandbox-org-policies", true, "Declare the sandbox organization's enforced policies (orgpolicy-effective-visibility)")
 	flag.Parse()
 	interfaces, err := net.Interfaces()
 	if err != nil || len(interfaces) != 1 || interfaces[0].Name != "lo" || os.Getenv("GCP_LOCAL_ISOLATED") != "1" {
@@ -67,7 +72,9 @@ func main() {
 	// Mirrors the sandbox organization's standing groups (storage-iam-groups):
 	// the allowed caller is in gcp-local-allowed, which is nested in
 	// gcp-local-nested. The denied caller is in neither.
-	must(engine.SetDirectory(iam.Directory{Groups: map[string][]string{
+	// The customer stands in for the sandbox's Workspace customer, which
+	// recordings alias.
+	must(engine.SetDirectory(iam.Directory{CustomerID: "C0gcplocal", Groups: map[string][]string{
 		"gcp-local-allowed@stitchwink.com": {"serviceAccount:allowed@gcp-local-test.iam.gserviceaccount.com"},
 		"gcp-local-nested@stitchwink.com":  {"group:gcp-local-allowed@stitchwink.com"},
 	}}))
@@ -82,8 +89,14 @@ func main() {
 	must(index.Put("resourcemanager", state.Resource{Name: terraformFolder, Service: "resourcemanager", Kind: "folder", Parent: organization, Scope: state.Scope{Location: state.Global}}))
 	_, err = engine.SetPolicy(terraformFolder, iam.Policy{Bindings: []iam.Binding{
 		{Role: "roles/resourcemanager.folderAdmin", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
+		// TestLocalOrgPolicyProject writes organization policies on a project
+		// under the folder and creates buckets there; no recording reads it.
+		{Role: "roles/orgpolicy.policyAdmin", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
+		{Role: "roles/storage.admin", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
 	}})
 	must(err)
+	must(index.Put("resourcemanager", state.Resource{Name: "//cloudresourcemanager.googleapis.com/projects/gcp-local-tf-policy", Service: "resourcemanager",
+		Kind: "project", Number: "000000000003", Parent: terraformFolder, Scope: state.Scope{Project: "gcp-local-tf-policy", Location: state.Global}}))
 	for i, project := range []string{"gcp-local-test", "synthetic-peer"} {
 		name := "//cloudresourcemanager.googleapis.com/projects/" + project
 		number := "000000000001"
@@ -122,6 +135,16 @@ func main() {
 			{Role: "roles/logging.admin", Members: []string{"serviceAccount:fixture@" + project + ".iam.gserviceaccount.com"}},
 		}})
 		must(err)
+	}
+	// orgpolicy-project-viewer reads as the allowed identity holding
+	// Organization Policy Viewer on the project, granted for that recording.
+	viewer, err := engine.GetPolicy("//cloudresourcemanager.googleapis.com/projects/gcp-local-test")
+	must(err)
+	viewer.Bindings = append(viewer.Bindings, iam.Binding{Role: "roles/orgpolicy.policyViewer", Members: []string{"serviceAccount:allowed@gcp-local-test.iam.gserviceaccount.com"}})
+	_, err = engine.SetPolicy("//cloudresourcemanager.googleapis.com/projects/gcp-local-test", viewer)
+	must(err)
+	if *sandboxPolicies {
+		must(declareSandboxPolicies(engine))
 	}
 	// The scenario identities exist as service accounts, so actAs checks on
 	// them (Cloud Tasks OIDC) evaluate rather than reporting a coverage gap.
@@ -229,6 +252,8 @@ func main() {
 	must(err)
 	_, err = resourcemanagerprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
+	_, err = orgpolicyprovider.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
 	_, err = iamadminprovider.New(context.Background(), registry, server.Backends, index, engine, iamadminprovider.Credentials{Tokens: identities, IDTokens: tokens})
 	must(err)
 	_, err = cloudtasksprovider.New(context.Background(), cloudtasksprovider.DeliveryConfig{Tokens: tokens}, registry, server.Backends, index, engine)
@@ -275,6 +300,28 @@ func main() {
 	defer cancel()
 	must(server.Serve(ctx, core.Listeners{HTTP: http, GRPC: grpc}))
 }
+
+// declareSandboxPolicies mirrors the policies the sandbox organization
+// enforces on its projects (recorded: orgpolicy-effective-visibility):
+// domain-restricted sharing to the directory's customer, uniform
+// bucket-level access, and the managed key creation constraint.
+func declareSandboxPolicies(engine *iam.Engine) error {
+	const organization = "organizations/314159265358/policies/"
+	enforced := &orgpolicypb.PolicySpec{Rules: []*orgpolicypb.PolicySpec_PolicyRule{{Kind: &orgpolicypb.PolicySpec_PolicyRule_Enforce{Enforce: true}}}}
+	for _, policy := range []*orgpolicypb.Policy{
+		{Name: organization + "iam.allowedPolicyMemberDomains", Spec: &orgpolicypb.PolicySpec{Rules: []*orgpolicypb.PolicySpec_PolicyRule{
+			{Kind: &orgpolicypb.PolicySpec_PolicyRule_Values{Values: &orgpolicypb.PolicySpec_PolicyRule_StringValues{AllowedValues: []string{"C0gcplocal"}}}},
+		}}},
+		{Name: organization + "storage.uniformBucketLevelAccess", Spec: enforced},
+		{Name: organization + "iam.managed.disableServiceAccountKeyCreation", Spec: enforced},
+	} {
+		if err := engine.DeclareOrgPolicy(policy, time.Now()); err != nil {
+			return fmt.Errorf("declare %s: %w", policy.GetName(), err)
+		}
+	}
+	return nil
+}
+
 func must(err error) {
 	if err != nil {
 		log.Fatal(err)

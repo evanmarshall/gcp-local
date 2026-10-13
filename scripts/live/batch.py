@@ -52,7 +52,7 @@ SCOPE_CONTRACTS = {
         None, "pubsub-delivery", "DELIVERY_LIMITS",
     ),
     "gcp_validation.services.messaging.pubsub_schemas": (None, "pubsub-schemas", "SCHEMA_LIMITS"),
-    "gcp_validation.services.security.secretmanager": (None, "secretmanager", "LIMITS"),
+    "gcp_validation.services.security.secretmanager.secrets": (None, "secretmanager", "LIMITS"),
 }
 
 

@@ -37,6 +37,7 @@ SERVICES = [
     "firestore",
     "iam",
     "logging",
+    "orgpolicy",
     "pubsub",
     "redis",
     "resourcemanager",
@@ -51,8 +52,10 @@ SERVICE_FLAG = ",".join(sorted("kms" if name == "cloudkms" else name for name in
 # Explicit project-level grants for the generated developer identity. Each is an
 # ordinary IAM binding the engine evaluates per request; nothing bypasses IAM.
 # The set mirrors the conformance fixture's grants, plus the KMS
-# encrypter/decrypter (Cloud KMS Admin cannot use keys) and Service Account
-# User (deploying a Cloud Run revision as another account needs actAs).
+# encrypter/decrypter (Cloud KMS Admin cannot use keys), Service Account
+# User (deploying a Cloud Run revision as another account needs actAs), and
+# Organization Policy Administrator on the project, which GCP grants only on
+# an organization.
 DEVELOPER_ROLES = [
     "roles/aiplatform.user",
     "roles/artifactregistry.admin",
@@ -71,6 +74,7 @@ DEVELOPER_ROLES = [
     "roles/iam.serviceAccountUser",
     "roles/logging.admin",
     "roles/networkmanagement.admin",
+    "roles/orgpolicy.policyAdmin",
     "roles/pubsub.admin",
     "roles/redis.admin",
     "roles/resourcemanager.projectIamAdmin",

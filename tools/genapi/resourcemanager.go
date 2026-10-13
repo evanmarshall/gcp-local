@@ -55,8 +55,10 @@ func resourceManagerRows() []route {
 // resourceManagerAlias its import alias.
 const resourceManagerPackage, resourceManagerAlias = "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb", "resourcemanagerpb"
 
-// writeResourceManager writes the three v3 transcoded services.
+// writeResourceManager writes the route table and the three v3 transcoded
+// services.
 func writeResourceManager(check bool) {
+	write("security/resourcemanager/resourcemanager_routes.go", resourceManagerRoutes(), check)
 	write("security/resourcemanager/folders_dispatch.go", transcodedDispatch(foldersRPC), check)
 	write("security/resourcemanager/organizations_dispatch.go", transcodedDispatch(organizationsRPC), check)
 	write("security/resourcemanager/projects_dispatch.go", transcodedDispatch(projectsRPC), check)

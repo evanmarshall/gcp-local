@@ -77,6 +77,7 @@ The generated developer identity gets these project-level grants. An identity wi
 | Secret Manager | `roles/secretmanager.admin` |
 | IAM service accounts | `roles/iam.serviceAccountAdmin`, `roles/iam.serviceAccountUser` |
 | Project IAM | `roles/resourcemanager.projectIamAdmin` |
+| Organization Policy | `roles/orgpolicy.policyAdmin` on the project; GCP grants it only on an organization |
 | Artifact Registry | `roles/artifactregistry.admin` |
 | Firestore | `roles/datastore.user`, `roles/datastore.indexAdmin` |
 | BigQuery | `roles/bigquery.dataOwner`, `roles/bigquery.jobUser` |

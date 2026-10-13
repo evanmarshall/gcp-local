@@ -50,6 +50,10 @@ Only allow-binding conditions on Storage are recorded against GCP (`storage-iam-
 
 Not recorded: deny rules and boundaries need organization-level setup (`roles/iam.denyAdmin` and principal access boundary admin are grantable only at an organization), which the sandbox doesn't allow ([#33](https://github.com/evanmarshall/gcp-local/issues/33), [#18](https://github.com/evanmarshall/gcp-local/issues/18)). Conditions on Cloud SQL and Memorystore are recorded for one conditional project grant each (`cloudsql-postgres-instance-admin`, `memorystore-redis-instance-admin`).
 
+## Organization policy
+
+Organization policies are a separate family from IAM: the engine stores them per hierarchy node, and providers check them at the mutation, after `Authorize` allows the request, with `CheckOrgPolicy` (or `SetPolicyFor` for a policy write's members). A violation is an `*OrgPolicyError` the provider renders as its service does; the decision record gets an `org-policy` signal, so a trace tells a constraint refusal (IAM checks allowed, signal `violation`) from an IAM denial. `dryRunSpec` verdicts are only traced. Constraints, evaluation, and evidence: [Organization Policy](../services/security/orgpolicy.md).
+
 ## Groups and domains
 
 `group:` and `domain:` members resolve against a local directory declared in the [bootstrap config](#bootstrap-config). Nothing is fetched from Google.
@@ -66,6 +70,7 @@ Not recorded: deny rules and boundaries need organization-level setup (`roles/ia
 
 - `group:EMAIL` and `principalSet://goog/group/EMAIL` cover the group's members and, transitively, the members of nested groups. Group members are `user:`, `serviceAccount:`, or `group:` naming another declared group. Nesting cycles are allowed.
 - `domain:NAME` covers every `user:` whose email is in a declared domain. Service accounts are never domain members.
+- `customer_id` (optional, `C` and at least 5 letters or digits) names the customer `iam.allowedPolicyMemberDomains` admits: users of the declared domains, the declared groups, and service accounts of indexed projects ([Organization Policy](../services/security/orgpolicy.md#enforced-constraints)).
 - Emails and domains compare without case. Policies read back members as written.
 - Groups work in allow bindings (with or without conditions), deny rules, and deny exceptions. The decision record names the matching group or domain member.
 - A policy naming a group or domain outside the directory is refused with GCP's 400 errors: "Group EMAIL does not exist.", "Domain NAME does not exist.", a `group:` naming a service account, and empty or malformed references (recorded: `storage-iam-directory`). The same applies to `-iam-config` policies, which fail the load.
@@ -84,7 +89,7 @@ The IAM provider owns custom roles ([IAM roles](../services/security/iam-roles.m
 
 ## Role snapshots
 
-`internal/iam/roles/` holds 82 predefined roles read from GCP with `roles.get` (full view), and `testable-permissions.json`, the project's `queryTestablePermissions` result grouped by custom-role support level, recorded on 2026-10-12 and 2026-10-13 UTC (the nine folder, organization, and project-mover roles). `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. `roles.get` and `roles.list` serve these snapshots, and custom roles are validated against the testable permissions. Builds and tests never fetch roles.
+`internal/iam/roles/` holds 84 predefined roles read from GCP with `roles.get` (full view), and `testable-permissions.json`, the project's `queryTestablePermissions` result grouped by custom-role support level, recorded on 2026-10-12 and 2026-10-13 UTC (the nine folder, organization, and project-mover roles, and the two Organization Policy roles). `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. `roles.get` and `roles.list` serve these snapshots, and custom roles are validated against the testable permissions. Builds and tests never fetch roles.
 
 To propose a refresh (read-only; needs an authorized account and quota project):
 
@@ -105,7 +110,9 @@ Each run also records the quota project's testable permissions. Review permissio
 - `policies`: allow policies keyed by resource name.
 - `unsupported`: optional fail-closed feature markers.
 - `service_accounts`: optional local account email, project, and numeric unique ID, used for [Pub/Sub push](../services/messaging/pubsub.md) tokens.
-- `directory`: optional [groups and domains](#groups-and-domains).
+- `directory`: optional [groups and domains](#groups-and-domains), and the `customer_id` domain-restricted sharing admits.
+- `org_policies`: optional [Organization Policy](../services/security/orgpolicy.md#use) v2 policies, each named `PARENT/policies/CONSTRAINT` on a declared node. They load after `policies`, so `iam.allowedPolicyMemberDomains` doesn't apply to the declared allow policies. A constraint gcp-local doesn't enforce fails the load.
+- `vpcsc_perimeters`: optional perimeter name to resource list; membership is a [trace signal](../services/security/orgpolicy.md#vpc-service-controls) only.
 
 Providers publish their own resources after backend success. The Resource Manager provider serves the declared organizations, folders, and projects; a declared folder's display name is its ID. A failed load discards the whole file.
 
@@ -129,7 +136,7 @@ Providers publish their own resources after backend success. The Resource Manage
 
 ## Decision records
 
-Each evaluation gets a random decision ID, separate from the trace ID. The record lists principal, method, target, every check, considered policies, and the deciding binding; it never stores credentials. The last 1,000 stay in memory. Unsupported and incomplete evaluations are distinct from allow and deny.
+Each evaluation gets a random decision ID, separate from the trace ID. The record lists principal, method, target, every check, considered policies, the deciding binding, and `signals`: the organization policy verdicts checked at the mutation and VPC-SC perimeter membership; it never stores credentials. The last 1,000 stay in memory. Unsupported and incomplete evaluations are distinct from allow and deny.
 
 Providers return the ID in `X-Gcp-Local-Decision-Id`. Look one up:
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -180,6 +181,129 @@ func TestLocalProjectIamPolicy(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: testProjectPolicy(),
+			},
+		},
+	})
+}
+
+// terraformPolicyProject is the conformance server's project under the
+// seeded folder, where the fixture holds Organization Policy Administrator
+// and Storage Admin through the folder. No recording reads it.
+const terraformPolicyProject = "gcp-local-tf-policy"
+
+// localOrgPolicyCase drives one Organization Policy case through the v2 and
+// Storage endpoints.
+func localOrgPolicyCase(t *testing.T, test resource.TestCase) {
+	t.Helper()
+	for i, step := range test.Steps {
+		if step.Config == "" {
+			continue
+		}
+		if step.ExpectError == nil {
+			step.ConfigPlanChecks.PostApplyPostRefresh = append(step.ConfigPlanChecks.PostApplyPostRefresh, plancheck.ExpectEmptyPlan())
+		}
+		step.Config = fmt.Sprintf(`provider "google" {
+ project = %q
+ access_token = %q
+ org_policy_custom_endpoint = %q
+ storage_custom_endpoint = %q
+ universe_domain = "gcp-local.invalid"
+ request_timeout = "2s"
+ add_terraform_attribution_label = false
+}
+`, terraformPolicyProject, fixtureToken, endpoint+"/v2/", endpoint+"/storage/v1/") + step.Config
+		test.Steps[i] = step
+	}
+	resource.Test(t, test)
+}
+
+// testOrgPolicyConfig renders a gcp.resourceLocations policy on the project
+// allowing the listed value groups and, when bucket is set, a bucket in
+// europe-west1 created after it.
+func testOrgPolicyConfig(bucket bool, allowed ...string) string {
+	config := fmt.Sprintf(`
+resource "google_org_policy_policy" "locations" {
+ name   = "projects/%s/policies/gcp.resourceLocations"
+ parent = "projects/%s"
+ spec {
+  rules {
+   values {
+    allowed_values = %s
+   }
+  }
+ }
+}
+`, terraformPolicyProject, terraformPolicyProject, mustJSON(allowed))
+	if bucket {
+		config += fmt.Sprintf(`
+resource "google_storage_bucket" "europe" {
+ name                        = "gcp-local-tf-policy-europe"
+ project                     = %q
+ location                    = "EUROPE-WEST1"
+ force_destroy               = true
+ uniform_bucket_level_access = true
+ public_access_prevention    = "enforced"
+ soft_delete_policy { retention_duration_seconds = 0 }
+ depends_on                  = [google_org_policy_policy.locations]
+}
+`, terraformPolicyProject)
+	}
+	return config
+}
+
+// mustJSON renders a string list as an HCL list.
+func mustJSON(values []string) string {
+	encoded, _ := json.Marshal(values)
+	return string(encoded)
+}
+
+// testOrgPolicyDeleted requires the destroyed policy to read back absent.
+func testOrgPolicyDeleted(*terraform.State) error {
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		endpoint+"/v2/projects/"+terraformPolicyProject+"/policies/gcp.resourceLocations", nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+fixtureToken)
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("policy after destroy: HTTP %d", response.StatusCode)
+	}
+	return nil
+}
+
+// TestLocalOrgPolicyProject sets a project resource-location policy, has it
+// refuse a bucket in europe-west1, widens it so the same bucket is created,
+// imports it, and destroys both.
+func TestLocalOrgPolicyProject(t *testing.T) {
+	localOrgPolicyCase(t, resource.TestCase{
+		PreCheck:          func() { preCheck(t) },
+		ExternalProviders: pinnedProvider(),
+		CheckDestroy:      testOrgPolicyDeleted,
+		Steps: []resource.TestStep{
+			{
+				Config: testOrgPolicyConfig(false, "in:us-locations"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("google_org_policy_policy.locations", "spec.0.rules.0.values.0.allowed_values.0", "in:us-locations"),
+					resource.TestCheckResourceAttrSet("google_org_policy_policy.locations", "spec.0.etag"),
+				),
+			},
+			{
+				Config:      testOrgPolicyConfig(true, "in:us-locations"),
+				ExpectError: regexp.MustCompile(`Request violates constraint 'constraints/gcp.resourceLocations'`),
+			},
+			{
+				Config: testOrgPolicyConfig(true, "in:us-locations", "in:europe-west1-locations"),
+				Check:  resource.TestCheckResourceAttr("google_storage_bucket.europe", "location", "EUROPE-WEST1"),
+			},
+			{
+				ResourceName:      "google_org_policy_policy.locations",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})

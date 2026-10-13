@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-13T02:00:50.343929+00:00",
+  "recorded_at": "2026-10-13T22:22:18.731484+00:00",
   "scenario": {
     "id": "secretmanager-access-lifecycle",
     "service": "secretmanager",
     "transport": "rest-v1",
-    "revision": "64ad5b6ce7f82a97b56e9c2f71944b9dc1089f5bbe603427f4567795df9934bc",
+    "revision": "ec5365d7f9fae6a869b557bf2a824ff4f02551527f6499e5b855f1d5acf849fa",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "132349809c916af668959fa9c575feb44e13ddadd37ec38b32b3b3187d956e84",
+  "snapshot_sha256": "5e020bd61521b51361abdb625bf782d56c40e3dbf7d5c4e6312d6cf9e8524b10",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,11 +22,11 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/security/secretmanager.py": "d3c45c9ab707403aef1a3480bf00eff42481b18875e68b40a008d693c58ce94d",
+      "gcp_validation/services/security/secretmanager/secrets.py": "d3c45c9ab707403aef1a3480bf00eff42481b18875e68b40a008d693c58ce94d",
       "gcp_validation/services/security/refusals.py": "7e5c208b9472d70b50966390e74a6cea0d0f34de2ae5eb01121bf4ef526a8f7e",
       "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
-      "tests/conformance/security/secretmanager/conftest.py": "2b363f07622cced617e773f70ff205ec138864303425138a1d534281f4295cff"
+      "tests/conformance/security/secretmanager/conftest.py": "e68a9cab16ca5af6b8a908f64110ac2cdcb1d98846ccb8761863154e7d43de99"
     },
     "scope": {
       "services": [

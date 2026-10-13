@@ -1,0 +1,120 @@
+{
+  "orgpolicy-constraint-enforcement": {
+    "recorded-date": "13-10-2026, 22:17:01",
+    "recorded-content": {
+      "bucket-create-uniform-access-disabled": {
+        "http_status": 412,
+        "message": "Request violates constraint 'constraints/storage.uniformBucketLevelAccess'",
+        "reasons": [
+          "conditionNotMet"
+        ]
+      },
+      "bucket-create-access-omitted": {
+        "bucket_policy_only_enabled": true,
+        "http_status": 200,
+        "public_access_prevention": "inherited",
+        "uniform_enabled": true
+      },
+      "bucket-policy-all-users": {
+        "http_status": 412,
+        "message": "One or more users named in the policy do not belong to a permitted customer.",
+        "reasons": [
+          "conditionNotMet"
+        ]
+      },
+      "bucket-policy-all-users-denied-caller": {
+        "http_status": 403,
+        "message": "<denied> does not have storage.buckets.setIamPolicy access to the Google Cloud Storage bucket. Permission 'storage.buckets.setIamPolicy' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ]
+      },
+      "bucket-policy-all-authenticated-users": {
+        "http_status": 412,
+        "message": "One or more users named in the policy do not belong to a permitted customer.",
+        "reasons": [
+          "conditionNotMet"
+        ]
+      },
+      "bucket-policy-all-authenticated-users-denied-caller": {
+        "http_status": 403,
+        "message": "<denied> does not have storage.buckets.setIamPolicy access to the Google Cloud Storage bucket. Permission 'storage.buckets.setIamPolicy' denied on resource '//storage.googleapis.com/projects/_/buckets/<bucket>' (or it may not exist).",
+        "reasons": [
+          "forbidden"
+        ]
+      },
+      "bucket-policy-without-public-members": {
+        "http_status": 200,
+        "public_members": []
+      },
+      "bucket-disable-uniform-access": {
+        "http_status": 412,
+        "message": "Request violates constraint 'constraints/storage.uniformBucketLevelAccess'",
+        "reasons": [
+          "conditionNotMet"
+        ]
+      },
+      "bucket-deleted": {
+        "http_status": 204
+      },
+      "account-policy-all-users": {
+        "code": 400,
+        "details": [
+          {
+            "type": "PreconditionFailure",
+            "violations": [
+              {
+                "description": "User allUsers is not in permitted organization.",
+                "subject": "orgpolicy:projects/-/serviceAccounts/<account-unique-id>?configvalue=allUsers",
+                "type": "constraints/iam.allowedPolicyMemberDomains"
+              }
+            ]
+          }
+        ],
+        "http_status": 400,
+        "message": "One or more users named in the policy do not belong to a permitted customer.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "account-key-admin-granted": {
+        "bindings": [
+          [
+            "roles/iam.serviceAccountKeyAdmin",
+            [
+              "serviceAccount:<fixture>"
+            ]
+          ]
+        ],
+        "http_status": 200
+      },
+      "key-create-denied-caller": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "key-create-refused": {
+        "code": 400,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "customConstraints": "constraints/iam.managed.disableServiceAccountKeyCreation",
+              "resource": "projects/-/serviceAccounts/<account-unique-id>"
+            },
+            "reason": "CUSTOM_ORG_POLICY_VIOLATION",
+            "type": "ErrorInfo"
+          }
+        ],
+        "http_status": 400,
+        "message": "Operation denied by org policy on resource 'projects/-/serviceAccounts/<account-unique-id>': [\"constraints/iam.managed.disableServiceAccountKeyCreation\": \"This constraint, when enforced, blocks service account key creation.\"].",
+        "status": "FAILED_PRECONDITION"
+      },
+      "account-deleted": {
+        "http_status": 200
+      },
+      "cleanup": {
+        "account_absent": true,
+        "bucket_absent": true
+      }
+    }
+  }
+}

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"mime"
@@ -17,6 +19,8 @@ import (
 
 	storageapi "github.com/evanmarshall/gcp-local/api/generated/storage"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/iam/orgpolicy"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -540,15 +544,10 @@ const (
 	defaultRetention = minRetention
 )
 
-func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	request, err := decodeBucketRequest(r.JSON)
-	if err != nil {
-		return nil, err
-	}
-	project, _ := p.index.Get(provider.ProjectResource(scope.Project))
-	rules, err := bucketconfig.ParseLifecycle(request.Lifecycle, request.Location, project.Number)
-	if err != nil {
-		return nil, err //nolint:wrapcheck // GCP's refusal, rendered as is
+func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, decision string) (*gateway.RESTResponse, error) {
+	request, rules, refused, err := p.decodeBucketCreate(r.JSON, decision, scope)
+	if refused != nil || err != nil {
+		return refused, err
 	}
 	if _, exists := p.index.Get(BucketResource(request.Name)); exists {
 		return bucketNameOwned(), nil
@@ -577,13 +576,38 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	return response, nil
 }
 
+// decodeBucketCreate decodes a bucket create and its lifecycle rules under
+// the project's organization policies: uniform access applies to the access
+// setting, and gcp.resourceLocations to the location (modeled, not recorded:
+// the sandbox allows every location).
+func (p *Provider) decodeBucketCreate(body []byte, decision string, scope state.Scope) (bucketRequest, []bucketconfig.Rule, *gateway.RESTResponse, error) {
+	name := provider.ProjectResource(scope.Project)
+	project, _ := p.index.Get(name)
+	request, err := decodeBucketRequest(body, func(request *bucketRequest) error {
+		return p.uniformPolicy(decision, name, request)
+	})
+	if _, violated := errors.AsType[*iam.OrgPolicyError](err); err != nil && !violated {
+		return request, nil, nil, err
+	}
+	if err == nil {
+		err = p.iam.CheckOrgPolicy(decision, name, orgpolicy.ResourceLocations, request.Location)
+	}
+	if refused, err := orgPolicyRefusal(err); refused != nil || err != nil {
+		return request, nil, refused, err
+	}
+	rules, err := bucketconfig.ParseLifecycle(request.Lifecycle, request.Location, project.Number)
+	return request, rules, nil, err //nolint:wrapcheck // GCP's refusal, rendered as is
+}
+
 func bucketNameOwned() *gateway.RESTResponse {
 	return wireError(409, "conflict", "Bucket name is already owned")
 }
 
 // decodeBucketRequest reads a bucket create body and refuses every
 // configuration this emulator does not model, then normalizes the rest.
-func decodeBucketRequest(body []byte) (bucketRequest, error) {
+// uniform applies the organization's uniform access policy to the request's
+// access setting before the access model is checked.
+func decodeBucketRequest(body []byte, uniform func(*bucketRequest) error) (bucketRequest, error) {
 	var request bucketRequest
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
@@ -593,7 +617,7 @@ func decodeBucketRequest(body []byte) (bucketRequest, error) {
 		}
 		return request, gap("unsupported bucket configuration")
 	}
-	for _, check := range []func(*bucketRequest) error{uniformAccess, namespaceAccess, unsupportedBucketPolicy, bucketRetention, bucketPlacement} {
+	for _, check := range []func(*bucketRequest) error{uniformAccess, namespaceAccess, uniform, unsupportedBucketPolicy, bucketRetention, bucketPlacement} {
 		if err := check(&request); err != nil {
 			return request, err
 		}
@@ -675,6 +699,50 @@ func uniformAccess(request *bucketRequest) error {
 		request.IAM.Uniform, request.IAM.BucketPolicyOnly = &access, &access
 	}
 	return nil
+}
+
+// uniformPolicy applies storage.uniformBucketLevelAccess to a new bucket
+// (recorded: orgpolicy-constraint-enforcement): under the constraint an
+// omitted setting becomes enabled and a disabled one is refused.
+func (p *Provider) uniformPolicy(decision, project string, request *bucketRequest) error {
+	uniform := request.IAM.Uniform
+	if uniform != nil {
+		if uniform.Enabled {
+			return nil
+		}
+		if err := p.iam.CheckOrgPolicy(decision, project, orgpolicy.UniformBucketAccess); err != nil {
+			return fmt.Errorf("check uniform bucket-level access: %w", err)
+		}
+		return nil
+	}
+	enforced, err := p.iam.OrgPolicyEnforced(project, orgpolicy.UniformBucketAccess)
+	if err != nil {
+		return fmt.Errorf("read uniform bucket-level access: %w", err)
+	}
+	if enforced {
+		access := bucketAccess{Enabled: true}
+		request.IAM.Uniform, request.IAM.BucketPolicyOnly = &access, &access
+	}
+	return nil
+}
+
+// orgPolicyRefusal renders an organization policy refusal as Storage does:
+// 412 conditionNotMet naming the constraint, or for a policy member outside
+// the permitted customers GCP's member message (both recorded:
+// orgpolicy-constraint-enforcement). Any other error is returned wrapped.
+func orgPolicyRefusal(err error) (*gateway.RESTResponse, error) {
+	violation, ok := errors.AsType[*iam.OrgPolicyError](err)
+	if !ok {
+		if err != nil {
+			return nil, fmt.Errorf("check the organization policy: %w", err)
+		}
+		return nil, nil //nolint:nilnil // no refusal and no error: the request may proceed
+	}
+	message := "Request violates constraint 'constraints/" + violation.Constraint + "'"
+	if violation.Constraint == orgpolicy.MemberDomains {
+		message = iam.MemberDomainsMessage
+	}
+	return wireError(412, "conditionNotMet", message), nil
 }
 
 // unsupportedBucketPolicy requires uniform bucket-level access, the only

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from gcp_validation.live_rest import RestClient
-from gcp_validation.services.security.secretmanager_policies import (
+from gcp_validation.services.security.secretmanager.policies import (
     LIVE_ENDPOINT,
     PUBSUB_ENDPOINT,
     SERVICE,

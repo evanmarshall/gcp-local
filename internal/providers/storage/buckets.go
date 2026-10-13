@@ -18,6 +18,7 @@ import (
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam/orgpolicy"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -27,6 +28,20 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// guardedPatch refuses a patch that disables uniform access under
+// storage.uniformBucketLevelAccess (recorded:
+// orgpolicy-constraint-enforcement), then applies the patch; disabling it
+// otherwise stays a gap.
+func (p *Provider) guardedPatch(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, name, decision string) (*gateway.RESTResponse, error) {
+	if disablesUniformAccess(r.JSON) {
+		refused, err := orgPolicyRefusal(p.iam.CheckOrgPolicy(decision, BucketResource(name), orgpolicy.UniformBucketAccess))
+		if refused != nil || err != nil {
+			return refused, err
+		}
+	}
+	return p.patchBucket(ctx, b, r, scope, name)
+}
 
 func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, name string) (*gateway.RESTResponse, error) {
 	patch, err := decodeBucketPatch(r.JSON, name)
@@ -109,6 +124,21 @@ func (p *Provider) storeBucketPatch(scope state.Scope, name string, previous, me
 	}
 	p.bucketMetadata(scope, current)
 	return &gateway.RESTResponse{Status: 200, JSON: current}, nil
+}
+
+// disablesUniformAccess reports a patch that turns uniform bucket-level
+// access off, under either of its names.
+func disablesUniformAccess(body []byte) bool {
+	var patch struct {
+		IAM struct {
+			Uniform          *bucketAccess `json:"uniformBucketLevelAccess"`
+			BucketPolicyOnly *bucketAccess `json:"bucketPolicyOnly"`
+		} `json:"iamConfiguration"`
+	}
+	if json.Unmarshal(body, &patch) != nil {
+		return false
+	}
+	return (patch.IAM.Uniform != nil && !patch.IAM.Uniform.Enabled) || (patch.IAM.BucketPolicyOnly != nil && !patch.IAM.BucketPolicyOnly.Enabled)
 }
 
 // applyBucketPatch applies the patched catalog-owned fields to a copy of the

@@ -3,13 +3,19 @@ package iam
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
+	"github.com/evanmarshall/gcp-local/internal/iam/orgpolicy"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type Binding struct {
@@ -58,12 +64,6 @@ type unsupportedPolicy struct {
 	scope    state.Scope
 }
 
-// orgPolicyRecord is one stored constraint; dryRun keeps it advisory.
-type orgPolicyRecord struct {
-	constraint string
-	dryRun     bool
-}
-
 type storedPolicy struct {
 	policy     Policy
 	owner      string
@@ -97,8 +97,20 @@ func (e *Engine) GetPolicy(resource string) (Policy, error) {
 }
 
 // SetPolicy validates, compiles, and stores an allow policy. Validation runs in
-// the order GCP reports failures, and nothing is stored unless every check passes.
+// the order GCP reports failures, and nothing is stored unless every check
+// passes. Members the policy adds must pass iam.allowedPolicyMemberDomains
+// (an *OrgPolicyError otherwise); SetPolicyFor also traces that check.
 func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
+	return e.setPolicy("", resource, policy)
+}
+
+// SetPolicyFor is SetPolicy after the decision decisionID authorized the
+// write: the organization policy verdicts are traced on that decision.
+func (e *Engine) SetPolicyFor(decisionID, resource string, policy Policy) (Policy, error) {
+	return e.setPolicy(decisionID, resource, policy)
+}
+
+func (e *Engine) setPolicy(decisionID, resource string, policy Policy) (Policy, error) {
 	owner, ok := e.index.Get(resource)
 	if !ok {
 		return Policy{}, status.Error(codes.NotFound, "Policy resource is not registered")
@@ -122,6 +134,9 @@ func (e *Engine) SetPolicy(resource string, policy Policy) (Policy, error) {
 	}
 	conditions, err := e.compileBindings(policy.Bindings, directory, roleContext{resource: resource, previous: previous, lookup: lookup})
 	if err != nil {
+		return Policy{}, err
+	}
+	if err := e.checkMemberDomains(decisionID, resource, previous, policy); err != nil {
 		return Policy{}, err
 	}
 	return e.storePolicy(resource, owner, policy, conditions, denies)
@@ -370,7 +385,7 @@ func (e *Engine) MarkUnsupported(resource string, features []string) error {
 }
 
 // Forget drops everything attached to one resource: its allow policy,
-// unsupported markers, org-policy constraints, and perimeter membership. The
+// unsupported markers, organization policies, and perimeter membership. The
 // index calls it whenever a resource is removed.
 func (e *Engine) Forget(resource string) {
 	e.mu.Lock()
@@ -464,3 +479,344 @@ func (p Policy) Wire() any {
 	}
 	return p
 }
+
+// OrgPolicyError is a mutation an enforced organization policy refuses.
+// Providers render it as their service reports the refusal. GRPCStatus is
+// the form IAM returns (recorded: orgpolicy-constraint-enforcement, a
+// service account policy naming allUsers): FAILED_PRECONDITION with a
+// PreconditionFailure naming the constraint and the refused value.
+type OrgPolicyError struct {
+	// Constraint is the constraint ID ("gcp.resourceLocations").
+	Constraint string
+	// Value is the refused list value (a member, a location); "" for a
+	// boolean constraint.
+	Value string
+	// Resource is the index name of the resource the mutation acts on.
+	Resource string
+}
+
+// MemberDomainsMessage is GCP's refusal of a policy member outside the
+// permitted customers (recorded for Storage and IAM).
+const MemberDomainsMessage = "One or more users named in the policy do not belong to a permitted customer."
+
+func (v *OrgPolicyError) Error() string { return v.GRPCStatus().Message() }
+
+// GRPCStatus renders the violation for a provider that passes it through.
+func (v *OrgPolicyError) GRPCStatus() *status.Status {
+	message := "Request violates constraint 'constraints/" + v.Constraint + "'"
+	description := message
+	if v.Constraint == orgpolicy.MemberDomains {
+		message, description = MemberDomainsMessage, "User "+v.Value+" is not in permitted organization."
+	}
+	subject := "orgpolicy:" + relativeName(v.Resource)
+	if v.Value != "" {
+		subject += "?configvalue=" + v.Value
+	}
+	base := status.New(codes.FailedPrecondition, message)
+	detailed, err := base.WithDetails(&errdetails.PreconditionFailure{Violations: []*errdetails.PreconditionFailure_Violation{
+		{Type: "constraints/" + v.Constraint, Subject: subject, Description: description},
+	}})
+	if err != nil {
+		return base
+	}
+	return detailed
+}
+
+// relativeName strips the service host from a full resource name.
+func relativeName(name string) string {
+	if rest, ok := strings.CutPrefix(name, "//"); ok {
+		if _, path, found := strings.Cut(rest, "/"); found {
+			return path
+		}
+	}
+	return name
+}
+
+// OrgPolicy returns a copy of the organization policy node stores for a
+// constraint. node is a hierarchy node's index name.
+func (e *Engine) OrgPolicy(node, constraint string) (*orgpolicypb.Policy, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	policy, ok := e.orgPolicies[node][constraint]
+	if !ok {
+		return nil, false
+	}
+	return proto.CloneOf(policy), true
+}
+
+// OrgPolicies returns copies of a node's organization policies in catalog
+// order.
+func (e *Engine) OrgPolicies(node string) []*orgpolicypb.Policy {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var policies []*orgpolicypb.Policy
+	for _, constraint := range orgpolicy.Catalog() {
+		if policy, ok := e.orgPolicies[node][constraint.Name]; ok {
+			policies = append(policies, proto.CloneOf(policy))
+		}
+	}
+	return policies
+}
+
+// SetOrgPolicy validates and stores an organization policy on a hierarchy
+// node, replacing the node's policy for the same constraint. Bootstrap and
+// the Organization Policy API both write through it. A constraint the
+// emulator doesn't enforce is refused: storing it would claim an
+// enforcement that never happens. The caller sets the name and Seals it.
+func (e *Engine) SetOrgPolicy(node, constraint string, policy *orgpolicypb.Policy) error {
+	if _, ok := e.index.Get(node); !ok || !strings.HasPrefix(node, hierarchyPrefix) {
+		return status.Error(codes.NotFound, "Organization policy resource is not registered")
+	}
+	definition, ok := orgpolicy.Lookup(constraint)
+	if !ok {
+		return status.Errorf(codes.Unimplemented, "Constraint constraints/%s is not enforced locally", constraint)
+	}
+	if err := orgpolicy.Validate(definition, policy); err != nil {
+		return fmt.Errorf("validate the organization policy: %w", err)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.orgPolicies[node] == nil {
+		e.orgPolicies[node] = map[string]*orgpolicypb.Policy{}
+	}
+	e.orgPolicies[node][constraint] = proto.CloneOf(policy)
+	return nil
+}
+
+// DeleteOrgPolicy removes a node's policy for a constraint and reports
+// whether one was stored.
+func (e *Engine) DeleteOrgPolicy(node, constraint string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.orgPolicies[node][constraint]
+	delete(e.orgPolicies[node], constraint)
+	if len(e.orgPolicies[node]) == 0 {
+		delete(e.orgPolicies, node)
+	}
+	return ok
+}
+
+// EffectiveOrgPolicy is the spec getEffectivePolicy reports for a constraint
+// at a node: the hierarchy's specs merged with conditions evaluated.
+func (e *Engine) EffectiveOrgPolicy(node, constraint string) (*orgpolicypb.PolicySpec, error) {
+	definition, ok := orgpolicy.Lookup(constraint)
+	if !ok {
+		return nil, status.Errorf(codes.Unimplemented, "Constraint constraints/%s is not enforced locally", constraint)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	rules, _, err := e.effectiveRules(node, definition, false)
+	if err != nil {
+		return nil, err
+	}
+	return orgpolicy.Render(definition, rules), nil
+}
+
+// OrgPolicyEnforced reports whether a boolean constraint's spec applies at
+// resource, without tracing: Storage reads public access prevention with it.
+func (e *Engine) OrgPolicyEnforced(resource, constraint string) (bool, error) {
+	definition, ok := orgpolicy.Lookup(constraint)
+	if !ok || definition.List {
+		return false, status.Errorf(codes.Internal, "Constraint constraints/%s is not an enforced boolean constraint", constraint)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.orgPolicies) == 0 {
+		return false, nil
+	}
+	rules, _, err := e.effectiveRules(resource, definition, false)
+	return orgpolicy.Enforced(rules), err
+}
+
+// CheckOrgPolicy evaluates one enforced constraint for a mutation of
+// resource (its index name, or its project's for a create) after the
+// decision decisionID authorized it, and traces the verdict on it. A boolean
+// constraint takes no values; a list constraint checks each value. The
+// first value the spec refuses is an *OrgPolicyError; a dryRunSpec
+// verdict is only traced. Call it at the mutation, after Authorize, so an
+// IAM denial comes first (recorded for service account key creation).
+func (e *Engine) CheckOrgPolicy(decisionID, resource, constraint string, values ...string) error {
+	definition, ok := orgpolicy.Lookup(constraint)
+	if !ok {
+		return status.Errorf(codes.Internal, "Constraint constraints/%s is not enforced", constraint)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.checkOrgPolicy(decisionID, resource, definition, values)
+}
+
+// checkMemberDomains applies iam.allowedPolicyMemberDomains to the members a
+// policy write adds. Members already present stay: GCP's constraint is not
+// retroactive, and a read-modify-write must keep working.
+func (e *Engine) checkMemberDomains(decisionID, resource string, previous, policy Policy) error {
+	present := map[string]bool{}
+	for _, binding := range previous.Bindings {
+		for _, member := range binding.Members {
+			present[member] = true
+		}
+	}
+	var added []string
+	for _, binding := range policy.Bindings {
+		for _, member := range binding.Members {
+			if !present[member] && !slices.Contains(added, member) {
+				added = append(added, member)
+			}
+		}
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	definition, _ := orgpolicy.Lookup(orgpolicy.MemberDomains)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.checkOrgPolicy(decisionID, resource, definition, added)
+}
+
+// checkOrgPolicy evaluates and traces one constraint. Without any stored
+// organization policy there is nothing to enforce. The caller holds mu.
+func (e *Engine) checkOrgPolicy(decisionID, resource string, definition orgpolicy.Constraint, values []string) error {
+	if len(e.orgPolicies) == 0 {
+		return nil
+	}
+	rules, dryRun, err := e.effectiveRules(resource, definition, false)
+	if err != nil {
+		return err
+	}
+	value, refused := e.refusedValue(definition, rules, values)
+	e.traceOrgPolicy(decisionID, resource, definition, "", values, value, refused)
+	if dryRun {
+		dryRules, _, err := e.effectiveRules(resource, definition, true)
+		if err != nil {
+			return err
+		}
+		dryValue, dryRefused := e.refusedValue(definition, dryRules, values)
+		e.traceOrgPolicy(decisionID, resource, definition, "dry-run ", values, dryValue, dryRefused)
+	}
+	if refused {
+		return &OrgPolicyError{Constraint: definition.Name, Value: value, Resource: resource}
+	}
+	return nil
+}
+
+// effectiveRules merges the constraint's specs along resource's ancestry,
+// root first. The dry-run chain takes each node's dryRunSpec, or its spec
+// where it has none. hasDryRun reports whether any node has a dryRunSpec.
+// An unresolvable hierarchy fails closed. The caller holds mu.
+func (e *Engine) effectiveRules(resource string, definition orgpolicy.Constraint, dryRun bool) ([]*orgpolicypb.PolicySpec_PolicyRule, bool, error) {
+	ancestors, err := e.ancestry(Target{Name: resource})
+	if err != nil {
+		return nil, false, status.Error(codes.Unimplemented, "Organization policy hierarchy cannot be resolved: "+err.Error())
+	}
+	chain := make([]*orgpolicypb.PolicySpec, 0, len(ancestors))
+	hasDryRun := false
+	for _, ancestor := range slices.Backward(ancestors) {
+		policy := e.orgPolicies[ancestor.Name][definition.Name]
+		spec := policy.GetSpec()
+		if policy.GetDryRunSpec() != nil {
+			hasDryRun = true
+			if dryRun {
+				spec = policy.GetDryRunSpec()
+			}
+		}
+		chain = append(chain, spec)
+	}
+	rules, err := orgpolicy.Effective(definition, chain)
+	if err != nil {
+		return nil, false, status.Error(codes.Internal, err.Error())
+	}
+	return rules, hasDryRun, nil
+}
+
+// refusedValue returns the first value the effective rules refuse; a
+// boolean constraint refuses when enforced. The caller holds mu.
+func (e *Engine) refusedValue(definition orgpolicy.Constraint, rules []*orgpolicypb.PolicySpec_PolicyRule, values []string) (string, bool) {
+	if !definition.List {
+		return "", orgpolicy.Enforced(rules)
+	}
+	for _, value := range values {
+		matches := func(entry string) bool { return orgpolicy.LocationMatches(entry, value) }
+		if definition.Name == orgpolicy.MemberDomains {
+			customer := e.memberCustomer(value)
+			matches = func(entry string) bool { return customer != "" && strings.TrimPrefix(entry, "is:") == customer }
+		}
+		if !orgpolicy.Allows(rules, matches) {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+// traceOrgPolicy appends one verdict to a remembered decision. The caller
+// holds mu.
+func (e *Engine) traceOrgPolicy(decisionID, resource string, definition orgpolicy.Constraint, mode string, values []string, refused string, violation bool) {
+	decision, ok := e.decisions[decisionID]
+	if !ok {
+		return
+	}
+	verdict, detail := mode+"allow", definition.Reference()
+	if violation {
+		verdict = mode + "violation"
+		if refused != "" {
+			detail += ": " + refused
+		}
+	} else if len(values) > 0 {
+		detail += ": " + strings.Join(values, ", ")
+	}
+	decision.Signals = append(decision.Signals, Signal{Family: "org-policy", Verdict: verdict, Detail: detail, Resource: resource})
+	e.decisions[decisionID] = decision
+}
+
+// memberCustomer is the directory customer an IAM member belongs to, or ""
+// for none: users of a declared domain, declared groups, declared domains,
+// and service accounts of indexed projects (Google-managed ones by project
+// number). allUsers, allAuthenticatedUsers, and everyone else belong to no
+// customer. The caller holds mu.
+func (e *Engine) memberCustomer(member string) string {
+	group := func(email string) bool { return e.directory.groups[email] }
+	forms := []struct {
+		prefix  string
+		belongs func(string) bool
+	}{
+		{"user:", func(email string) bool {
+			_, domain, _ := strings.Cut(email, "@")
+			return e.directory.domains[domain]
+		}},
+		{"group:", group},
+		{strings.ToLower(groupSetPrefix), group},
+		{"domain:", func(domain string) bool { return e.directory.domains[domain] }},
+		{"serviceaccount:", e.localAccount},
+	}
+	lower := strings.ToLower(member)
+	for _, form := range forms {
+		if rest, ok := strings.CutPrefix(lower, form.prefix); ok && form.belongs(rest) {
+			return e.directory.customer
+		}
+	}
+	return ""
+}
+
+// hierarchyPrefix starts the index name of every organization, folder, and
+// project.
+const hierarchyPrefix = "//cloudresourcemanager.googleapis.com/"
+
+// localAccount reports a service account of an indexed project: a
+// Google-managed account named by the project's number (service-NUMBER@...,
+// as the Storage and gcp-sa-* service agents are, NUMBER-compute@developer,
+// NUMBER@cloudservices), or NAME@PROJECT.iam.gserviceaccount.com.
+func (e *Engine) localAccount(email string) bool {
+	local, domain, _ := strings.Cut(email, "@")
+	if !serviceAccountEmail(email) {
+		return false
+	}
+	if number := managedAccountNumber.FindStringSubmatch(local); number != nil {
+		_, found := e.index.ProjectByNumber(number[1])
+		return found
+	}
+	project, ok := strings.CutSuffix(domain, ".iam.gserviceaccount.com")
+	_, found := e.index.Get(projectNodePrefix + project)
+	return ok && found
+}
+
+// managedAccountNumber reads the project number from a Google-managed
+// account's local part.
+var managedAccountNumber = regexp.MustCompile(`^(?:service-)?([0-9]+)(?:-compute)?$`)

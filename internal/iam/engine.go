@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
@@ -57,9 +58,11 @@ type Decision struct {
 	Reason    string            `json:"reason"`
 	Complete  bool              `json:"complete"`
 	Checks    []Check           `json:"checks"`
-	// Signals carry non-IAM policy families evaluated alongside the request.
-	// They are dry-run observations, never enforcement, and stay distinct from
-	// IAM denial so no precedence order is implied between families.
+	// Signals carry the non-IAM policy families evaluated for the request:
+	// VPC-SC perimeter membership at authorization, and every organization
+	// policy check a provider makes at the mutation after authorization
+	// (CheckOrgPolicy, SetPolicyFor). They stay distinct from the IAM checks,
+	// so a trace tells an organization policy refusal from an IAM denial.
 	Signals []Signal `json:"signals,omitempty"`
 	// conditions holds the request's CEL attributes; never serialized.
 	conditions conditionContext
@@ -71,6 +74,9 @@ type Decision struct {
 }
 
 // Signal records one non-IAM policy family's observation on a decision.
+// Organization policy verdicts are "allow", "violation" (the mutation was
+// refused), "dry-run allow", and "dry-run violation" (traced, never
+// enforced); a VPC-SC signal is "inside-perimeter".
 type Signal struct {
 	Family   string `json:"family"`
 	Verdict  string `json:"verdict"`
@@ -87,7 +93,7 @@ type Engine struct {
 	rules       map[string]Rule
 	policies    map[string]storedPolicy
 	unsupported map[string]unsupportedPolicy
-	orgPolicies map[string][]orgPolicyRecord
+	orgPolicies map[string]map[string]*orgpolicypb.Policy
 	perimeters  map[string][]string
 	revision    uint64
 	decisions   map[string]Decision
@@ -133,7 +139,7 @@ func New(index *state.Index) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := &Engine{index: index, roles: catalog.permissions, definitions: catalog.definitions, testable: catalog.testable, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string][]orgPolicyRecord{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}
+	engine := &Engine{index: index, roles: catalog.permissions, definitions: catalog.definitions, testable: catalog.testable, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string]map[string]*orgpolicypb.Policy{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}
 	// A resource that leaves the index takes its policy with it, whichever
 	// provider deleted it: GCP gives a recreated resource an empty policy.
 	// A delete racing a same-name recreate can drop the new policy, never
@@ -584,6 +590,7 @@ func (e *Engine) ancestry(target Target) ([]state.Resource, error) {
 }
 func cloneDecision(value Decision) Decision {
 	value.Principal.Scopes = append([]string(nil), value.Principal.Scopes...)
+	value.Signals = append([]Signal(nil), value.Signals...)
 	value.Checks = append([]Check(nil), value.Checks...)
 	for i := range value.Checks {
 		value.Checks[i].Policies = append([]string(nil), value.Checks[i].Policies...)
@@ -742,23 +749,8 @@ func pabBounds(pab *PABPolicy, ancestors []state.Resource) bool {
 	return false
 }
 
-// MarkOrgPolicy stores one org-policy constraint on a resource. The
-// constraint is reported in traces as a dry-run signal; nothing enforces it.
-func (e *Engine) MarkOrgPolicy(resource string, constraint string, dryRun bool) error {
-	if _, ok := e.index.Get(resource); !ok {
-		return status.Error(codes.NotFound, "Org-policy resource is not registered")
-	}
-	if constraint == "" {
-		return status.Error(codes.InvalidArgument, "Org-policy constraint is required")
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.orgPolicies[resource] = append(e.orgPolicies[resource], orgPolicyRecord{constraint: constraint, dryRun: dryRun})
-	return nil
-}
-
 // MarkPerimeter records one VPC Service Controls perimeter over resources.
-// Membership is reported in traces as a dry-run signal; nothing enforces it.
+// Membership is reported in traces; nothing enforces it.
 func (e *Engine) MarkPerimeter(name string, resources []string) error {
 	if name == "" || len(resources) == 0 {
 		return status.Error(codes.InvalidArgument, "A perimeter requires a name and resources")
@@ -776,21 +768,11 @@ func (e *Engine) MarkPerimeter(name string, resources []string) error {
 	return nil
 }
 
-// collectSignals observes the non-IAM families along the ancestor chain.
-// Each family reports independently; the order here is presentation, not
-// precedence, and no family blocks or replaces an IAM verdict.
+// collectSignals reports the VPC-SC perimeters along the ancestor chain.
+// Membership is a trace signal only: no request is refused for crossing a
+// perimeter, and it never replaces an IAM verdict.
 func (e *Engine) collectSignals(ancestors []state.Resource, decision *Decision) {
 	for _, ancestor := range ancestors {
-		for _, record := range e.orgPolicies[ancestor.Name] {
-			verdict := "violation"
-			if record.dryRun {
-				verdict = "dry-run violation"
-			}
-			decision.Signals = append(decision.Signals, Signal{
-				Family: "org-policy", Verdict: verdict,
-				Detail: record.constraint, Resource: ancestor.Name,
-			})
-		}
 		if perimeters := e.perimeters[ancestor.Name]; len(perimeters) > 0 {
 			decision.Signals = append(decision.Signals, Signal{
 				Family: "vpc-sc", Verdict: "inside-perimeter",

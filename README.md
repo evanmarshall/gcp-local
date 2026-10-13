@@ -70,9 +70,10 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Artifact Registry](docs/services/artifactregistry.md) | gcp-local | Repositories only; no push or pull |
 | [IAM](docs/services/security/serviceaccounts.md) and [project IAM](docs/services/security/project-iam.md) | gcp-local | Service accounts and policies; impersonation (`generateAccessToken`, `generateIdToken`, `signJwt`, `signBlob`) |
 | [Resource Manager](docs/services/security/resourcemanager.md) | gcp-local | Folders, project moves, and organization and folder IAM inherited by everything under them |
+| [Organization Policy](docs/services/security/orgpolicy.md) | gcp-local | Policies on organizations, folders, and projects; 6 constraints enforced on Storage and IAM requests |
 | [VPC networking](docs/services/networking.md) | gcp-local | Connectivity verdicts; no real traffic |
 
-IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage, Cloud SQL, Memorystore, Secret Manager, and Cloud KMS; on other services a condition that reads `resource.*` grants nothing. Deny rules and principal access boundaries for service accounts are enforced locally but not recorded; organization policy and VPC Service Controls are not enforced ([IAM](docs/architecture/iam.md)).
+IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage, Cloud SQL, Memorystore, Secret Manager, and Cloud KMS; on other services a condition that reads `resource.*` grants nothing. Deny rules and principal access boundaries for service accounts are enforced locally but not recorded; ([IAM](docs/architecture/iam.md)). Organization policies are enforced for 6 constraints; VPC Service Controls are not enforced ([Organization Policy](docs/services/security/orgpolicy.md)).
 
 ## How it works
 
@@ -84,7 +85,7 @@ Scenarios are recorded once against a sandbox Google Cloud project and replayed 
 
 - Unsupported methods and options return `UNIMPLEMENTED`.
 - State is in memory; `reset` and `down` discard it.
-- Storage buckets need uniform bucket-level access; ACLs, versioning, and object retention are not modeled. Public access prevention and soft delete work, but deleted buckets are not soft-deleted and organization policies are not applied ([Storage](docs/services/storage.md#gaps)).
+- Storage buckets need uniform bucket-level access; ACLs, versioning, and object retention are not modeled. Public access prevention and soft delete work, but deleted buckets are not soft-deleted ([Storage](docs/services/storage.md#gaps)).
 - Packaged Cloud Run runs your own images only with `gcp-local --cloud-run-docker up`, which mounts the Docker socket (root-equivalent on the host). Revisions have no internet access ([Cloud Run](docs/services/cloudrun.md)).
 - Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379, 5432, or 3306; read the port from the API. Redis doesn't accept TLS; Cloud SQL serves TLS with the instance's own CA ([Cloud SQL](docs/services/databases/cloudsql.md#tls)).
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.

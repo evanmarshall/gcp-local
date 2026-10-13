@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"maps"
 	"math/big"
@@ -20,14 +21,16 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/iam/orgpolicy"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 // execute dispatches one authorized request.
-func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target) (*gateway.RESTResponse, error) {
+func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target, decision string) (*gateway.RESTResponse, error) {
 	switch call.Method {
 	case methodAccountsCreate:
 		return p.accountsCreate(request, scope)
@@ -46,13 +49,13 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 			if call.Method == methodAccountsGetIam {
 				response, policyErr = p.getIam(request, target)
 			} else {
-				response, policyErr = p.setIam(request, target)
+				response, policyErr = p.setIam(request, target, decision)
 			}
 			return policyErr
 		})
 		return response, err
 	case methodKeysList, methodKeysGet, methodKeysCreate, methodKeysDelete:
-		return p.executeKey(call.Method, request, scope)
+		return p.executeKey(call.Method, request, scope, target, decision)
 	case methodSignBlob, methodSignJwt, methodAccessToken, methodIDToken:
 		return p.executeCredentials(call.Method, request, scope)
 	default:
@@ -76,13 +79,21 @@ func (p *Provider) executeCredentials(method string, request *gateway.RESTReques
 }
 
 // executeKey dispatches one authorized service account key request.
-func (p *Provider) executeKey(method string, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+func (p *Provider) executeKey(method string, request *gateway.RESTRequest, scope state.Scope, target iam.Target, decision string) (*gateway.RESTResponse, error) {
 	switch method {
 	case methodKeysList:
 		return p.keysList(request, scope)
 	case methodKeysGet:
 		return p.keysGet(request, scope)
 	case methodKeysCreate:
+		// GCP refuses a malformed body before the organization policy
+		// (recorded: serviceaccount-lifecycle-authorization "key-unknown-field").
+		if err := checkKeyRequest(request.JSON); err != nil {
+			return nil, err
+		}
+		if err := p.keyCreationPolicy(decision, target); err != nil {
+			return nil, err
+		}
 		return p.keysCreate(request, scope)
 	default:
 		return p.keysDelete(request, scope)
@@ -366,14 +377,51 @@ func (p *Provider) keysList(request *gateway.RESTRequest, scope state.Scope) (*g
 	return &gateway.RESTResponse{JSON: provider.ListBody("keys", items, "")}, nil
 }
 
+// keyCreationConstraints refuse user-managed key creation; the managed one
+// is checked first (the sandbox enforces it).
+var keyCreationConstraints = []string{orgpolicy.ManagedKeyCreation, orgpolicy.KeyCreation}
+
+// keyCreationPolicy refuses a key creation an enforced constraint blocks,
+// after IAM allowed it: an IAM denial comes first (recorded:
+// orgpolicy-constraint-enforcement, which also records the managed
+// constraint's refusal; the legacy constraint's is modeled).
+func (p *Provider) keyCreationPolicy(decision string, target iam.Target) error {
+	name := p.uniqueName(target)
+	for _, constraint := range keyCreationConstraints {
+		err := p.engine.CheckOrgPolicy(decision, target.Name, constraint)
+		if _, violated := errors.AsType[*iam.OrgPolicyError](err); !violated {
+			if err != nil {
+				return fmt.Errorf("check %s: %w", constraint, err)
+			}
+			continue
+		}
+		reference := "constraints/" + constraint
+		if constraint == orgpolicy.ManagedKeyCreation {
+			definition, _ := orgpolicy.Lookup(constraint)
+			message := fmt.Sprintf("Operation denied by org policy on resource '%s': [%q: %q].", name, reference, definition.Description())
+			return provider.ErrorInfo(codes.FailedPrecondition, message, "CUSTOM_ORG_POLICY_VIOLATION", "iam.googleapis.com",
+				map[string]string{"customConstraints": reference, "resource": name})
+		}
+		const message = "Key creation is not allowed on this service account."
+		detailed, _ := status.New(codes.FailedPrecondition, message).WithDetails(&errdetails.PreconditionFailure{
+			Violations: []*errdetails.PreconditionFailure_Violation{{Type: reference, Subject: "orgpolicy:" + name, Description: message}}})
+		return detailed.Err()
+	}
+	return nil
+}
+
+// uniqueName is an account's name by unique ID, as its refusals name it:
+// projects/-/serviceAccounts/UNIQUE_ID.
+func (p *Provider) uniqueName(target iam.Target) string {
+	resource, _ := p.index.Get(target.Name)
+	return "projects/-/serviceAccounts/" + resource.Number
+}
+
 // keysCreate generates one user-managed RSA key, publishes its public half for
 // signature verification, and returns the private key file once. The key is
 // generated outside the lock from a copy of the account's identity fields.
 // Only the default file type and algorithm are modeled.
 func (p *Provider) keysCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	if err := checkKeyRequest(request.JSON); err != nil {
-		return nil, err
-	}
 	account := request.Path["serviceAccount"]
 	var identity accountRecord
 	if err := p.withAccount(scope, account, func(_ *scopeState, record *accountRecord) error {
@@ -593,13 +641,19 @@ func (p *Provider) getIam(request *gateway.RESTRequest, target iam.Target) (*gat
 	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }
 
-// setIam stores the policy of the account.
-func (p *Provider) setIam(request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
+// setIam stores the policy of the account. A member outside the permitted
+// customers is refused naming the account by unique ID (recorded:
+// orgpolicy-constraint-enforcement).
+func (p *Provider) setIam(request *gateway.RESTRequest, target iam.Target, decision string) (*gateway.RESTResponse, error) {
 	decoded, err := provider.DecodePolicy(request.JSON, gap)
 	if err != nil {
 		return nil, err
 	}
-	policy, err := p.engine.SetPolicy(target.Name, decoded)
+	policy, err := p.engine.SetPolicyFor(decision, target.Name, decoded)
+	if violation, ok := errors.AsType[*iam.OrgPolicyError](err); ok {
+		violation.Resource = "//iam.googleapis.com/" + p.uniqueName(target)
+		return nil, violation
+	}
 	if err != nil {
 		// The engine's own statuses (a stale etag is ABORTED) reach the caller.
 		if _, ok := status.FromError(err); ok {

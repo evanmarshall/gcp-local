@@ -1,6 +1,6 @@
 # Terraform compatibility
 
-19 Terraform acceptance cases pass against gcp-local across 15 services, with the released google provider 8.5.0, Terraform 1.16.5, and terraform-plugin-testing 1.15.0. Only 3 are extracted from the provider's upstream tests; the other 16 are written in gcp-local. The [selection manifest](../../tests/terraform/selection.json) lists both sets and pins the upstream source hashes; the [adapter audit](../../tests/terraform/audit.md) lists every change to the upstream cases.
+21 Terraform acceptance cases pass against gcp-local across 16 services, with the released google provider 8.5.0, Terraform 1.16.5, and terraform-plugin-testing 1.15.0. Only 3 are extracted from the provider's upstream tests; the other 18 are written in gcp-local. The [selection manifest](../../tests/terraform/selection.json) lists both sets and pins the upstream source hashes; the [adapter audit](../../tests/terraform/audit.md) lists every change to the upstream cases.
 
 ## Extracted from upstream (3)
 
@@ -12,7 +12,7 @@ Extracted by `scripts/dev/generate_terraform_tests.py` from `hashicorp/terraform
 | `TestAccStorageBucket_labels` | `google/services/storage/resource_storage_bucket_test.go` | Add, change, and remove labels with import checks and an empty plan after each step |
 | `TestAccStorageObject_recreate` | `google/services/storage/resource_storage_bucket_object_test.go` | Small multipart upload, CRC32C checks, replacement on content change |
 
-## Written locally (16)
+## Written locally (18)
 
 These have no upstream counterpart. Their configurations and assertions are gcp-local's own, in `tests/terraform/runner`.
 
@@ -35,6 +35,7 @@ These have no upstream counterpart. Their configurations and assertions are gcp-
 | `TestLocalFolderAndFolderIam` | Folder create through a polled operation under a seeded folder, folder IAM member, rename, import, empty plan, `DELETE_REQUESTED` after destroy |
 | `TestLocalSQLDatabaseInstance` | PostgreSQL instance with backups and point-in-time recovery, `ssl_mode`, an authorized network, and a flag, plus a database and a user; in-place update (PUT) of `ssl_mode`, networks, and log retention; empty plan; 404 after destroy |
 | `TestLocalProjectIamPolicy` | Project IAM policy replace; runs last because it replaces the whole policy |
+| `TestLocalOrgPolicyProject` | `google_org_policy_policy` with a `gcp.resourceLocations` rule on a project under a seeded folder, a bucket in `europe-west1` refused by it, the rule widened so the bucket is created, import, empty plan, 404 after destroy. Runs without the sandbox organization's policies (`-sandbox-org-policies=false`), since `TestLocalServiceAccount` creates a key |
 
 These cases prove the released provider accepts gcp-local's responses. They are not recorded from real GCP and never run against it; the API outcomes they rely on are recorded separately ([coverage](../coverage.md)).
 

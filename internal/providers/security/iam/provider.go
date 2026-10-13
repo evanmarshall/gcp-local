@@ -145,7 +145,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
-	response, err := p.execute(call, request, scope, target)
+	response, err := p.execute(call, request, scope, target, decision.ID)
 	if err != nil {
 		return nil, err
 	}

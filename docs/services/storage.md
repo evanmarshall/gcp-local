@@ -27,7 +27,7 @@ Point each client at the emulator and keep its normal credential loading:
 - Go and rclone need the `/storage/v1/` suffix; without it they request `/storage/b/...`. The Go client reads objects over the XML API at the endpoint's host.
 - Signed URLs use the client's endpoint as their host: Python takes `client.api_endpoint`, Go takes `SignedURLOptions{Hostname: "127.0.0.1:4566", Insecure: true}`.
 
-Bucket create must set `location` and `iamConfiguration.uniformBucketLevelAccess.enabled: true` (or its former name `bucketPolicyOnly`, which rclone sends). Everything else has GCP's defaults:
+Bucket create must set `location` and `iamConfiguration.uniformBucketLevelAccess.enabled: true` (or its former name `bucketPolicyOnly`, which rclone sends). Under an enforced `storage.uniformBucketLevelAccess` [organization policy](security/orgpolicy.md), an omitted setting is enabled and a disabled one, on create or patch, is 412 (recorded: `orgpolicy-constraint-enforcement`). `gcp.resourceLocations` checks the location (modeled). Everything else has GCP's defaults:
 
 | Setting | Default | Accepted |
 | --- | --- | --- |
@@ -161,7 +161,7 @@ A bucket with a soft-delete policy keeps every object generation that a delete, 
 `allUsers` and `allAuthenticatedUsers` in a bucket policy follow the bucket's `publicAccessPrevention`:
 
 - `enforced`: `setIamPolicy` returns 412 `The member bindings allUsers and allAuthenticatedUsers are not allowed since public access prevention is enforced.` A public binding inherited from the project grants nothing on the bucket.
-- `inherited`: GCP applies the `storage.publicAccessPrevention` organization policy. The emulator models no organization policies, so, as in a hierarchy that sets none, public members are accepted and grant access: `allUsers` to anonymous callers on the JSON and XML APIs, `allAuthenticatedUsers` to any authenticated caller. A real project whose organization enforces that constraint, or domain-restricted sharing (`iam.allowedPolicyMemberDomains`), refuses these bindings. Not recorded: the sandbox organization enforces domain-restricted sharing.
+- `inherited`: the `storage.publicAccessPrevention` [organization policy](security/orgpolicy.md) decides. Enforced above the bucket, it refuses public members as `enforced` does and public grants grant nothing (modeled). With none, public members are accepted and grant access: `allUsers` to anonymous callers on the JSON and XML APIs, `allAuthenticatedUsers` to any authenticated caller (modeled). Domain-restricted sharing (`iam.allowedPolicyMemberDomains`) refuses them with 412 `One or more users named in the policy do not belong to a permitted customer.` (recorded: `orgpolicy-constraint-enforcement`).
 
 ## IAM
 
@@ -237,7 +237,7 @@ Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PR
 - No ACLs, requester pays, encryption keys, or compose.
 - Bucket soft delete is not modeled: a deleted bucket and its soft-deleted objects are gone at once. `softDeleted` on `buckets.list` and `buckets.get`, and `buckets.restore`, return the 400 gap. `objects.restore` in a bucket whose policy is `0` returns the gap.
 - Soft-deleted media (`alt=media`), preconditions on a soft-deleted read, soft-deleted listings longer than one page or with other options, and `restoreToken` return the gap.
-- Organization policies are not modeled ([public access prevention](#public-access-prevention)). `publicAccessPrevention: unspecified` returns the gap.
+- Of the [organization policy](security/orgpolicy.md) constraints, only uniform access, public access prevention, domain-restricted sharing, and resource locations apply. `publicAccessPrevention: unspecified` returns the gap.
 - Object `patch` refuses every other field (`acl`, `storageClass`, contexts) and clearing a string field (null or empty). `objects.update` (PUT) is a gap.
 - `rewrite` never returns a `rewriteToken` and refuses one; it refuses buckets in different projects.
 - XML API: object `GET` and `PUT` only. No HMAC signatures, signed resumable starts (`x-goog-resumable`), `x-goog-if-*` or `If-Match`/`If-None-Match` headers, signed payload hashes, or virtual-hosted URLs. A bucket named like an API path prefix (`storage`, `upload`, `v1`) is not reachable over XML.

@@ -28,6 +28,7 @@ import (
 	"github.com/evanmarshall/gcp-local/api/generated/run"
 	"github.com/evanmarshall/gcp-local/api/generated/security/cloudkms"
 	"github.com/evanmarshall/gcp-local/api/generated/security/iam"
+	"github.com/evanmarshall/gcp-local/api/generated/security/orgpolicy"
 	"github.com/evanmarshall/gcp-local/api/generated/security/resourcemanager"
 	"github.com/evanmarshall/gcp-local/api/generated/security/secretmanager"
 	"github.com/evanmarshall/gcp-local/api/generated/storage"
@@ -89,7 +90,7 @@ func New(registry *Registry, resolve Resolver) *Gateway {
 		run.RunServicesMethods, run.RunRevisionsMethods, mixin.OperationsMethods,
 		spanner.SpannerInstanceAdminMethods, spanner.SpannerDatabaseAdminMethods,
 		bigtable.BigtableInstanceAdminMethods, bigtable.BigtableTableAdminMethods, iam.IAMAdminMethods, iam.IAMCredentialsMethods,
-		resourcemanager.FoldersMethods, resourcemanager.OrganizationsMethods, resourcemanager.ProjectsMethods} {
+		resourcemanager.FoldersMethods, resourcemanager.OrganizationsMethods, resourcemanager.ProjectsMethods, orgpolicy.OrgPolicyMethods} {
 		for _, rpc := range table {
 			g.rpcs[rpc.Method] = rpc
 		}
@@ -114,7 +115,7 @@ func (g *Gateway) addTranscoding() {
 		run.RunServicesTranscoding, run.RunRevisionsTranscoding,
 		spanner.SpannerInstanceAdminTranscoding, spanner.SpannerDatabaseAdminTranscoding,
 		bigtable.BigtableInstanceAdminTranscoding, bigtable.BigtableTableAdminTranscoding, iam.IAMAdminTranscoding, iam.IAMCredentialsTranscoding,
-		resourcemanager.FoldersTranscoding, resourcemanager.OrganizationsTranscoding, resourcemanager.ProjectsTranscoding} {
+		resourcemanager.FoldersTranscoding, resourcemanager.OrganizationsTranscoding, resourcemanager.ProjectsTranscoding, orgpolicy.OrgPolicyTranscoding} {
 		for _, binding := range table {
 			g.transcoded[binding.RPC] = append(g.transcoded[binding.RPC], binding)
 		}
@@ -155,6 +156,7 @@ func contracts() []contract.Route {
 	routes = append(routes, artifactregistry.ArtifactRegistryRoutes...)
 	routes = append(routes, resourcemanager.ResourceManagerRoutes...)
 	routes = append(routes, iam.IAMRoutes...)
+	routes = append(routes, orgpolicy.OrgPolicyRoutes...)
 	routes = append(routes, cloudtasks.CloudTasksRoutes...)
 	routes = append(routes, cloudscheduler.CloudSchedulerRoutes...)
 	routes = append(routes, cloudsql.CloudSQLRoutes...)

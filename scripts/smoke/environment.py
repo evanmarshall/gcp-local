@@ -59,6 +59,11 @@ SERVICE_PROBES = [
     ("artifactregistry", "GET", "/v1/projects/{project}/locations/us-central1/repositories"),
     ("iam", "GET", "/v1/projects/{project}/serviceAccounts"),
     ("resourcemanager", "POST", "/v1/projects/{project}:getIamPolicy"),
+    (
+        "orgpolicy",
+        "GET",
+        "/v2/projects/{project}/policies/gcp.resourceLocations:getEffectivePolicy",
+    ),
     ("redis", "GET", "/v1/projects/{project}/locations/us-central1/instances"),
     ("cloudsql", "GET", "/sql/v1beta4/projects/{project}/instances"),
     ("logging", "GET", "/v2/projects/{project}/logs"),

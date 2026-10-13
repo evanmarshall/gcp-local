@@ -57,6 +57,10 @@
     {"name": "iamcredentials", "tests": ["tests/conformance/security/iam/test_credentials.py"],
      "option": "--gcp-live-scope-file", "scope": "security/iamcredentials.json"},
     {"name": "resourcemanager-hierarchy", "tests": ["tests/conformance/security/resourcemanager/hierarchy/test_hierarchy.py"],
-     "option": "--gcp-live-scope-file", "scope": "security/resourcemanager-hierarchy.json"}
+     "option": "--gcp-live-scope-file", "scope": "security/resourcemanager-hierarchy.json"},
+    {"name": "orgpolicy-visibility", "tests": ["tests/conformance/security/orgpolicy/visibility/test_visibility.py"],
+     "option": "--gcp-live-scope-file", "scope": "security/orgpolicy-visibility.json"},
+    {"name": "orgpolicy-enforcement", "tests": ["tests/conformance/security/orgpolicy/enforcement/test_enforcement.py"],
+     "option": "--gcp-live-scope-file", "scope": "security/orgpolicy-enforcement.json"}
   ]
 }

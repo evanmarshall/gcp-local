@@ -4,8 +4,8 @@
     "file": "testable-permissions.json",
     "sha256": "3bcff8021676cde6e50a256036eb8ea34cd531ac1eea6670b684d753b8337a73"
   },
-  "recorded_at": "2026-10-13T00:27:31.765461+00:00",
-  "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudscheduler, cloudsql, cloudtasks, compute, customroles, firestore, identity, kms, logging, networkmanagement, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions and the project's testable permissions; no resource mutation or grant",
+  "recorded_at": "2026-10-13T04:17:10.701730+00:00",
+  "scope": "Read-only predefined aiplatform, artifactregistry, bigquery, bigtable, cloudscheduler, cloudsql, cloudtasks, compute, customroles, firestore, identity, kms, logging, networkmanagement, orgpolicy, pubsub, redis, resourcemanager, run, secretmanager, serviceaccounts, spanner, storage role definitions and the project's testable permissions; no resource mutation or grant",
   "roles": [
     {
       "file": "vertexai/aiplatform.user.json",
@@ -246,6 +246,16 @@
       "file": "compute/networkmanagement.viewer.json",
       "name": "roles/networkmanagement.viewer",
       "sha256": "265220301a8bf97576995132719312609ecebae858f12d074146dc158840c194"
+    },
+    {
+      "file": "security/orgpolicy/orgpolicy.policyAdmin.json",
+      "name": "roles/orgpolicy.policyAdmin",
+      "sha256": "0df50eecd17fcd84359141e7c103ee6d681f07431916eb3cafcdcc706ec49130"
+    },
+    {
+      "file": "security/orgpolicy/orgpolicy.policyViewer.json",
+      "name": "roles/orgpolicy.policyViewer",
+      "sha256": "5ace352805bc409224d04e0f3bb91d047d952a81e6d7ca0e3688b402248cd42d"
     },
     {
       "file": "messaging/pubsub/pubsub.admin.json",

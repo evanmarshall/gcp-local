@@ -1,0 +1,67 @@
+{
+ "source": "https://orgpolicy.googleapis.com/v2/projects/{project}/constraints",
+ "read_at": "2026-10-13T04:10:00Z",
+ "note": "The constraints gcp-local enforces, in GCP's list order, as constraints.list returned them for the sandbox project.",
+ "constraints": [
+  {
+   "name": "constraints/gcp.resourceLocations",
+   "displayName": "Google Cloud Platform - Resource Location Restriction",
+   "description": "This list constraint defines the set of locations where location-based Google Cloud resources can be created. Important: The information on this page does not describe Google Cloud Platform's data location commitments for Customer Data (as defined in the agreement under which Google has agreed to provide Google Cloud Platform services and as described in the Google Cloud Platform Services Summary at https://docs.cloud.google.com/terms/services) to its customers. For the list of Google Cloud Platform services for which Customer Data location may be selected by customers, see Google Cloud Platform Services with Data Residency at https://docs.cloud.google.com/terms/data-residency. By default, resources can be created in any location. For a full list of supported services, see https://docs.cloud.google.com/organization-policy/reference/restrict-locations-supported-services. Policies for this constraint can specify multi-regions such as asia and europe, regions such as us-east1 or europe-west1 as allowed or denied locations. Allowing or denying a multi-region does not imply that all included sub-locations should also be allowed or denied. For example, if the policy denies the us multi-region (which refers to multi-region resources, like some storage services), resources can still be created in the regional location us-east1. On the other hand, the in:us-locations group contains all locations within the us region, and can be used to block every region. We recommend using value groups to define your policy. You can specify value groups, collections of locations that are curated by Google to provide a simple way to define your resource locations. To use value groups in your organization policy, prefix your entries with the string in:, followed by the value group. For example, to create resources that will only be physically located within the US, set in:us-locations in the list of allowed values. If the suggested_value field is used in a location policy, it should be a region. If the value specified is a region, a UI for a zonal resource may pre-populate any zone in that region. ",
+   "constraintDefault": "ALLOW",
+   "listConstraint": {
+    "supportsIn": true
+   }
+  },
+  {
+   "name": "constraints/iam.allowedPolicyMemberDomains",
+   "displayName": "Domain restricted sharing",
+   "description": "This list constraint defines the organization principal sets and Google Workspace customer IDs whose principals can be added to IAM policies. By default, all user identities are allowed to be added to IAM policies. Only allowed values can be defined in this constraint, denied values are not supported. All domains associated with a Google Workspace account or the principal set listed in the allowed_values will be allowed by the organization policy. All other domains will be blocked by the organization policy. You do not need to add the google.com customer ID to this list in order to interoperate with Google services. Adding google.com allows sharing with Google employees and non-production systems, and should only be used for sharing data with Google employees.",
+   "constraintDefault": "ALLOW",
+   "listConstraint": {}
+  },
+  {
+   "name": "constraints/iam.disableServiceAccountKeyCreation",
+   "displayName": "Disable service account key creation",
+   "description": "This boolean constraint, when enforced, disables the creation of service account external keys and Cloud Storage HMAC keys. By default, service account external keys can be created by users based on their Cloud IAM roles and permissions.",
+   "constraintDefault": "ALLOW",
+   "booleanConstraint": {},
+   "equivalentConstraint": "constraints/iam.managed.disableServiceAccountKeyCreation"
+  },
+  {
+   "name": "constraints/storage.uniformBucketLevelAccess",
+   "displayName": "Enforce uniform bucket-level access",
+   "description": "This boolean constraint requires buckets to use uniform bucket-level access where this constraint is set to True. Any new bucket in the Organization resource must have uniform bucket-level access enabled, and no existing buckets in the organization resource can disable uniform bucket-level access. Enforcement of this constraint is not retroactive: existing buckets with uniform bucket-level access disabled continue to have it disabled. The default value for this constraint is False. Uniform bucket-level access disables the evaluation of ACLs assigned to Cloud Storage objects in the bucket. Consequently, only IAM policies grant access to objects in these buckets.",
+   "constraintDefault": "ALLOW",
+   "booleanConstraint": {}
+  },
+  {
+   "name": "constraints/storage.publicAccessPrevention",
+   "displayName": "Enforce Public Access Prevention",
+   "description": "Secure your Cloud Storage data from public exposure by enforcing public access prevention. This governance policy prevents existing and future resources from being accessed via the public internet by disabling and blocking ACLs and IAM permissions that grant access to allUsers and allAuthenticatedUsers. Enforce this policy on the entire organization (recommended), specific projects, or specific folders to ensure no data is publicly exposed.This policy overrides existing public permissions. Public access will be revoked for existing buckets and objects after this policy is enabled. For more details on the effects of changing enforcement of this constraint on resources, please see: https://docs.cloud.google.com/storage/docs/public-access-prevention.",
+   "constraintDefault": "ALLOW",
+   "booleanConstraint": {}
+  },
+  {
+   "name": "constraints/iam.managed.disableServiceAccountKeyCreation",
+   "displayName": "Disable service account key creation",
+   "description": "This constraint, when enforced, blocks service account key creation.",
+   "constraintDefault": "ALLOW",
+   "booleanConstraint": {
+    "customConstraintDefinition": {
+     "resourceTypes": [
+      "iam.googleapis.com/ServiceAccountKey"
+     ],
+     "methodTypes": [
+      "CREATE",
+      "UPDATE"
+     ],
+     "condition": "resource.keyType == 'USER_MANAGED' && resource.keyOrigin == 'GOOGLE_PROVIDED'",
+     "actionType": "DENY"
+    }
+   },
+   "supportsDryRun": true,
+   "equivalentConstraint": "constraints/iam.disableServiceAccountKeyCreation",
+   "supportsSimulation": true
+  }
+ ]
+}

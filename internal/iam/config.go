@@ -7,8 +7,13 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
+	"github.com/evanmarshall/gcp-local/internal/iam/orgpolicy"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // Configuration sentinels; Load reports the first violated bootstrap rule.
@@ -30,18 +35,15 @@ type Config struct {
 	Policies        map[string]Policy   `json:"policies"`
 	Unsupported     map[string][]string `json:"unsupported,omitempty"`
 	ServiceAccounts []ServiceAccount    `json:"service_accounts,omitempty"`
-	// OrgPolicies declares constraints per resource; dryRun keeps them advisory.
-	OrgPolicies map[string]OrgPolicyDeclaration `json:"org_policies,omitempty"`
+	// OrgPolicies declares Organization Policy v2 policies in the API's JSON
+	// form, each named PARENT/policies/CONSTRAINT on a declared organization,
+	// folder, or project. They are the same records the Organization Policy
+	// API reads and writes.
+	OrgPolicies []json.RawMessage `json:"org_policies,omitempty"`
 	// Perimeters declares VPC-SC perimeters by name over listed resources.
 	Perimeters map[string][]string `json:"vpcsc_perimeters,omitempty"`
 	// Directory declares the local groups and domains policies may name.
 	Directory Directory `json:"directory,omitzero"`
-}
-
-// OrgPolicyDeclaration is one resource's constraint set with a dry-run mode.
-type OrgPolicyDeclaration struct {
-	Constraints []string `json:"constraints"`
-	DryRun      bool     `json:"dry_run"`
 }
 
 // Load creates a fresh index/engine so a rejected bootstrap cannot publish a
@@ -106,13 +108,17 @@ func (e *Engine) publishPolicies(config Config) error {
 	return nil
 }
 
-// publishSignalFamilies loads the org-policy and perimeter declarations.
+// publishSignalFamilies loads the organization policies and perimeters.
+// Organization policies load after allow policies: like GCP's constraints,
+// iam.allowedPolicyMemberDomains is not retroactive.
 func (e *Engine) publishSignalFamilies(config Config) error {
-	for resource, declaration := range config.OrgPolicies {
-		for _, constraint := range declaration.Constraints {
-			if err := e.MarkOrgPolicy(resource, constraint, declaration.DryRun); err != nil {
-				return err
-			}
+	for _, raw := range config.OrgPolicies {
+		policy := &orgpolicypb.Policy{}
+		if err := protojson.Unmarshal(raw, policy); err != nil {
+			return fmt.Errorf("%w: org_policies: %w", errConfigInvalid, err)
+		}
+		if err := e.DeclareOrgPolicy(policy, time.Now()); err != nil {
+			return fmt.Errorf("org policy %s: %w", policy.GetName(), err)
 		}
 	}
 	for name, resources := range config.Perimeters {
@@ -121,6 +127,24 @@ func (e *Engine) publishSignalFamilies(config Config) error {
 		}
 	}
 	return nil
+}
+
+// DeclareOrgPolicy stores a policy named PARENT/policies/CONSTRAINT, as the
+// bootstrap configuration declares one. The name takes GCP's response form
+// (a project by number) and the server-owned fields are set.
+func (e *Engine) DeclareOrgPolicy(policy *orgpolicypb.Policy, now time.Time) error {
+	parent, constraint, ok := orgpolicy.ParseName(policy.GetName())
+	if !ok {
+		return fmt.Errorf("%w: organization policy name %q", errConfigInvalid, policy.GetName())
+	}
+	node, found := orgpolicy.Node(e.index, parent)
+	if !found {
+		return fmt.Errorf("%w: organization policy parent %s is not declared", errConfigInvalid, parent)
+	}
+	policy = proto.CloneOf(policy)
+	policy.Name = orgpolicy.Parent(node) + "/policies/" + constraint
+	orgpolicy.Seal(policy, now)
+	return e.SetOrgPolicy(node.Name, constraint, policy)
 }
 
 // decodeConfig reads one JSON object, rejecting unknown fields and trailing data.

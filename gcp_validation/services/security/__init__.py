@@ -1,1 +1,1 @@
-"""Security scenario adapters: Cloud KMS, IAM, project IAM, Secret Manager."""
+"""Security scenario adapters: KMS, IAM, Organization Policy, Resource Manager, Secret Manager."""

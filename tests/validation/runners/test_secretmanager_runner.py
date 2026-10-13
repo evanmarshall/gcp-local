@@ -4,7 +4,7 @@ from types import SimpleNamespace as ns  # noqa: N813 -- short alias keeps fakes
 import pytest
 
 from gcp_validation.config import Target
-from gcp_validation.services.security.secretmanager import (
+from gcp_validation.services.security.secretmanager.secrets import (
     LIMITS,
     LiveScope,
     SecretManagerClient,

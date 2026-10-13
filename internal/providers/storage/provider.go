@@ -21,6 +21,7 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/iam/orgpolicy"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage/xmlapi"
@@ -309,6 +310,9 @@ type request struct {
 	// xml marks an XML API request; it authorizes as objects.get or
 	// objects.insert and answers in the XML API's shapes.
 	xml bool
+	// decision is the complete authorization's decision ID, which
+	// organization policy checks at the mutation trace their verdicts on.
+	decision string
 }
 
 func isProjectMethod(method string) bool {
@@ -428,6 +432,7 @@ func (p *Provider) serve(ctx context.Context, driver backend.Backend, req reques
 	if denied != nil {
 		return denied, nil
 	}
+	req.decision = id
 	response, err := p.execute(ctx, b, req, current)
 	if err == nil {
 		p.decorate(b, req.scope, req.bucket, response)
@@ -541,8 +546,18 @@ func (p *Provider) resolveTarget(call gateway.Call, bucket, object string) (iam.
 	target.Attributes = iam.ResourceAttributes{Name: "projects/_/buckets/" + bucket,
 		Type: "storage.googleapis.com/Bucket", Service: "storage.googleapis.com"}
 	// Enforced public access prevention overrides public grants on the
-	// bucket and its objects (storage/docs/public-access-prevention).
-	target.PublicPrevented = p.bucketSettings(resource.Scope, bucket).public == publicEnforced
+	// bucket and its objects (storage/docs/public-access-prevention); an
+	// inherited one applies when storage.publicAccessPrevention is enforced
+	// above the bucket.
+	public := p.bucketSettings(resource.Scope, bucket).public
+	target.PublicPrevented = public == publicEnforced
+	if public == publicInherited {
+		enforced, err := p.iam.OrgPolicyEnforced(target.Name, orgpolicy.PublicAccessPrevention)
+		if err != nil {
+			return iam.Target{}, state.Scope{}, nil, gap(status.Convert(err).Message())
+		}
+		target.PublicPrevented = enforced
+	}
 	if object != "" {
 		target.Parent = target.Name
 		target.Name += "/objects/" + object
@@ -774,15 +789,15 @@ func (p *Provider) executeBucket(ctx context.Context, b *memoryBackend, req requ
 	path := "/storage/v1/b/" + url.PathEscape(req.bucket)
 	switch req.call.Method {
 	case MethodBucketsInsert:
-		return p.createBucket(ctx, b, req.rest, req.scope)
+		return p.createBucket(ctx, b, req.rest, req.scope, req.decision)
 	case MethodBucketsPatch:
-		return p.patchBucket(ctx, b, req.rest, req.scope, req.bucket)
+		return p.guardedPatch(ctx, b, req.rest, req.scope, req.bucket, req.decision)
 	case MethodBucketsLock:
 		return p.lockRetention(ctx, b, req.rest, req.scope, req.bucket)
 	case MethodBucketsGetIamPolicy:
 		return p.readBucketPolicy(req.bucket)
 	case MethodBucketsSetIamPolicy:
-		return p.writeBucketPolicy(req.scope, req.bucket, req.rest)
+		return p.writeBucketPolicy(req.scope, req.bucket, req.rest, req.decision)
 	case MethodBucketsList:
 		return p.listBuckets(ctx, b, req.rest, req.scope)
 	case MethodBucketsGet, MethodBucketsGetLayout:
@@ -984,20 +999,26 @@ func (p *Provider) readBucketPolicy(bucket string) (*gateway.RESTResponse, error
 }
 
 // writeBucketPolicy validates and stores one bucket IAM policy.
-func (p *Provider) writeBucketPolicy(scope state.Scope, bucket string, r *gateway.RESTRequest) (*gateway.RESTResponse, error) {
+func (p *Provider) writeBucketPolicy(scope state.Scope, bucket string, r *gateway.RESTRequest, decision string) (*gateway.RESTResponse, error) {
 	request, err := decodeBucketPolicy(bucket, r.JSON)
 	if err != nil {
 		return nil, err
 	}
 	// Enforced prevention refuses public members (recorded:
-	// storage-public-access-enforced). Inherited prevention follows the
-	// storage.publicAccessPrevention organization policy; the emulator models
-	// no organization policies, so, as for a hierarchy that sets none, it does
-	// not apply and public members are accepted and grant access.
-	if p.bucketSettings(scope, bucket).public != publicInherited && policyBindsPublic(request.Bindings) {
+	// storage-public-access-enforced) before any organization policy.
+	// Inherited prevention follows the storage.publicAccessPrevention
+	// constraint (modeled, not recorded: the sandbox doesn't enforce it).
+	prevented, err := p.publicPrevented(scope, bucket, decision, request.Bindings)
+	if err != nil {
+		return nil, err
+	}
+	if prevented {
 		return wireError(412, "conditionNotMet", "The member bindings allUsers and allAuthenticatedUsers are not allowed since public access prevention is enforced."), nil
 	}
-	result, err := p.iam.SetPolicy(BucketResource(bucket), request.Policy)
+	result, err := p.iam.SetPolicyFor(decision, BucketResource(bucket), request.Policy)
+	if refused, _ := orgPolicyRefusal(err); refused != nil {
+		return refused, nil
+	}
 	if status.Code(err) == codes.InvalidArgument {
 		// Recorded: version and condition errors are 400 "invalid" in Storage's format.
 		return wireError(400, "invalid", status.Convert(err).Message()), nil
@@ -1006,6 +1027,20 @@ func (p *Provider) writeBucketPolicy(scope state.Scope, bucket string, r *gatewa
 		return nil, fmt.Errorf("write bucket policy: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: result}, nil
+}
+
+// publicPrevented reports whether public access prevention refuses a policy
+// write's bindings: the bucket's enforced setting, or for an inherited one an
+// enforced storage.publicAccessPrevention above it.
+func (p *Provider) publicPrevented(scope state.Scope, bucket, decision string, bindings []iam.Binding) (bool, error) {
+	if !policyBindsPublic(bindings) {
+		return false, nil
+	}
+	if p.bucketSettings(scope, bucket).public != publicInherited {
+		return true, nil
+	}
+	refused, err := orgPolicyRefusal(p.iam.CheckOrgPolicy(decision, BucketResource(bucket), orgpolicy.PublicAccessPrevention))
+	return refused != nil, err
 }
 
 // bucketPolicyEnvelope is the wire shape of a bucket IAM policy write.
