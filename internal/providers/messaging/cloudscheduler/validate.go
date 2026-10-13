@@ -13,7 +13,6 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/robfig/cron/v3"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -260,74 +259,6 @@ func defaultDuration(field **durationpb.Duration, value time.Duration) {
 var outputFields = map[protoreflect.Name]bool{
 	"name": true, "user_update_time": true, "state": true, "status": true,
 	"schedule_time": true, "last_attempt_time": true,
-}
-
-// maskPaths resolves an update mask to field paths of Job, accepting JSON or
-// proto names. Without a mask, every field the update sets is updated.
-func maskPaths(mask string, update *schedulerpb.Job) ([][]protoreflect.FieldDescriptor, error) {
-	descriptor := update.ProtoReflect().Descriptor()
-	var paths [][]protoreflect.FieldDescriptor
-	if strings.TrimSpace(mask) == "" {
-		update.ProtoReflect().Range(func(field protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
-			if !outputFields[field.Name()] {
-				paths = append(paths, []protoreflect.FieldDescriptor{field})
-			}
-			return true
-		})
-		return paths, nil
-	}
-	for path := range strings.SplitSeq(mask, ",") {
-		resolved, err := resolvePath(descriptor, strings.TrimSpace(path))
-		if err != nil {
-			return nil, err
-		}
-		paths = append(paths, resolved)
-	}
-	return paths, nil
-}
-
-// resolvePath resolves one dotted mask path; only message fields may have
-// children, and output fields are refused.
-func resolvePath(descriptor protoreflect.MessageDescriptor, path string) ([]protoreflect.FieldDescriptor, error) {
-	var fields []protoreflect.FieldDescriptor
-	for i, segment := range strings.Split(path, ".") {
-		if descriptor == nil {
-			return nil, provider.Invalid("Invalid update mask path " + path)
-		}
-		field := descriptor.Fields().ByName(protoreflect.Name(segment))
-		if field == nil {
-			field = descriptor.Fields().ByJSONName(segment)
-		}
-		if field == nil || (i == 0 && outputFields[field.Name()]) {
-			return nil, provider.Invalid("Invalid update mask path " + path)
-		}
-		fields = append(fields, field)
-		descriptor = field.Message()
-		if field.IsMap() || field.IsList() {
-			descriptor = nil
-		}
-	}
-	return fields, nil
-}
-
-// applyMask copies each masked field from update onto a copy of current; a
-// field the update leaves unset is cleared.
-func applyMask(current, update *schedulerpb.Job, paths [][]protoreflect.FieldDescriptor) *schedulerpb.Job {
-	merged := proto.CloneOf(current)
-	for _, path := range paths {
-		target, source := merged.ProtoReflect(), update.ProtoReflect()
-		for _, field := range path[:len(path)-1] {
-			target = target.Mutable(field).Message()
-			source = source.Get(field).Message()
-		}
-		leaf := path[len(path)-1]
-		if source.Has(leaf) {
-			target.Set(leaf, source.Get(leaf))
-		} else {
-			target.Clear(leaf)
-		}
-	}
-	return merged
 }
 
 // touchesTarget reports whether an update changes the job's target.

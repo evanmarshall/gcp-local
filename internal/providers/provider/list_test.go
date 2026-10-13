@@ -89,3 +89,19 @@ func TestListBodyOmitsEmptyFields(t *testing.T) {
 		t.Fatal(body)
 	}
 }
+
+func TestPageOptions(t *testing.T) {
+	items := []string{"a", "b"}
+	page, _, err := Page(items, url.Values{"pageSize": {"-1"}}, Paging{Default: 10, Max: 10, NegativeDefault: true}, testGap)
+	if err != nil || len(page) != 2 {
+		t.Fatalf("negative size as default = %v, %v", page, err)
+	}
+	full := Paging{Default: 10, Max: 10, FullPageToken: true}
+	page, next, err := Page(items, url.Values{"pageSize": {"1"}, "pageToken": {"MQ"}}, full, testGap)
+	if err != nil || !slices.Equal(page, []string{"b"}) || next == "" {
+		t.Fatalf("full last page = %v %q %v", page, next, err)
+	}
+	if page, next, _ = Page(items, url.Values{"pageSize": {"1"}, "pageToken": {next}}, full, testGap); len(page) != 0 || next != "" {
+		t.Fatalf("page after the last = %v %q", page, next)
+	}
+}

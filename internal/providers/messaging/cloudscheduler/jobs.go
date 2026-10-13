@@ -76,18 +76,38 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest) (*ga
 		return p.patchJob(call, request, scope)
 	case methodDelete:
 		return p.deleteJob(scope, location, id)
+	case methodPause, methodResume, methodRun:
+		return p.jobAction(call.Method, request, scope)
+	}
+	return nil, gap("this method is not implemented")
+}
+
+// actionBodies are the request messages of pause, resume, and run, whose
+// bodies bind the whole request (body: "*"); each holds only the job name.
+var actionBodies = map[string]func() proto.Message{
+	methodPause:  func() proto.Message { return &schedulerpb.PauseJobRequest{} },
+	methodResume: func() proto.Message { return &schedulerpb.ResumeJobRequest{} },
+	methodRun:    func() proto.Message { return &schedulerpb.RunJobRequest{} },
+}
+
+// jobAction pauses, resumes, or runs one job after strictly decoding its body.
+func (p *Provider) jobAction(method string, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	if err := provider.DecodeProto(request.JSON, "", actionBodies[method](), gap); err != nil {
+		return nil, err
+	}
+	location, id := request.Path["location"], request.Path["job"]
+	switch method {
 	case methodPause:
 		return p.withJob(scope, location, id, p.pause)
 	case methodResume:
 		return p.withJob(scope, location, id, p.resume)
-	case methodRun:
+	default:
 		return p.withJob(scope, location, id, func(record *jobRecord) error {
 			record.run = true
 			record.nudge()
 			return nil
 		})
 	}
-	return nil, gap("this method is not implemented")
 }
 
 // decodeJob reads a REST job body, refusing names and values GCP's
@@ -297,7 +317,7 @@ func (p *Provider) patchJob(call gateway.Call, request *gateway.RESTRequest, sco
 	if update.GetName() != "" && update.GetName() != jobName(scope.Project, location, id) {
 		return nil, provider.Invalid("The job name does not match the request path")
 	}
-	paths, err := maskPaths(request.Query.Get("updateMask"), update)
+	paths, err := provider.MaskPaths(request.Query.Get("updateMask"), update, outputFields)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +328,7 @@ func (p *Provider) patchJob(call gateway.Call, request *gateway.RESTRequest, sco
 	}); err != nil {
 		return nil, err
 	}
-	replacement, err := newRecord(applyMask(current, update, paths), scope.Project)
+	replacement, err := newRecord(provider.ApplyMask(current, update, paths), scope.Project)
 	if err != nil {
 		return nil, err
 	}

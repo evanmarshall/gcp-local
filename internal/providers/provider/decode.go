@@ -12,6 +12,7 @@ import (
 
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/evanmarshall/gcp-local/internal/iam"
+	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -72,6 +73,46 @@ func DecodePolicy(body []byte, gap func(string) error) (iam.Policy, error) {
 		return iam.Policy{}, FieldViolation("policy", "Invalid JSON payload received. "+err.Error())
 	}
 	return envelope.Policy, nil
+}
+
+// Unmodeled lists, for DecodeProto, the dotted JSON paths of message's input
+// fields that modeled doesn't cover: every field not marked OUTPUT_ONLY
+// (google.api.field_behavior) that is neither a modeled path nor the parent
+// message of one. A modeled message path covers its whole subtree. Deriving
+// the list from the descriptor makes a field a later proto adds a gap, never
+// silently accepted.
+func Unmodeled(message proto.Message, modeled ...string) []string {
+	covered := names(modeled)
+	parents := map[string]bool{}
+	for _, path := range modeled {
+		for i := strings.LastIndex(path, "."); i > 0; i = strings.LastIndex(path[:i], ".") {
+			parents[path[:i]] = true
+		}
+	}
+	var paths []string
+	var walk func(protoreflect.MessageDescriptor, string)
+	walk = func(descriptor protoreflect.MessageDescriptor, prefix string) {
+		fields := descriptor.Fields()
+		for i := range fields.Len() {
+			field := fields.Get(i)
+			path := join(prefix, field.JSONName())
+			switch {
+			case covered[path] || outputOnly(field):
+			case parents[path] && field.Message() != nil && !field.IsMap():
+				walk(field.Message(), path)
+			default:
+				paths = append(paths, path)
+			}
+		}
+	}
+	walk(message.ProtoReflect().Descriptor(), "")
+	return paths
+}
+
+// outputOnly reports a field GCP's schema marks OUTPUT_ONLY.
+func outputOnly(field protoreflect.FieldDescriptor) bool {
+	behaviors, _ := proto.GetExtension(field.Options(), annotations.E_FieldBehavior).([]annotations.FieldBehavior)
+	return slices.Contains(behaviors, annotations.FieldBehavior_OUTPUT_ONLY)
 }
 
 // protoWalk checks a JSON document against a message descriptor before
@@ -509,4 +550,74 @@ func sortedKeys[T any](values map[string]T) []string {
 	}
 	slices.Sort(keys)
 	return keys
+}
+
+// MaskPaths resolves an update mask (google.protobuf.FieldMask, comma
+// separated) to field paths of update's message, accepting JSON or proto
+// names. A top-level field in output may not be named. Only message fields
+// may have children. An empty mask selects every field update sets, output
+// fields excepted.
+func MaskPaths(mask string, update proto.Message, output map[protoreflect.Name]bool) ([][]protoreflect.FieldDescriptor, error) {
+	descriptor := update.ProtoReflect().Descriptor()
+	var paths [][]protoreflect.FieldDescriptor
+	if strings.TrimSpace(mask) == "" {
+		update.ProtoReflect().Range(func(field protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+			if !output[field.Name()] {
+				paths = append(paths, []protoreflect.FieldDescriptor{field})
+			}
+			return true
+		})
+		return paths, nil
+	}
+	for path := range strings.SplitSeq(mask, ",") {
+		resolved, err := maskPath(descriptor, strings.TrimSpace(path), output)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, resolved)
+	}
+	return paths, nil
+}
+
+// maskPath resolves one dotted mask path.
+func maskPath(descriptor protoreflect.MessageDescriptor, path string, output map[protoreflect.Name]bool) ([]protoreflect.FieldDescriptor, error) {
+	var fields []protoreflect.FieldDescriptor
+	for i, segment := range strings.Split(path, ".") {
+		if descriptor == nil {
+			return nil, Invalid("Invalid update mask path " + path)
+		}
+		field := descriptor.Fields().ByName(protoreflect.Name(segment))
+		if field == nil {
+			field = descriptor.Fields().ByJSONName(segment)
+		}
+		if field == nil || (i == 0 && output[field.Name()]) {
+			return nil, Invalid("Invalid update mask path " + path)
+		}
+		fields = append(fields, field)
+		descriptor = field.Message()
+		if field.IsMap() || field.IsList() {
+			descriptor = nil
+		}
+	}
+	return fields, nil
+}
+
+// ApplyMask copies each masked field from update onto a copy of current; a
+// field the update leaves unset is cleared.
+func ApplyMask[M proto.Message](current, update M, paths [][]protoreflect.FieldDescriptor) M {
+	merged := proto.CloneOf(current)
+	for _, path := range paths {
+		target, source := merged.ProtoReflect(), update.ProtoReflect()
+		for _, field := range path[:len(path)-1] {
+			target = target.Mutable(field).Message()
+			source = source.Get(field).Message()
+		}
+		leaf := path[len(path)-1]
+		if source.Has(leaf) {
+			target.Set(leaf, source.Get(leaf))
+		} else {
+			target.Clear(leaf)
+		}
+	}
+	return merged
 }

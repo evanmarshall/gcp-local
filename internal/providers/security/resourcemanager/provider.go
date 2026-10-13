@@ -159,7 +159,7 @@ func operationScope(call gateway.Call) state.Scope {
 // type ("Folder", "Project").
 func (p *Provider) run(call gateway.Call, target, verb, typ string, decision iam.Decision, work func() (map[string]any, error)) (*gateway.RESTResponse, error) {
 	scope := operationScope(call)
-	id, err := p.operations.Start(scope, target, verb)
+	id, err := p.operations.Start(scope, provider.Launch{Target: target, Verb: verb})
 	if err != nil {
 		return nil, fmt.Errorf("start the operation: %w", err)
 	}

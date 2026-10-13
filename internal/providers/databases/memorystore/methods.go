@@ -99,7 +99,7 @@ var paging = provider.Paging{Default: maxPageSize, Max: maxPageSize,
 // before the work and finishes with its response. A refused mutation leaves
 // no operation and returns its error.
 func (p *Provider) operate(scope state.Scope, target, verb string, work func() (map[string]any, error)) (*gateway.RESTResponse, error) {
-	id, err := p.operations.Start(scope, target, verb)
+	id, err := p.operations.Start(scope, provider.Launch{Target: target, Verb: verb})
 	if err != nil {
 		return nil, err
 	}

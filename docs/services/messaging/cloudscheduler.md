@@ -55,6 +55,7 @@ Locations, CMEK config, and operations methods return `UNIMPLEMENTED`. An anonym
 - Methods check `cloudscheduler.jobs.create`, `get`, `list`, `update`, `delete`, `pause`, `enable` (resume), and `run` on the job, whose parent is the project. A missing job is authorized on the project, then returns 404.
 - A job with `oidcToken` or `oauthToken` needs `iam.serviceAccounts.actAs` on that account at create, and at patch when the update touches the target. The account must be a declared same-project local service account.
 - Deliveries act as `serviceAccount:service-NUMBER@gcp-sa-cloudscheduler.iam.gserviceaccount.com`. Publishing needs its `pubsub.topics.publish`; OIDC and OAuth tokens need its `iam.serviceAccounts.getOpenIdToken` and `getAccessToken`. GCP grants it `roles/cloudscheduler.serviceAgent` on the project; the packaged environment writes that grant, and with `bin/gcp-local` you add it to the IAM configuration. Without it attempts fail with `PERMISSION_DENIED`.
+- No resource attributes reach IAM Conditions (jobs have no policy of their own); a project-level condition on `resource.*` grants nothing. GCP's behavior there is not recorded.
 - Pinned roles: `roles/cloudscheduler.admin`, `viewer`, `jobRunner`, `serviceAgent`.
 
 ## Verification
@@ -71,7 +72,7 @@ sh scripts/check/recordings.sh
 
 ## Gaps
 
-- No App Engine targets, English-like schedules, locations, CMEK, or operations methods.
+- No App Engine targets, English-like schedules, locations, CMEK, or operations methods. `appEngineHttpTarget` returns `UNIMPLEMENTED`; every other `Job` field is modeled, and pause, resume, and run bodies decode strictly (400 for any name but `name`).
 - GCP answered overlapping mutations of one job with 409 `ABORTED` ("sync mutate calls cannot be queued") while recording; the scenario retries them. gcp-local applies them in order.
 - `DISABLED` and `UPDATE_FAILED` states are not modeled.
 - HTTP deliveries, OAuth tokens, retries, and run on a paused job are modeled locally, not recorded. gRPC is not recorded.

@@ -561,6 +561,11 @@ func TestRefusalsAndTheirMessages(t *testing.T) {
 			"Invalid job name projects/" + testProject + "/locations/europe-west1/jobs/x"},
 		{"output mask", "actor", http.MethodPatch, basePath + "/existing?updateMask=state", map[string]any{}, 400, "Invalid update mask path state"},
 		{"missing job", "actor", http.MethodPost, basePath + "/missing:pause", map[string]any{}, 404, "The resource 'jobs/missing' was not found"},
+		// pause, resume, and run bodies bind the request, which holds only the name.
+		{"unknown pause field", "actor", http.MethodPost, basePath + "/existing:pause", map[string]any{"force": true}, 400,
+			`Invalid JSON payload received. Unknown name "force": Cannot find field.`},
+		{"unknown run field", "actor", http.MethodPost, basePath + "/existing:run", map[string]any{"legacyAppEngineCron": true}, 400,
+			`Invalid JSON payload received. Unknown name "legacyAppEngineCron": Cannot find field.`},
 	}
 	for _, tc := range cases {
 		code, document := h.call(tc.token, tc.verb, tc.path, tc.body)

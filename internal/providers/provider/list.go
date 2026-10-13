@@ -9,9 +9,15 @@ import (
 // Paging is one list method's documented default and maximum page size and
 // the service's recorded refusals of a page token Page didn't issue and of a
 // negative page size. A nil refusal is a plain INVALID_ARGUMENT.
+// NegativeDefault reads a negative size as the default instead, as Cloud Run
+// does (recording run-service-lifecycle). FullPageToken returns a next
+// token after every full page, even the last, as Cloud Tasks' task list
+// does (recording cloudtasks-dispatch-retry); the next page is then empty.
 type Paging struct {
 	Default, Max               int
 	InvalidToken, NegativeSize error
+	NegativeDefault            bool
+	FullPageToken              bool
 }
 
 // Page returns the page of items a list request asks for and the token of
@@ -19,8 +25,8 @@ type Paging struct {
 // documented order: by name unless the method's reference says otherwise.
 //
 //   - pageSize: absent or 0 is size.Default, above size.Max is size.Max;
-//     negative is size.NegativeSize and not an integer is GCP's 400 with a
-//     BadRequest violation.
+//     negative is size.NegativeSize (size.Default with NegativeDefault) and
+//     not an integer is GCP's 400 with a BadRequest violation.
 //   - pageToken: only a token Page returned; anything else is
 //     size.InvalidToken. A token past the end (items were deleted) is an
 //     empty last page.
@@ -33,18 +39,9 @@ func Page[T any](items []T, query url.Values, size Paging, gap func(string) erro
 			return nil, "", gap("list " + option + " is not implemented")
 		}
 	}
-	limit := size.Default
-	if text := query.Get("pageSize"); text != "" {
-		parsed, err := strconv.Atoi(text)
-		if err != nil {
-			return nil, "", FieldViolation("page_size", "Invalid value at 'page_size' (TYPE_INT32), "+strconv.Quote(text))
-		}
-		if parsed < 0 {
-			return nil, "", refusal(size.NegativeSize, "Invalid argument: 'page_size'")
-		}
-		if parsed > 0 {
-			limit = min(parsed, size.Max)
-		}
+	limit, err := pageSize(query.Get("pageSize"), size)
+	if err != nil {
+		return nil, "", err
 	}
 	start, ok := pageStart(query.Get("pageToken"))
 	if !ok {
@@ -53,10 +50,28 @@ func Page[T any](items []T, query url.Values, size Paging, gap func(string) erro
 	start = min(start, len(items))
 	end := min(start+limit, len(items))
 	next := ""
-	if end < len(items) {
+	if end < len(items) || size.FullPageToken && end-start == limit {
 		next = base64.RawURLEncoding.EncodeToString([]byte(strconv.Itoa(end)))
 	}
 	return items[start:end], next, nil
+}
+
+// pageSize reads the requested page size.
+func pageSize(text string, size Paging) (int, error) {
+	if text == "" {
+		return size.Default, nil
+	}
+	parsed, err := strconv.Atoi(text)
+	switch {
+	case err != nil:
+		return 0, FieldViolation("page_size", "Invalid value at 'page_size' (TYPE_INT32), "+strconv.Quote(text))
+	case parsed < 0 && !size.NegativeDefault:
+		return 0, refusal(size.NegativeSize, "Invalid argument: 'page_size'")
+	case parsed > 0:
+		return min(parsed, size.Max), nil
+	default:
+		return size.Default, nil
+	}
 }
 
 // pageStart decodes a page token Page issued into its offset.

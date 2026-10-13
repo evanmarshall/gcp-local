@@ -195,9 +195,9 @@ func (t tableAdmin) update(ctx context.Context) (*gateway.RESTResponse, error) {
 	}); err != nil {
 		return nil, err
 	}
-	id, err := t.provider.operations.StartImmediate(t.scope, operationTarget(t.table(), zone), verbUpdateTable)
+	id, err := t.provider.operations.Start(t.scope, provider.Launch{Target: operationTarget(t.table(), zone), Verb: verbUpdateTable, Immediate: true})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // the store's scope refusal
+		return nil, err
 	}
 	return t.provider.started(t.scope, id, result, nil)
 }

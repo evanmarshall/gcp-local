@@ -355,7 +355,7 @@ func (p *Provider) fieldUpdate(request *gateway.RESTRequest, scope state.Scope) 
 	if setsTTL && body.GetTtlConfig() == nil {
 		change = "REMOVE"
 	}
-	id, err := p.operations.Start(scope, name, change)
+	id, err := p.operations.Start(scope, provider.Launch{Target: name, Verb: change})
 	if err != nil {
 		return nil, err
 	}

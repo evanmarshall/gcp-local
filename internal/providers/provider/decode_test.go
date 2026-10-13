@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 var testGap = CoverageGap("Test")
@@ -142,5 +144,35 @@ func TestDecodeJSONCanIgnoreUnknownNames(t *testing.T) {
 	}
 	if code, _, _ := violation(t, DecodeJSON([]byte(`{"replicas":2,"bogus":1}`), "thing", &body, testGap, fields)); code != codes.Unimplemented {
 		t.Fatalf("an unmodeled field must stay a gap: %v", code)
+	}
+}
+
+func TestUnmodeledListsEveryUncoveredInputField(t *testing.T) {
+	got := Unmodeled(&schedulerpb.Job{}, "name", "pubsubTarget", "retryConfig.retryCount")
+	for _, want := range []string{"description", "httpTarget", "retryConfig.maxRetryDuration"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("Unmodeled lacks %s: %v", want, got)
+		}
+	}
+	for _, covered := range []string{"name", "pubsubTarget", "pubsubTarget.topicName", "retryConfig", "retryConfig.retryCount"} {
+		if slices.Contains(got, covered) {
+			t.Errorf("Unmodeled lists covered %s", covered)
+		}
+	}
+}
+
+func TestMaskPathsAndApplyMask(t *testing.T) {
+	current := &schedulerpb.Job{Description: "old", Schedule: "* * * * *", RetryConfig: &schedulerpb.RetryConfig{RetryCount: 1, MaxDoublings: 2}}
+	update := &schedulerpb.Job{Description: "new", RetryConfig: &schedulerpb.RetryConfig{RetryCount: 3, MaxDoublings: 9}}
+	paths, err := MaskPaths("description,retry_config.retryCount,schedule", update, map[protoreflect.Name]bool{"state": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := ApplyMask(current, update, paths)
+	if merged.GetDescription() != "new" || merged.GetSchedule() != "" || merged.GetRetryConfig().GetRetryCount() != 3 || merged.GetRetryConfig().GetMaxDoublings() != 2 {
+		t.Fatalf("merged = %v", merged)
+	}
+	if _, err := MaskPaths("state", update, map[protoreflect.Name]bool{"state": true}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("output path = %v", err)
 	}
 }

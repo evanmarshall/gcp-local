@@ -149,7 +149,7 @@ func (p *Provider) instancesCreate(request *gateway.RESTRequest, scope state.Sco
 		return nil, err
 	}
 	name := provider.InstanceName(scope.Project, record.Name)
-	id, err := p.operations.Start(scope, operationTarget(name, record.Cluster.Location), verbCreateInstance)
+	id, err := p.operations.Start(scope, provider.Launch{Target: operationTarget(name, record.Cluster.Location), Verb: verbCreateInstance})
 	if err != nil {
 		return nil, err
 	}
@@ -379,9 +379,9 @@ func (p *Provider) instancesUpdate(request *gateway.RESTRequest, scope state.Sco
 	// The update's response instance has no state (recorded).
 	delete(result, "state")
 	result["@type"] = typeInstance
-	id, err := p.operations.StartImmediate(scope, target, verbUpdateInstance)
+	id, err := p.operations.Start(scope, provider.Launch{Target: target, Verb: verbUpdateInstance, Immediate: true})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // the store's scope refusal
+		return nil, err
 	}
 	return p.started(scope, id, result, nil)
 }

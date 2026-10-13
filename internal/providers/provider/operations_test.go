@@ -32,7 +32,7 @@ func newTestOperations(latency time.Duration) *Operations {
 
 func TestOperationIsNotDoneUntilWorkAndLatencyComplete(t *testing.T) {
 	ops := newTestOperations(50 * time.Millisecond)
-	id, err := ops.Start(regionA, "projects/p/locations/us-central1/instances/i", "create")
+	id, err := ops.Start(regionA, Launch{Target: "projects/p/locations/us-central1/instances/i", Verb: "create"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestOperationIsNotDoneUntilWorkAndLatencyComplete(t *testing.T) {
 
 func TestOperationFailureWaitsForTheLatency(t *testing.T) {
 	ops := newTestOperations(50 * time.Millisecond)
-	quick, _ := ops.Start(regionA, "t", "update")
+	quick, _ := ops.Start(regionA, Launch{Target: "t", Verb: "update"})
 	ops.Finish(regionA, quick, nil, errFailure)
 	if body, _ := ops.Get(regionA, quick); body["done"] != false {
 		t.Fatalf("finished work reported done before the latency: %v", body)
@@ -77,7 +77,7 @@ func object(t *testing.T, value any) map[string]any {
 
 func TestOperationWaitTimesOutAndCancels(t *testing.T) {
 	ops := newTestOperations(0)
-	id, _ := ops.Start(regionA, "t", "create")
+	id, _ := ops.Start(regionA, Launch{Target: "t", Verb: "create"})
 	if body, err := ops.Wait(context.Background(), regionA, id, 20*time.Millisecond); err != nil || body["done"] != false {
 		t.Fatalf("timed-out wait: %v %v", body, err)
 	}
@@ -90,7 +90,7 @@ func TestOperationWaitTimesOutAndCancels(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	pending, _ := ops.Start(regionA, "t", "create")
+	pending, _ := ops.Start(regionA, Launch{Target: "t", Verb: "create"})
 	if _, err := ops.Wait(ctx, regionA, pending, time.Second); status.Code(err) != codes.Canceled {
 		t.Fatalf("cancelled wait: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestOperationWaitTimesOutAndCancels(t *testing.T) {
 
 func TestOperationCancelAndDelete(t *testing.T) {
 	ops := newTestOperations(time.Hour)
-	running, _ := ops.Start(regionA, "t", "create")
+	running, _ := ops.Start(regionA, Launch{Target: "t", Verb: "create"})
 	must(t, ops.Cancel(regionA, running))
 	ops.Finish(regionA, running, map[string]any{"@type": "late"}, nil)
 	body, _ := ops.Get(regionA, running)
@@ -120,10 +120,10 @@ func TestOperationsListByScopeInCreationOrder(t *testing.T) {
 	ops := newTestOperations(0)
 	ids := make([]string, 0, 3)
 	for range 3 {
-		id, _ := ops.Start(regionA, "t", "create")
+		id, _ := ops.Start(regionA, Launch{Target: "t", Verb: "create"})
 		ids = append(ids, id)
 	}
-	other, _ := ops.Start(regionB, "t", "create")
+	other, _ := ops.Start(regionB, Launch{Target: "t", Verb: "create"})
 	body, err := ops.List(regionA, url.Values{"pageSize": {"2"}}, Paging{Default: 100, Max: 100}, testGap)
 	if err != nil {
 		t.Fatal(err)
@@ -149,10 +149,10 @@ func TestOperationsListByScopeInCreationOrder(t *testing.T) {
 
 func TestOperationsKeepTheNewest(t *testing.T) {
 	ops := newTestOperations(0)
-	first, _ := ops.Start(regionA, "t", "create")
+	first, _ := ops.Start(regionA, Launch{Target: "t", Verb: "create"})
 	ops.Finish(regionA, first, nil, nil)
 	for range maxOperations {
-		_, _ = ops.Start(regionA, "t", "create")
+		_, _ = ops.Start(regionA, Launch{Target: "t", Verb: "create"})
 	}
 	if _, err := ops.Get(regionA, first); status.Code(err) != codes.NotFound {
 		t.Fatalf("oldest finished operation kept: %v", err)
@@ -168,7 +168,7 @@ func must(t *testing.T, err error) {
 
 func TestOperationsNamedAndImmediate(t *testing.T) {
 	ops := newTestOperations(time.Hour).Named(func(_ state.Scope, target, id string) string { return "operations/" + target + "/operations/" + id })
-	id, err := ops.StartImmediate(regionA, "projects/p/instances/i", "update")
+	id, err := ops.Start(regionA, Launch{Target: "projects/p/instances/i", Verb: "update", Immediate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,9 +177,30 @@ func TestOperationsNamedAndImmediate(t *testing.T) {
 	if err != nil || body["done"] != true || body["name"] != "operations/projects/p/instances/i/operations/"+id {
 		t.Fatalf("an immediate operation is done once finished: %v %v", body, err)
 	}
-	slow, _ := ops.Start(regionA, "projects/p/instances/j", "create")
+	slow, _ := ops.Start(regionA, Launch{Target: "projects/p/instances/j", Verb: "create"})
 	ops.Finish(regionA, slow, map[string]any{}, nil)
 	if body, _ := ops.Get(regionA, slow); body["done"] != false {
 		t.Fatalf("Start keeps the store's latency: %v", body)
+	}
+}
+
+func TestOperationMetadataAndNewestFirst(t *testing.T) {
+	operations := NewOperations(state.Scope.Validate, 0, func(op Operation) map[string]any {
+		if op.Done {
+			return op.Response
+		}
+		return op.Metadata
+	})
+	first, _ := operations.Start(regionA, Launch{Target: "t", Verb: "create", Metadata: map[string]any{"phase": "start"}})
+	second, _ := operations.Start(regionA, Launch{Target: "t", Verb: "update"})
+	operations.Finish(regionA, first, map[string]any{"phase": "done"}, nil)
+	body, err := operations.Get(regionA, first)
+	if err != nil || object(t, body["metadata"])["phase"] != "done" {
+		t.Fatalf("finished operation = %v, %v", body, err)
+	}
+	listed, err := operations.NewestFirst().List(regionA, url.Values{}, Paging{Default: 10, Max: 10}, testGap)
+	items, _ := listed["operations"].([]map[string]any)
+	if err != nil || len(items) != 2 || items[0]["name"] != OperationName(regionA, second) {
+		t.Fatalf("newest first = %v, %v", listed, err)
 	}
 }

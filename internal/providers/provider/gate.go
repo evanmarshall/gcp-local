@@ -31,6 +31,9 @@ const (
 	// MissingPermission is Bigtable admin's; it names no resource (recording
 	// bigtable-instance-table-admin).
 	MissingPermission = "Access denied. Missing IAM permission: %s.%.0s"
+	// PermissionDeniedResourceMayNotExist is Cloud Run's (recording
+	// run-service-lifecycle).
+	PermissionDeniedResourceMayNotExist = "Permission '%s' denied on resource '%s' (or resource may not exist)."
 )
 
 // CredentialsMissing is GCP's 401 for a request without credentials: an

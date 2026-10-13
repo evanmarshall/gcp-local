@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/url"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -25,6 +26,10 @@ type Operation struct {
 	Created, Ended  time.Time // Ended is zero until Done
 	Done            bool
 	CancelRequested bool
+	// Metadata is what Start recorded in Launch.Metadata; Response is the
+	// finished work's response once Done. A service whose metadata is its
+	// resource (Cloud Run) renders them.
+	Metadata, Response map[string]any
 }
 
 // Operations stores one service's google.longrunning operations, scoped by
@@ -36,6 +41,7 @@ type Operations struct {
 	latency  time.Duration
 	metadata func(Operation) map[string]any
 	name     func(scope state.Scope, target, id string) string
+	newest   bool          // List renders the newest operation first
 	changed  chan struct{} // closed and replaced on every Finish or Cancel
 	mu       sync.Mutex    // guards changed
 }
@@ -75,26 +81,40 @@ func (o *Operations) Named(name func(scope state.Scope, target, id string) strin
 	return o
 }
 
-// Start records a running operation on target and returns its ID; its name
-// is OperationName(scope, id) unless Named replaced it.
-func (o *Operations) Start(scope state.Scope, target, verb string) (string, error) {
-	return o.start(scope, target, verb, o.latency)
+// NewestFirst makes List render the newest operation first, as Cloud Run
+// lists them (recording run-service-lifecycle).
+func (o *Operations) NewestFirst() *Operations {
+	o.newest = true
+	return o
 }
 
-// StartImmediate is Start for a method GCP answers with an operation that is
-// already done once its work finished, with no minimum latency (Bigtable's
-// partial instance and table updates, recording bigtable-instance-table-admin).
-func (o *Operations) StartImmediate(scope state.Scope, target, verb string) (string, error) {
-	return o.start(scope, target, verb, 0)
+// Launch describes one operation Start records: the resource and action its
+// metadata reports, an optional metadata payload the renderer sees as
+// Operation.Metadata (the store keeps the map, so the caller must not change
+// it afterwards), and Immediate for a method GCP answers with an operation
+// that is done as soon as its work finished, with no minimum latency
+// (Bigtable's partial instance and table updates, recording
+// bigtable-instance-table-admin).
+type Launch struct {
+	Target, Verb string
+	Metadata     map[string]any
+	Immediate    bool
 }
 
-func (o *Operations) start(scope state.Scope, target, verb string, latency time.Duration) (string, error) {
+// Start records a running operation and returns its ID; its name is
+// OperationName(scope, id) unless Named replaced it.
+func (o *Operations) Start(scope state.Scope, launch Launch) (string, error) {
+	latency := o.latency
+	if launch.Immediate {
+		latency = 0
+	}
 	raw := make([]byte, 8)
 	_, _ = rand.Read(raw)
 	now := time.Now().UTC()
 	id := "operation-" + strconv.FormatInt(now.UnixMilli(), 10) + "-" + hex.EncodeToString(raw)
 	err := o.store.With(scope, func(log *operationLog) error {
-		log.records[id] = &operationRecord{Operation: Operation{Name: o.name(scope, target, id), Target: target, Verb: verb, Created: now}, latency: latency}
+		log.records[id] = &operationRecord{latency: latency, Operation: Operation{Name: o.name(scope, launch.Target, id),
+			Target: launch.Target, Verb: launch.Verb, Created: now, Metadata: launch.Metadata}}
 		log.order = append(log.order, id)
 		log.trim()
 		return nil
@@ -136,12 +156,18 @@ func (o *Operations) Get(scope state.Scope, id string) (map[string]any, error) {
 	return body, err //nolint:wrapcheck // wire statuses
 }
 
-// List renders one page of the scope's operations in creation order as a
-// ListOperationsResponse. A filter is refused with gap.
+// List renders one page of the scope's operations in creation order, or
+// newest first after NewestFirst, as a ListOperationsResponse. A filter is
+// refused with gap.
 func (o *Operations) List(scope state.Scope, query url.Values, size Paging, gap func(string) error) (map[string]any, error) {
 	var body map[string]any
 	err := o.store.With(scope, func(log *operationLog) error {
-		page, next, err := Page(log.order, query, size, gap)
+		order := log.order
+		if o.newest {
+			order = slices.Clone(order)
+			slices.Reverse(order)
+		}
+		page, next, err := Page(order, query, size, gap)
 		if err != nil {
 			return err
 		}
@@ -251,7 +277,7 @@ func wire(record *operationRecord, metadata func(Operation) map[string]any, now 
 	view := record.Operation
 	view.Done = record.finished && !now.Before(record.doneAt)
 	if view.Done {
-		view.Ended = record.doneAt
+		view.Ended, view.Response = record.doneAt, record.response
 	}
 	body := map[string]any{"name": view.Name, "metadata": metadata(view), "done": view.Done}
 	switch {
