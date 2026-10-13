@@ -1,6 +1,6 @@
 # Cloud Run
 
-Cloud Run v2 services, revisions, and operations over REST and gRPC, with containers run by Docker or as local processes and invocation gated by ID token and `run.invoker`. Modeled locally; nothing is recorded against GCP.
+Cloud Run v2 services, revisions, and operations over REST and gRPC, with containers run by Docker or as local processes and invocation gated by ID token and `run.invoker`. The scenario `run-service-lifecycle` is recorded against GCP over REST; gRPC and invocation with a token are not recorded.
 
 ## Run your own image
 
@@ -63,14 +63,16 @@ Routes are `/v2/projects/{project}/locations/{location}/...`.
 
 | Resource | Methods | Notes |
 | --- | --- | --- |
-| Services | `create`, `get`, `list`, `patch`, `delete` | `serviceId` query; one container; port from `ports[0].containerPort` (default 8080) |
-| Services | `getIamPolicy`, `setIamPolicy` | `allUsers` with `roles/run.invoker` allows anonymous calls |
-| Revisions | `get`, `list`, `delete` | Stopped after 5 minutes idle; the next call cold-starts |
-| Operations | `get`, `list`, `delete` | Create and update operations finish when the container is ready; an early exit fails them. A finished operation never changes. Deletes return a finished operation |
+| Services | `create`, `get`, `list`, `patch`, `delete` | `serviceId` query; one container; port from `ports[0].containerPort` (default 8080); `list` pages by name |
+| Services | `getIamPolicy`, `setIamPolicy` | `allUsers` with `roles/run.invoker` allows anonymous calls; conditional bindings are stored |
+| Revisions | `get`, `list`, `delete` | `list` pages newest first. Stopped after 5 minutes idle; the next call cold-starts |
+| Operations | `get`, `list`, `delete`, `wait` | One operation per rollout and per delete; `list` pages newest first. A rollout finishes when the container is ready; an early exit fails it. A rollout or delete reads `done` no sooner than 2 s after it starts. A finished operation never changes |
+
+Bodies decode strictly: an unknown name or a mistyped value is GCP's 400 with a `BadRequest` violation. A page token gcp-local didn't issue is GCP's 500 `Internal error encountered.`; a negative `pageSize` is the default (100; at most 1000, not recorded). Every service serves all traffic from its newest ready revision. Revision names are `SERVICE-00001` without GCP's random suffix.
 
 Containers launch outside the provider's state lock. An update that loses a race with another update returns 409 `ABORTED` and starts nothing; a service deleted while its create launches finishes that rollout with `ABORTED`. Requests racing a delete read 404.
 
-The same 13 methods run over gRPC on port 4567 (`google.cloud.run.v2.Services`, `google.cloud.run.v2.Revisions`, and `google.longrunning.Operations`), with the same permissions. Operation metadata and response are the `Service` (or the deleted `Revision`), so client LRO helpers work. Point the client at the gRPC endpoint with local ADC on a plaintext local channel:
+The same 14 methods run over gRPC on port 4567 (`google.cloud.run.v2.Services`, `google.cloud.run.v2.Revisions`, and `google.longrunning.Operations`), with the same permissions. Operation metadata and response are the `Service` (or the deleted `Revision`), so client LRO helpers work. Point the client at the gRPC endpoint with local ADC on a plaintext local channel:
 
 ```python
 import google.auth, grpc
@@ -97,7 +99,15 @@ Every create and update deploys a revision, and needs `iam.serviceAccounts.actAs
 
 A deleted service's policy goes with it; a service recreated with the same name starts empty.
 
+A denial is 403 `Permission 'PERMISSION' denied on resource 'NAME' (or resource may not exist).` with no details, naming the service (also for create), `.../services` for list, or the operation. Anonymous invocation of a private service is 403; an invalid token is 401.
+
+Conditions on a service binding see `request.time` but no resource attributes, as in GCP: a condition on `resource.name`, `resource.type`, or `resource.service` grants nothing (recorded). Project-level conditions on Cloud Run resources are not recorded and get no resource attributes either.
+
 ## Verification
+
+| Recording | Date (UTC) | Observes |
+| --- | --- | --- |
+| `run-service-lifecycle` | 2026-10-13 | Create and wait (operation shape, `reconciling`), service fields (traffic, `trafficStatuses`, revisions, conditions, ingress, launch stage), anonymous and invalid-token invocation, four denials with messages, list order and paging, bad page token, negative page size, a rollout with its own operation, revisions and operations newest first, a denied operation read, a `request.time` and a resource-attribute conditional binding, unknown and mistyped fields, delete operation, operation delete |
 
 ```sh
 sh scripts/go.sh test -race ./internal/providers/run ./cmd/gcp-local      # includes the Go client over gRPC
@@ -110,12 +120,12 @@ The Docker-mode smoke builds `examples/workflow` as a user image, deploys it wit
 
 ## Gaps
 
-- No recordings.
+- Recorded over REST only; invocation with a valid ID token is not recorded.
 - Revision containers have no internet egress.
-- `ingress` is stored but not enforced; token and `run.invoker` are the only boundary. VPC egress and Direct VPC are not modeled, and the [networking analyzer](networking.md) has no Cloud Run endpoints.
-- No jobs, volumes (including `/cloudsql`), or `valueSource` environment variables.
-- A pull happens inside `create` and can take up to 5 minutes.
+- Traffic splits, tags, and `ingress` other than `INGRESS_TRAFFIC_ALL` return `UNIMPLEMENTED` ([#92](https://github.com/evanmarshall/gcp-local/issues/92)); a `traffic` block other than 100% to the latest revision is refused. Token and `run.invoker` are the only boundary.
+- Every other unmodeled service field returns `UNIMPLEMENTED` naming it when set: `scaling`, `template.scaling`, `template.vpcAccess`, `template.maxInstanceRequestConcurrency`, `template.timeout`, `template.containers.resources` (limits), probes, `template.encryptionKey`, `binaryAuthorization`, `template.volumes`, `template.labels`, `valueSource` env, `etag`, and the rest of the v2 schema. So do more than one container and a port named other than `http1`.
+- VPC egress and Direct VPC are not modeled, and the [networking analyzer](networking.md) has no Cloud Run endpoints. No jobs.
+- A pull happens inside `create` and can take up to 5 minutes. An update's launch failure is a synchronous 500, not a failed operation.
 - State is in memory.
-- `TestIamPermissions`, `CancelOperation`, and `WaitOperation` return `UNIMPLEMENTED`. So do the request options `validateOnly`, `allowMissing`, `showDeleted`, `updateMask`, `etag`, `pageSize`, `pageToken`, and `filter` when set; lists return everything on one page.
-- Service fields other than the template's one container (image, port, plain `env`), `serviceAccount`, `revision`, `ingress`, and `traffic` are accepted and ignored.
-- A service's rollout operations share one name; a later rollout replaces the earlier one.
+- `TestIamPermissions` returns `UNIMPLEMENTED`. GCP serves no operations `cancel` for Cloud Run (404); gcp-local returns `UNIMPLEMENTED`. The request options `validateOnly`, `allowMissing`, `showDeleted`, `updateMask`, and `etag` return `UNIMPLEMENTED` when set, and so do `filter` on operations list and `updateMask` or audit configs on `setIamPolicy`.
+- A `wait` whose timeout passes returns the operation not done, as GCP does; GCP's not-done metadata is a partial `Service`, gcp-local's the full one.

@@ -1,0 +1,341 @@
+{
+  "run-service-lifecycle": {
+    "recorded-date": "13-10-2026, 01:33:54",
+    "recorded-content": {
+      "create-operation": {
+        "done": false,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200,
+        "metadata_generation": "1",
+        "metadata_reconciling": true,
+        "metadata_type": "type.googleapis.com/google.cloud.run.v2.Service",
+        "response_type": null
+      },
+      "create-waited": {
+        "done": true,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_generation": "1",
+        "metadata_reconciling": false,
+        "metadata_type": "type.googleapis.com/google.cloud.run.v2.Service",
+        "response_type": "type.googleapis.com/google.cloud.run.v2.Service"
+      },
+      "service": {
+        "condition_types": [
+          "ConfigurationsReady",
+          "RoutesReady"
+        ],
+        "container_port": 8080,
+        "creator": "<fixture>",
+        "env": [],
+        "generation": "1",
+        "has_uri": true,
+        "http_status": 200,
+        "image": "us-docker.pkg.dev/cloudrun/container/hello",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "latest_ready": "<run>-b-00001",
+        "latest_ready_is_latest_created": true,
+        "launch_stage": "GA",
+        "name": "projects/<project>/locations/us-central1/services/<run>-b",
+        "observed_generation": "1",
+        "port_name": "http1",
+        "ready_names_a_revision": true,
+        "reconciling": false,
+        "service_account": "<allowed>",
+        "terminal_condition": {
+          "state": "CONDITION_SUCCEEDED",
+          "type": "Ready"
+        },
+        "traffic": [
+          {
+            "percent": 100,
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "percent": 100,
+            "revision": "<run>-b-00001",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ]
+      },
+      "invoke-anonymous": {
+        "http_status": 403
+      },
+      "invoke-invalid-token": {
+        "http_status": 401
+      },
+      "denied-get": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission 'run.services.get' denied on resource 'projects/<project>/locations/us-central1/services/<run>-b' (or resource may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-get-missing": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission 'run.services.get' denied on resource 'projects/<project>/locations/us-central1/services/<run>-none' (or resource may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-list": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission 'run.services.list' denied on resource 'projects/<project>/locations/us-central1/services' (or resource may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-create": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission 'run.services.create' denied on resource 'projects/<project>/locations/us-central1/services/<run>-denied' (or resource may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "list-paged": {
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "negative_size_lists_owned": true,
+        "negative_size_status": 200,
+        "owned_order": [
+          "<run>-a",
+          "<run>-b"
+        ],
+        "second_count": 1,
+        "second_status": 200
+      },
+      "list-invalid-token": {
+        "code": 500,
+        "details": [],
+        "http_status": 500,
+        "message": "Internal error encountered.",
+        "status": "INTERNAL"
+      },
+      "update-operation": {
+        "distinct_from_create": true,
+        "done": false,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200,
+        "metadata_generation": "2",
+        "metadata_reconciling": true,
+        "metadata_type": "type.googleapis.com/google.cloud.run.v2.Service",
+        "response_type": null
+      },
+      "update-wait-short": {
+        "done": false,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200
+      },
+      "update-waited": {
+        "done": true,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_generation": "2",
+        "metadata_reconciling": false,
+        "metadata_type": "type.googleapis.com/google.cloud.run.v2.Service",
+        "response_type": "type.googleapis.com/google.cloud.run.v2.Service"
+      },
+      "updated": {
+        "condition_types": [
+          "ConfigurationsReady",
+          "RoutesReady"
+        ],
+        "container_port": 8080,
+        "creator": "<fixture>",
+        "env": [
+          {
+            "name": "MODE",
+            "value": "second"
+          }
+        ],
+        "generation": "2",
+        "has_uri": true,
+        "http_status": 200,
+        "image": "us-docker.pkg.dev/cloudrun/container/hello",
+        "ingress": "INGRESS_TRAFFIC_ALL",
+        "latest_ready": "<run>-b-00002",
+        "latest_ready_is_latest_created": true,
+        "launch_stage": "GA",
+        "name": "projects/<project>/locations/us-central1/services/<run>-b",
+        "observed_generation": "2",
+        "port_name": "http1",
+        "ready_names_a_revision": true,
+        "reconciling": false,
+        "service_account": "<allowed>",
+        "terminal_condition": {
+          "state": "CONDITION_SUCCEEDED",
+          "type": "Ready"
+        },
+        "traffic": [
+          {
+            "percent": 100,
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ],
+        "traffic_statuses": [
+          {
+            "percent": 100,
+            "revision": "<run>-b-00002",
+            "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+          }
+        ]
+      },
+      "revisions": {
+        "http_status": 200,
+        "names": [
+          "<run>-b-00002",
+          "<run>-b-00001"
+        ]
+      },
+      "operations-listed": {
+        "http_status": 200,
+        "owned_order": [
+          "update-first",
+          "create-second",
+          "create-first"
+        ]
+      },
+      "denied-operation-get": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission 'run.operations.get' denied on resource 'projects/<project>/locations/us-central1/operations/<update-operation>' (or resource may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "policy-read": {
+        "bindings": null,
+        "fields": [
+          "etag"
+        ],
+        "http_status": 200
+      },
+      "conditional-policy": {
+        "bindings": [
+          {
+            "condition": {
+              "expression": "request.time < timestamp(\"2100-01-01T00:00:00Z\")",
+              "title": "gl-time"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/run.viewer"
+          }
+        ],
+        "http_status": 200,
+        "version": 3
+      },
+      "time-condition": {
+        "http_status": 200,
+        "name": "projects/<project>/locations/us-central1/services/<run>-b"
+      },
+      "resource-condition": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "Permission 'run.services.get' denied on resource 'projects/<project>/locations/us-central1/services/<run>-b' (or resource may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\" at 'service': Cannot find field.",
+                "field": "service"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\" at 'service': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "mistyped-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'service.template.containers[0].ports[0].container_port' (TYPE_INT32), \"many\"",
+                "field": "service.template.containers[0].ports[0].container_port"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'service.template.containers[0].ports[0].container_port' (TYPE_INT32), \"many\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "delete-operation": {
+        "done": false,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200,
+        "metadata_generation": "2",
+        "metadata_has_delete_time": true,
+        "metadata_reconciling": true,
+        "metadata_type": "type.googleapis.com/google.cloud.run.v2.Service",
+        "response_type": null
+      },
+      "delete-waited": {
+        "done": true,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_generation": "2",
+        "metadata_reconciling": false,
+        "metadata_type": "type.googleapis.com/google.cloud.run.v2.Service",
+        "response_type": "type.googleapis.com/google.cloud.run.v2.Service"
+      },
+      "absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "operation-deleted": {
+        "body": {},
+        "http_status": 200
+      },
+      "operation-absent": {
+        "code": 404,
+        "http_status": 404,
+        "status": "NOT_FOUND"
+      },
+      "cleanup": {
+        "services_absent": true
+      }
+    }
+  }
+}

@@ -104,7 +104,8 @@ type servingRef struct {
 	address  string
 }
 
-// lookupServing resolves the host to its serving revision. A reaped revision
+// lookupServing resolves the host to its serving revision: the newest ready
+// one, since all traffic goes to the latest revision. A reaped revision
 // resolves with an empty address, for the caller to cold-start.
 func (p *Provider) lookupServing(host string) (servingRef, error) {
 	p.hostMu.RLock()
@@ -118,12 +119,12 @@ func (p *Provider) lookupServing(host string) (servingRef, error) {
 	serving := servingRef{project: scope.Project, location: scope.Location, id: entry.id}
 	var unavailable bool
 	if err := p.withService(scope, entry.id, func(_ *scopeState, record *serviceRecord) error {
-		latest := latestRevision(record)
+		revision := servingRevision(record)
 		switch {
-		case latest == nil || (latest.Address == "" && !latest.reaped):
+		case revision == nil || (revision.Address == "" && !revision.reaped):
 			unavailable = true
 		default:
-			serving.revision, serving.address = latest.ID, latest.Address
+			serving.revision, serving.address = revision.ID, revision.Address
 		}
 		return nil
 	}); err != nil {
@@ -248,24 +249,24 @@ func (p *Provider) authorizeToken(r *http.Request, bearer string, serving servin
 		},
 	}
 	target := iam.Target{Name: serviceResource(serving.project, serving.location, serving.id)}
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
-	if authorizeErr != nil {
+	if _, authorizeErr := p.engine.Authorize(call, target, nil); authorizeErr != nil {
 		if status.Code(authorizeErr) == codes.PermissionDenied || status.Code(authorizeErr) == codes.Unauthenticated {
 			return status.Error(codes.PermissionDenied, "The caller does not have the run.invoker permission")
 		}
 		return fmt.Errorf("authorize the invocation: %w", authorizeErr)
 	}
-	_ = decision
 	return nil
 }
 
-// requirePublic refuses anonymous traffic unless the service policy grants
-// run.invoker to allUsers.
+// requirePublic refuses anonymous traffic with 403, as GCP does (recording
+// run-service-lifecycle), unless the service policy grants run.invoker to
+// allUsers. An invalid token is 401.
 func (p *Provider) requirePublic(serving servingRef) error {
 	target := serviceResource(serving.project, serving.location, serving.id)
+	refused := status.Error(codes.PermissionDenied, "Anonymous callers must be granted the run.invoker role")
 	policy, err := p.engine.GetPolicy(target)
 	if err != nil {
-		return status.Error(codes.Unauthenticated, "Anonymous callers must be granted the run.invoker role")
+		return refused
 	}
 	for _, binding := range policy.Bindings {
 		if binding.Role != "roles/run.invoker" {
@@ -277,7 +278,7 @@ func (p *Provider) requirePublic(serving servingRef) error {
 			}
 		}
 	}
-	return status.Error(codes.Unauthenticated, "Anonymous callers must be granted the run.invoker role")
+	return refused
 }
 
 // hostEntry maps one local service host to its scope and identifier.

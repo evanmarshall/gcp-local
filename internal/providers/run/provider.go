@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
@@ -31,16 +30,24 @@ type Provider struct {
 	metabind func(http.Handler) (string, func(), error)
 	reapers  map[string]context.CancelFunc
 	reaperMu sync.Mutex
-	rollouts atomic.Uint64
 	tokens   *identity.IDTokens
 	baseURL  string
 	hosts    map[string]hostEntry
 	hostMu   sync.RWMutex
 	engine   *iam.Engine
+	gate     provider.Gate
 	runtime  container.Runtime
 	scopes   *state.Store[scopeState]
-	clock    func() time.Time
+	// operations holds every rollout and delete operation, one name each.
+	operations *provider.Operations
+	clock      func() time.Time
 }
+
+// operationLatency is the least time from an operation's start to done, so
+// a delete's operation reads done=false first and a rollout is still running
+// a second in, as GCP's are (recording run-service-lifecycle).
+// Tests shorten it (TestMain); nothing else changes it.
+var operationLatency = 2 * time.Second
 
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("run requires registry, manager, index, iam, and runtime")
@@ -59,8 +66,12 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 	p := &Provider{
 		index: index, engine: engine, runtime: runtime, tokens: config.Tokens, baseURL: config.BaseURL,
 		metadata: config.Metadata, metabind: config.MetadataBind,
-		scopes: state.NewStore(newScopeState, state.Scope.Validate),
-		hosts:  map[string]hostEntry{}, reapers: map[string]context.CancelFunc{},
+		// Cloud Run's denials carry no details, and its service policies'
+		// conditions see no resource attributes (recording run-service-lifecycle).
+		gate:       provider.Gate{Engine: engine, Index: index, Message: provider.PermissionDeniedResourceMayNotExist},
+		scopes:     state.NewStore(newScopeState, state.Scope.Validate),
+		operations: provider.NewOperations(state.Scope.Validate, operationLatency, operationMetadata).NewestFirst(),
+		hosts:      map[string]hostEntry{}, reapers: map[string]context.CancelFunc{},
 		clock: time.Now,
 	}
 	if err := manager.Register(serviceName, backend.Definition{
@@ -126,7 +137,8 @@ func (p *Provider) stopReaper(scope state.Scope, id string) {
 	p.reaperMu.Unlock()
 }
 
-// Reset stops every container in the scope, then clears the provider state.
+// Reset stops every container in the scope, then clears the provider state
+// and its operations.
 func (p *Provider) Reset(ctx context.Context, scope state.Scope) error {
 	p.stopReapers(scope)
 	var ids []string
@@ -146,12 +158,16 @@ func (p *Provider) Reset(ctx context.Context, scope state.Scope) error {
 	for _, id := range ids {
 		p.forgetHost(scope, id)
 	}
+	if err := p.operations.Reset(scope); err != nil {
+		return fmt.Errorf("clear the run operations: %w", err)
+	}
 	return nil
 }
 
-// errNoService reports a service that does not exist (or no longer does).
-func errNoService(id string) error {
-	return status.Errorf(codes.NotFound, "service %q is not found", id)
+// errNoService reports a service that does not exist (or no longer does), in
+// GCP's wording.
+func errNoService(scope state.Scope, id string) error {
+	return status.Errorf(codes.NotFound, "Resource '%s' of kind 'SERVICE' in region '%s' in project '%s' does not exist.", id, scope.Location, scope.Project)
 }
 
 // withService runs use on an existing service under its scope lock. The
@@ -161,7 +177,7 @@ func (p *Provider) withService(scope state.Scope, id string, use func(*scopeStat
 	return p.scopes.With(scope, func(s *scopeState) error { //nolint:wrapcheck // status errors carry the wire status
 		record := s.services[id]
 		if record == nil {
-			return errNoService(id)
+			return errNoService(scope, id)
 		}
 		return use(s, record)
 	})
@@ -178,12 +194,13 @@ var errUnimplemented = gap("this method is not implemented")
 // model.
 func coverageGap(feature string) error { return gap(feature + " is not implemented") }
 
-// refusedOptions are the Admin API v2 query options (services.create, list,
-// patch, delete; revisions.list, delete; operations.list) the provider does
-// not model. A request that sets one to a non-default value is refused rather
-// than silently answered as if it were unset: validateOnly would mutate,
-// pageSize would be exceeded, and etag would not be checked.
-var refusedOptions = []string{"validateOnly", "allowMissing", "showDeleted", "updateMask", "etag", "pageSize", "pageToken", "filter"}
+// refusedOptions are the Admin API v2 query options (services.create,
+// patch, delete; revisions.delete; services and revisions list) the provider
+// does not model. A request that sets one to a non-default value is refused
+// rather than silently answered as if it were unset: validateOnly would
+// mutate, allowMissing would not create, showDeleted would hide deleted
+// resources, and etag would not be checked.
+var refusedOptions = []string{"validateOnly", "allowMissing", "showDeleted", "updateMask", "etag"}
 
 // refuseOptions returns the gap for the first non-default refused option.
 func refuseOptions(query url.Values) error {
@@ -195,33 +212,26 @@ func refuseOptions(query url.Values) error {
 	return nil
 }
 
-// denied renders the Cloud Run denial shape with the failed permission.
-func denied(call gateway.Call, target iam.Target, decision iam.Decision) *gateway.RESTResponse {
-	permission := provider.DeniedPermission(decision)
-	actor := call.Principal.Subject
-	code := 403
-	if call.Principal.State != gateway.Authenticated {
-		actor, code = "Anonymous caller", 401
-	}
-	return provider.WireError(code, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", actor, permission, target.Name))
-}
-
 // handle is the gateway entry point for every Cloud Run v2 method.
 func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	request, ok := raw.(*gateway.RESTRequest)
 	if !ok {
 		return nil, status.Error(codes.Internal, "Invalid Cloud Run request")
 	}
-	target, scope, id, err := resolveCall(call, request)
+	scope, id, reported, err := resolveCall(call, request)
 	if err != nil {
 		return nil, err
 	}
-	decision, refusal, err := p.authorize(call, target, scope, id)
+	candidates := []string{provider.ProjectResource(scope.Project)}
+	if id != "" {
+		candidates = []string{serviceResource(scope.Project, scope.Location, id), candidates[0]}
+	}
+	// The service and its index entry change together under the scope lock
+	// Nearest holds, so a request racing a delete authorizes at the project
+	// and reads 404.
+	decision, target, err := provider.Nearest(p.gate, p.scopes, scope, call, reported, candidates...)
 	if err != nil {
 		return nil, err
-	}
-	if refusal != nil {
-		return refusal, nil
 	}
 	if err := p.preflight(call, request, scope); err != nil {
 		return nil, err
@@ -232,38 +242,7 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
-}
-
-// authorize evaluates the method's permission plan and returns the denial
-// response of a refused caller. A service-addressed call checks existence and
-// authorizes under one scope lock, and delete removes the index entry under
-// that lock, so a call racing a delete reads NOT_FOUND rather than an
-// unverified target.
-func (p *Provider) authorize(call gateway.Call, target iam.Target, scope state.Scope, id string) (iam.Decision, *gateway.RESTResponse, error) {
-	var decision iam.Decision
-	var authorizeErr error
-	evaluate := func(*scopeState, *serviceRecord) error {
-		decision, authorizeErr = p.engine.Authorize(call, target, nil)
-		return nil
-	}
-	if id == "" {
-		_ = evaluate(nil, nil)
-	} else if err := p.withService(scope, id, evaluate); err != nil {
-		return decision, nil, err
-	}
-	switch status.Code(authorizeErr) {
-	case codes.OK:
-		return decision, nil, nil
-	case codes.PermissionDenied, codes.Unauthenticated:
-		return decision, denied(call, target, decision), nil
-	default:
-		return decision, nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-	}
+	return provider.WithDecision(response, decision), nil
 }
 
 // preflight refuses unmodeled request options and, for a deploy, a caller
@@ -278,24 +257,34 @@ func (p *Provider) preflight(call gateway.Call, request *gateway.RESTRequest, sc
 	return nil
 }
 
-// resolveCall derives the IAM target, scope, and addressed service ID ("" for
-// project-scoped methods) of one request.
-func resolveCall(call gateway.Call, request *gateway.RESTRequest) (iam.Target, state.Scope, string, error) {
+// resolveCall derives the scope, the addressed service ID ("" for
+// collection and operation methods), and the resource name a denial reports
+// (recording run-service-lifecycle): the service, or for create the service
+// being created, the collection for a list, or the operation.
+func resolveCall(call gateway.Call, request *gateway.RESTRequest) (state.Scope, string, string, error) {
 	parts := request.Path
 	scope := state.Scope{Project: parts["project"], Location: parts["location"]}
 	switch call.Method {
-	case methodServicesCreate, methodServicesList, methodOperationsList, methodOperationsGet, methodOperationsDelete:
-		// Project-scoped methods and operations authorize against the project
-		// ancestor; the location namespace may not exist yet on a first create.
-		return iam.Target{Name: provider.ProjectResource(scope.Project)}, scope, "", nil
+	case methodServicesCreate:
+		return scope, "", wireName(scope, "services", request.Query.Get("serviceId")), nil
+	case methodServicesList:
+		return scope, "", wireName(scope, "services"), nil
+	case methodOperationsList:
+		return scope, "", wireName(scope, "operations"), nil
+	case methodOperationsGet, methodOperationsDelete, methodOperationsWait:
+		return scope, "", wireName(scope, "operations", parts["operation"]), nil
 	}
 	// Revisions are not indexed IAM resources; they authorize on their
 	// service, which inherits the project's policy.
 	id := parts["service"]
 	if !uidPattern.MatchString(id) || scope.Location == "" {
-		return iam.Target{}, state.Scope{}, "", status.Error(codes.InvalidArgument, "Invalid Cloud Run resource name")
+		return state.Scope{}, "", "", status.Error(codes.InvalidArgument, "Invalid Cloud Run resource name")
 	}
-	return iam.Target{Name: serviceResource(scope.Project, scope.Location, id)}, scope, id, nil
+	reported := wireName(scope, "services", id)
+	if revision := parts["revision"]; revision != "" {
+		reported += "/revisions/" + revision
+	}
+	return scope, id, reported, nil
 }
 
 // locationTarget names the parent collection for project-scoped methods.

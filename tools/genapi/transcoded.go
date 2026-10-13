@@ -155,6 +155,8 @@ var runServicesRPC = transcodedService{
 			&annotations.HttpRule{Pattern: &annotations.HttpRule_Get{Get: runOperation}}},
 		{longrunningOperations.Methods().ByName("DeleteOperation"), "run.operations.delete",
 			&annotations.HttpRule{Pattern: &annotations.HttpRule_Delete{Delete: runOperation}}},
+		{longrunningOperations.Methods().ByName("WaitOperation"), "run.operations.wait",
+			&annotations.HttpRule{Pattern: &annotations.HttpRule_Post{Post: runOperation + ":wait"}, Body: "*"}},
 	},
 }
 

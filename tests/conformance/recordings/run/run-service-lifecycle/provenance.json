@@ -1,0 +1,49 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-13T01:33:54.921075+00:00",
+  "scenario": {
+    "id": "run-service-lifecycle",
+    "service": "run",
+    "transport": "rest-v2",
+    "revision": "99965dce9fe2410b63424f739f5bdc9ac6a975b48e29eefbe2d5974ffe00559d",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "2aa58f904e5a5a538d194ee519b595888a34f0cd99192e0fa26089fc41c20d99",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
+      "gcp_validation/services/run.py": "6a11355edb0e03ac89e072d4d17dd8b44b88e1bb8475fcecfe2d938f00b962e0",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/live_paths.py": "9f6dcf0382d5be6ce5039f0f0bcff07f7c02c9c087deb9f5885f5a9834a5a1d7",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/run/conftest.py": "1f96a3a2b4bbfe88843fff2fa9e7024bd2bbe2df06936ea017a09100a94250a2"
+    },
+    "scope": {
+      "services": [
+        "run"
+      ],
+      "location": "global",
+      "limits": {
+        "max_services": 4,
+        "max_run_seconds": 1500
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -27,6 +28,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+// TestMain shortens the operation latency: the tests check ordering, not
+// GCP's wall-clock delay, and the race detector makes every wait dearer.
+func TestMain(m *testing.M) {
+	operationLatency = 20 * time.Millisecond
+	os.Exit(m.Run())
+}
 
 // fakeRuntime records container calls and fails launches on demand.
 type fakeRuntime struct {
@@ -234,17 +242,12 @@ func TestFailedStartupFailsOperation(t *testing.T) {
 		"name":     serviceReference,
 		"template": map[string]any{"containers": []any{map[string]any{"image": "example.local/broken:1"}}},
 	})
-	var operation struct {
-		Done  bool `json:"done"`
-		Error struct {
-			Code int `json:"code"`
-		} `json:"error"`
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", recorder.Code, recorder.Body.String())
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &operation); err != nil {
-		t.Fatalf("decode operation: %v", err)
-	}
-	if !operation.Done || operation.Error.Code == 0 {
-		t.Fatalf("startup failure did not fail the operation: %s", recorder.Body.String())
+	waitFor(t, func() bool { done, _ := h.rolloutState(t); return done })
+	if _, code := h.rolloutState(t); code != float64(codes.Internal) {
+		t.Fatalf("startup failure finished the rollout with code %v", code)
 	}
 }
 
@@ -360,10 +363,9 @@ func TestOperationGetAndList(t *testing.T) {
 }
 
 func TestWorkloadEnvInjectsServiceIdentity(t *testing.T) {
-	record := &serviceRecord{Name: "svc", Template: templateShape{
-		Container: containerSpec{Image: "img", Port: 8080, Env: map[string]string{"APP_ENV": "local"}},
-	}}
-	revision := &revisionRecord{ID: testFirstRevision, Template: record.Template}
+	template := templateShape{Container: containerSpec{Image: "img", Port: 8080, Env: map[string]string{"APP_ENV": "local"}}}
+	record := &serviceRecord{Name: "svc", Spec: serviceSpec{Template: template}}
+	revision := &revisionRecord{ID: testFirstRevision, Template: template}
 	env := workloadEnv(record, revision)
 	for _, want := range []string{"K_SERVICE=svc", "K_REVISION=svc-00001", "PORT=8080", "APP_ENV=local"} {
 		if !containsEntry(env, want) {
@@ -384,7 +386,9 @@ func TestInvocationRequiresInvokerGrant(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/_run/svc-demo-project.us-central1.run.app/", nil)
 	handler.ServeHTTP(recorder, request)
-	if recorder.Code != 401 {
+	// GCP refuses an anonymous caller of a private service with 403
+	// (recording run-service-lifecycle).
+	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("anonymous invocation status = %d body %s", recorder.Code, recorder.Body.String())
 	}
 }
@@ -472,81 +476,235 @@ func TestEveryRouteIsHandled(t *testing.T) {
 	probe(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/operations")
 }
 
-func TestOperationDeleteAcknowledgesTerminalOperations(t *testing.T) {
+func TestOperationDeleteForgetsTheOperation(t *testing.T) {
 	h := newHarness(t)
 	h.create(t)
-	recorder := h.invoke(http.MethodDelete, "/v2/projects/demo-project/locations/us-central1/operations/rel-svc", nil)
-	if recorder.Code != 200 {
-		t.Fatalf("operation delete status = %d body %s", recorder.Code, recorder.Body.String())
+	operation := h.newestOperation(t)
+	if recorder := h.invoke(http.MethodDelete, "/v2/"+operation, nil); recorder.Code != http.StatusOK || recorder.Body.String() != "{}" {
+		t.Fatalf("operation delete = %d %s", recorder.Code, recorder.Body.String())
 	}
-	recorder = h.invoke(http.MethodDelete, "/v2/projects/demo-project/locations/us-central1/operations/missing", nil)
-	if recorder.Code != 200 {
-		t.Fatalf("missing operation delete status = %d body %s", recorder.Code, recorder.Body.String())
+	for _, verb := range []string{http.MethodGet, http.MethodDelete} {
+		if recorder := h.invoke(verb, "/v2/"+operation, nil); recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s of a deleted operation = %d %s", verb, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 
-func TestUpdateSplitsTrafficAcrossRevisions(t *testing.T) {
+// Each rollout has its own operation (recording run-service-lifecycle).
+func TestEveryRolloutHasItsOwnOperation(t *testing.T) {
 	h := newHarness(t)
 	h.create(t)
-	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
-		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
-		"traffic": []any{
-			map[string]any{"revision": testFirstRevision, "percent": 90},
-			map[string]any{"latestRevision": true, "percent": 10},
-		},
-	})
-	if recorder.Code != 200 {
-		t.Fatalf("update status = %d body %s", recorder.Code, recorder.Body.String())
+	first := h.newestOperation(t)
+	update := map[string]any{"template": map[string]any{"containers": []any{map[string]any{"image": "example.local/svc:2"}}}}
+	recorder := h.invoke(http.MethodPatch, "/v2/"+serviceReference, update)
+	var operation struct {
+		Name string `json:"name"`
 	}
-	recorder = h.invoke(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/services/svc", nil)
-	var service struct {
-		Traffic []struct {
-			Revision string `json:"revision"`
-			Percent  int    `json:"percent"`
-		} `json:"traffic"`
+	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &operation) != nil {
+		t.Fatalf("update = %d %s", recorder.Code, recorder.Body.String())
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &service); err != nil {
-		t.Fatalf("decode service: %v", err)
+	if operation.Name == first || h.newestOperation(t) != operation.Name {
+		t.Fatalf("update operation %q, create operation %q", operation.Name, first)
 	}
-	total := 0
-	byRevision := map[string]int{}
-	for _, entry := range service.Traffic {
-		total += entry.Percent
-		byRevision[entry.Revision] = entry.Percent
-	}
-	if total != 100 || byRevision[testFirstRevision] != 90 {
-		t.Fatalf("traffic = %+v", service.Traffic)
+	if recorder := h.invoke(http.MethodGet, "/v2/"+first, nil); recorder.Code != http.StatusOK {
+		t.Fatalf("the create operation is gone after the update: %d", recorder.Code)
 	}
 }
 
-func TestUpdateRejectsBadTrafficSplit(t *testing.T) {
+// Request shapes the provider would otherwise accept and ignore are explicit
+// gaps naming the field; nothing is launched.
+func TestUnmodeledServiceFieldsAreGaps(t *testing.T) {
 	h := newHarness(t)
-	h.create(t)
-	recorder := h.invoke(http.MethodPatch, "/v2/projects/demo-project/locations/us-central1/services/svc", map[string]any{
-		"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}},
-		"traffic": []any{
-			map[string]any{keyName: testFirstRevision, "percent": 90},
-			map[string]any{"latestRevision": true, "percent": 90},
-		},
-	})
-	if recorder.Code != 200 {
-		t.Fatalf("update status = %d", recorder.Code)
+	container := func(extra map[string]any) map[string]any {
+		entry := map[string]any{"image": imageReference}
+		maps.Copy(entry, extra)
+		return entry
 	}
-	recorder = h.invoke(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/services/svc", nil)
-	var service struct {
-		Traffic []struct {
-			Percent int `json:"percent"`
-		} `json:"traffic"`
+	template := func(extra map[string]any) map[string]any {
+		body := map[string]any{"containers": []any{container(nil)}}
+		maps.Copy(body, extra)
+		return body
 	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &service); err != nil {
-		t.Fatalf("decode service: %v", err)
+	cases := []struct {
+		body map[string]any
+		want string
+	}{
+		{map[string]any{"template": template(nil), "traffic": []any{
+			map[string]any{"type": "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION", "revision": testFirstRevision, "percent": 90},
+			map[string]any{"type": latestTraffic, "percent": 10},
+		}}, "traffic other than 100% to the latest revision is not implemented"},
+		{map[string]any{"template": template(nil), "traffic": []any{map[string]any{"type": latestTraffic, "percent": 100, "tag": "blue"}}},
+			"traffic other than 100% to the latest revision is not implemented"},
+		{map[string]any{"template": template(nil), "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY"}, "ingress INGRESS_TRAFFIC_INTERNAL_ONLY is not implemented"},
+		{map[string]any{"template": template(nil), "scaling": map[string]any{"minInstanceCount": 1}}, "scaling is not modeled"},
+		{map[string]any{"template": template(map[string]any{"scaling": map[string]any{"maxInstanceCount": 2}})}, "template.scaling is not modeled"},
+		{map[string]any{"template": template(map[string]any{"vpcAccess": map[string]any{"connector": "c"}})}, "template.vpcAccess is not modeled"},
+		{map[string]any{"template": template(map[string]any{"maxInstanceRequestConcurrency": 1})}, "template.maxInstanceRequestConcurrency is not modeled"},
+		{map[string]any{"template": template(map[string]any{"encryptionKey": "k"})}, "template.encryptionKey is not modeled"},
+		{map[string]any{"template": template(nil), "binaryAuthorization": map[string]any{"useDefault": true}}, "binaryAuthorization is not modeled"},
+		{map[string]any{"template": map[string]any{"containers": []any{container(map[string]any{"resources": map[string]any{"limits": map[string]any{"cpu": "2"}}})}}},
+			"template.containers.resources is not modeled"},
+		{map[string]any{"template": map[string]any{"containers": []any{container(nil), container(nil)}}}, "more than one container (sidecars) is not implemented"},
+		{map[string]any{"template": map[string]any{"containers": []any{container(map[string]any{"ports": []any{map[string]any{"name": "h2c"}}})}}},
+			"port name h2c is not implemented"},
 	}
-	total := 0
-	for _, entry := range service.Traffic {
-		total += entry.Percent
+	for _, c := range cases {
+		recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId=svc", c.body)
+		if recorder.Code != http.StatusNotImplemented || !strings.Contains(recorder.Body.String(), "Cloud Run coverage gap: "+c.want) {
+			t.Errorf("%v = %d %s", c.body, recorder.Code, recorder.Body.String())
+		}
 	}
-	if total != 100 {
-		t.Fatalf("bad split fell back to %d percent", total)
+	// GCP's own defaults are not refusals: all traffic to the latest
+	// revision, all ingress, and an empty resources block.
+	accepted := map[string]any{"template": map[string]any{"containers": []any{container(map[string]any{"resources": map[string]any{}})}},
+		"ingress": "INGRESS_TRAFFIC_ALL", "traffic": []any{map[string]any{"type": latestTraffic, "percent": 100}}}
+	if recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId=svc", accepted); recorder.Code != http.StatusOK {
+		t.Fatalf("default traffic and ingress = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if len(h.runtime.started) != 1 {
+		t.Fatalf("refused requests launched containers: %v", h.runtime.started)
+	}
+}
+
+// Unknown names and mistyped values are GCP's transcoder 400s.
+func TestServiceBodiesDecodeStrictly(t *testing.T) {
+	h := newHarness(t)
+	for body, want := range map[string]string{
+		`{"template":{"containers":[{"image":"i"}]},"unknownField":1}`:                `Unknown name \"unknownField\" at 'service': Cannot find field.`,
+		`{"template":{"containers":[{"image":"i","ports":[{"containerPort":"x"}]}]}}`: `Invalid value at 'service.template.containers[0].ports[0].container_port' (TYPE_INT32), \"x\"`,
+	} {
+		request, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, servicesPath+"?serviceId=svc", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer fixture-actor")
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		h.gateway.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), want) {
+			t.Errorf("%s = %d %s", body, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+// Lists page in GCP's order: services by name, revisions and operations
+// newest first. An unknown token is GCP's 500; a negative size is the default.
+func TestListsPageInOrder(t *testing.T) {
+	h := newHarness(t)
+	for _, id := range []string{"svc-b", "svc-a"} {
+		if recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId="+id, serviceBody("")); recorder.Code != http.StatusOK {
+			t.Fatalf("create %s = %d %s", id, recorder.Code, recorder.Body.String())
+		}
+	}
+	first := page(t, h, servicesPath+"?pageSize=1", "services")
+	second := page(t, h, servicesPath+"?pageSize=1&pageToken="+first.next, "services")
+	if first.names[0] != testParent+"/services/svc-a" || second.names[0] != testParent+"/services/svc-b" || second.next != "" {
+		t.Fatalf("pages = %+v %+v", first, second)
+	}
+	if all := page(t, h, servicesPath+"?pageSize=-1", "services"); len(all.names) != 2 {
+		t.Fatalf("negative page size = %+v", all)
+	}
+	if recorder := h.invoke(http.MethodGet, servicesPath+"?pageToken=bogus", nil); recorder.Code != http.StatusInternalServerError ||
+		!strings.Contains(recorder.Body.String(), "Internal error encountered.") {
+		t.Fatalf("bogus page token = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// Revisions and operations list newest first (recording run-service-lifecycle).
+func TestRevisionsAndOperationsListNewestFirst(t *testing.T) {
+	h := newHarness(t)
+	for _, id := range []string{"svc-b", "svc-a"} {
+		if recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId="+id, serviceBody("")); recorder.Code != http.StatusOK {
+			t.Fatalf("create %s = %d %s", id, recorder.Code, recorder.Body.String())
+		}
+	}
+	update := map[string]any{"template": map[string]any{"containers": []any{map[string]any{"image": "example.local/svc:2"}}}}
+	if recorder := h.invoke(http.MethodPatch, "/v2/"+testParent+"/services/svc-a", update); recorder.Code != http.StatusOK {
+		t.Fatalf("update = %d %s", recorder.Code, recorder.Body.String())
+	}
+	revisions := page(t, h, "/v2/"+testParent+"/services/svc-a/revisions", "revisions")
+	if !slices.Equal(revisions.names, []string{testParent + "/services/svc-a/revisions/svc-a-00002", testParent + "/services/svc-a/revisions/svc-a-00001"}) {
+		t.Fatalf("revisions = %v", revisions.names)
+	}
+	operations := page(t, h, "/v2/"+testParent+"/operations?pageSize=2", "operations")
+	if len(operations.names) != 2 || operations.next == "" || h.newestOperation(t) != operations.names[0] {
+		t.Fatalf("operations = %+v", operations)
+	}
+}
+
+// listPage is one decoded list response.
+type listPage struct {
+	names []string
+	next  string
+}
+
+// page lists one page and returns its item names and next token.
+func page(t *testing.T, h *harness, path, field string) listPage {
+	t.Helper()
+	recorder := h.invoke(http.MethodGet, path, nil)
+	var raw map[string]json.RawMessage
+	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &raw) != nil {
+		t.Fatalf("list %s = %d %s", path, recorder.Code, recorder.Body.String())
+	}
+	var result listPage
+	_ = json.Unmarshal(raw["nextPageToken"], &result.next)
+	var items []struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(raw[field], &items)
+	for _, item := range items {
+		result.names = append(result.names, item.Name)
+	}
+	return result
+}
+
+// The newest ready revision serves, whatever its name sorts as: invocations
+// once went to the name-sorted last revision.
+func TestTheNewestReadyRevisionServes(t *testing.T) {
+	h := newHarness(t)
+	revision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer revision.Close()
+	h.runtime.address = revision.Listener.Addr().String()
+	named := func(name string) map[string]any {
+		return map[string]any{"template": map[string]any{"revision": name, "containers": []any{map[string]any{"image": imageReference}}}}
+	}
+	if recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId=svc", named("svc-zzz")); recorder.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	waitFor(t, func() bool { done, _ := h.rolloutState(t); return done })
+	if recorder := h.invoke(http.MethodPatch, "/v2/"+serviceReference, named("svc-aaa")); recorder.Code != http.StatusOK {
+		t.Fatalf("update = %d %s", recorder.Code, recorder.Body.String())
+	}
+	waitFor(t, func() bool { done, _ := h.rolloutState(t); return done })
+	serving, err := h.provider.lookupServing(hostOf(state.Scope{Project: "demo-project", Location: "us-central1"}, "svc"))
+	if err != nil || serving.revision != "svc-aaa" {
+		t.Fatalf("serving = %+v, %v", serving, err)
+	}
+}
+
+// A service binding's condition sees request.time but no resource
+// attributes, so a condition on resource.* grants nothing, as in GCP
+// (recording run-service-lifecycle).
+func TestServiceBindingConditionsSeeNoResourceAttributes(t *testing.T) {
+	h := newHarness(t)
+	if recorder := h.invoke(http.MethodPost, servicesPath+"?serviceId=svc", serviceBody("")); recorder.Code != http.StatusOK {
+		t.Fatalf("create = %d %s", recorder.Code, recorder.Body.String())
+	}
+	for expression, want := range map[string]int{
+		`request.time < timestamp("2100-01-01T00:00:00Z")`: http.StatusOK,
+		`resource.type == "run.googleapis.com/Service" && resource.service == "run.googleapis.com" && resource.name == "` + serviceReference + `"`: http.StatusForbidden,
+	} {
+		recorder := h.invoke(http.MethodPost, "/v2/"+serviceReference+":setIamPolicy", map[string]any{"policy": map[string]any{
+			"version": 3, "bindings": []any{map[string]any{"role": "roles/run.viewer", "members": []any{"serviceAccount:viewer@demo-project.iam.gserviceaccount.com"},
+				"condition": map[string]any{"title": "probe", "expression": expression}}},
+		}})
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("setIamPolicy = %d %s", recorder.Code, recorder.Body.String())
+		}
+		request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/v2/"+serviceReference, nil)
+		request.Header.Set("Authorization", "Bearer viewer")
+		recorder = httptest.NewRecorder()
+		h.gateway.ServeHTTP(recorder, request)
+		if recorder.Code != want {
+			t.Errorf("%s: viewer get = %d %s", expression, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 
@@ -586,8 +744,15 @@ func TestServiceDeletedDuringLaunchDiscardsTheContainer(t *testing.T) {
 		t.Fatalf("delete during launch = %d %s", recorder.Code, recorder.Body.String())
 	}
 	close(blocking.release)
-	if body := <-created; !strings.Contains(body, `"done":true`) || !strings.Contains(body, `"code":10`) {
-		t.Fatalf("create of a deleted service = %s", body)
+	var operation struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal([]byte(<-created), &operation) != nil || operation.Name == "" {
+		t.Fatal("the create of a deleted service returned no operation")
+	}
+	waitFor(t, func() bool { done, _ := h.operationState(t, operation.Name); return done })
+	if _, code := h.operationState(t, operation.Name); code != float64(codes.Aborted) {
+		t.Fatalf("create of a deleted service finished with code %v", code)
 	}
 	h.runtime.mu.Lock()
 	defer h.runtime.mu.Unlock()
@@ -790,10 +955,32 @@ func (e *exitingRuntime) Ready(ctx context.Context, container string) error {
 // errExited is a container exit the tests inject.
 var errExited = errors.New("the container exited")
 
-// rolloutState reads the service's rollout operation: done, and its error code.
+// rolloutState reads the newest operation, the latest rollout: done, and its
+// error code.
 func (h *harness) rolloutState(t *testing.T) (bool, float64) {
 	t.Helper()
-	recorder := h.invoke(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/operations/rel-svc", nil)
+	return h.operationState(t, h.newestOperation(t))
+}
+
+// newestOperation names the newest operation of the test location.
+func (h *harness) newestOperation(t *testing.T) string {
+	t.Helper()
+	recorder := h.invoke(http.MethodGet, "/v2/projects/demo-project/locations/us-central1/operations", nil)
+	var listing struct {
+		Operations []struct {
+			Name string `json:"name"`
+		} `json:"operations"`
+	}
+	if recorder.Code != http.StatusOK || json.Unmarshal(recorder.Body.Bytes(), &listing) != nil || len(listing.Operations) == 0 {
+		t.Fatalf("operations list = %d %s", recorder.Code, recorder.Body.String())
+	}
+	return listing.Operations[0].Name
+}
+
+// operationState reads one operation: done, and its error code.
+func (h *harness) operationState(t *testing.T, name string) (bool, float64) {
+	t.Helper()
+	recorder := h.invoke(http.MethodGet, "/v2/"+name, nil)
 	var operation struct {
 		Done  bool `json:"done"`
 		Error struct {

@@ -651,6 +651,7 @@ func runRows() []route {
 		{"run.operations.get", http.MethodGet, base + "/operations/{operation}", false, false},
 		{"run.operations.list", http.MethodGet, base + "/operations", false, false},
 		{"run.operations.delete", http.MethodDelete, base + "/operations/{operation}", false, false},
+		{"run.operations.wait", http.MethodPost, base + "/operations/{operation}:wait", true, false},
 	}
 }
 

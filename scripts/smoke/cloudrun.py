@@ -211,7 +211,8 @@ def create_and_grant() -> None:
     assert "error" not in result, result
 
     code, _ = invoke(HOST)
-    assert code == 401, "anonymous invocation before the grant returned " + str(code)
+    # GCP refuses an anonymous caller of a private service with 403.
+    assert code == 403, "anonymous invocation before the grant returned " + str(code)
 
     _, policy = request("GET", SCOPE + "/services/acceptance:getIamPolicy")
     policy.setdefault("bindings", []).append({"role": "roles/run.invoker", "members": ["allUsers"]})

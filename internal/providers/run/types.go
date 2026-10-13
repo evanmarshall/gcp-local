@@ -1,10 +1,10 @@
 package run
 
 import (
-	"encoding/json"
 	"net/url"
 	"regexp"
 
+	"cloud.google.com/go/run/apiv2/runpb"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -16,53 +16,87 @@ const serviceName = "run"
 // uidPattern pins the accepted Cloud Run identifier shape.
 var uidPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 
-// ingressSettings are Cloud Run's documented ingress values.
-var ingressSettings = map[string]bool{
-	"INGRESS_TRAFFIC_ALL": true, "INGRESS_TRAFFIC_INTERNAL_ONLY": true,
-	"INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER": true,
-}
-
-// validateIngress accepts a documented ingress value. Ingress and analytical
-// VPC behavior remain scoped in #16/#17; the setting is recorded here.
-func validateIngress(value string) error {
-	if value == "" || ingressSettings[value] {
-		return nil
-	}
-	return status.Errorf(codes.InvalidArgument, "Invalid ingress setting %q", value)
-}
-
-// serviceResource builds the canonical Cloud Run v2 service resource name.
+// serviceResource builds the canonical full resource name of a Cloud Run v2
+// service, the index and IAM target name.
 func serviceResource(project, location, id string) string {
 	return "//run.googleapis.com/projects/" + url.PathEscape(project) +
-		"/locations/" + url.PathEscape(location) + "/" + kindService + "/" + url.PathEscape(id)
+		"/locations/" + url.PathEscape(location) + "/services/" + url.PathEscape(id)
 }
 
-// requestEnvelope is the decoded services.create or services.update body.
-type requestEnvelope struct {
-	Name        string         `json:"name"`
-	Template    map[string]any `json:"template"`
-	Ingress     string         `json:"ingress"`
-	Labels      map[string]any `json:"labels"`
-	Annotations map[string]any `json:"annotations"`
-	LaunchStage string         `json:"launchStage"`
-	Traffic     []trafficEntry `json:"traffic,omitempty"`
+// modeledService are the google.cloud.run.v2.Service input fields the
+// provider models, by JSON path. Every other input field is refused with a
+// gap naming it unless unset (provider.Unmodeled): scaling, VPC access,
+// concurrency, resource limits, probes, CMEK, Binary Authorization, volumes,
+// and the rest. ingress and traffic take only the values validateService
+// accepts; the rest of their range is #92.
+var modeledService = []string{
+	"name", "description", "labels", "annotations", "client", "clientVersion", "launchStage",
+	"ingress", "traffic",
+	"template.revision", "template.serviceAccount",
+	"template.containers.image", "template.containers.ports.containerPort", "template.containers.ports.name",
+	"template.containers.env.name", "template.containers.env.value",
 }
 
-// trafficEntry is one requested traffic split entry.
-type trafficEntry struct {
-	Revision       string `json:"revision"`
-	Percent        int    `json:"percent"`
-	Tag            string `json:"tag,omitempty"`
-	LatestRevision bool   `json:"latestRevision,omitempty"`
-}
+// unmodeledService is the gap list DecodeProto refuses.
+var unmodeledService = provider.Unmodeled(&runpb.Service{}, modeledService...)
 
-// decodeRequest reads one service body. Unknown fields fail before container work.
-func decodeRequest(body []byte) (requestEnvelope, error) {
-	var request requestEnvelope
-	if json.Unmarshal(body, &request) != nil || len(request.Template) == 0 {
-		return requestEnvelope{}, status.Error(codes.InvalidArgument, "Invalid service configuration")
+// decodeService strictly decodes a services.create or services.update body,
+// which binds the request's service field.
+func decodeService(body []byte) (*runpb.Service, error) {
+	service := &runpb.Service{}
+	if err := provider.DecodeProto(body, "service", service, gap, unmodeledService...); err != nil {
+		return nil, err
 	}
-	return request, nil
+	return service, nil
+}
+
+// serviceSpec is a validated service request: its metadata and template.
+type serviceSpec struct {
+	Description, Client, ClientVersion, LaunchStage string
+	Labels, Annotations                             map[string]string
+	Template                                        templateShape
+}
+
+// latestTraffic is the one traffic shape the provider serves: all traffic to
+// the latest ready revision, GCP's default.
+const latestTraffic = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+
+// validateService checks a decoded service and returns its spec. Ingress
+// other than all traffic and any traffic block other than 100% to the latest
+// revision are gaps: the local invocation surface would not enforce them.
+func validateService(service *runpb.Service) (serviceSpec, error) {
+	if ingress := service.GetIngress(); ingress != runpb.IngressTraffic_INGRESS_TRAFFIC_UNSPECIFIED && ingress != runpb.IngressTraffic_INGRESS_TRAFFIC_ALL {
+		return serviceSpec{}, coverageGap("ingress " + ingress.String())
+	}
+	if !allLatest(service.GetTraffic()) {
+		return serviceSpec{}, coverageGap("traffic other than 100% to the latest revision")
+	}
+	template, err := resolveTemplate(service.GetTemplate())
+	if err != nil {
+		return serviceSpec{}, err
+	}
+	stage := service.GetLaunchStage().String()
+	if service.GetLaunchStage() == 0 {
+		stage = "GA"
+	}
+	return serviceSpec{
+		Description: service.GetDescription(), Client: service.GetClient(), ClientVersion: service.GetClientVersion(),
+		LaunchStage: stage, Labels: service.GetLabels(), Annotations: service.GetAnnotations(), Template: template,
+	}, nil
+}
+
+// allLatest reports a traffic block that is absent or sends 100% to the
+// latest revision, untagged.
+func allLatest(traffic []*runpb.TrafficTarget) bool {
+	switch {
+	case len(traffic) == 0:
+		return true
+	case len(traffic) > 1:
+		return false
+	}
+	only := traffic[0]
+	return only.GetType() == runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST &&
+		only.GetPercent() == 100 && only.GetRevision() == "" && only.GetTag() == ""
 }
 
 // templateShape is the validated revision template of a service request.
@@ -82,66 +116,68 @@ type containerSpec struct {
 	Env   map[string]string
 }
 
-// resolveTemplate validates the single-container revision template. Multi-revision
-// template features stay out until their cloud behavior is recorded.
-func resolveTemplate(template map[string]any) (templateShape, error) {
-	shape := templateShape{
-		Revision:       provider.Text(template["revision"]),
-		ServiceAccount: provider.Text(template["serviceAccount"]),
+// resolveTemplate validates the single-container revision template.
+func resolveTemplate(template *runpb.RevisionTemplate) (templateShape, error) {
+	if template == nil {
+		return templateShape{}, status.Error(codes.InvalidArgument, "A service requires a revision template")
 	}
+	shape := templateShape{Revision: template.GetRevision(), ServiceAccount: template.GetServiceAccount()}
 	// The v2 API names the revision identity by its email, without a member prefix.
 	if account := shape.ServiceAccount; account != "" && !serviceAccountEmail.MatchString(account) {
 		return templateShape{}, status.Errorf(codes.InvalidArgument, "serviceAccount must be a service account email, got %q", account)
 	}
-	if volumes, _ := template["volumes"].([]any); len(volumes) != 0 {
-		return templateShape{}, status.Error(codes.Unimplemented, "Revision volumes are not implemented")
-	}
-	container, refused := resolveContainer(template["containers"])
-	if refused != nil {
-		return templateShape{}, refused
+	container, err := resolveContainer(template.GetContainers())
+	if err != nil {
+		return templateShape{}, err
 	}
 	shape.Container = container
 	return shape, nil
 }
 
-// resolveContainer validates the single container entry of a template.
-func resolveContainer(value any) (containerSpec, error) {
-	containers, _ := value.([]any)
-	if len(containers) != 1 {
-		return containerSpec{}, status.Error(codes.InvalidArgument, "A revision requires exactly one container")
+// resolveContainer validates the template's one container. Sidecars are a
+// gap; GCP accepts up to ten containers.
+func resolveContainer(containers []*runpb.Container) (containerSpec, error) {
+	switch {
+	case len(containers) == 0:
+		return containerSpec{}, status.Error(codes.InvalidArgument, "A revision requires a container")
+	case len(containers) > 1:
+		return containerSpec{}, coverageGap("more than one container (sidecars)")
 	}
-	first, _ := containers[0].(map[string]any)
-	if first == nil {
-		return containerSpec{}, status.Error(codes.InvalidArgument, "Invalid container entry")
-	}
-	image := provider.Text(first["image"])
+	first := containers[0]
+	image := first.GetImage()
 	if image == "" || len(image) > maxImageLength {
 		return containerSpec{}, status.Errorf(codes.InvalidArgument, "A revision requires a container image of at most %d characters", maxImageLength)
 	}
-	port := 8080
-	// The v2 API carries the serving port as ports[0].containerPort.
-	if ports := provider.MapList(first["ports"]); len(ports) > 0 && number(ports[0]["containerPort"]) > 0 {
-		port = int(number(ports[0]["containerPort"]))
+	port, err := containerPort(first.GetPorts())
+	if err != nil {
+		return containerSpec{}, err
 	}
-	env, refused := resolveEnv(first["env"])
-	if refused != nil {
-		return containerSpec{}, refused
+	env := map[string]string{}
+	for _, entry := range first.GetEnv() {
+		if entry.GetName() == "" {
+			return containerSpec{}, status.Error(codes.InvalidArgument, "A container environment variable requires a name")
+		}
+		env[entry.GetName()] = entry.GetValue()
 	}
 	return containerSpec{Image: image, Port: port, Env: env}, nil
 }
 
-// resolveEnv validates plain-text environment entries of a container.
-func resolveEnv(value any) (map[string]string, error) {
-	env := map[string]string{}
-	for _, entry := range provider.MapList(value) {
-		name := provider.Text(entry["name"])
-		// valueSource is an object (a Secret Manager reference); any value is refused.
-		if _, sourced := entry["valueSource"]; name == "" || sourced {
-			return nil, status.Errorf(codes.InvalidArgument, "Container environment variable %q is unsupported in this slice", name)
-		}
-		env[name] = provider.Text(entry["value"])
+// containerPort reads the serving port, default 8080. http1 is the default
+// protocol; h2c end-to-end HTTP/2 is not modeled.
+func containerPort(ports []*runpb.ContainerPort) (int, error) {
+	switch {
+	case len(ports) > 1:
+		return 0, status.Error(codes.InvalidArgument, "A container exposes at most one port")
+	case len(ports) == 0:
+		return 8080, nil
 	}
-	return env, nil
+	if name := ports[0].GetName(); name != "" && name != "http1" {
+		return 0, coverageGap("port name " + name)
+	}
+	if ports[0].GetContainerPort() > 0 {
+		return int(ports[0].GetContainerPort()), nil
+	}
+	return 8080, nil
 }
 
 // serviceAccountEmail matches the bare service-account email a template names.
@@ -150,22 +186,11 @@ var serviceAccountEmail = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z
 // maxImageLength bounds the accepted container image reference length.
 const maxImageLength = 2048
 
-// number reads a JSON number field as a float.
-func number(value any) float64 {
-	if value, ok := value.(float64); ok {
-		return value
-	}
-	return 0
-}
+// Shared wire JSON keys of the Cloud Run v2 document shapes.
+const keyName, keyType, keyState = "name", "type", "state"
 
-// Shared wire JSON keys of the Cloud Run v2 error and document shapes.
-const (
-	keyError, keyCode, keyStatus, keyMessage = "error", "code", "status", "message"
-	keyName, keyType                         = "name", "type"
-)
-
-// permissions follows Google's documented Cloud Run access-control table. These
-// are the simulator's permission plan, not recorded cloud-fidelity claims.
+// permissions follows Google's documented Cloud Run access-control table;
+// operations.wait reads the operation (run.operations.get).
 var permissions = map[string]string{
 	methodServicesCreate:   "run.services.create",
 	methodServicesGet:      "run.services.get",
@@ -180,6 +205,7 @@ var permissions = map[string]string{
 	methodOperationsGet:    "run.operations.get",
 	methodOperationsList:   "run.operations.list",
 	methodOperationsDelete: "run.operations.delete",
+	methodOperationsWait:   "run.operations.get",
 	methodServicesInvoke:   "run.routes.invoke",
 	methodServicesActAs:    "iam.serviceAccounts.actAs",
 }
@@ -199,5 +225,6 @@ const (
 	methodOperationsGet    = "run.operations.get"
 	methodOperationsList   = "run.operations.list"
 	methodOperationsDelete = "run.operations.delete"
+	methodOperationsWait   = "run.operations.wait"
 	methodServicesInvoke   = "run.services.invoke"
 )

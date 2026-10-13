@@ -80,7 +80,7 @@ LOCAL_SUPPORT = {
     "secret-manager": "single-recorded-scenario",
     "bigquery": "partial-recorded-slice",
     "firestore": "single-recorded-scenario",
-    "cloud-run": "local-only-slice",
+    "cloud-run": "single-recorded-scenario",
 }
 ENDPOINT_VARIABLES = (
     "STORAGE_EMULATOR_HOST",

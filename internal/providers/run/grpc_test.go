@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -194,11 +195,11 @@ func TestGoClientDeploysListsAndDeletesOverGRPC(t *testing.T) {
 // checkCreated verifies the service a finished create operation returns.
 func checkCreated(t *testing.T, g *grpcHarness, operation *runapi.CreateServiceOperation, service *runpb.Service) {
 	t.Helper()
-	if service.GetName() != serviceReference || service.GetLatestReadyRevision() != testFirstRevision || service.GetUri() == "" {
+	if service.GetName() != serviceReference || service.GetLatestReadyRevision() != serviceReference+"/revisions/"+testFirstRevision || service.GetUri() == "" {
 		t.Fatalf("created service = %v", service)
 	}
-	if conditions := service.GetConditions(); len(conditions) != 1 || conditions[0].GetState() != runpb.Condition_CONDITION_SUCCEEDED {
-		t.Fatalf("conditions = %v", conditions)
+	if condition := service.GetTerminalCondition(); condition.GetState() != runpb.Condition_CONDITION_SUCCEEDED {
+		t.Fatalf("terminal condition = %v", condition)
 	}
 	if metadata, err := operation.Metadata(); err != nil || metadata.GetName() != serviceReference {
 		t.Fatalf("operation metadata = %v, %v", metadata, err)
@@ -244,7 +245,7 @@ func checkUpdate(t *testing.T, client *runapi.ServicesClient) {
 		t.Fatalf("UpdateService: %v", err)
 	}
 	updated, err := update.Wait(ctx)
-	if err != nil || updated.GetLatestReadyRevision() != "svc-00002" || updated.GetTraffic()[0].GetRevision() != "svc-00002" {
+	if err != nil || updated.GetLatestReadyRevision() != serviceReference+"/revisions/svc-00002" || updated.GetTrafficStatuses()[0].GetRevision() != "svc-00002" {
 		t.Fatalf("updated service = %v, %v", updated, err)
 	}
 }
@@ -326,7 +327,7 @@ func TestGRPCDeniesUngrantedIdentityBeforeLaunch(t *testing.T) {
 	ctx := context.Background()
 	_, err := g.services(t, peerSubject).CreateService(ctx, &runpb.CreateServiceRequest{Parent: testParent, ServiceId: "svc",
 		Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: imageReference}}}}})
-	want := peerSubject + " does not have run.services.create access to //cloudresourcemanager.googleapis.com/projects/demo-project."
+	want := "Permission 'run.services.create' denied on resource 'projects/demo-project/locations/us-central1/services/svc' (or resource may not exist)."
 	if status.Code(err) != codes.PermissionDenied || status.Convert(err).Message() != want {
 		t.Fatalf("ungranted CreateService = %v", err)
 	}
@@ -334,7 +335,7 @@ func TestGRPCDeniesUngrantedIdentityBeforeLaunch(t *testing.T) {
 		t.Fatalf("a denied create launched %v", g.runtime.started)
 	}
 	_, err = runpb.NewServicesClient(g.conn(t, "")).ListServices(ctx, &runpb.ListServicesRequest{Parent: testParent})
-	if status.Code(err) != codes.Unauthenticated || !strings.Contains(status.Convert(err).Message(), "Anonymous caller does not have run.services.list access") {
+	if status.Code(err) != codes.Unauthenticated || status.Convert(err).Message() != "Request had invalid authentication credentials." {
 		t.Fatalf("anonymous ListServices = %v", err)
 	}
 }
@@ -346,17 +347,17 @@ func TestGRPCMapsProviderErrors(t *testing.T) {
 	g.deploy(t, client)
 	_, err := client.CreateService(ctx, &runpb.CreateServiceRequest{Parent: testParent, ServiceId: "svc",
 		Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: imageReference}}}}})
-	if status.Code(err) != codes.AlreadyExists || status.Convert(err).Message() != "service svc already exists" {
+	if status.Code(err) != codes.AlreadyExists || status.Convert(err).Message() != "Resource 'svc' already exists." {
 		t.Fatalf("duplicate CreateService = %v", err)
 	}
 	conn := g.conn(t, ownerSubject)
 	_, err = runpb.NewRevisionsClient(conn).GetRevision(ctx, &runpb.GetRevisionRequest{Name: serviceReference + "/revisions/missing"})
-	if status.Code(err) != codes.NotFound || status.Convert(err).Message() != "revision missing is not found" {
+	if status.Code(err) != codes.NotFound || status.Convert(err).Message() != "Revision 'missing' does not exist." {
 		t.Fatalf("missing GetRevision = %v", err)
 	}
 	operations := longrunningpb.NewOperationsClient(conn)
 	_, err = operations.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: testParent + "/operations/missing"})
-	if status.Code(err) != codes.NotFound || status.Convert(err).Message() != "operation is not found" {
+	if status.Code(err) != codes.NotFound || status.Convert(err).Message() != "The resource 'operations/missing' was not found" {
 		t.Fatalf("missing GetOperation = %v", err)
 	}
 	// Only Cloud Run's operation names reach the provider: a Spanner name
@@ -377,30 +378,39 @@ func TestGRPCRefusesUnimplementedMethods(t *testing.T) {
 	g := newGRPCHarness(t)
 	ctx := context.Background()
 	conn := g.conn(t, ownerSubject)
-	operation := testParent + "/operations/rel-svc"
-	calls := map[string]func() *status.Status{
-		"/google.cloud.run.v2.Services/TestIamPermissions": func() *status.Status {
-			_, err := runpb.NewServicesClient(conn).TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: serviceReference, Permissions: []string{"run.services.get"}})
-			return status.Convert(err)
-		},
-		"/google.longrunning.Operations/CancelOperation": func() *status.Status {
-			_, err := longrunningpb.NewOperationsClient(conn).CancelOperation(ctx, &longrunningpb.CancelOperationRequest{Name: operation})
-			return status.Convert(err)
-		},
-		"/google.longrunning.Operations/WaitOperation": func() *status.Status {
-			_, err := longrunningpb.NewOperationsClient(conn).WaitOperation(ctx, &longrunningpb.WaitOperationRequest{Name: operation})
-			return status.Convert(err)
-		},
+	operation := testParent + "/operations/missing"
+	_, err := runpb.NewServicesClient(conn).TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: serviceReference, Permissions: []string{"run.services.get"}})
+	if refused := status.Convert(err); refused.Code() != codes.Unimplemented || refused.Message() != "No provider implements /google.cloud.run.v2.Services/TestIamPermissions" {
+		t.Errorf("TestIamPermissions = %v", refused)
 	}
-	// The Operations mixin names the Cloud Run resource kind it does not serve.
-	suffix := map[string]string{
-		"/google.longrunning.Operations/CancelOperation": " for projects/*/locations/*/operations/* resources",
-		"/google.longrunning.Operations/WaitOperation":   " for projects/*/locations/*/operations/* resources",
+	// Cloud Run binds no cancel (run_v2.yaml); the mixin names the resource
+	// kind it does not serve.
+	_, err = longrunningpb.NewOperationsClient(conn).CancelOperation(ctx, &longrunningpb.CancelOperationRequest{Name: operation})
+	want := "No provider implements /google.longrunning.Operations/CancelOperation for projects/*/locations/*/operations/* resources"
+	if refused := status.Convert(err); refused.Code() != codes.Unimplemented || refused.Message() != want {
+		t.Errorf("CancelOperation = %v", refused)
 	}
-	for method, call := range calls {
-		if refused := call(); refused.Code() != codes.Unimplemented || refused.Message() != "No provider implements "+method+suffix[method] {
-			t.Errorf("%s = %v", method, refused)
-		}
+}
+
+// WaitOperation blocks until the rollout is done and returns it done.
+func TestGRPCWaitOperationReturnsTheDoneRollout(t *testing.T) {
+	g := newGRPCHarness(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client := g.services(t, ownerSubject)
+	operation, err := client.CreateService(ctx, &runpb.CreateServiceRequest{Parent: testParent, ServiceId: "svc", Service: &runpb.Service{
+		Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: imageReference}}}}})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	waited, err := longrunningpb.NewOperationsClient(g.conn(t, ownerSubject)).WaitOperation(ctx, &longrunningpb.WaitOperationRequest{
+		Name: operation.Name(), Timeout: durationpb.New(20 * time.Second)})
+	if err != nil || !waited.GetDone() || waited.GetResponse() == nil {
+		t.Fatalf("WaitOperation = %v, %v", waited, err)
+	}
+	_, err = longrunningpb.NewOperationsClient(g.conn(t, ownerSubject)).WaitOperation(ctx, &longrunningpb.WaitOperationRequest{Name: testParent + "/operations/missing"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("WaitOperation on a missing operation = %v", err)
 	}
 }
 
@@ -412,19 +422,13 @@ type optionCase struct {
 
 // optionCases sets each refused option through the generated gRPC stubs.
 func optionCases(ctx context.Context, conn *grpc.ClientConn) []optionCase {
-	services, revisions, operations := runpb.NewServicesClient(conn), runpb.NewRevisionsClient(conn), longrunningpb.NewOperationsClient(conn)
+	services, revisions := runpb.NewServicesClient(conn), runpb.NewRevisionsClient(conn)
 	template := &runpb.Service{Name: serviceReference, Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: imageReference}}}}
 	revision := serviceReference + "/revisions/" + testFirstRevision
 	refuse := func(_ any, err error) *status.Status { return status.Convert(err) }
 	return []optionCase{
 		{"validateOnly", func() *status.Status {
 			return refuse(services.CreateService(ctx, &runpb.CreateServiceRequest{Parent: testParent, ServiceId: "other", Service: template, ValidateOnly: true}))
-		}},
-		{"pageSize", func() *status.Status {
-			return refuse(services.ListServices(ctx, &runpb.ListServicesRequest{Parent: testParent, PageSize: 1}))
-		}},
-		{"pageToken", func() *status.Status {
-			return refuse(services.ListServices(ctx, &runpb.ListServicesRequest{Parent: testParent, PageToken: "next"}))
 		}},
 		{"showDeleted", func() *status.Status {
 			return refuse(services.ListServices(ctx, &runpb.ListServicesRequest{Parent: testParent, ShowDeleted: true}))
@@ -444,20 +448,11 @@ func optionCases(ctx context.Context, conn *grpc.ClientConn) []optionCase {
 		{"validateOnly", func() *status.Status {
 			return refuse(services.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: serviceReference, ValidateOnly: true}))
 		}},
-		{"pageSize", func() *status.Status {
-			return refuse(revisions.ListRevisions(ctx, &runpb.ListRevisionsRequest{Parent: serviceReference, PageSize: 1}))
-		}},
 		{"showDeleted", func() *status.Status {
 			return refuse(revisions.ListRevisions(ctx, &runpb.ListRevisionsRequest{Parent: serviceReference, ShowDeleted: true}))
 		}},
 		{"etag", func() *status.Status {
 			return refuse(revisions.DeleteRevision(ctx, &runpb.DeleteRevisionRequest{Name: revision, Etag: `"abc"`}))
-		}},
-		{"filter", func() *status.Status {
-			return refuse(operations.ListOperations(ctx, &longrunningpb.ListOperationsRequest{Name: testParent, Filter: "done=true"}))
-		}},
-		{"pageToken", func() *status.Status {
-			return refuse(operations.ListOperations(ctx, &longrunningpb.ListOperationsRequest{Name: testParent, PageToken: "next"}))
 		}},
 	}
 }
@@ -472,8 +467,8 @@ func TestGRPCRefusesUnmodeledOptions(t *testing.T) {
 			t.Errorf("%s = %v", c.option, refused)
 		}
 	}
-	_, err := runpb.NewServicesClient(conn).SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: serviceReference, Policy: &iampb.Policy{}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"bindings"}}})
-	if status.Code(err) != codes.Unimplemented || status.Convert(err).Message() != "Cloud Run coverage gap: setIamPolicy updateMask is not implemented" {
+	_, err := runpb.NewServicesClient(conn).SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: serviceReference, Policy: &iampb.Policy{}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"audit_configs"}}})
+	if status.Code(err) != codes.Unimplemented || status.Convert(err).Message() != "Cloud Run coverage gap: setIamPolicy updateMask audit_configs is not modeled" {
 		t.Errorf("SetIamPolicy updateMask = %v", err)
 	}
 	if len(g.runtime.started) != 1 || len(g.runtime.stopped) != 0 {
@@ -487,14 +482,10 @@ func TestRESTRefusesUnmodeledOptions(t *testing.T) {
 	base := "/v2/" + serviceReference
 	cases := []struct{ option, verb, path string }{
 		{"validateOnly", http.MethodPost, "/v2/" + testParent + "/services?serviceId=other&validateOnly=true"},
-		{"pageSize", http.MethodGet, "/v2/" + testParent + "/services?pageSize=1"},
-		{"pageToken", http.MethodGet, "/v2/" + testParent + "/services?pageToken=next"},
 		{"showDeleted", http.MethodGet, "/v2/" + testParent + "/services?showDeleted=true"},
 		{"allowMissing", http.MethodPatch, base + "?allowMissing=true"},
 		{"updateMask", http.MethodPatch, base + "?updateMask=template"},
 		{"etag", http.MethodDelete, base + "?etag=abc"},
-		{"pageSize", http.MethodGet, base + "/revisions?pageSize=1"},
-		{"filter", http.MethodGet, "/v2/" + testParent + "/operations?filter=done"},
 	}
 	body := map[string]any{"template": map[string]any{"containers": []any{map[string]any{"image": imageReference}}}}
 	for _, c := range cases {
@@ -517,7 +508,7 @@ func TestCreateRefusesSecretEnvironmentSources(t *testing.T) {
 			map[string]any{"name": "TOKEN", "valueSource": map[string]any{"secretKeyRef": map[string]any{"secret": "s", "version": "1"}}},
 		}}}},
 	})
-	if err := statusFrom(recorder); status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != `Container environment variable "TOKEN" is unsupported in this slice` {
+	if recorder.Code != http.StatusNotImplemented || !strings.Contains(recorder.Body.String(), "Cloud Run coverage gap: template.containers.env.valueSource is not modeled") {
 		t.Fatalf("valueSource create = %d %s", recorder.Code, recorder.Body.String())
 	}
 	if len(h.runtime.started) != 0 {
@@ -571,11 +562,25 @@ func TestRESTRevisionsAndDeletesReturnOperations(t *testing.T) {
 			Response map[string]any `json:"response"`
 		}
 		recorder = h.invoke(http.MethodDelete, "/v2/"+deletion.path, nil)
-		if err := json.Unmarshal(recorder.Body.Bytes(), &operation); err != nil || recorder.Code != http.StatusOK {
+		if err := json.Unmarshal(recorder.Body.Bytes(), &operation); err != nil || recorder.Code != http.StatusOK || operation.Done {
 			t.Fatalf("REST delete %s = %d %s", deletion.path, recorder.Code, recorder.Body.String())
 		}
+		h.wait(t, recorder, &operation)
 		if !operation.Done || operation.Response["@type"] != deletion.typeURL || operation.Response["name"] != deletion.path {
 			t.Fatalf("REST delete %s operation = %+v", deletion.path, operation)
 		}
+	}
+}
+
+// wait waits on the operation a response names and decodes it into done.
+func (h *harness) wait(t *testing.T, started *httptest.ResponseRecorder, done any) {
+	t.Helper()
+	var name struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(started.Body.Bytes(), &name)
+	recorder := h.invoke(http.MethodPost, "/v2/"+name.Name+":wait", map[string]any{"timeout": "5s"})
+	if err := json.Unmarshal(recorder.Body.Bytes(), done); err != nil || recorder.Code != http.StatusOK {
+		t.Fatalf("REST wait %s = %d %s", name.Name, recorder.Code, recorder.Body.String())
 	}
 }

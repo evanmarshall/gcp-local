@@ -48,7 +48,7 @@ def deploy(services: run_v2.ServicesClient) -> run_v2.Service:
     operation = services.create_service(parent=PARENT, service=service, service_id="sdk-svc")
     created = operation.result(timeout=60)
     assert created.name == NAME, created
-    assert created.latest_ready_revision == "sdk-svc-00001", created
+    assert created.latest_ready_revision == NAME + "/revisions/sdk-svc-00001", created
     assert created.uri, created
     assert operation.metadata.name == NAME, operation.metadata
     return created

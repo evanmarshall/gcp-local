@@ -26,11 +26,11 @@ const methodServicesActAs = "run.services.actAs"
 // GCP creates that account with the project; an environment that declares it
 // checks its own policy, and otherwise it has none, so the project's decides.
 func (p *Provider) authorizeRuntimeAccount(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) error {
-	body, err := decodeRequest(request.JSON)
+	service, err := decodeService(request.JSON)
 	if err != nil {
 		return err
 	}
-	template, err := resolveTemplate(body.Template)
+	template, err := resolveTemplate(service.GetTemplate())
 	if err != nil {
 		return err
 	}

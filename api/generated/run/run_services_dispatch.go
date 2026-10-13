@@ -129,4 +129,5 @@ var RunServicesTranscoding = []contract.Transcoding{
 	{RPC: "/google.longrunning.Operations/ListOperations", REST: "run.operations.list", Verb: "GET", Path: "/v2/{name=projects/*/locations/*}/operations", Field: "name", Body: "", Unserved: nil},
 	{RPC: "/google.longrunning.Operations/GetOperation", REST: "run.operations.get", Verb: "GET", Path: "/v2/{name=projects/*/locations/*/operations/*}", Field: "name", Body: "", Unserved: nil},
 	{RPC: "/google.longrunning.Operations/DeleteOperation", REST: "run.operations.delete", Verb: "DELETE", Path: "/v2/{name=projects/*/locations/*/operations/*}", Field: "name", Body: "", Unserved: nil},
+	{RPC: "/google.longrunning.Operations/WaitOperation", REST: "run.operations.wait", Verb: "POST", Path: "/v2/{name=projects/*/locations/*/operations/*}:wait", Field: "name", Body: "*", Unserved: nil},
 }

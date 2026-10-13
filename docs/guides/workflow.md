@@ -75,7 +75,7 @@ This workflow is the only test of Terraform with local ADC.
 ## Limits
 
 - Push delivery, push ID tokens, and redelivery timing are modeled locally, not recorded.
-- Cloud Run is modeled locally, not recorded.
+- Cloud Run's admin API is recorded over REST (`run-service-lifecycle`); Pub/Sub push into Cloud Run is modeled locally, not recorded.
 - Storage, Pub/Sub pull authorization, and service accounts are recorded ([Storage](../services/storage.md), [Pub/Sub](../services/messaging/pubsub.md), [service accounts](../services/security/serviceaccounts.md)).
 - Step 4 infers the invoker denial from no object being stored; it doesn't observe the invocation response.
 - The local service `uri` is `http://127.0.0.1:PORT/_run/HOST` and the push audience is `https://HOST`. On GCP both are the service URL.

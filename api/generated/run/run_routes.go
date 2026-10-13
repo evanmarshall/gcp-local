@@ -19,4 +19,5 @@ var RunRoutes = []contract.Route{
 	{Method: "run.operations.get", Verb: "GET", Path: "/v2/projects/{project}/locations/{location}/operations/{operation}", JSONBody: false, Media: false},
 	{Method: "run.operations.list", Verb: "GET", Path: "/v2/projects/{project}/locations/{location}/operations", JSONBody: false, Media: false},
 	{Method: "run.operations.delete", Verb: "DELETE", Path: "/v2/projects/{project}/locations/{location}/operations/{operation}", JSONBody: false, Media: false},
+	{Method: "run.operations.wait", Verb: "POST", Path: "/v2/projects/{project}/locations/{location}/operations/{operation}:wait", JSONBody: true, Media: false},
 }

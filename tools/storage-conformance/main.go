@@ -216,8 +216,11 @@ func main() {
 	must(tokenErr)
 	_, err = pubsubprovider.New(registry, server.Backends, index, engine, pubsubprovider.Config{Java: java, JAR: jar, IDTokens: tokens})
 	must(err)
-	_, err = runprovider.New(context.Background(), runprovider.Config{BaseURL: "http://127.0.0.1:4566"}, registry, server.Backends, index, engine, &servingRuntime{servers: map[string]*http.Server{}})
+	runProvider, err := runprovider.New(context.Background(), runprovider.Config{BaseURL: "http://127.0.0.1:4566"}, registry, server.Backends, index, engine, &servingRuntime{servers: map[string]*http.Server{}})
 	must(err)
+	// Serve the invocation surface as cmd/gcp-local does, so the Cloud Run
+	// scenario's anonymous and invalid-token invocations replay.
+	server.Run = runProvider.Invocation()
 	_, err = computeprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = artifactregistryprovider.New(context.Background(), registry, server.Backends, index, engine)
