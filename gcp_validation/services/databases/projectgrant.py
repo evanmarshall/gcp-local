@@ -47,8 +47,10 @@ class ConditionalGrant:
             bindings = change(policy.get('bindings', []))
             if bindings is None:
                 return
-            # Version 3 only while a conditional binding remains, as other runs expect.
-            version = 3 if any(binding.get('condition') for binding in bindings) else 1
+            # Any write to a policy that holds a condition must say version 3, even
+            # one removing the last condition (recorded: project-iam-policy-versions).
+            held = [*policy.get('bindings', []), *bindings]
+            version = 3 if any(binding.get('condition') for binding in held) else 1
             written = self.crm.request('fixture', 'POST', self.api + ':setIamPolicy', body={
                 'policy': {'version': version, 'etag': policy['etag'], 'bindings': bindings}},
                 timeout=30)

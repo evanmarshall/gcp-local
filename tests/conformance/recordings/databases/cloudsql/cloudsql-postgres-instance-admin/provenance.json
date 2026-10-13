@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-13T02:45:41.461314+00:00",
+  "recorded_at": "2026-10-13T22:36:00.799995+00:00",
   "scenario": {
     "id": "cloudsql-postgres-instance-admin",
     "service": "cloudsql",
     "transport": "rest-v1beta4",
-    "revision": "835ab60a98d65151a30be8f922fe484805fb5ee1c6be52762c9f75cce90cdc71",
+    "revision": "e027b45e3c035917048d6adb63cac2721269b5d70ea8bc414e8d2398c5ecc353",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "43107f7a5c1bd3beb46cd2f91e2e343e3d5ffda025c690c3cc1c6ccdfbf6dc9a",
+  "snapshot_sha256": "072aa2fd748cc1011e3f50d5d0b55e9d7a6b4b9c80294156a8443ef3df815333",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -23,7 +23,7 @@
   "context": {
     "contract_files": {
       "gcp_validation/services/databases/cloudsql.py": "d422305d14ffd42e7e4bfd5622c34712ec1626d47c7e779ef9d5dd97558633b5",
-      "gcp_validation/services/databases/projectgrant.py": "9a68465db9c32f4dd0c5ff3706928b58782166fc082ca4b40afaa5279d158b40",
+      "gcp_validation/services/databases/projectgrant.py": "416b283247aaa32a12086837f99ee8aa6317db74add8eb82f4770bd1aa954a3b",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "tests/conformance/databases/cloudsql/conftest.py": "641f8b1fb9b8bc28d11c6fbd94b822a19fb43f3892ef5782753a8a6096fd3aec"
