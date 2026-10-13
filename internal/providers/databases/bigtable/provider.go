@@ -41,7 +41,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	p := &Provider{
 		manager: manager, index: index, engine: engine,
-		gate:   provider.Gate{Engine: engine, Index: index, Message: provider.MissingPermission, Attributes: attributes},
+		gate:   provider.Gate{Engine: engine, Index: index, Message: provider.MissingPermission, Attributes: func(target, _ string) iam.ResourceAttributes { return attributes(target) }},
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}

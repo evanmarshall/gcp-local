@@ -44,7 +44,7 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	p := &Provider{
 		manager: manager, index: index, engine: engine,
 		// Denials are rendered by authorize; Message is BigQuery's dataset form.
-		gate:   provider.Gate{Engine: engine, Index: index, Message: "Permission %s denied on %s", Attributes: attributes},
+		gate:   provider.Gate{Engine: engine, Index: index, Message: "Permission %s denied on %s", Attributes: func(target, _ string) iam.ResourceAttributes { return attributes(target) }},
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
