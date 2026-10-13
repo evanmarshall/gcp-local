@@ -11,69 +11,81 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// getPolicyBody is a GetIamPolicyRequest body; any requested version reads
-// the stored policy.
-type getPolicyBody struct {
-	Options *struct {
-		RequestedPolicyVersion int `json:"requestedPolicyVersion"`
-	} `json:"options"`
-}
-
 // setPolicyBody is a SetIamPolicyRequest body.
 type setPolicyBody struct {
 	Policy     iam.Policy `json:"policy"`
 	UpdateMask string     `json:"updateMask"`
 }
 
-var setPolicyFields = provider.Fields{}
+// policyRequest is one decoded get or set policy request: a get's requested
+// version, or a set's policy and the fields its update mask replaces.
+type policyRequest struct {
+	set     bool
+	version int
+	policy  iam.Policy
+	mask    map[string]bool
+}
 
-// decodePolicyRequest strictly decodes a get or set policy body. set reports
-// a set, whose policy it returns.
-func decodePolicyRequest(method string, body []byte) (iam.Policy, bool, error) {
+// decodePolicyRequest strictly decodes a get or set policy body.
+func decodePolicyRequest(method string, request *gateway.RESTRequest) (policyRequest, error) {
 	if !strings.HasSuffix(method, "setIamPolicy") {
-		return iam.Policy{}, false, decodeGetPolicy(body)
+		version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
+		return policyRequest{version: version}, err //nolint:wrapcheck // wire statuses
 	}
 	var set setPolicyBody
-	if err := provider.DecodeJSON(body, "", &set, gap, setPolicyFields); err != nil {
-		return iam.Policy{}, true, err
+	if err := provider.DecodeJSON(request.JSON, "", &set, gap, provider.Fields{}); err != nil {
+		return policyRequest{}, err
 	}
-	return set.Policy, true, checkUpdateMask(set.UpdateMask)
+	mask, err := updateMask(set.UpdateMask)
+	return policyRequest{set: true, policy: set.Policy, mask: mask}, err
 }
 
-// decodeGetPolicy checks a get policy body; any requested version from 0 to
-// 3 reads the stored policy.
-func decodeGetPolicy(body []byte) error {
-	var get getPolicyBody
-	if err := provider.DecodeJSON(body, "", &get, gap, provider.Fields{}); err != nil {
-		return err
-	}
-	if get.Options != nil && (get.Options.RequestedPolicyVersion < 0 || get.Options.RequestedPolicyVersion > 3) {
-		return provider.Invalid("Invalid requested policy version")
-	}
-	return nil
-}
-
-// checkUpdateMask accepts a mask that includes bindings; it may also name
-// etag, version, and auditConfigs, as Terraform's "bindings,etag,auditConfigs"
-// does. A mask without bindings is a gap.
-func checkUpdateMask(mask string) error {
+// updateMask parses a setIamPolicy update mask. Its paths are the policy
+// fields the request replaces; GCP's default is "bindings,etag"
+// (https://cloud.google.com/resource-manager/reference/rest/v1/projects/setIamPolicy).
+func updateMask(mask string) (map[string]bool, error) {
 	if mask == "" {
-		return nil
+		mask = "bindings,etag"
 	}
-	bindings := false
+	paths := map[string]bool{}
 	for path := range strings.SplitSeq(mask, ",") {
 		switch path = strings.TrimSpace(path); path {
-		case "bindings":
-			bindings = true
-		case "etag", "version", "auditConfigs", "audit_configs":
+		case "bindings", "etag", "auditConfigs", "version":
+			paths[path] = true
+		case "audit_configs":
+			paths["auditConfigs"] = true
 		default:
-			return provider.Invalid(fmt.Sprintf("Invalid update mask path %q", path))
+			return nil, provider.Invalid(fmt.Sprintf("Invalid update mask path %q", path))
 		}
 	}
-	if !bindings {
-		return gap("setIamPolicy updateMask without bindings")
+	return paths, nil
+}
+
+// masked returns the policy a set request stores: the stored policy with
+// the masked fields replaced (recorded: project-iam-policy-versions). A
+// masked field the request omits is cleared: "bindings" without bindings
+// removes every binding. bindings brings the request's version (and local
+// deny rules and boundary); the etag is checked whenever the request has
+// one, masked or not. A policy with a conditional binding takes only a
+// version-3 request, whatever the mask.
+func (r policyRequest) masked(stored iam.Policy) (iam.Policy, error) {
+	if stored.View(3).Version == 3 && r.policy.Version < 3 {
+		return iam.Policy{}, provider.Invalid(fmt.Sprintf("Specified policy version (%d) must be at least 3 based on the policy's contents. "+
+			"For more information, please refer to https://cloud.google.com/iam/help/allow-policies/versions.", max(r.policy.Version, 1)))
 	}
-	return nil
+	result := stored
+	if r.mask["bindings"] {
+		result.Bindings = r.policy.Bindings
+		result.DenyRules, result.PAB = r.policy.DenyRules, r.policy.PAB
+	}
+	if r.mask["bindings"] || r.mask["version"] {
+		result.Version = r.policy.Version
+	}
+	if r.mask["auditConfigs"] {
+		result.AuditConfigs = r.policy.AuditConfigs
+	}
+	result.ETag = r.policy.ETag
+	return result, nil
 }
 
 // references names each v3 policy and permission method's path variable.
@@ -90,7 +102,7 @@ func reference(method string, path map[string]string) string {
 // projects. Bindings on an organization or folder are inherited by
 // everything under it through the IAM engine's ancestry walk.
 func (p *Provider) policy(call gateway.Call, request *gateway.RESTRequest) (*gateway.RESTResponse, error) {
-	policy, set, err := decodePolicyRequest(call.Method, request.JSON)
+	decoded, err := decodePolicyRequest(call.Method, request)
 	if err != nil {
 		return nil, err
 	}
@@ -105,26 +117,32 @@ func (p *Provider) policy(call gateway.Call, request *gateway.RESTRequest) (*gat
 	if err != nil {
 		return nil, err
 	}
-	stored, err := p.readOrWrite(node.Name, policy, set)
+	stored, err := p.readOrWrite(node.Name, decoded)
 	if err != nil {
 		return nil, err
 	}
 	return respond(stored.Wire(), decision), nil
 }
 
-// readOrWrite reads a node's stored policy, or replaces it when set.
-func (p *Provider) readOrWrite(name string, policy iam.Policy, set bool) (iam.Policy, error) {
-	var stored iam.Policy
-	var err error
-	if set {
-		stored, err = p.engine.SetPolicy(name, policy)
-	} else {
-		stored, err = p.engine.GetPolicy(name)
-	}
+// readOrWrite reads a node's stored policy at the requested version, or
+// applies a set request's masked fields to it. The caller holds p.mu, so the
+// read and the write see the same stored policy.
+func (p *Provider) readOrWrite(name string, request policyRequest) (iam.Policy, error) {
+	stored, err := p.engine.GetPolicy(name)
 	if err != nil {
 		return iam.Policy{}, policyError(err)
 	}
-	return stored, nil
+	if !request.set {
+		return stored.View(request.version), nil
+	}
+	update, err := request.masked(stored)
+	if err != nil {
+		return iam.Policy{}, err
+	}
+	if stored, err = p.engine.SetPolicy(name, update); err != nil {
+		return iam.Policy{}, policyError(err)
+	}
+	return stored.View(3), nil
 }
 
 // policyError passes the engine's statuses (a stale etag is ABORTED) through.
@@ -144,7 +162,7 @@ func (p *Provider) projectPolicyV1(call gateway.Call, request *gateway.RESTReque
 	if !projectIDPattern.MatchString(project) {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid project id %q", project)
 	}
-	policy, set, err := decodePolicyRequest(call.Method, request.JSON)
+	decoded, err := decodePolicyRequest(call.Method, request)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +179,7 @@ func (p *Provider) projectPolicyV1(call gateway.Call, request *gateway.RESTReque
 		}
 		return provider.Denied(decision, target.Name), nil
 	}
-	stored, err := p.readOrWrite(target.Name, policy, set)
+	stored, err := p.readOrWrite(target.Name, decoded)
 	if err != nil {
 		return nil, err
 	}

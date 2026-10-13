@@ -38,14 +38,14 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:4566/v3/folde
 | `testIamPermissions` on organizations, folders, projects (v3), projects (v1) | none | The tested permissions the caller holds; a node that doesn't exist holds none |
 | `operations.get` (v3 and v1) | the caller started it | Another caller's or an unknown operation is 400 |
 
-`setIamPolicy` accepts an `updateMask` that includes `bindings` (Terraform sends `bindings,etag,auditConfigs`). Pinned roles: `roles/resourcemanager.organizationAdmin`, `organizationViewer`, `folderAdmin`, `folderCreator`, `folderEditor`, `folderIamAdmin`, `folderMover`, `folderViewer`, `projectMover`, `projectIamAdmin`.
+`getIamPolicy` and `setIamPolicy` on folders and organizations follow [project IAM](project-iam.md): requested versions, `updateMask`, and `auditConfigs` (stored, not enforced). Pinned roles: `roles/resourcemanager.organizationAdmin`, `organizationViewer`, `folderAdmin`, `folderCreator`, `folderEditor`, `folderIamAdmin`, `folderMover`, `folderViewer`, `projectMover`, `projectIamAdmin`.
 
 ## Hierarchy
 
 - The IAM engine walks every resource through its project, folders, and organization ([IAM](../../architecture/iam.md#evaluation)). A project or folder that moves changes its ancestry at once and keeps its own policy.
 - Mutations return operations with `done: false`; they report done 250 ms later. Business-rule failures finish the operation with `FAILED_PRECONDITION`: a display name an ACTIVE sibling has ("Requested entity already exists"), more than 10 folder levels ("Folder reached maximum depth."), and deleting a folder with an ACTIVE folder or a project under it.
 - Moving a folder under itself or a descendant, and changing a folder in `DELETE_REQUESTED`, is a synchronous `FAILED_PRECONDITION`.
-- Request bodies decode strictly: an unknown field is GCP's 400; `tags` and `policy.auditConfigs` are gaps unless empty.
+- Request bodies decode strictly: an unknown field is GCP's 400; `tags` is a gap unless empty.
 
 ## Errors
 

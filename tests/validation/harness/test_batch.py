@@ -66,7 +66,8 @@ def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
     }
     assert set(names["compute"]) == compute
     assert sorted(entry.name for entry in alone) == [
-        "logging-test_cloudlogging_conditions", "security-resourcemanager-test_policy"]
+        "logging-test_cloudlogging_conditions", "security-resourcemanager-test_policy",
+        "security-resourcemanager-versions-test_versions"]
     # The read-only hierarchy scenario shares no lock; only project-policy writers run alone.
     laned = [name for members in names.values() for name in members]
     assert "security-resourcemanager-test_policy" not in laned
@@ -86,5 +87,9 @@ def test_exclusive_entries_run_after_every_lane(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setitem(run.__globals__, "execute", fake)
     lanes, alone = batch["schedule"](batch["plan"](), scope_tree(tmp_path))
     failed = run(lanes, alone, argparse.Namespace(jobs=4))
-    assert order[-1] == "security-resourcemanager-test_policy"
+    assert order[-3:] == [
+        "logging-test_cloudlogging_conditions",
+        "security-resourcemanager-test_policy",
+        "security-resourcemanager-versions-test_versions",
+    ]
     assert failed == ["artifactregistry-test_artifactregistry"]

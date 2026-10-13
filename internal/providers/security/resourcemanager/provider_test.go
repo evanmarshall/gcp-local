@@ -211,6 +211,93 @@ func TestProjectPolicyRoundTrip(t *testing.T) {
 	}
 }
 
+// policyClient reads and writes the test project's v1 policy as the test actor.
+type policyClient struct{ h *harness }
+
+func (c policyClient) get(options any) map[string]any {
+	body := map[string]any{}
+	if options != nil {
+		body["options"] = options
+	}
+	return c.h.expect(testToken, http.MethodPost, testBase+":getIamPolicy", body, 200)
+}
+
+// set sends policy with the current etag (unless it names one) and mask.
+func (c policyClient) set(policy map[string]any, mask string, code int) map[string]any {
+	if _, named := policy["etag"]; !named {
+		policy["etag"] = c.get(nil)["etag"]
+	}
+	body := map[string]any{"policy": policy}
+	if mask != "" {
+		body["updateMask"] = mask
+	}
+	return c.h.expect(testToken, http.MethodPost, testBase+":setIamPolicy", body, code)
+}
+
+// Bindings the policy tests write.
+var (
+	adminBinding  = map[string]any{"role": "roles/resourcemanager.projectIamAdmin", "members": []any{testActor}}
+	viewerBinding = map[string]any{"role": "roles/iam.serviceAccountViewer", "members": []any{testReader},
+		"condition": map[string]any{"title": "t", "expression": `request.time < timestamp("2100-01-01T00:00:00Z")`}}
+	schedulerAudit = []any{map[string]any{"service": "cloudscheduler.googleapis.com", "auditLogConfigs": []any{map[string]any{"logType": "DATA_READ"}}}}
+)
+
+// Project policy versions and conditional bindings (recorded: project-iam-policy-versions).
+func TestProjectPolicyVersions(t *testing.T) {
+	c := policyClient{newHarness(t)}
+	c.h.expect(testToken, http.MethodPost, testBase+":getIamPolicy", map[string]any{"options": map[string]any{"requestedPolicyVersion": 7}}, 400)
+	if version := c.get(map[string]any{"requestedPolicyVersion": 2})["version"]; version != float64(1) {
+		t.Fatalf("version 2 read = %v", version)
+	}
+	if written := c.set(map[string]any{"version": 3, "bindings": []any{adminBinding, viewerBinding}}, "", 200); written["version"] != float64(3) {
+		t.Fatalf("conditional set = %v", written)
+	}
+	if role := at(t, c.get(map[string]any{"requestedPolicyVersion": 3}), "bindings", 1, "role"); role != "roles/iam.serviceAccountViewer" {
+		t.Fatalf("v3 role = %v", role)
+	}
+	for _, options := range []any{nil, map[string]any{"requestedPolicyVersion": 1}} {
+		read := c.get(options)
+		role, _ := at(t, read, "bindings", 1, "role").(string)
+		prefix := "roles/iam.serviceAccountViewer_withcond_"
+		if read["version"] != float64(1) || !strings.HasPrefix(role, prefix) || len(role) != len(prefix)+20 {
+			t.Fatalf("v1 read = %v", read)
+		}
+	}
+	c.set(map[string]any{"version": 1, "bindings": []any{adminBinding}}, "", 400)
+	c.set(map[string]any{"auditConfigs": schedulerAudit}, "auditConfigs", 400)
+	c.set(map[string]any{"version": 3, "bindings": []any{adminBinding}}, "", 200)
+}
+
+// Project policy update masks and audit configs (recorded: project-iam-policy-versions).
+func TestProjectPolicyMasksAndAuditConfigs(t *testing.T) {
+	c := policyClient{newHarness(t)}
+	stale := c.set(map[string]any{"version": 1, "bindings": []any{adminBinding}}, "", 200)["etag"]
+	added := c.set(map[string]any{"auditConfigs": schedulerAudit}, "auditConfigs", 200)
+	if bindings, ok := added["bindings"].([]any); !ok || len(bindings) != 1 || added["auditConfigs"] == nil {
+		t.Fatalf("audit mask = %v", added)
+	}
+	for mask, policy := range map[string]map[string]any{
+		"":         {"version": 1, "bindings": []any{adminBinding}},
+		"bindings": {"version": 1, "bindings": []any{adminBinding}, "auditConfigs": []any{}},
+	} {
+		if kept := c.set(policy, mask, 200); kept["auditConfigs"] == nil {
+			t.Fatalf("audit configs dropped by mask %q: %v", mask, kept)
+		}
+	}
+	if kept := c.set(map[string]any{"version": 1, "bindings": []any{adminBinding}, "auditConfigs": []any{}}, "", 200); kept["auditConfigs"] == nil {
+		t.Fatalf("default mask applied audit configs: %v", kept)
+	}
+	c.set(map[string]any{"etag": stale, "auditConfigs": []any{}}, "auditConfigs", 409)
+	c.set(map[string]any{"version": 1}, "version", 200)
+	c.set(map[string]any{}, "bogus", 400)
+	if cleared := c.set(map[string]any{"auditConfigs": []any{}}, "auditConfigs", 200); cleared["auditConfigs"] != nil {
+		t.Fatalf("audit configs kept: %v", cleared)
+	}
+	if emptied, _ := c.set(map[string]any{}, "bindings", 200)["bindings"].([]any); len(emptied) != 0 {
+		t.Fatalf("bindings mask without bindings kept %v", emptied)
+	}
+}
+
 // at follows a path through decoded JSON: a string indexes an object and an
 // int an array. Any other shape fails the test.
 func at(t *testing.T, value any, path ...any) any {

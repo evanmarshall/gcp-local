@@ -1,0 +1,328 @@
+{
+  "project-iam-policy-versions": {
+    "recorded-date": "13-10-2026, 04:43:00",
+    "recorded-content": {
+      "read-version-two": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "read-version-seven": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "read-version-negative": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "set-conditional": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [
+          {
+            "condition": {
+              "description": "Expires in 2100",
+              "expression": "request.time < timestamp(\"2100-01-01T00:00:00Z\")",
+              "title": "gcp-local-conformance"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/iam.serviceAccountViewer",
+            "withcond_suffix": null
+          }
+        ],
+        "version": 3
+      },
+      "read-v3": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [
+          {
+            "condition": {
+              "description": "Expires in 2100",
+              "expression": "request.time < timestamp(\"2100-01-01T00:00:00Z\")",
+              "title": "gcp-local-conformance"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/iam.serviceAccountViewer",
+            "withcond_suffix": null
+          }
+        ],
+        "version": 3
+      },
+      "read-v1": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/iam.serviceAccountViewer",
+            "withcond_suffix": {
+              "hex": true,
+              "length": 20
+            }
+          }
+        ],
+        "version": 1
+      },
+      "read-v0": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/iam.serviceAccountViewer",
+            "withcond_suffix": {
+              "hex": true,
+              "length": 20
+            }
+          }
+        ],
+        "version": 1
+      },
+      "read-unversioned": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [
+          {
+            "condition": null,
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/iam.serviceAccountViewer",
+            "withcond_suffix": {
+              "hex": true,
+              "length": 20
+            }
+          }
+        ],
+        "version": 1
+      },
+      "set-v1-dropping-condition": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "set-audit-mask-with-conditions": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "set-v3-dropping-condition": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "set-audit-mask": {
+        "audit_configs": [
+          {
+            "auditLogConfigs": [
+              {
+                "logType": "DATA_READ"
+              }
+            ],
+            "service": "cloudscheduler.googleapis.com"
+          }
+        ],
+        "fields": [
+          "auditConfigs",
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "read-audit": {
+        "audit_configs": [
+          {
+            "auditLogConfigs": [
+              {
+                "logType": "DATA_READ"
+              }
+            ],
+            "service": "cloudscheduler.googleapis.com"
+          }
+        ],
+        "fields": [
+          "auditConfigs",
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "set-default-mask-keeps-audit": {
+        "audit_configs": [
+          {
+            "auditLogConfigs": [
+              {
+                "logType": "DATA_READ"
+              }
+            ],
+            "service": "cloudscheduler.googleapis.com"
+          }
+        ],
+        "fields": [
+          "auditConfigs",
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "set-default-mask-ignores-audit": {
+        "audit_configs": [
+          {
+            "auditLogConfigs": [
+              {
+                "logType": "DATA_READ"
+              }
+            ],
+            "service": "cloudscheduler.googleapis.com"
+          }
+        ],
+        "fields": [
+          "auditConfigs",
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "set-bindings-mask-ignores-audit": {
+        "audit_configs": [
+          {
+            "auditLogConfigs": [
+              {
+                "logType": "DATA_READ"
+              }
+            ],
+            "service": "cloudscheduler.googleapis.com"
+          }
+        ],
+        "fields": [
+          "auditConfigs",
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "set-audit-mask-stale-etag": {
+        "code": 409,
+        "http_status": 409,
+        "status": "ABORTED"
+      },
+      "set-version-mask": {
+        "audit_configs": [
+          {
+            "auditLogConfigs": [
+              {
+                "logType": "DATA_READ"
+              }
+            ],
+            "service": "cloudscheduler.googleapis.com"
+          }
+        ],
+        "fields": [
+          "auditConfigs",
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "set-audit-mask-clears": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "read-final": {
+        "audit_configs": [],
+        "fields": [
+          "bindings",
+          "etag",
+          "version"
+        ],
+        "http_status": 200,
+        "scenario_bindings": [],
+        "version": 1
+      },
+      "cleanup": {
+        "version_1_without_conditions_or_audit_configs": true
+      }
+    }
+  }
+}

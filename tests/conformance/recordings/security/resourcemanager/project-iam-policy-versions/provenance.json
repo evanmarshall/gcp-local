@@ -1,0 +1,49 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-13T04:43:00.351165+00:00",
+  "scenario": {
+    "id": "project-iam-policy-versions",
+    "service": "resourcemanager",
+    "transport": "rest-v1",
+    "revision": "f19c4528167fe0c365a71e9d309f7c79e1e86ec5234b3b78258119dca89eb3e7",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "25ba8dad5b98b90bee449813fa990aee0cc164b177fb5b1ba52d2b19e4a0abf1",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/security/projectiam_versions.py": "438f49ce665069dea8b7dc86351a3c74d7cdeaeb2d0c73822f90fa25974bf29a",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/resourcemanager/versions/conftest.py": "393537d618f7a8b9e7f992fb9f93b4ca4549af808a8b2212f9e8f312e41383a8"
+    },
+    "scope": {
+      "services": [
+        "projectiampolicy"
+      ],
+      "location": "global",
+      "limits": {
+        "max_added_bindings": 1,
+        "max_audit_configs": 1,
+        "max_policy_writes": 12,
+        "max_run_seconds": 600
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}
