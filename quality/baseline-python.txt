@@ -101,7 +101,7 @@
 1	E501	tests/conformance/security/secretmanager/conftest.py
 1	E501	tests/conformance/security/secretmanager/test_secrets.py
 1	F401	gcp_validation/services/compute/networking.py
-1	ICN001	tests/conformance/storage/test_storage_bucket_updates.py
+1	ICN001	tests/conformance/storage/buckets/test_storage_bucket_updates.py
 1	N818	gcp_validation/services/messaging/pubsub.py
 1	PIE810	gcp_validation/live_rest.py
 1	PLR0912	gcp_validation/sandbox.py
@@ -190,7 +190,7 @@
 2	E501	tests/conformance/security/resourcemanager/conftest.py
 2	E501	tests/conformance/storage/test_storage.py
 2	E501	tests/conformance/storage/test_storage_isolation.py
-2	FURB162	tests/conformance/storage/test_storage_bucket_updates.py
+2	FURB162	tests/conformance/storage/buckets/test_storage_bucket_updates.py
 2	PT028	gcp_validation/services/compute/vm_connectivity.py
 20	ANN201	gcp_validation/services/security/secretmanager.py
 20	E501	gcp_validation/services/security/cloudkms.py
@@ -264,7 +264,7 @@
 6	D102	gcp_validation/services/storage/normalization.py
 6	E501	gcp_validation/sandbox.py
 6	E501	gcp_validation/services/databases/firestore.py
-6	E501	tests/conformance/storage/test_storage_bucket_updates.py
+6	E501	tests/conformance/storage/buckets/test_storage_bucket_updates.py
 6	S101	gcp_validation/services/messaging/pubsub.py
 7	ANN001	gcp_validation/services/storage/authorization.py
 7	ANN001	gcp_validation/services/storage/conditions.py
