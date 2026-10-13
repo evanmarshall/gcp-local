@@ -97,6 +97,12 @@ func (f *fakeDriver) serve(request proto.Message) (proto.Message, error) {
 		return operation(name, f.instances[name])
 	case *instancepb.GetInstanceRequest:
 		return f.instance(request.GetName())
+	case *instancepb.ListInstancesRequest:
+		response := &instancepb.ListInstancesResponse{}
+		for _, instance := range f.instances {
+			response.Instances = append(response.Instances, instance)
+		}
+		return response, nil
 	case *instancepb.DeleteInstanceRequest:
 		return f.deleteInstance(request.GetName())
 	case *databasepb.DropDatabaseRequest:

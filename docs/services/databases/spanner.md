@@ -34,14 +34,18 @@ The Go client (v1.95.1) is tested, data and admin. The client matrix also drives
 | Instance configs | `get`, `list` | Only `emulator-config` is listed |
 | Instances | `create`, `get`, `list`, `delete`, `getIamPolicy`, `setIamPolicy` | `update` returns the emulator's 501 |
 | Databases | `create`, `get`, `list`, `update`, `delete`, `getDdl`, `updateDdl`, `getIamPolicy`, `setIamPolicy` | |
-| Operations | Instance and database `operations.get` | Operations complete immediately |
-| Backups | `list` | Always empty |
+| Operations | Instance and database `operations.get` | The emulator's operations; they complete immediately |
+| Backups | `list` | Empty: no backup can be created locally |
 | Sessions (gRPC and REST) | `CreateSession`, `BatchCreateSessions`, `GetSession`, `ListSessions`, `DeleteSession` | `spanner.sessions.*` |
 | Queries | `ExecuteSql`, `ExecuteBatchDml`, `Read`; `ExecuteStreamingSql`, `StreamingRead` (gRPC only) | |
 | Transactions | `BeginTransaction`, `Commit`, `Rollback` | |
 | Partitions | `PartitionQuery`, `PartitionRead` | |
 
-The provider fills service-managed fields the emulator omits (`instanceType`, `edition`, `resourceLocation`, database `createTime`, `versionRetentionPeriod`, `earliestVersionTime`, `encryptionInfo`). Non-default `edition`, `instanceType`, `defaultBackupScheduleType`, and any `autoscalingConfig` return 501.
+The provider fills service-managed fields the emulator omits (`instanceType`, `edition`, `resourceLocation`, database `createTime`, `versionRetentionPeriod`, `earliestVersionTime`, `encryptionInfo`). Non-default `edition`, `instanceType`, `defaultBackupScheduleType`, any `autoscalingConfig`, and a database `encryptionConfig` (CMEK, which the emulator ignores) return 501.
+
+- Bodies are decoded strictly: an unknown or mistyped field is GCP's 400 with a `BadRequest` violation. A `setIamPolicy` body is a `SetIamPolicyRequest`; `updateMask` returns 501.
+- Lists (`instanceConfigs`, `instances`, `databases`, `backups`) are in name order and paged by the provider. `pageSize` of 0 or less is the maximum (1000); a token the provider didn't issue is GCP's 400 "Invalid List... request"; `filter` returns 501.
+- A 403 is GCP's "Operation denied by [IAM permission '...' on resource '...']." with an `iam.googleapis.com` ErrorInfo.
 
 ## IAM
 
@@ -58,12 +62,14 @@ Pinned roles: `roles/spanner.admin`, `roles/spanner.databaseAdmin`, `roles/spann
 
 A request that begins a transaction inline also needs the `BeginTransaction` permission (local model). `roles/spanner.viewer` has no data permission except `beginReadOnlyTransaction`. Instance and database policies are inherited by child resources.
 
+IAM Conditions see `resource.type` (`spanner.googleapis.com/Instance` or `/Database`), `resource.name` (`projects/P/instances/I[/databases/D]`), and `resource.service` (`spanner.googleapis.com`). A request is authorized on the addressed resource, or its nearest existing ancestor, under the lock deletes take, so a request racing a delete reads 404.
+
 ## Verification
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `spanner-instance-database-admin` | 2026-10-12 | Instance and database create, DDL update and canonical form, operations, 409 duplicate, delete then 404 |
-| `spanner-data-plane-rest` | 2026-10-12 | Session create and delete, mutation commit, read, DML in a transaction, query, denied session and query |
+| `spanner-instance-database-admin` | 2026-10-13 | Instance and database create, DDL update and canonical form, operations, 409 duplicate, delete then 404; denial messages and ErrorInfo, unknown body field, database list order and paging, page-token refusal, negative page size, empty backups list, a databaseAdmin grant on the instance conditioned on a database's `resource.type`, `.name`, and `.service` |
+| `spanner-data-plane-rest` | 2026-10-13 | Session create and delete, mutation commit, read, DML in a transaction, query, denied session and query |
 
 ```sh
 sh scripts/check/backend/spanner.sh          # provider and Go client against the real emulator
@@ -74,7 +80,8 @@ sh scripts/check/recordings.sh   # both recordings
 
 ## Gaps
 
-- Not served: backup create and restore, instance partitions, database roles, operation list and cancel, `testIamPermissions`, REST `:executeStreamingSql` and `:streamingRead`. Over gRPC these return `UNIMPLEMENTED` "No provider implements ...", as do backup and backup-schedule IAM policies and `ListOperations`, `CancelOperation`, and `DeleteOperation` on Spanner operation names.
+- `UNIMPLEMENTED` "Spanner coverage gap": backup `create`, `copy`, `get`, `patch`, `delete`, `databases.restore`, and instance and database `operations.list` and `cancel`.
+- Not served: instance partitions, database roles, `testIamPermissions`, REST `:executeStreamingSql` and `:streamingRead`. Over gRPC these return `UNIMPLEMENTED` "No provider implements ...", as do backup and backup-schedule IAM policies and `ListOperations`, `CancelOperation`, and `DeleteOperation` on Spanner operation names.
 - `UNIMPLEMENTED`: partitioned DML, Data Boost, `creator_role`, single-use read-write `ExecuteSql`/`Read`, `BatchWrite`.
 - Requests are limited to 2 MiB. Query and lock behavior is the emulator's, including one read-write transaction at a time.
 - State is in memory; reset or restart discards it.

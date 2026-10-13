@@ -128,3 +128,38 @@ func TestNearestPicksTheIndexedTargetUnderTheScopeLock(t *testing.T) {
 		t.Fatal("a scope the store refuses was allowed")
 	}
 }
+
+func TestNearestSuppliesConditionAttributes(t *testing.T) {
+	f := newGateFixture(t)
+	table := "//x.googleapis.com/projects/p/tables/t"
+	must(t, f.index.Put("x", state.Resource{Name: table, Service: "x", Kind: "table", Parent: f.project, Scope: ProjectScope("p")}))
+	// The viewer's grant holds only on resources whose resource.name is the table's.
+	_, err := f.engine.SetPolicy(f.project, iam.Policy{Version: 3, Bindings: []iam.Binding{{
+		Role: "roles/cloudscheduler.viewer", Members: []string{f.viewer.Subject},
+		Condition: []byte(`{"title":"t","expression":"resource.name == \"projects/p/tables/t\""}`),
+	}}})
+	must(t, err)
+	store := state.NewStore(func() struct{} { return struct{}{} }, state.GlobalScope)
+	call := f.call("test.get", f.viewer)
+	bare := Gate{Engine: f.engine, Index: f.index, Message: LacksPermission}
+	if _, _, err := Nearest(bare, store, ProjectScope("p"), call, "", table, f.project); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("without attributes the condition must grant nothing: %v", err)
+	}
+	named := bare
+	named.Attributes = func(target string) iam.ResourceAttributes {
+		return iam.ResourceAttributes{Name: target[len("//x.googleapis.com/"):], Type: "x.googleapis.com/Table", Service: "x.googleapis.com"}
+	}
+	if _, target, err := Nearest(named, store, ProjectScope("p"), call, "", table, f.project); err != nil || target.Attributes.Type != "x.googleapis.com/Table" {
+		t.Fatalf("attributes: %v %v", target, err)
+	}
+}
+
+func TestGateDenialWithAFixedMessage(t *testing.T) {
+	f := newGateFixture(t)
+	gate := Gate{Engine: f.engine, Message: NotAuthorized, Domain: "iam.googleapis.com"}
+	_, err := gate.Check(f.call("test.create", f.viewer), iam.Target{Name: f.project}, "projects/p/topics/t")
+	s := status.Convert(err)
+	if s.Message() != "User not authorized to perform this action." || len(s.Details()) != 1 {
+		t.Fatalf("fixed message: %v %v", err, s.Details())
+	}
+}

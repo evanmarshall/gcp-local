@@ -55,7 +55,7 @@ func TestAdminClientsOverGRPC(t *testing.T) {
 	must(t, err)
 	_, err = peer.CreateDatabase(ctx, &databasepb.CreateDatabaseRequest{Parent: name, CreateStatement: "CREATE DATABASE `" + testDatabase + "`"})
 	refused(t, "ungranted create", err, codes.PermissionDenied,
-		"The caller does not have spanner.databases.create access to //spanner.googleapis.com/"+name+".")
+		"Operation denied by [IAM permission 'spanner.databases.create' on resource '//spanner.googleapis.com/"+name+"'].")
 	making, err := databases.CreateDatabase(ctx, &databasepb.CreateDatabaseRequest{Parent: name, CreateStatement: "CREATE DATABASE `" + testDatabase + "`"})
 	must(t, err)
 	db, err := making.Wait(ctx)

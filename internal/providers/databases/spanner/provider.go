@@ -2,12 +2,14 @@ package spanner
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/base64"
 	"errors"
 	"fmt"
-	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"cloud.google.com/go/iam/apiv1/iampb"
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
@@ -16,14 +18,19 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // Provider is the authorization gate in front of the official emulator. It
 // owns IAM policies and index references; the emulator owns resource state.
 type Provider struct {
-	manager  *backend.Manager
-	index    *state.Index
-	engine   *iam.Engine
+	manager *backend.Manager
+	index   *state.Index
+	engine  *iam.Engine
+	gate    provider.Gate
+	// created records database creation times. Its scope lock also guards
+	// every index change of the scope's instances and databases, which
+	// Nearest relies on.
 	created  *state.Store[createdDatabases]
 	clock    func() time.Time
 	poisoned sync.Map // scopes with an unresolved mutation outcome, cleared only on reset
@@ -51,6 +58,8 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		return nil, err
 	}
 	p := &Provider{manager: manager, index: index, engine: engine, clock: time.Now,
+		gate: provider.Gate{Engine: engine, Index: index, Message: deniedMessage, Domain: "iam.googleapis.com",
+			Attributes: attributes},
 		created: state.NewStore(func() createdDatabases { return createdDatabases{} }, state.GlobalScope)}
 	if err := manager.Register(serviceName, backend.Definition{
 		Validate: state.GlobalScope,
@@ -58,11 +67,15 @@ func newProvider(registry *gateway.Registry, manager *backend.Manager, index *st
 		// The manager stops the emulator (discarding its in-memory state)
 		// before this hook clears the provider-owned policies and references.
 		AfterReset: func(scope state.Scope) error {
-			if err := p.created.Reset(scope); err != nil {
+			// Unindex under the scope lock Nearest holds.
+			if err := p.created.With(scope, func(times *createdDatabases) error {
+				clear(*times)
+				engine.ClearScope(serviceName, scope)
+				index.RemoveScope(serviceName, scope)
+				return nil
+			}); err != nil {
 				return fmt.Errorf("clear the Spanner scope: %w", err)
 			}
-			engine.ClearScope(serviceName, scope)
-			index.RemoveScope(serviceName, scope)
 			p.poisoned.Delete(scope)
 			return nil
 		},
@@ -82,6 +95,12 @@ func (p *Provider) registerHandlers(registry *gateway.Registry) error {
 			return fmt.Errorf("register %s: %w", method, err)
 		}
 	}
+	for method, what := range unserved {
+		refusal := gap(what)
+		if err := registry.Register(method, func(gateway.Call, any) (any, error) { return nil, refusal }); err != nil {
+			return fmt.Errorf("register %s: %w", method, err)
+		}
+	}
 	return p.registerData(registry)
 }
 
@@ -96,20 +115,16 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if _, failed := p.poisoned.Load(scope); failed {
 		return nil, status.Error(codes.FailedPrecondition, "A Spanner mutation outcome is unresolved; reset this scope")
 	}
-	target := p.target(request.Path)
-	decision, authorizeErr := p.engine.Authorize(call, target, nil)
-	if provider.Unverified(authorizeErr) {
-		// A concurrent delete removed the indexed target after target()
-		// chose it; authorize against the nearest surviving ancestor.
-		target = p.target(request.Path)
-		decision, authorizeErr = p.engine.Authorize(call, target, nil)
-	}
-	if authorizeErr != nil {
-		code := status.Code(authorizeErr)
-		if code != codes.PermissionDenied && code != codes.Unauthenticated {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, authorizeErr)
-		}
-		return provider.Denied(decision, target.Name), nil
+	// Creates and deletes unindex under the scope lock Nearest holds, so a
+	// request racing one is authorized at the parent and reads 404, never an
+	// unverified target.
+	names := candidates(request.Path)
+	// A denial names the addressed resource: the database, the instance, or
+	// for instance methods without one, the project.
+	reported := strings.TrimPrefix(strings.TrimPrefix(names[0], fullName("")), "//cloudresourcemanager.googleapis.com/")
+	decision, target, err := provider.Nearest(p.gate, p.created, scope, call, reported, names...)
+	if err != nil {
+		return nil, err
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
@@ -117,32 +132,38 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
-// target selects the IAM resource for a request: the addressed database or
-// instance when the index knows it, else its nearest indexed ancestor, so a
-// missing resource is authorized against its parent and then reported by the
+// candidates are the IAM targets of a request, most specific first: the
+// addressed database, its instance, and the project. A missing resource is
+// authorized against its nearest indexed ancestor and then reported by the
 // emulator, as GCP does.
-func (p *Provider) target(path map[string]string) iam.Target {
+func candidates(path map[string]string) []string {
 	project := path[pathProject]
-	names := []string{provider.ProjectResource(project)}
+	var names []string
 	if instance := path[pathInstance]; instance != "" {
-		names = append(names, fullName(provider.InstanceName(project, instance)))
 		if database := path[pathDatabase]; database != "" {
 			names = append(names, fullName(databaseName(project, instance, database)))
 		}
+		names = append(names, fullName(provider.InstanceName(project, instance)))
 	}
-	for i := len(names) - 1; i > 0; i-- {
-		if resource, ok := p.index.Get(names[i]); ok && resource.Service == serviceName && resource.Scope == provider.ProjectScope(project) {
-			return iam.Target{Name: names[i]}
-		}
+	return append(names, provider.ProjectResource(project))
+}
+
+// attributes are the IAM Conditions resource attributes of an instance or
+// database target, from Google's resource attribute reference; recorded in
+// spanner-instance-database-admin. A project target has none.
+func attributes(target string) iam.ResourceAttributes {
+	name, ok := strings.CutPrefix(target, fullName(""))
+	switch {
+	case !ok:
+		return iam.ResourceAttributes{}
+	case strings.Contains(name, "/databases/"):
+		return iam.ResourceAttributes{Name: name, Type: "spanner.googleapis.com/Database", Service: "spanner.googleapis.com"}
+	default:
+		return iam.ResourceAttributes{Name: name, Type: "spanner.googleapis.com/Instance", Service: "spanner.googleapis.com"}
 	}
-	return iam.Target{Name: names[0]}
 }
 
 // addressed names the instance or database an IAM-policy request addresses.
@@ -162,6 +183,9 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 			return nil, status.Errorf(codes.NotFound, "Resource not found: %s", addressed(request.Path))
 		}
 		if call.Method == methodInstancesGetIam || call.Method == methodDatabasesGetIam {
+			if err := provider.DecodeProto(request.JSON, "", &iampb.GetIamPolicyRequest{}, gap); err != nil {
+				return nil, err
+			}
 			return p.getIam(target)
 		}
 		return p.setIam(request, target)
@@ -179,20 +203,36 @@ func (p *Provider) getIam(target iam.Target) (*gateway.RESTResponse, error) {
 	return &gateway.RESTResponse{JSON: policy.Wire()}, nil
 }
 
-// setIam stores the policy of an instance or database.
+// setIam stores the policy of an instance or database. The body is a
+// google.iam.v1.SetIamPolicyRequest; an update mask is a gap.
 func (p *Provider) setIam(request *gateway.RESTRequest, target iam.Target) (*gateway.RESTResponse, error) {
-	var envelope struct {
-		Policy iam.Policy `json:"policy"`
+	set := &iampb.SetIamPolicyRequest{}
+	if err := provider.DecodeProto(request.JSON, "", set, gap, "updateMask"); err != nil {
+		return nil, err
 	}
-	if json.Unmarshal(request.JSON, &envelope) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
+	policy := iam.Policy{Version: int(set.GetPolicy().GetVersion()), ETag: base64.StdEncoding.EncodeToString(set.GetPolicy().GetEtag())}
+	for _, binding := range set.GetPolicy().GetBindings() {
+		entry := iam.Binding{Role: binding.GetRole(), Members: binding.GetMembers()}
+		if binding.GetCondition() != nil {
+			condition, err := protojson.Marshal(binding.GetCondition())
+			if err != nil {
+				return nil, status.Error(codes.InvalidArgument, "Invalid IAM condition")
+			}
+			entry.Condition = condition
+		}
+		policy.Bindings = append(policy.Bindings, entry)
 	}
-	policy, err := p.engine.SetPolicy(target.Name, envelope.Policy)
+	stored, err := p.engine.SetPolicy(target.Name, policy)
 	if err != nil {
 		return nil, fmt.Errorf("write the Spanner policy: %w", err)
 	}
-	return &gateway.RESTResponse{JSON: policy}, nil
+	return &gateway.RESTResponse{JSON: stored}, nil
 }
+
+// deniedMessage is the 403 message, taking the permission and the relative
+// resource name; the 403 carries an iam.googleapis.com ErrorInfo
+// (spanner-instance-database-admin).
+const deniedMessage = "Operation denied by [IAM permission '%s' on resource '//spanner.googleapis.com/%s']."
 
 // errBackendType reports a backend that is not a Spanner driver.
 var errBackendType = errors.New("spanner backend is not an emulator driver")

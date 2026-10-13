@@ -66,6 +66,24 @@ var permissions = map[string]string{
 	methodBackupsList:          "spanner.backups.list",
 }
 
+// gapBackups names the backup methods' gap.
+const gapBackups = "backups"
+
+// unserved are routed methods the emulator can't back; each returns its gap,
+// with no backend call, instead of falling through to another service's route.
+var unserved = map[string]string{
+	"spanner.backups.create":              gapBackups,
+	"spanner.backups.copy":                gapBackups,
+	"spanner.backups.get":                 gapBackups,
+	"spanner.backups.patch":               gapBackups,
+	"spanner.backups.delete":              gapBackups,
+	"spanner.databases.restore":           "database restore",
+	"spanner.instances.operations.list":   "operation list",
+	"spanner.instances.operations.cancel": "operation cancel",
+	"spanner.databases.operations.list":   "operation list",
+	"spanner.databases.operations.cancel": "operation cancel",
+}
+
 // Path variables and resource kinds shared by the handlers.
 const (
 	pathProject   = "project"

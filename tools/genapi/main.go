@@ -768,6 +768,18 @@ func spannerRows() []route {
 		{"spanner.instances.operations.get", http.MethodGet, base + "/instances/{instance}/operations/{operation}", false, false},
 		{"spanner.databases.operations.get", http.MethodGet, base + "/instances/{instance}/databases/{database}/operations/{operation}", false, false},
 		{"spanner.backups.list", http.MethodGet, base + "/instances/{instance}/backups", false, false},
+		// Routed so they return the provider's coverage gap instead of
+		// falling through to the Storage XML route.
+		{"spanner.backups.create", http.MethodPost, base + "/instances/{instance}/backups", true, false},
+		{"spanner.backups.copy", http.MethodPost, base + "/instances/{instance}/backups:copy", true, false},
+		{"spanner.backups.get", http.MethodGet, base + "/instances/{instance}/backups/{backup}", false, false},
+		{"spanner.backups.patch", http.MethodPatch, base + "/instances/{instance}/backups/{backup}", true, false},
+		{"spanner.backups.delete", http.MethodDelete, base + "/instances/{instance}/backups/{backup}", false, false},
+		{"spanner.databases.restore", http.MethodPost, base + "/instances/{instance}/databases:restore", true, false},
+		{"spanner.instances.operations.list", http.MethodGet, base + "/instances/{instance}/operations", false, false},
+		{"spanner.instances.operations.cancel", http.MethodPost, base + "/instances/{instance}/operations/{operation}:cancel", false, false},
+		{"spanner.databases.operations.list", http.MethodGet, base + "/instances/{instance}/databases/{database}/operations", false, false},
+		{"spanner.databases.operations.cancel", http.MethodPost, base + "/instances/{instance}/databases/{database}/operations/{operation}:cancel", false, false},
 		{"spanner.databases.getIamPolicy", http.MethodPost, base + "/instances/{instance}/databases/{database}:getIamPolicy", true, false},
 		{"spanner.databases.setIamPolicy", http.MethodPost, base + "/instances/{instance}/databases/{database}:setIamPolicy", true, false},
 		// Unary data-plane session methods; the streaming REST variants are not routed.

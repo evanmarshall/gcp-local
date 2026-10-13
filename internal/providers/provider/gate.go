@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -18,6 +19,9 @@ const (
 	LacksPermission = `The principal (user or service account) lacks IAM permission "%s" for the resource "%s" (or the resource may not exist).`
 	// PermissionDeniedOn is Memorystore's (recording memorystore-redis-instance-admin).
 	PermissionDeniedOn = "Permission '%s' denied on '%s'"
+	// NotAuthorized is Pub/Sub's, which names neither (recording
+	// pubsub-rest-data-plane); a message without verbs is used as is.
+	NotAuthorized = "User not authorized to perform this action."
 )
 
 // Authorizer is the IAM engine's authorization entry point; *iam.Engine
@@ -33,12 +37,18 @@ type Gate struct {
 	// Index holds the resources Nearest picks among.
 	Index *state.Index
 	// Message formats a 403's message from the permission and resource
-	// (LacksPermission, PermissionDeniedOn).
+	// (LacksPermission, PermissionDeniedOn), or is the whole message when it
+	// has no verbs (NotAuthorized).
 	Message string
 	// Domain is the ErrorInfo domain a 403 carries, the service's API host.
 	// Empty sends no details, as Cloud Scheduler's and Memorystore's recorded
 	// denials have none. Set it only from a recorded denial with details.
 	Domain string
+	// Attributes returns the IAM Conditions resource attributes (resource.name,
+	// .type, .service) of a target Nearest picks, from the service's row of
+	// Google's resource attribute reference. Nil supplies none, so a condition
+	// that reads one grants nothing.
+	Attributes func(target string) iam.ResourceAttributes
 }
 
 // Check authorizes call on target. It returns the decision and nil when the
@@ -89,6 +99,9 @@ func Nearest[T any](g Gate, store *state.Store[T], scope state.Scope, call gatew
 				break
 			}
 		}
+		if g.Attributes != nil {
+			target.Attributes = g.Attributes(target.Name)
+		}
 		reported := resource
 		if reported == "" {
 			reported = target.Name
@@ -113,7 +126,10 @@ func (g Gate) Denial(call gateway.Call, decision iam.Decision, resource string) 
 		return status.Error(codes.Unauthenticated, "Request had invalid authentication credentials.")
 	}
 	permission := DeniedPermission(decision)
-	message := fmt.Sprintf(g.Message, permission, resource)
+	message := g.Message
+	if strings.Contains(message, "%") {
+		message = fmt.Sprintf(message, permission, resource)
+	}
 	if g.Domain == "" {
 		return status.Error(codes.PermissionDenied, message)
 	}

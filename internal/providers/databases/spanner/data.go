@@ -270,10 +270,19 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 	if err != nil {
 		return scope, err
 	}
-	target := p.target(path)
 	authorization := call
 	authorization.Method = plan
-	decision, err := p.engine.Authorize(authorization, target, features)
+	var target iam.Target
+	var decision iam.Decision
+	// Pick and check under the scope lock that unindexing holds, as Nearest
+	// does; Nearest itself takes no request features.
+	if lockErr := p.created.With(scope, func(*createdDatabases) error {
+		target = p.nearest(candidates(path))
+		decision, err = p.engine.Authorize(authorization, target, features)
+		return nil
+	}); lockErr != nil {
+		return scope, fmt.Errorf("authorize in scope %s: %w", scope.Project, lockErr)
+	}
 	if decision.ID != "" {
 		_ = grpc.SetHeader(call.Context, metadata.Pairs("x-gcp-local-decision-id", decision.ID))
 	}
@@ -286,6 +295,17 @@ func (p *Provider) authorizeData(call gateway.Call, request proto.Message) (stat
 			provider.DeniedPermission(decision), strings.TrimPrefix(target.Name, "//spanner.googleapis.com/"))
 	}
 	return scope, nil
+}
+
+// nearest is the first indexed candidate, with its condition attributes, or
+// the last (the project). Call it under the scope lock.
+func (p *Provider) nearest(names []string) iam.Target {
+	for _, name := range names[:len(names)-1] {
+		if _, indexed := p.index.Get(name); indexed {
+			return iam.Target{Name: name, Attributes: attributes(name)}
+		}
+	}
+	return iam.Target{Name: names[len(names)-1]}
 }
 
 // selected is a request whose transaction selector can begin a transaction.

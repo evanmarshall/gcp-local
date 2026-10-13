@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -367,4 +368,163 @@ func TestConcurrentAdminRequests(t *testing.T) {
 			{Method: http.MethodDelete, Path: testPath, Want: []int{200, 404}},
 		}
 	})
+}
+
+// TestDatabaseRequestsRacingDelete races database reads, policy reads, and
+// deletes against recreation. Authorization picks the database, instance, or
+// project under the scope lock that unindexing holds, so a request sees 200,
+// 404, or 409, never 501 for a target unindexed mid-check (CI flake on
+// DELETE .../databases/demo_db).
+func TestDatabaseRequestsRacingDelete(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	database := testPath + "/databases/" + testDatabase
+	providertest.Hammer(t, h.gate, adminToken, 16, 40, func(worker int) []providertest.Request {
+		if worker%4 == 0 {
+			return []providertest.Request{
+				{Method: http.MethodPost, Path: testPath + "/databases", Body: createDatabase(testDatabase), Want: []int{200, 409}},
+				{Method: http.MethodDelete, Path: database, Want: []int{200, 404}},
+			}
+		}
+		return []providertest.Request{
+			{Method: http.MethodDelete, Path: database, Want: []int{200, 404}},
+			{Method: http.MethodGet, Path: database, Want: []int{200, 404}},
+			{Method: http.MethodPost, Path: database + ":getIamPolicy", Body: map[string]any{}, Want: []int{200, 404}},
+		}
+	})
+}
+
+// errorBody decodes a REST error.
+func errorBody(t *testing.T, body map[string]any) (string, []any) {
+	t.Helper()
+	failure := object(t, body["error"])
+	message, _ := failure["message"].(string)
+	details, _ := failure["details"].([]any)
+	return message, details
+}
+
+func TestDenialMatchesTheRecording(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	message, details := errorBody(t, h.expect(h.invoke(peerToken, http.MethodGet, testPath, nil), http.StatusForbidden))
+	if message != "Operation denied by [IAM permission 'spanner.instances.get' on resource '//spanner.googleapis.com/projects/demo-spanner/instances/demo-inst']." {
+		t.Fatalf("message = %q", message)
+	}
+	info := object(t, details[0])
+	if info["reason"] != "IAM_PERMISSION_DENIED" || info["domain"] != "iam.googleapis.com" ||
+		object(t, info["metadata"])["resource"] != "projects/demo-spanner/instances/demo-inst" {
+		t.Fatalf("details = %v", details)
+	}
+}
+
+func TestBodiesAreDecodedStrictly(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	body := createDatabase("x_db")
+	body["unknownField"] = 1
+	message, _ := errorBody(t, h.expect(h.invoke(adminToken, http.MethodPost, testPath+"/databases", body), http.StatusBadRequest))
+	if message != `Invalid JSON payload received. Unknown name "unknownField": Cannot find field.` {
+		t.Fatalf("unknown field: %q", message)
+	}
+	// The emulator accepts a CMEK key and ignores it.
+	cmek := createDatabase("x_db")
+	cmek["encryptionConfig"] = map[string]any{"kmsKeyName": "projects/p/locations/l/keyRings/r/cryptoKeys/k"}
+	message, _ = errorBody(t, h.expect(h.invoke(adminToken, http.MethodPost, testPath+"/databases", cmek), http.StatusNotImplemented))
+	if message != "Spanner coverage gap: encryptionConfig is not modeled" {
+		t.Fatalf("CMEK: %q", message)
+	}
+	// A policy holds only version, bindings, and etag; deny rules are not Spanner's.
+	h.expect(h.invoke(adminToken, http.MethodPost, testPath+":setIamPolicy", map[string]any{
+		"policy": map[string]any{"denyRules": []any{}}}), http.StatusBadRequest)
+	message, _ = errorBody(t, h.expect(h.invoke(adminToken, http.MethodPost, testPath+":setIamPolicy", map[string]any{
+		"policy": map[string]any{}, "updateMask": "bindings"}), http.StatusNotImplemented))
+	if message != "Spanner coverage gap: updateMask is not modeled" {
+		t.Fatalf("update mask: %q", message)
+	}
+}
+
+func TestListsPageInNameOrder(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	for _, id := range []string{"gl_db", "gl_ab", "gl_mm"} {
+		h.expect(h.invoke(adminToken, http.MethodPost, testPath+"/databases", createDatabase(id)), http.StatusOK)
+	}
+	names := func(body map[string]any) []string {
+		items := provider.MapList(body["databases"])
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			out = append(out, provider.LastSegment(provider.Text(item["name"])))
+		}
+		return out
+	}
+	all := h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/databases", nil), http.StatusOK)
+	if got := strings.Join(names(all), ","); got != "gl_ab,gl_db,gl_mm" {
+		t.Fatalf("order = %v", got)
+	}
+	first := h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/databases?pageSize=2", nil), http.StatusOK)
+	second := h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/databases?pageSize=2&pageToken="+provider.Text(first["nextPageToken"]), nil), http.StatusOK)
+	if got := len(names(first)) + 10*len(names(second)); got != 12 || first["nextPageToken"] == nil || second["nextPageToken"] != nil {
+		t.Fatalf("pages = %v %v", first, second)
+	}
+	if got := names(h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/databases?pageSize=-1", nil), http.StatusOK)); len(got) != 3 {
+		t.Fatalf("a negative size is the maximum (recorded): %v", got)
+	}
+}
+
+// TestListRefusals checks the recorded page-token refusal and the filter gap.
+func TestListRefusals(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	message, details := errorBody(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/databases?pageToken=bad", nil), http.StatusBadRequest))
+	if message != "Invalid ListDatabases request" || len(details) != 1 {
+		t.Fatalf("token: %q %v", message, details)
+	}
+	message, _ = errorBody(t, h.expect(h.invoke(adminToken, http.MethodGet, testInstances+"?filter=name:x", nil), http.StatusNotImplemented))
+	if message != "Spanner coverage gap: list filter is not implemented" {
+		t.Fatalf("filter: %q", message)
+	}
+}
+
+func TestBackupsAreAnExplicitGap(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	// Recorded: an instance without backups lists {}.
+	if body := h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/backups", nil), http.StatusOK); len(body) != 0 {
+		t.Fatalf("backups = %v", body)
+	}
+	message, _ := errorBody(t, h.expect(h.invoke(adminToken, http.MethodGet, testPath+"/backups?filter=name:x", nil), http.StatusNotImplemented))
+	if message != "Spanner coverage gap: list filter is not implemented" {
+		t.Fatalf("backup filter: %q", message)
+	}
+	for _, probe := range []struct{ verb, path string }{
+		{http.MethodPost, testPath + "/backups?backupId=b"},
+		{http.MethodGet, testPath + "/backups/b"},
+		{http.MethodDelete, testPath + "/backups/b"},
+		{http.MethodPost, testPath + "/databases:restore"},
+		{http.MethodGet, testPath + "/operations"},
+		{http.MethodPost, testPath + "/operations/op:cancel"},
+	} {
+		message, _ := errorBody(t, h.expect(h.invoke(adminToken, probe.verb, probe.path, map[string]any{}), http.StatusNotImplemented))
+		if !strings.HasPrefix(message, "Spanner coverage gap: ") {
+			t.Fatalf("%s %s: %q", probe.verb, probe.path, message)
+		}
+	}
+}
+
+// TestConditionalGrantOnTheInstance replays the recorded conditional grant: a
+// databaseAdmin binding on the instance conditioned on the database's
+// resource.type, .name, and .service allows only that database.
+func TestConditionalGrantOnTheInstance(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	for _, id := range []string{"gl_db", "gl_ab"} {
+		h.expect(h.invoke(adminToken, http.MethodPost, testPath+"/databases", createDatabase(id)), http.StatusOK)
+	}
+	expression := `resource.type == "spanner.googleapis.com/Database" && resource.name == "projects/demo-spanner/instances/demo-inst/databases/gl_db" && resource.service == "spanner.googleapis.com"`
+	h.expect(h.invoke(adminToken, http.MethodPost, testPath+":setIamPolicy", map[string]any{"policy": map[string]any{
+		"version": 3, "bindings": []any{map[string]any{"role": "roles/spanner.databaseAdmin", "members": []string{principal(peerToken)},
+			"condition": map[string]any{"title": "t", "expression": expression}}}}}), http.StatusOK)
+	h.expect(h.invoke(peerToken, http.MethodGet, testPath+"/databases/gl_db", nil), http.StatusOK)
+	h.expect(h.invoke(peerToken, http.MethodGet, testPath+"/databases/gl_ab", nil), http.StatusForbidden)
+	h.expect(h.invoke(peerToken, http.MethodGet, testPath, nil), http.StatusForbidden)
 }

@@ -1,6 +1,6 @@
 {
   "spanner-instance-database-admin": {
-    "recorded-date": "12-10-2026, 17:56:24",
+    "recorded-date": "13-10-2026, 01:00:07",
     "recorded-content": {
       "instance-operation": {
         "done": true,
@@ -60,7 +60,19 @@
       },
       "denied-read": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "spanner.instances.get",
+              "resource": "projects/<project>/instances/<instance>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Operation denied by [IAM permission 'spanner.instances.get' on resource '//spanner.googleapis.com/projects/<project>/instances/<instance>'].",
         "status": "PERMISSION_DENIED"
       },
       "policy-read": {
@@ -91,8 +103,36 @@
       },
       "viewer-cannot-create-database": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "spanner.databases.create",
+              "resource": "projects/<project>/instances/<instance>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Operation denied by [IAM permission 'spanner.databases.create' on resource '//spanner.googleapis.com/projects/<project>/instances/<instance>'].",
         "status": "PERMISSION_DENIED"
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
       },
       "database-operation": {
         "done": true,
@@ -165,6 +205,121 @@
         "statements": [
           "CREATE TABLE Items (\n  Id STRING(36) NOT NULL,\n  Name STRING(64),\n  Note STRING(64),\n) PRIMARY KEY(Id)"
         ]
+      },
+      "second-database-operation": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.spanner.admin.database.v1.CreateDatabaseMetadata",
+        "response_fields": [
+          "@type",
+          "createTime",
+          "databaseDialect",
+          "earliestVersionTime",
+          "name",
+          "resourceLocationId",
+          "state",
+          "versionRetentionPeriod"
+        ],
+        "response_type": "type.googleapis.com/google.spanner.admin.database.v1.Database"
+      },
+      "database-list": {
+        "fields": [
+          "databases"
+        ],
+        "http_status": 200,
+        "names": [
+          "projects/<project>/instances/<instance>/databases/gl_ab",
+          "projects/<project>/instances/<instance>/databases/gl_db"
+        ]
+      },
+      "database-list-paged": {
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "second_count": 1,
+        "second_has_next": false,
+        "second_status": 200
+      },
+      "list-invalid-token": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Got: not-a-page-token",
+                "field": "page_token"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid ListDatabases request",
+        "status": "INVALID_ARGUMENT"
+      },
+      "list-negative-size": {
+        "count": 2,
+        "has_next": false,
+        "http_status": 200
+      },
+      "backup-list": {
+        "body": {},
+        "http_status": 200
+      },
+      "conditional-granted": {
+        "conditions": [
+          [],
+          [
+            "expression",
+            "title"
+          ]
+        ],
+        "http_status": 200,
+        "roles": [
+          "roles/spanner.databaseAdmin",
+          "roles/spanner.viewer"
+        ],
+        "version": 3
+      },
+      "condition-matched": {
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_type": "type.googleapis.com/google.spanner.admin.database.v1.UpdateDatabaseDdlMetadata",
+        "response_fields": [
+          "@type"
+        ],
+        "response_type": "type.googleapis.com/google.protobuf.Empty"
+      },
+      "condition-not-matched": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "spanner.databases.updateDdl",
+              "resource": "projects/<project>/instances/<instance>/databases/gl_ab"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Operation denied by [IAM permission 'spanner.databases.updateDdl' on resource '//spanner.googleapis.com/projects/<project>/instances/<instance>/databases/gl_ab'].",
+        "status": "PERMISSION_DENIED"
       },
       "duplicate-instance": {
         "code": 409,

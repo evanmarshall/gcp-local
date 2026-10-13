@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T17:56:24.251528+00:00",
+  "recorded_at": "2026-10-13T01:00:07.145732+00:00",
   "scenario": {
     "id": "spanner-instance-database-admin",
     "service": "spanner",
     "transport": "rest-v1",
-    "revision": "1d6388ebf37b43b20f520bc8894ffb80636719f57fe569a0b5c35708e3a5424f",
+    "revision": "eb021711c25ea97b1893e942897ab0de9174d604d60fba40d06855d04886f9b9",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "edaa361e3016deaf2e53cf89cada95c832d9d3d3b8f2dfc2be9bfd2d9a646fe9",
+  "snapshot_sha256": "10336cc0b917b99b1d69b32caaa2b5f09e42e440e89d55377d464a1a3c09fbb9",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,7 +22,8 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/databases/spanner.py": "401a19b1a69e44bc83dbaa6e8125bd53ce4d7c2cf001d9bc12a7ba593e07ac9d",
+      "gcp_validation/services/databases/spanner.py": "a40a4d4c09c6837f46bb6b544ef1ba755842a7ee470d533583c287b9a7292072",
+      "gcp_validation/errors.py": "e6d4c51925754454281a12b9719ad3684a9dbe363695509ebedb2b8da5e6f87f",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
       "tests/conformance/databases/spanner/admin/conftest.py": "42a8bf6c8668f8118efaf3de70003daee53edd57e17e41138363639225f7feb8"
@@ -35,7 +36,7 @@
       "limits": {
         "max_instances": 1,
         "max_processing_units": 100,
-        "max_databases": 1,
+        "max_databases": 2,
         "max_run_seconds": 900
       },
       "cleanup_required": true,

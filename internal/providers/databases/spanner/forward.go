@@ -3,6 +3,10 @@ package spanner
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"maps"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -65,27 +69,34 @@ type rpc struct {
 	request, response proto.Message
 	body, field       string
 	bind              binding
+	// unmodeled are body fields the emulator would accept and ignore; set to
+	// a non-default value, they are a gap.
+	unmodeled []string
 }
 
 var rpcs = map[string]rpc{
-	methodConfigsGet:           {instanceAdmin + "GetInstanceConfig", &instancepb.GetInstanceConfigRequest{}, &instancepb.InstanceConfig{}, "", fieldName, configPath},
-	methodConfigsList:          {rpcListInstanceConfigs, &instancepb.ListInstanceConfigsRequest{}, &instancepb.ListInstanceConfigsResponse{}, "", fieldParent, projectPath},
-	methodInstancesCreate:      {instanceAdmin + "CreateInstance", &instancepb.CreateInstanceRequest{}, &longrunningpb.Operation{}, "*", fieldParent, projectPath},
-	methodInstancesGet:         {instanceAdmin + "GetInstance", &instancepb.GetInstanceRequest{}, &instancepb.Instance{}, "", fieldName, instancePath},
-	methodInstancesList:        {instanceAdmin + "ListInstances", &instancepb.ListInstancesRequest{}, &instancepb.ListInstancesResponse{}, "", fieldParent, projectPath},
-	methodInstancesUpdate:      {instanceAdmin + "UpdateInstance", &instancepb.UpdateInstanceRequest{}, &longrunningpb.Operation{}, "*", "instance.name", instancePath},
-	methodInstancesDelete:      {instanceAdmin + "DeleteInstance", &instancepb.DeleteInstanceRequest{}, &emptypb.Empty{}, "", fieldName, instancePath},
-	methodInstanceOperationGet: {rpcGetOperation, &longrunningpb.GetOperationRequest{}, &longrunningpb.Operation{}, "", fieldName, instanceOperationPath},
-	methodDatabasesCreate:      {databaseAdmin + "CreateDatabase", &databasepb.CreateDatabaseRequest{}, &longrunningpb.Operation{}, "*", fieldParent, instancePath},
-	methodDatabasesGet:         {databaseAdmin + "GetDatabase", &databasepb.GetDatabaseRequest{}, &databasepb.Database{}, "", fieldName, databasePath},
-	methodDatabasesList:        {databaseAdmin + "ListDatabases", &databasepb.ListDatabasesRequest{}, &databasepb.ListDatabasesResponse{}, "", fieldParent, instancePath},
-	methodDatabasesUpdate:      {databaseAdmin + "UpdateDatabase", &databasepb.UpdateDatabaseRequest{}, &longrunningpb.Operation{}, pathDatabase, "database.name", databasePath},
-	methodDatabasesDelete:      {databaseAdmin + "DropDatabase", &databasepb.DropDatabaseRequest{}, &emptypb.Empty{}, "", pathDatabase, databasePath},
-	methodDatabasesApplyDdl:    {databaseAdmin + "UpdateDatabaseDdl", &databasepb.UpdateDatabaseDdlRequest{}, &longrunningpb.Operation{}, "*", pathDatabase, databasePath},
-	methodDatabasesGetDdl:      {databaseAdmin + "GetDatabaseDdl", &databasepb.GetDatabaseDdlRequest{}, &databasepb.GetDatabaseDdlResponse{}, "", pathDatabase, databasePath},
-	methodDatabaseOperationGet: {rpcGetOperation, &longrunningpb.GetOperationRequest{}, &longrunningpb.Operation{}, "", fieldName, databaseOperationPath},
-	methodBackupsList:          {databaseAdmin + "ListBackups", &databasepb.ListBackupsRequest{}, &databasepb.ListBackupsResponse{}, "", fieldParent, instancePath},
+	methodConfigsGet:           {instanceAdmin + "GetInstanceConfig", &instancepb.GetInstanceConfigRequest{}, &instancepb.InstanceConfig{}, "", fieldName, configPath, nil},
+	methodConfigsList:          {rpcListInstanceConfigs, &instancepb.ListInstanceConfigsRequest{}, &instancepb.ListInstanceConfigsResponse{}, "", fieldParent, projectPath, nil},
+	methodInstancesCreate:      {instanceAdmin + "CreateInstance", &instancepb.CreateInstanceRequest{}, &longrunningpb.Operation{}, "*", fieldParent, projectPath, nil},
+	methodInstancesGet:         {instanceAdmin + "GetInstance", &instancepb.GetInstanceRequest{}, &instancepb.Instance{}, "", fieldName, instancePath, nil},
+	methodInstancesList:        {instanceAdmin + "ListInstances", &instancepb.ListInstancesRequest{}, &instancepb.ListInstancesResponse{}, "", fieldParent, projectPath, nil},
+	methodInstancesUpdate:      {instanceAdmin + "UpdateInstance", &instancepb.UpdateInstanceRequest{}, &longrunningpb.Operation{}, "*", "instance.name", instancePath, nil},
+	methodInstancesDelete:      {instanceAdmin + "DeleteInstance", &instancepb.DeleteInstanceRequest{}, &emptypb.Empty{}, "", fieldName, instancePath, nil},
+	methodInstanceOperationGet: {rpcGetOperation, &longrunningpb.GetOperationRequest{}, &longrunningpb.Operation{}, "", fieldName, instanceOperationPath, nil},
+	// The emulator accepts a CMEK key and ignores it.
+	methodDatabasesCreate:      {databaseAdmin + "CreateDatabase", &databasepb.CreateDatabaseRequest{}, &longrunningpb.Operation{}, "*", fieldParent, instancePath, []string{"encryptionConfig"}},
+	methodDatabasesGet:         {databaseAdmin + "GetDatabase", &databasepb.GetDatabaseRequest{}, &databasepb.Database{}, "", fieldName, databasePath, nil},
+	methodDatabasesList:        {databaseAdmin + "ListDatabases", &databasepb.ListDatabasesRequest{}, &databasepb.ListDatabasesResponse{}, "", fieldParent, instancePath, nil},
+	methodDatabasesUpdate:      {databaseAdmin + "UpdateDatabase", &databasepb.UpdateDatabaseRequest{}, &longrunningpb.Operation{}, pathDatabase, "database.name", databasePath, nil},
+	methodDatabasesDelete:      {databaseAdmin + "DropDatabase", &databasepb.DropDatabaseRequest{}, &emptypb.Empty{}, "", pathDatabase, databasePath, nil},
+	methodDatabasesApplyDdl:    {databaseAdmin + "UpdateDatabaseDdl", &databasepb.UpdateDatabaseDdlRequest{}, &longrunningpb.Operation{}, "*", pathDatabase, databasePath, nil},
+	methodDatabasesGetDdl:      {databaseAdmin + "GetDatabaseDdl", &databasepb.GetDatabaseDdlRequest{}, &databasepb.GetDatabaseDdlResponse{}, "", pathDatabase, databasePath, nil},
+	methodDatabaseOperationGet: {rpcGetOperation, &longrunningpb.GetOperationRequest{}, &longrunningpb.Operation{}, "", fieldName, databaseOperationPath, nil},
+	methodBackupsList:          {databaseAdmin + "ListBackups", &databasepb.ListBackupsRequest{}, &databasepb.ListBackupsResponse{}, "", fieldParent, instancePath, nil},
 }
+
+// pageParameters are the list query parameters list applies itself.
+var pageParameters = map[string]bool{"pageSize": true, "pageToken": true, "filter": true}
 
 // systemParameters are Google API system query parameters with no request field.
 var systemParameters = map[string]bool{"alt": true, "prettyPrint": true, "$.xgafv": true, "quotaUser": true}
@@ -95,16 +106,20 @@ var systemParameters = map[string]bool{"alt": true, "prettyPrint": true, "$.xgaf
 // resource or project.
 func (r rpc) build(request *gateway.RESTRequest) (proto.Message, error) {
 	message := r.request.ProtoReflect().New()
-	if r.body != "" && len(request.JSON) > 0 {
-		target := message
+	if r.body != "" {
+		target, root := message, ""
 		if r.body != "*" {
-			target = message.Mutable(message.Descriptor().Fields().ByName(protoreflect.Name(r.body))).Message()
+			target, root = message.Mutable(message.Descriptor().Fields().ByName(protoreflect.Name(r.body))).Message(), r.body
 		}
-		if err := protojson.Unmarshal(request.JSON, target.Interface()); err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid JSON payload: %v", err)
+		if err := provider.DecodeProto(request.JSON, root, target.Interface(), gap, r.unmodeled...); err != nil {
+			return nil, err
 		}
 	}
+	paged := message.Descriptor().Fields().ByName("page_token") != nil
 	for key, values := range request.Query {
+		if paged && pageParameters[key] {
+			continue // list pages it reads
+		}
 		if err := setQuery(message, key, values); err != nil {
 			return nil, err
 		}
@@ -185,7 +200,7 @@ func (p *Provider) forward(call gateway.Call, request *gateway.RESTRequest, scop
 			return err
 		}
 		response := route.response.ProtoReflect().New().Interface()
-		if err := p.invoke(ctx, b, route, message, response, scope); err != nil {
+		if err := p.invoke(ctx, b, route, message, response, request.Query, scope); err != nil {
 			return err
 		}
 		if document, err = render(response); err != nil {
@@ -199,16 +214,100 @@ func (p *Provider) forward(call gateway.Call, request *gateway.RESTRequest, scop
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// invoke performs one emulator call and settles its index references.
-// Backups are not exposed locally: after confirming the instance exists, the
-// provider reports the empty collection instead of the emulator's
-// UNIMPLEMENTED, since no backup can be created through this provider.
-func (p *Provider) invoke(ctx context.Context, b driver, route rpc, message, response proto.Message, scope state.Scope) error {
-	if list, ok := message.(*databasepb.ListBackupsRequest); ok {
-		return b.client().Invoke(ctx, instanceAdmin+"GetInstance", &instancepb.GetInstanceRequest{Name: list.GetParent()}, &instancepb.Instance{})
+// invoke performs one emulator call and settles its index references; list
+// requests are paged by list.
+func (p *Provider) invoke(ctx context.Context, b driver, route rpc, message, response proto.Message, query url.Values, scope state.Scope) error {
+	if message.ProtoReflect().Descriptor().Fields().ByName("page_token") != nil {
+		return list(ctx, b, route, message, response, query)
 	}
 	mutation := mutationOf(ctx, b, message, scope)
 	return p.settle(ctx, b, mutation, b.client().Invoke(ctx, route.method, message, response))
+}
+
+// errPageToken marks a page token list didn't issue; list renders it as
+// Spanner's refusal.
+var errPageToken = status.Error(codes.InvalidArgument, "page token")
+
+// paging is Spanner's list page size: a size of 0 or less is the maximum
+// (ListDatabasesRequest reference; recorded for -1). Max is a local choice.
+var paging = provider.Paging{Default: 1000, Max: 1000, InvalidToken: errPageToken}
+
+// list reads every page of a list from the emulator, orders the items by
+// name, and fills response with the page query asks for, so tokens, order,
+// and refusals are the provider's rather than the emulator's. filter is a
+// gap.
+func list(ctx context.Context, b driver, route rpc, message, response proto.Message, query url.Values) error {
+	out := response.ProtoReflect()
+	field := out.Descriptor().Fields().ByName(listField(out.Descriptor()))
+	items, err := listAll(ctx, b, route, message, field)
+	if err != nil {
+		return err
+	}
+	slices.SortFunc(items, func(a, b protoreflect.Message) int { return strings.Compare(itemName(a), itemName(b)) })
+	if size, err := strconv.Atoi(query.Get("pageSize")); err == nil && size < 0 {
+		query = maps.Clone(query)
+		query.Del("pageSize")
+	}
+	page, next, err := provider.Page(items, query, paging, gap)
+	if errors.Is(err, errPageToken) {
+		// Recorded: "Invalid ListDatabases request" with a page_token violation.
+		rpc := route.method[strings.LastIndex(route.method, "/")+1:]
+		return provider.BadRequest("Invalid "+rpc+" request", "page_token", "Got: "+query.Get("pageToken")) //nolint:wrapcheck // Spanner's recorded refusal
+	}
+	if err != nil {
+		return err
+	}
+	listed := out.Mutable(field).List()
+	for _, item := range page {
+		listed.Append(protoreflect.ValueOfMessage(item))
+	}
+	if next != "" {
+		out.Set(out.Descriptor().Fields().ByName("next_page_token"), protoreflect.ValueOfString(next))
+	}
+	return nil
+}
+
+// listAll reads every item of a list from the emulator. Backups are not
+// exposed locally: after confirming the instance exists, the list is empty
+// instead of the emulator's UNIMPLEMENTED, since no backup can be created
+// through this provider.
+func listAll(ctx context.Context, b driver, route rpc, message proto.Message, field protoreflect.FieldDescriptor) ([]protoreflect.Message, error) {
+	if backups, ok := message.(*databasepb.ListBackupsRequest); ok {
+		return nil, b.client().Invoke(ctx, instanceAdmin+"GetInstance", &instancepb.GetInstanceRequest{Name: backups.GetParent()}, &instancepb.Instance{})
+	}
+	var items []protoreflect.Message
+	request := message.ProtoReflect()
+	for {
+		page := route.response.ProtoReflect().New()
+		if err := b.client().Invoke(ctx, route.method, message, page.Interface()); err != nil {
+			return nil, err
+		}
+		listed := page.Get(field).List()
+		for i := range listed.Len() {
+			items = append(items, listed.Get(i).Message())
+		}
+		next := page.Get(page.Descriptor().Fields().ByName("next_page_token")).String()
+		if next == "" {
+			return items, nil
+		}
+		request.Set(request.Descriptor().Fields().ByName("page_token"), protoreflect.ValueOfString(next))
+	}
+}
+
+// listField names a list response's repeated resource field.
+func listField(response protoreflect.MessageDescriptor) protoreflect.Name {
+	fields := response.Fields()
+	for i := range fields.Len() {
+		if field := fields.Get(i); field.IsList() && field.Kind() == protoreflect.MessageKind {
+			return field.Name()
+		}
+	}
+	panic("Spanner list response without a resource field: " + string(response.FullName()))
+}
+
+// itemName is a listed resource's name.
+func itemName(item protoreflect.Message) string {
+	return item.Get(item.Descriptor().Fields().ByName("name")).String()
 }
 
 // render converts a response to a mutable proto3 JSON document.

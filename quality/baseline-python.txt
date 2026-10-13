@@ -11,8 +11,6 @@
 1	ANN204	gcp_validation/services/compute/vm_connectivity.py
 1	ANN204	gcp_validation/services/databases/bigquery.py
 1	ANN204	gcp_validation/services/databases/bigtable.py
-1	ANN204	gcp_validation/services/databases/firestore.py
-1	ANN204	gcp_validation/services/databases/spanner.py
 1	ANN204	gcp_validation/services/messaging/cloudtasks.py
 1	ANN204	gcp_validation/services/security/cloudkms.py
 1	ANN204	gcp_validation/services/security/projectiam.py
@@ -47,8 +45,6 @@
 1	D107	gcp_validation/services/compute/vm_connectivity.py
 1	D107	gcp_validation/services/databases/bigquery.py
 1	D107	gcp_validation/services/databases/bigtable.py
-1	D107	gcp_validation/services/databases/firestore.py
-1	D107	gcp_validation/services/databases/spanner.py
 1	D107	gcp_validation/services/messaging/cloudtasks.py
 1	D107	gcp_validation/services/security/cloudkms.py
 1	D107	gcp_validation/services/security/projectiam.py
@@ -59,19 +55,15 @@
 1	D205	gcp_validation/services/compute/networking.py
 1	D205	gcp_validation/services/compute/vm_connectivity.py
 1	D205	gcp_validation/services/databases/bigtable.py
-1	D205	gcp_validation/services/databases/spanner.py
 1	D205	gcp_validation/services/security/cloudkms.py
 1	D209	gcp_validation/services/compute/networking.py
 1	D209	gcp_validation/services/compute/vm_connectivity.py
 1	D209	gcp_validation/services/databases/bigtable.py
-1	D209	gcp_validation/services/databases/spanner.py
 1	D209	gcp_validation/services/security/cloudkms.py
 1	D401	gcp_validation/services/artifactregistry.py
 1	D401	gcp_validation/services/compute/vm_connectivity.py
 1	D401	gcp_validation/services/databases/bigquery.py
 1	D401	gcp_validation/services/databases/bigtable.py
-1	D401	gcp_validation/services/databases/firestore.py
-1	D401	gcp_validation/services/databases/spanner.py
 1	D401	gcp_validation/services/messaging/cloudtasks.py
 1	D401	gcp_validation/services/messaging/pubsub.py
 1	D401	gcp_validation/services/security/cloudkms.py
@@ -128,8 +120,6 @@
 1	T201	gcp_validation/services/compute/vm_connectivity.py
 1	T201	gcp_validation/services/databases/bigquery.py
 1	T201	gcp_validation/services/databases/bigtable.py
-1	T201	gcp_validation/services/databases/firestore.py
-1	T201	gcp_validation/services/databases/spanner.py
 1	T201	gcp_validation/services/messaging/cloudtasks.py
 1	T201	gcp_validation/services/messaging/pubsub.py
 1	T201	gcp_validation/services/security/cloudkms.py
@@ -154,12 +144,9 @@
 13	E501	gcp_validation/services/compute/vm_connectivity.py
 14	ANN201	gcp_validation/live_rest.py
 14	D102	gcp_validation/live_rest.py
-14	E501	gcp_validation/services/databases/spanner.py
 15	D102	gcp_validation/services/storage/client.py
-16	ANN001	gcp_validation/services/databases/spanner.py
 16	ANN001	gcp_validation/services/security/serviceaccounts.py
 16	ANN201	gcp_validation/services/messaging/pubsub.py
-17	ANN001	gcp_validation/services/databases/firestore.py
 17	ANN201	gcp_validation/services/compute/networking.py
 17	ANN201	gcp_validation/services/storage/client.py
 17	E501	gcp_validation/services/storage/client.py
@@ -208,8 +195,6 @@
 3	D103	gcp_validation/sandbox.py
 3	D103	gcp_validation/services/artifactregistry.py
 3	D103	gcp_validation/services/databases/bigtable.py
-3	D103	gcp_validation/services/databases/firestore.py
-3	D103	gcp_validation/services/databases/spanner.py
 3	D103	gcp_validation/services/storage/sdk_slice.py
 3	D107	gcp_validation/live_rest.py
 3	D107	gcp_validation/services/messaging/pubsub.py
@@ -233,8 +218,6 @@
 4	ANN201	gcp_validation/services/storage/authorization.py
 4	ANN201	gcp_validation/services/storage/sdk_slice.py
 4	ANN204	gcp_validation/services/messaging/pubsub.py
-4	D102	gcp_validation/services/databases/firestore.py
-4	D102	gcp_validation/services/databases/spanner.py
 4	D102	gcp_validation/services/messaging/cloudtasks.py
 4	D103	gcp_validation/services/compute/networking.py
 4	D103	gcp_validation/services/databases/bigquery.py
@@ -263,7 +246,6 @@
 6	D102	gcp_validation/services/databases/bigquery.py
 6	D102	gcp_validation/services/storage/normalization.py
 6	E501	gcp_validation/sandbox.py
-6	E501	gcp_validation/services/databases/firestore.py
 6	E501	tests/conformance/storage/buckets/test_storage_bucket_updates.py
 6	S101	gcp_validation/services/messaging/pubsub.py
 7	ANN001	gcp_validation/services/storage/authorization.py
@@ -271,9 +253,7 @@
 7	ANN201	gcp_validation/services/compute/vm_connectivity.py
 8	ANN001	gcp_validation/sandbox.py
 8	ANN001	gcp_validation/services/storage/normalization.py
-8	ANN201	gcp_validation/services/databases/firestore.py
 8	ANN201	gcp_validation/services/messaging/cloudtasks.py
 8	ANN201	gcp_validation/services/security/serviceaccounts.py
-9	ANN201	gcp_validation/services/databases/spanner.py
 9	E501	gcp_validation/live_rest.py
 9	E501	gcp_validation/services/security/projectiam.py
