@@ -22,4 +22,8 @@ var FirestoreRoutes = []contract.Route{
 	{Method: "firestore.documents.listCollectionIds", Verb: "POST", Path: "/v1/projects/{project}/databases/(default)/documents/{path=**}:listCollectionIds", JSONBody: true, Media: false},
 	{Method: "firestore.fields.get", Verb: "GET", Path: "/v1/projects/{project}/databases/(default)/collectionGroups/{collectionId}/fields/{fieldId}", JSONBody: false, Media: false},
 	{Method: "firestore.fields.update", Verb: "PATCH", Path: "/v1/projects/{project}/databases/(default)/collectionGroups/{collectionId}/fields/{fieldId}", JSONBody: true, Media: false},
+	{Method: "firestore.operations.get", Verb: "GET", Path: "/v1/projects/{project}/databases/(default)/operations/{operation}", JSONBody: false, Media: false},
+	{Method: "firestore.operations.list", Verb: "GET", Path: "/v1/projects/{project}/databases/(default)/operations", JSONBody: false, Media: false},
+	{Method: "firestore.operations.cancel", Verb: "POST", Path: "/v1/projects/{project}/databases/(default)/operations/{operation}:cancel", JSONBody: true, Media: false},
+	{Method: "firestore.operations.delete", Verb: "DELETE", Path: "/v1/projects/{project}/databases/(default)/operations/{operation}", JSONBody: false, Media: false},
 }

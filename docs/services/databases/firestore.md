@@ -1,6 +1,6 @@
 # Firestore
 
-Firestore v1 documents, subcollections, queries, aggregations, transactions, batch writes, and listeners over REST and gRPC in the `(default)` database, with IAM checked on every request. Google's official emulator (1.19.9, [pin](../../../toolchains/firestore.json)) stores documents; each project gets its own JVM. CRUD, queries, aggregations, subcollections, and transactions are recorded against GCP; batch writes and listeners are modeled locally.
+Firestore v1 documents, subcollections, queries, aggregations, transactions, batch writes, listeners, and TTL policies over REST and gRPC in the `(default)` database, with IAM checked on every request. Google's official emulator (1.19.9, [pin](../../../toolchains/firestore.json)) stores documents; each project gets its own JVM. CRUD, queries, aggregations, subcollections, and transactions are recorded against GCP; batch writes and listeners are modeled locally.
 
 ## Use
 
@@ -52,8 +52,14 @@ db._firestore_api_internal = FirestoreClient(transport=FirestoreGrpcTransport(ch
 | listCollectionIds | `POST documents[/{doc}]:listCollectionIds` | `ListCollectionIds` | `datastore.entities.list` |
 | listen | Not routed | `Listen` | `datastore.entities.get`, `.list` |
 | fields.get, fields.patch | `GET`/`PATCH collectionGroups/{c}/fields/{f}` | Not routed | `datastore.schemas.get`, `.update` |
+| operations.get, operations.list | `GET operations/{id}`, `GET operations` | Not routed | `datastore.operations.get`, `.list` |
 
-Collection-group fields are stored by the provider, since the emulator doesn't serve them. An unset field reads as automatic index settings; patch returns a completed operation.
+Collection-group fields and their operations are the provider's, since the emulator doesn't serve the Admin API. They follow the recorded shapes:
+
+- A field reads with the automatic single-field indexes inherited from `__default__`, and `ttlConfig.state` when it has a TTL policy.
+- `fields.patch` with `updateMask=ttlConfig` (what Terraform's `google_firestore_field` sends) turns TTL on with `{"ttlConfig": {}}` and off with `{}`. It returns an operation named `projects/P/databases/(default)/operations/ID`, without `done` for at least 500 ms, with `FieldOperationMetadata` and then a `Field` response. The policy reads `CREATING` until then, `ACTIVE` after.
+- An ACTIVE policy deletes, before the next request, every document in the collection group whose field holds a timestamp at or before the provider clock. GCP deletes within 24 hours of expiry. Arrays and other types aren't deleted.
+- Bodies are decoded strictly: unknown or mistyped fields are GCP's 400 with a `BadRequest` violation.
 
 ## IAM
 
@@ -68,17 +74,19 @@ Permissions follow Google's [required permissions table](https://docs.cloud.goog
 
 - A read that starts a transaction also needs `datastore.databases.get`, as does an empty commit.
 - Listen uses the query permissions and rechecks on each response, so revoking ends delivery.
-- Documents outside the request project's `(default)` database return `INVALID_ARGUMENT`.
+- Documents outside the request project return `INVALID_ARGUMENT`; named databases return 501.
+- A 403 is "Missing or insufficient permissions." for documents and "The caller does not have permission" for the Admin API, without details, as recorded.
+- IAM Conditions see `resource.type` `firestore.googleapis.com/Database`, `resource.name` `projects/P/databases/(default)`, and `resource.service` `firestore.googleapis.com`, from Google's attribute reference; not recorded.
 - Security rules are bypassed; IAM is the only gate. There are no per-document grants.
 
 ## Verification
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `firestore-document-lifecycle` | 2026-10-12 | Typed values round-trip, masked and unmasked PATCH, 409 duplicate, 404 missing, 200 on deleting a missing doc, 403 denied read and write |
+| `firestore-document-lifecycle` | 2026-10-13 | Typed values round-trip, masked and unmasked PATCH, 409 duplicate, 404 missing, 200 on deleting a missing doc, 403 denied read and write with messages; a default field, TTL enable and disable operations and their metadata, the field with TTL, a denied and an unknown-field field patch |
 | `firestore-query-transaction` | 2026-10-12 | Filtered limited query, count, subcollection query, `listCollectionIds`, transaction commit and rollback, denied query and commit |
 
-Recordings compare status and error `code`/`status`, not messages. Run in Linux or moo:
+Recordings compare status and error `code`/`status`; the document and field denials and the field refusal also compare messages and details. Run in Linux or moo:
 
 ```sh
 sh scripts/check/recordings.sh   # both recordings
@@ -89,7 +97,8 @@ sh scripts/check/backend/firestore.sh         # provider and Python SDK against 
 
 ## Gaps
 
-- Batch writes and listeners are not recorded.
+- Batch writes, listeners, and TTL deletion are not recorded.
+- Index exemptions (`indexConfig`, or `updateMask=indexConfig`) and operation `cancel` and `delete` return 501.
 - Composite index requirements are not enforced.
-- Not served: `Write` stream, `PartitionQuery`, `ExecutePipeline`, REST `:listen`, named databases, and Admin API other than collection-group fields.
+- Not served: `Write` stream, `PartitionQuery`, `ExecutePipeline`, REST `:listen`, named databases, and Admin API other than collection-group fields and operations.
 - Documents are in memory; reset or restart discards them.

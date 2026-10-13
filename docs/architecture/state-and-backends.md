@@ -26,11 +26,11 @@ The index exists for IAM ancestry and cross-service references. It never copies 
 
 ## Provider helpers
 
-New and changed provider code uses the helpers in `internal/providers/provider`. Cloud Scheduler uses `Nearest`, `DecodeProto`, and `Page`; Memorystore uses `Gate`, `DecodeJSON`, `Page`, and `Operations`; Bigtable's admin methods use `Nearest`.
+New and changed provider code uses the helpers in `internal/providers/provider`. Cloud Scheduler uses `Nearest`, `DecodeProto`, and `Page`; Memorystore uses `Gate`, `DecodeJSON`, `Page`, and `Operations`; Bigtable's admin methods use `Nearest`; Spanner admin and Pub/Sub use `Nearest`, `DecodeProto`, and `Page`; Firestore uses `Gate`, `DecodeProto`, and `Operations`.
 
 | Helper | Use |
 | --- | --- |
-| `Gate{Engine, Index, Message, Domain}` | One per provider. `Message` is the service's recorded 403 format (`LacksPermission`, `PermissionDeniedOn`). `Domain` adds ErrorInfo `IAM_PERMISSION_DENIED` with `permission`/`resource` metadata; leave it empty unless a recorded denial has details. |
+| `Gate{Engine, Index, Message, Domain, Attributes}` | One per provider. `Message` is the service's recorded 403 format (`LacksPermission`, `PermissionDeniedOn`), or a fixed message without verbs (`NotAuthorized`). `Domain` adds ErrorInfo `IAM_PERMISSION_DENIED` with `permission`/`resource` metadata; leave it empty unless a recorded denial has details. `Attributes` gives `Nearest`'s chosen target its IAM Conditions `resource.*` values. |
 | `Nearest(gate, store, scope, call, resource, candidates...)` | Authorize at the first indexed candidate (most specific first, project last) under the scope lock. Returns the decision, the target, and the refusal to return as is: 401, 403, or a wrapped engine refusal. |
 | `gate.Check(call, target, resource)` | Authorize one fixed target the same way. |
 | `WithDecision(response, decision)` | Stamp the decision ID header on the executed response. |
@@ -63,8 +63,8 @@ Run a mutation as an operation: `Start` before the work, `Finish` with the respo
 
 Limits:
 
-- Recorded denials of Cloud Scheduler and Memorystore carry no `details`, and their wording differs (`cloudscheduler-job-lifecycle`, `memorystore-redis-instance-admin`). No recording yet shows a service's ErrorInfo domain; record one before setting `Domain`.
-- Page-token and page-size refusals differ per service; set `Paging` from the service's recording.
+- Recorded denials of Cloud Scheduler, Memorystore, and Firestore carry no `details`, and their wording differs (`cloudscheduler-job-lifecycle`, `memorystore-redis-instance-admin`, `firestore-document-lifecycle`). Pub/Sub's and Spanner's carry ErrorInfo domain `iam.googleapis.com` (`pubsub-rest-data-plane`, `spanner-instance-database-admin`); Pub/Sub's also has per-request `error_info_id` and `troubleshooter_url` metadata, not modeled. Record a denial before setting `Domain`.
+- Page-token and page-size refusals differ per service; set `Paging` from the service's recording. A refusal that quotes the request (Pub/Sub's and Spanner's name the token) uses a sentinel `InvalidToken` the provider replaces. Spanner treats a negative size as the maximum.
 - Page tokens aren't bound to the other list parameters.
 - Storage's JSON API doesn't fit `Gate`, `Nearest`, or `Page`. Its recorded denials are wire bodies with an `errors[]` list, actor-specific wording, and `text/html` on uploads; `authorize` in the Storage provider renders them. Its list tokens resume after the last entry's name and it pages by `maxResults`; `Page`'s offset tokens would shift when entries change between pages (`storage-list-paging`). It uses `ListBody` and `DecodeJSON` (folders).
 

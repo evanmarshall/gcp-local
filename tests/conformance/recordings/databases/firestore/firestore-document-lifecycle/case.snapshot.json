@@ -1,6 +1,6 @@
 {
   "firestore-document-lifecycle": {
-    "recorded-date": "12-10-2026, 17:38:12",
+    "recorded-date": "13-10-2026, 01:10:24",
     "recorded-content": {
       "created": {
         "field_values": {
@@ -106,7 +106,9 @@
       },
       "denied-read": {
         "code": 403,
+        "details": [],
         "http_status": 403,
+        "message": "Missing or insufficient permissions.",
         "status": "PERMISSION_DENIED"
       },
       "denied-write": {
@@ -215,6 +217,252 @@
         "code": 404,
         "http_status": 404,
         "status": "NOT_FOUND"
+      },
+      "field-default": {
+        "fields": [
+          "indexConfig",
+          "name"
+        ],
+        "http_status": 200,
+        "indexConfig": {
+          "ancestorField": "projects/<project>/databases/(default)/collectionGroups/__default__/fields/*",
+          "indexes": [
+            {
+              "fields": [
+                {
+                  "fieldPath": "when",
+                  "order": "ASCENDING"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            },
+            {
+              "fields": [
+                {
+                  "fieldPath": "when",
+                  "order": "DESCENDING"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            },
+            {
+              "fields": [
+                {
+                  "arrayConfig": "CONTAINS",
+                  "fieldPath": "when"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            }
+          ],
+          "usesAncestorConfig": true
+        },
+        "name": "projects/<project>/databases/(default)/collectionGroups/<collection>/fields/when",
+        "ttl_fields": []
+      },
+      "ttl-denied": {
+        "code": 403,
+        "details": [],
+        "http_status": 403,
+        "message": "The caller does not have permission",
+        "status": "PERMISSION_DENIED"
+      },
+      "ttl-unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\" at 'field': Cannot find field.",
+                "field": "field"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\" at 'field': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "ttl-enable-operation": {
+        "database_operation": true,
+        "done": null,
+        "error": null,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200,
+        "metadata_fields": [
+          "@type",
+          "field",
+          "startTime",
+          "state",
+          "ttlConfigDelta"
+        ],
+        "metadata_type": "type.googleapis.com/google.firestore.admin.v1.FieldOperationMetadata",
+        "response_type": null
+      },
+      "ttl-enable-done": {
+        "database_operation": true,
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_fields": [
+          "@type",
+          "endTime",
+          "field",
+          "progressDocuments",
+          "startTime",
+          "state",
+          "ttlConfigDelta"
+        ],
+        "metadata_type": "type.googleapis.com/google.firestore.admin.v1.FieldOperationMetadata",
+        "response_type": "type.googleapis.com/google.firestore.admin.v1.Field"
+      },
+      "ttl-field": {
+        "fields": [
+          "indexConfig",
+          "name",
+          "ttlConfig"
+        ],
+        "http_status": 200,
+        "indexConfig": {
+          "ancestorField": "projects/<project>/databases/(default)/collectionGroups/__default__/fields/*",
+          "indexes": [
+            {
+              "fields": [
+                {
+                  "fieldPath": "when",
+                  "order": "ASCENDING"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            },
+            {
+              "fields": [
+                {
+                  "fieldPath": "when",
+                  "order": "DESCENDING"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            },
+            {
+              "fields": [
+                {
+                  "arrayConfig": "CONTAINS",
+                  "fieldPath": "when"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            }
+          ],
+          "usesAncestorConfig": true
+        },
+        "name": "projects/<project>/databases/(default)/collectionGroups/<collection>/fields/when",
+        "ttl_fields": [
+          "state"
+        ]
+      },
+      "ttl-disable-operation": {
+        "database_operation": true,
+        "done": null,
+        "error": null,
+        "fields": [
+          "metadata",
+          "name"
+        ],
+        "http_status": 200,
+        "metadata_fields": [
+          "@type",
+          "field",
+          "startTime",
+          "state",
+          "ttlConfigDelta"
+        ],
+        "metadata_type": "type.googleapis.com/google.firestore.admin.v1.FieldOperationMetadata",
+        "response_type": null
+      },
+      "ttl-disable-done": {
+        "database_operation": true,
+        "done": true,
+        "error": null,
+        "fields": [
+          "done",
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata_fields": [
+          "@type",
+          "endTime",
+          "field",
+          "progressDocuments",
+          "startTime",
+          "state",
+          "ttlConfigDelta"
+        ],
+        "metadata_type": "type.googleapis.com/google.firestore.admin.v1.FieldOperationMetadata",
+        "response_type": "type.googleapis.com/google.firestore.admin.v1.Field"
+      },
+      "field-after-disable": {
+        "fields": [
+          "indexConfig",
+          "name"
+        ],
+        "http_status": 200,
+        "indexConfig": {
+          "ancestorField": "projects/<project>/databases/(default)/collectionGroups/__default__/fields/*",
+          "indexes": [
+            {
+              "fields": [
+                {
+                  "fieldPath": "when",
+                  "order": "ASCENDING"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            },
+            {
+              "fields": [
+                {
+                  "fieldPath": "when",
+                  "order": "DESCENDING"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            },
+            {
+              "fields": [
+                {
+                  "arrayConfig": "CONTAINS",
+                  "fieldPath": "when"
+                }
+              ],
+              "queryScope": "COLLECTION",
+              "state": "READY"
+            }
+          ],
+          "usesAncestorConfig": true
+        },
+        "name": "projects/<project>/databases/(default)/collectionGroups/<collection>/fields/when",
+        "ttl_fields": []
       },
       "cleanup": {
         "collection_emptied": true

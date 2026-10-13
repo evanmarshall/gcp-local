@@ -980,6 +980,10 @@ func firestoreRoutes() []byte {
 		{"firestore.documents.listCollectionIds", http.MethodPost, base + "/{path=**}:listCollectionIds", true, false},
 		{"firestore.fields.get", http.MethodGet, "/v1/projects/{project}/databases/(default)/collectionGroups/{collectionId}/fields/{fieldId}", false, false},
 		{"firestore.fields.update", http.MethodPatch, "/v1/projects/{project}/databases/(default)/collectionGroups/{collectionId}/fields/{fieldId}", true, false},
+		{"firestore.operations.get", http.MethodGet, "/v1/projects/{project}/databases/(default)/operations/{operation}", false, false},
+		{"firestore.operations.list", http.MethodGet, "/v1/projects/{project}/databases/(default)/operations", false, false},
+		{"firestore.operations.cancel", http.MethodPost, "/v1/projects/{project}/databases/(default)/operations/{operation}:cancel", true, false},
+		{"firestore.operations.delete", http.MethodDelete, "/v1/projects/{project}/databases/(default)/operations/{operation}", false, false},
 	}
 	return routeTable("FirestoreRoutes", "is the Firestore v1 route table slice.", handWritten("main.go"), rows)
 }

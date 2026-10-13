@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -26,6 +27,7 @@ type fakeRPC struct {
 	mu         sync.Mutex
 	calls      []string
 	authorized []string
+	commits    []*pb.CommitRequest
 	server     *grpc.Server
 	connection *grpc.ClientConn
 }
@@ -49,8 +51,11 @@ func (f *fakeRPC) GetDocument(ctx context.Context, r *pb.GetDocumentRequest) (*p
 	return &pb.Document{Name: r.GetName()}, nil
 }
 
-func (f *fakeRPC) Commit(ctx context.Context, _ *pb.CommitRequest) (*pb.CommitResponse, error) {
+func (f *fakeRPC) Commit(ctx context.Context, r *pb.CommitRequest) (*pb.CommitResponse, error) {
 	f.record(ctx, "Commit")
+	f.mu.Lock()
+	f.commits = append(f.commits, proto.CloneOf(r))
+	f.mu.Unlock()
 	return &pb.CommitResponse{}, nil
 }
 
@@ -209,8 +214,18 @@ func TestCommitDeniesEachWriteKindBeforeTheBackend(t *testing.T) {
 		`{"delete":"` + name + `"}`: "datastore.entities.delete",
 	} {
 		recorder := h.invokeRaw(viewer, http.MethodPost, testDocsPath+":commit", `{"writes":[`+write+`]}`)
-		if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), permission) {
+		// GCP's denial names no permission (firestore-document-lifecycle).
+		if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "Missing or insufficient permissions.") {
 			t.Fatalf("commit %s = %d %s", write, recorder.Code, recorder.Body.String())
+		}
+		request := &pb.CommitRequest{}
+		if err := protojson.Unmarshal([]byte(`{"writes":[`+write+`]}`), request); err != nil {
+			t.Fatal(err)
+		}
+		request.Database = "projects/" + testProject + "/databases/(default)"
+		planned, err := requestPlans(testProject, request)
+		if err != nil || len(planned) != 1 || !slices.Contains(plans[planned[0]], permission) {
+			t.Fatalf("commit %s plans %v (%v), want %s", write, planned, err, permission)
 		}
 	}
 	if recorder := h.invokeRaw(viewer, http.MethodPost, testDocsPath+":batchWrite", `{"writes":[{"delete":"`+name+`"}]}`); recorder.Code != http.StatusForbidden {

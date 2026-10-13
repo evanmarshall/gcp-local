@@ -15,6 +15,10 @@ const (
 	methodDocumentsGet       = "firestore.documents.get"
 	methodFieldsGet          = "firestore.fields.get"
 	methodFieldsUpdate       = "firestore.fields.update"
+	methodOperationsGet      = "firestore.operations.get"
+	methodOperationsList     = "firestore.operations.list"
+	methodOperationsCancel   = "firestore.operations.cancel"
+	methodOperationsDelete   = "firestore.operations.delete"
 	methodDocumentsCreate    = "firestore.documents.create"
 	methodDocumentsUpdate    = "firestore.documents.update"
 	methodDocumentsDelete    = "firestore.documents.delete"
@@ -74,6 +78,8 @@ var plans = map[string][]string{
 	planWriteNone:           {permissionDatabasesGet},
 	methodFieldsGet:         {"datastore.schemas.get"},
 	methodFieldsUpdate:      {"datastore.schemas.update"},
+	methodOperationsGet:     {"datastore.operations.get"},
+	methodOperationsList:    {"datastore.operations.list"},
 }
 
 // restMethods are the REST routes the provider serves.
@@ -81,6 +87,18 @@ var restMethods = []string{
 	methodDocumentsGet, methodDocumentsCreate, methodDocumentsUpdate, methodDocumentsDelete,
 	methodBatchGet, methodBatchWrite, methodBeginTransaction, methodCommit, methodRollback,
 	methodRunQuery, methodRunAggregation, methodListCollectionIDs, methodFieldsGet, methodFieldsUpdate,
+	methodOperationsGet, methodOperationsList,
+}
+
+// unserved are routed methods that return their gap, so they don't fall
+// through to another service's route. Their permissions are outside the
+// pinned roles.
+var unserved = map[string]string{methodOperationsCancel: "operation cancel", methodOperationsDelete: "operation delete"}
+
+// adminMethods are the Admin API methods the provider serves itself; the
+// emulator doesn't serve the Admin API.
+var adminMethods = map[string]bool{
+	methodFieldsGet: true, methodFieldsUpdate: true, methodOperationsGet: true, methodOperationsList: true,
 }
 
 // Resource-name helpers follow the real Firestore namespace.
@@ -91,13 +109,12 @@ const (
 // uid is the shared resource-name matcher.
 var uid = regexp.MustCompile(uidPattern)
 
-// fieldRecord is one configured collection-group field.
+// fieldRecord is one collection-group field with a TTL policy. Index
+// exemptions aren't modeled, so a field without TTL has no record.
 type fieldRecord struct {
-	Name        string
-	TTLConfig   map[string]any
-	IndexConfig map[string]any
-	Configured  bool
-	CreatedAt   time.Time
+	// ActiveAt is when the TTL policy's operation finishes: until then it
+	// reads CREATING and deletes nothing.
+	ActiveAt time.Time
 }
 
 // scopeState is one project slice of provider-owned state: collection-group

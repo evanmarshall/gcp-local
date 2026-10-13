@@ -92,9 +92,6 @@ func (p *Provider) planned(call gateway.Call, request proto.Message) (backend.Ke
 	if err != nil {
 		return backend.Key{}, err
 	}
-	if err := p.ensureDatabase(scope); err != nil {
-		return backend.Key{}, err
-	}
 	if _, err := p.authorize(call, call.Project, plans); err != nil {
 		return backend.Key{}, err
 	}
@@ -118,6 +115,9 @@ func (p *Provider) unary(call gateway.Call, raw any) (any, error) {
 		b, ok := active.(driver)
 		if !ok {
 			return status.Error(codes.Internal, "Invalid Firestore backend")
+		}
+		if err := p.expire(ctx, b, key.Scope); err != nil {
+			return err
 		}
 		return b.client().Invoke(ownerContext(ctx, call.Project), call.Method, request, response)
 	})
@@ -147,6 +147,9 @@ func (p *Provider) serverStream(call gateway.Call, downstream gateway.Stream) er
 		b, ok := active.(driver)
 		if !ok {
 			return status.Error(codes.Internal, "Invalid Firestore backend")
+		}
+		if err := p.expire(ctx, b, key.Scope); err != nil {
+			return err
 		}
 		upstream, err := b.client().NewStream(ownerContext(ctx, call.Project), &grpc.StreamDesc{ServerStreams: true}, call.Method)
 		if err != nil {
@@ -196,6 +199,9 @@ func (p *Provider) listen(call gateway.Call, downstream gateway.Stream) error {
 		b, ok := active.(driver)
 		if !ok {
 			return status.Error(codes.Internal, "Invalid Firestore backend")
+		}
+		if err := p.expire(session, b, key.Scope); err != nil {
+			return err
 		}
 		upstreamCtx, cancel := context.WithCancel(ownerContext(session, call.Project))
 		defer cancel()

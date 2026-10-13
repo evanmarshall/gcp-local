@@ -26,9 +26,10 @@ import (
 
 // realHarness drives the provider against the pinned official emulator.
 type realHarness struct {
-	t       *testing.T
-	gate    *gateway.Gateway
-	manager *backend.Manager
+	t        *testing.T
+	gate     *gateway.Gateway
+	manager  *backend.Manager
+	provider *Provider
 }
 
 func newRealHarness(t *testing.T) *realHarness {
@@ -48,12 +49,14 @@ func newRealHarness(t *testing.T) *realHarness {
 		}
 		if _, err := engine.SetPolicy(provider.ProjectResource(project), iam.Policy{Bindings: []iam.Binding{
 			{Role: "roles/datastore.user", Members: []string{principal("actor", project)}},
+			{Role: "roles/datastore.indexAdmin", Members: []string{principal("actor", project)}},
 		}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	manager := backend.NewManager(60*time.Second, 10*time.Second)
-	if _, err := New(context.Background(), registry, manager, index, engine, config); err != nil {
+	p, err := New(context.Background(), registry, manager, index, engine, config)
+	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -65,7 +68,7 @@ func newRealHarness(t *testing.T) *realHarness {
 		actor, project, _ := bytes.Cut([]byte(token), []byte(":"))
 		return gateway.Principal{State: gateway.Authenticated, Subject: principal(string(actor), string(project)), Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}, nil
 	})
-	return &realHarness{t: t, gate: gate, manager: manager}
+	return &realHarness{t: t, gate: gate, manager: manager, provider: p}
 }
 
 func (h *realHarness) invoke(token, verb, path string, body any) (int, map[string]any) {
@@ -247,4 +250,32 @@ func (h *realHarness) invokeArray(token, path string, body any) (int, []map[stri
 	var decoded []map[string]any
 	_ = json.Unmarshal(recorder.Body.Bytes(), &decoded)
 	return recorder.Code, decoded
+}
+
+// TestEmulatorTTLDeletesExpiredDocuments enables TTL on a field as Terraform
+// does and, on a provider clock past the policy's activation, reads back only
+// the documents whose field isn't an expired timestamp.
+func TestEmulatorTTLDeletesExpiredDocuments(t *testing.T) {
+	h := newRealHarness(t)
+	owner := "actor:" + testProject
+	field := "/v1/projects/" + testProject + "/databases/(default)/collectionGroups/" + testCollection + "/fields/expires?updateMask=ttlConfig"
+	if code, body := h.invoke(owner, http.MethodPatch, field, map[string]any{"ttlConfig": map[string]any{}}); code != http.StatusOK {
+		t.Fatalf("enable TTL = %d %v", code, body)
+	}
+	for id, value := range map[string]map[string]any{
+		"past": {"timestampValue": "2020-01-01T00:00:00Z"}, "future": {"timestampValue": "2100-01-01T00:00:00Z"},
+		"text": {"stringValue": "2020-01-01T00:00:00Z"},
+	} {
+		body := map[string]any{"fields": map[string]any{"expires": value}}
+		if code, created := h.invoke(owner, http.MethodPost, documentsPath(testProject)+"?documentId="+id, body); code != http.StatusOK {
+			t.Fatalf("create %s = %d %v", id, code, created)
+		}
+	}
+	later := time.Now().Add(time.Minute)
+	h.provider.clock = func() time.Time { return later }
+	for id, want := range map[string]int{"past": http.StatusNotFound, "future": http.StatusOK, "text": http.StatusOK} {
+		if code, _ := h.invoke(owner, http.MethodGet, documentsPath(testProject)+"/"+id, nil); code != want {
+			t.Errorf("read %s after expiry = %d, want %d", id, code, want)
+		}
+	}
 }

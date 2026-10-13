@@ -5,37 +5,27 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
+	"cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// execute dispatches one authorized Firestore request inside the scope's
-// backend operation. Documents belong to the emulator; collection-group field
-// configuration is the Admin API, which the emulator does not serve, so the
-// provider keeps it.
-func (p *Provider) execute(ctx context.Context, b driver, call gateway.Call, request *gateway.RESTRequest, scope state.Scope, operation restOperation) (*gateway.RESTResponse, error) {
-	switch call.Method {
-	case methodFieldsGet:
-		return p.fieldGet(request, scope)
-	case methodFieldsUpdate:
-		return p.fieldUpdate(request, scope)
-	default:
-		return forward(ctx, b, operation, request)
-	}
-}
+// gap reports an unmodeled Firestore request shape explicitly.
+var gap = provider.CoverageGap("Firestore")
 
 // restOperation is one validated REST request: its permission plans and the
 // emulator request the provider rebuilds from validated route parameters.
@@ -62,7 +52,7 @@ var customMessages = map[string]func() proto.Message{
 // The documents routes carry a multi-segment path whose parity selects a
 // document (even) or a collection (odd); GET serves both get and list.
 func restOperationFor(method string, request *gateway.RESTRequest) (restOperation, error) {
-	if method == methodFieldsGet || method == methodFieldsUpdate {
+	if adminMethods[method] {
 		return restOperation{plans: []string{method}}, nil
 	}
 	root := "/v1/projects/" + url.PathEscape(request.Path["project"]) + "/databases/(default)/documents"
@@ -75,6 +65,9 @@ func restOperationFor(method string, request *gateway.RESTRequest) (restOperatio
 		}
 		root += "/" + escaped
 		segments = strings.Split(path, "/")
+	}
+	if err := decodeDocument(method, request); err != nil {
+		return restOperation{}, err
 	}
 	if operation, err := documentOperation(method, request, root, len(segments)%2 == 0); !errors.Is(err, errUnmatched) {
 		return operation, err
@@ -123,6 +116,15 @@ func documentOperation(method string, request *gateway.RESTRequest, root string,
 	}
 }
 
+// decodeDocument strictly decodes a create or patch body, which is forwarded
+// as is: the emulator would accept fields a Document doesn't have.
+func decodeDocument(method string, request *gateway.RESTRequest) error {
+	if method != methodDocumentsCreate && method != methodDocumentsUpdate {
+		return nil
+	}
+	return provider.DecodeProto(request.JSON, "document", &pb.Document{}, gap)
+}
+
 // customOperation decodes a custom method's body strictly into its Firestore
 // request message, fills the database or parent from the route, and plans it.
 func customOperation(method string, request *gateway.RESTRequest, root string) (restOperation, error) {
@@ -131,8 +133,8 @@ func customOperation(method string, request *gateway.RESTRequest, root string) (
 		return restOperation{}, status.Error(codes.Unimplemented, "Firestore coverage gap: this method is not served")
 	}
 	message := newMessage()
-	if err := protojson.Unmarshal(request.JSON, message); err != nil {
-		return restOperation{}, status.Errorf(codes.InvalidArgument, "Invalid %s body: %v", method, err)
+	if err := provider.DecodeProto(request.JSON, "", message, gap); err != nil {
+		return restOperation{}, err
 	}
 	// The route names the database or parent; it wins over the body.
 	project := request.Path["project"]
@@ -239,100 +241,254 @@ func httpVerb(method string) string {
 	}
 }
 
-// fieldGet returns one collection-group field record.
+// serveAdmin serves the collection-group field and operation methods.
+func (p *Provider) serveAdmin(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	switch call.Method {
+	case methodFieldsGet:
+		return p.fieldGet(request, scope)
+	case methodFieldsUpdate:
+		return p.fieldUpdate(request, scope)
+	case methodOperationsList:
+		body, err := p.operations.List(scope, request.Query, provider.Paging{Default: 100, Max: 1000}, gap)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range provider.MapList(anySlice(body["operations"])) {
+			renameOperation(scope, item)
+		}
+		return &gateway.RESTResponse{JSON: body}, nil
+	}
+	body, err := p.operations.Get(scope, request.Path["operation"])
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: renameOperation(scope, body)}, nil
+}
+
+// anySlice widens a list of operations to the []any MapList reads.
+func anySlice(value any) []any {
+	items, _ := value.([]map[string]any)
+	out := make([]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, item)
+	}
+	return out
+}
+
+// renameOperation gives an operation Firestore's name,
+// projects/P/databases/(default)/operations/ID, and omits done while false,
+// as GCP's proto3 JSON does (firestore-document-lifecycle).
+func renameOperation(scope state.Scope, body map[string]any) map[string]any {
+	body["name"] = databaseName(scope.Project) + "/operations/" + provider.LastSegment(provider.Text(body["name"]))
+	if body["done"] == false {
+		delete(body, "done")
+	}
+	return body
+}
+
+// keyState is the JSON key of a resource or operation state.
+const keyState = "state"
+
+// fieldOperationMetadata renders a field operation's FieldOperationMetadata
+// with the fields GCP returns (firestore-document-lifecycle).
+func fieldOperationMetadata(operation provider.Operation) map[string]any {
+	metadata := map[string]any{
+		"@type": "type.googleapis.com/google.firestore.admin.v1.FieldOperationMetadata",
+		"field": operation.Target, "startTime": provider.Stamp(operation.Created), keyState: "PROCESSING",
+		"ttlConfigDelta": map[string]any{"changeType": operation.Verb},
+	}
+	if operation.Done {
+		metadata[keyState], metadata["endTime"] = "SUCCESSFUL", provider.Stamp(operation.Ended)
+		metadata["progressDocuments"] = map[string]any{}
+		if operation.CancelRequested {
+			metadata[keyState] = "CANCELLED"
+		}
+	}
+	return metadata
+}
+
+// fieldGet returns one collection-group field.
 func (p *Provider) fieldGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	collection, field := request.Path["collectionId"], request.Path["fieldId"]
-	if !uid.MatchString(collection) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid collection id %q", collection)
+	collection, field, err := fieldPath(request)
+	if err != nil {
+		return nil, err
 	}
-	if !uid.MatchString(field) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid field id %q", field)
-	}
+	now := p.clock()
 	var document map[string]any
 	_ = p.scopes.With(scope, func(s *scopeState) error {
-		document = s.fields[collection+"/"+field].wire(projectField(scope.Project, collection, field))
+		document = fieldWire(scope.Project, collection, field, s.fields[collection+"/"+field], now)
 		return nil
 	})
 	return &gateway.RESTResponse{JSON: document}, nil
 }
 
-// wire renders a stored field, or an unconfigured one when record is nil:
-// real Firestore reports an unconfigured field with fully automatic index
-// settings rather than a 404. Call it under the scope lock.
-func (record *fieldRecord) wire(name string) map[string]any {
-	if record == nil {
-		return fieldWire(name, nil, nil, false)
+// fieldPath validates a field route's collection group and field.
+func fieldPath(request *gateway.RESTRequest) (string, string, error) {
+	collection, field := request.Path["collectionId"], request.Path["fieldId"]
+	if !uid.MatchString(collection) {
+		return "", "", status.Errorf(codes.InvalidArgument, "Invalid collection id %q", collection)
 	}
-	return fieldWire(record.Name, maps.Clone(record.TTLConfig), maps.Clone(record.IndexConfig), record.Configured)
+	if !uid.MatchString(field) {
+		return "", "", status.Errorf(codes.InvalidArgument, "Invalid field id %q", field)
+	}
+	return collection, field, nil
 }
 
-// fieldUpdate patches one field's TTL or index configuration.
+// fieldUpdate turns a field's TTL policy on or off as a long-running
+// operation, as Terraform's google_firestore_field does with
+// updateMask=ttlConfig. Index exemptions (indexConfig) are a gap.
 func (p *Provider) fieldUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	collection, field := request.Path["collectionId"], request.Path["fieldId"]
-	if !uid.MatchString(collection) || !uid.MatchString(field) {
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid field path")
+	collection, field, err := fieldPath(request)
+	if err != nil {
+		return nil, err
 	}
-	var body struct {
-		TTLConfig *struct {
-			ExpirationPolicy *struct {
-				Expiration string `json:"expiration"`
-			} `json:"expirationPolicy"`
-		} `json:"ttlConfig"`
-		IndexConfig *struct {
-			AncestorField string `json:"ancestorField"`
-		} `json:"indexConfig"`
+	body := &adminpb.Field{}
+	if err := provider.DecodeProto(request.JSON, "field", body, gap, "indexConfig"); err != nil {
+		return nil, err
 	}
-	if json.Unmarshal(request.JSON, &body) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid field body")
+	if err := ttlMask(request); err != nil {
+		return nil, err
+	}
+	name := projectField(scope.Project, collection, field)
+	change := "ADD"
+	if body.GetTtlConfig() == nil {
+		change = "REMOVE"
+	}
+	id, err := p.operations.Start(scope, name, change)
+	if err != nil {
+		return nil, err
 	}
 	now := p.clock()
-	var ttl map[string]any
-	if body.TTLConfig != nil && body.TTLConfig.ExpirationPolicy != nil {
-		ttl = map[string]any{"expirationPolicy": map[string]any{"expiration": body.TTLConfig.ExpirationPolicy.Expiration}}
-	}
-	var index map[string]any
-	if body.IndexConfig != nil {
-		index = map[string]any{"ancestorField": body.IndexConfig.AncestorField}
-	}
-	var document map[string]any
-	err := p.scopes.With(scope, func(s *scopeState) error {
-		record := s.fields[collection+"/"+field]
-		if record == nil {
-			record = &fieldRecord{Name: projectField(scope.Project, collection, field), CreatedAt: now}
-			s.fields[collection+"/"+field] = record
+	active := now.Add(operationLatency)
+	var done map[string]any
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		key := collection + "/" + field
+		if body.GetTtlConfig() == nil {
+			delete(s.fields, key)
+		} else if s.fields[key] == nil {
+			s.fields[key] = &fieldRecord{ActiveAt: active}
 		}
-		record.TTLConfig, record.IndexConfig = ttl, index
-		record.Configured = true
-		document = record.wire(record.Name)
+		// The operation's response is the field once it finishes.
+		done = fieldWire(scope.Project, collection, field, s.fields[key], active)
 		return nil
 	})
+	done["@type"] = "type.googleapis.com/google.firestore.admin.v1.Field"
+	p.operations.Finish(scope, id, done, nil)
+	operation, err := p.operations.Get(scope, id)
 	if err != nil {
-		return nil, fmt.Errorf("store the field configuration: %w", err)
+		return nil, err
 	}
-	return &gateway.RESTResponse{JSON: map[string]any{"done": true, "response": document}}, nil
+	return &gateway.RESTResponse{JSON: renameOperation(scope, operation)}, nil
+}
+
+// ttlMask refuses an update mask naming anything but the TTL policy.
+func ttlMask(request *gateway.RESTRequest) error {
+	for path := range strings.SplitSeq(request.Query.Get("updateMask"), ",") {
+		if path != "" && path != "ttlConfig" && path != "ttl_config" {
+			return gap("field updateMask " + strconv.Quote(path))
+		}
+	}
+	return nil
 }
 
 func projectField(project, collection, field string) string {
-	return "projects/" + project + "/databases/(default)/collectionGroups/" + collection + "/fields/" + field
+	return databaseName(project) + "/collectionGroups/" + collection + "/fields/" + field
 }
 
-func fieldWire(name string, ttl, index map[string]any, configured bool) map[string]any {
+// fieldWire renders a field as GCP does (firestore-document-lifecycle): the
+// automatic single-field indexes inherited from the database default, and a
+// TTL policy that reads CREATING until its operation finishes.
+func fieldWire(project, collection, field string, record *fieldRecord, now time.Time) map[string]any {
+	index := func(key, value string) map[string]any {
+		return map[string]any{"fields": []any{map[string]any{"fieldPath": field, key: value}}, "queryScope": "COLLECTION", keyState: "READY"}
+	}
 	document := map[string]any{
-		"name":        name,
-		"indexConfig": map[string]any{"ancestorField": "REQUEST_TIME", "reverting": false, "usesAncestorConfig": true},
+		"name": projectField(project, collection, field),
+		"indexConfig": map[string]any{
+			"ancestorField":      databaseName(project) + "/collectionGroups/__default__/fields/*",
+			"indexes":            []any{index("order", "ASCENDING"), index("order", "DESCENDING"), index("arrayConfig", "CONTAINS")},
+			"usesAncestorConfig": true,
+		},
 	}
-	document["ttlConfig"] = map[string]any{}
-	if configured {
-		if ttl != nil {
-			document["ttlConfig"] = ttl
-		} else {
-			// An empty HCL ttl_config{} sets the default expiration policy;
-			// the wire always carries one once configured.
-			document["ttlConfig"] = map[string]any{"expirationPolicy": map[string]any{"expiration": "864000s"}}
+	if record != nil {
+		state := "ACTIVE"
+		if now.Before(record.ActiveAt) {
+			state = "CREATING"
 		}
-	}
-	if index != nil {
-		document["indexConfig"] = index
+		document["ttlConfig"] = map[string]any{keyState: state}
 	}
 	return document
+}
+
+// expire deletes the scope's documents whose TTL field holds a timestamp at
+// or before the provider clock, as GCP's TTL policies do (GCP deletes within
+// 24 hours of expiry; this deletes before serving the next request). Only an
+// ACTIVE policy deletes; a field that holds an array or another type is
+// left alone.
+func (p *Provider) expire(ctx context.Context, b driver, scope state.Scope) error {
+	now := p.clock()
+	client := pb.NewFirestoreClient(b.client())
+	ctx = ownerContext(ctx, scope.Project)
+	for _, group := range p.activeTTL(scope, now) {
+		names, err := expired(ctx, client, scope.Project, group[0], group[1], now)
+		if err != nil {
+			return err
+		}
+		for start := 0; start < len(names); start += 500 {
+			writes := []*pb.Write{}
+			for _, name := range names[start:min(start+500, len(names))] {
+				writes = append(writes, &pb.Write{Operation: &pb.Write_Delete{Delete: name}})
+			}
+			if _, err := client.Commit(ctx, &pb.CommitRequest{Database: databaseName(scope.Project), Writes: writes}); err != nil {
+				return status.Errorf(codes.Unavailable, "Firestore TTL deletion failed: %v", err)
+			}
+		}
+	}
+	return nil
+}
+
+// activeTTL lists the collection group and field of every ACTIVE TTL policy.
+func (p *Provider) activeTTL(scope state.Scope, now time.Time) [][2]string {
+	var groups [][2]string
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		for key, record := range s.fields {
+			if !now.Before(record.ActiveAt) {
+				collection, field, _ := strings.Cut(key, "/")
+				groups = append(groups, [2]string{collection, field})
+			}
+		}
+		return nil
+	})
+	return groups
+}
+
+// expired names the documents of one collection group whose field is a
+// timestamp at or before now.
+func expired(ctx context.Context, client pb.FirestoreClient, project, collection, field string, now time.Time) ([]string, error) {
+	stream, err := client.RunQuery(ctx, &pb.RunQueryRequest{
+		Parent: databaseName(project) + "/documents",
+		QueryType: &pb.RunQueryRequest_StructuredQuery{StructuredQuery: &pb.StructuredQuery{
+			From: []*pb.StructuredQuery_CollectionSelector{{CollectionId: collection, AllDescendants: true}},
+			Where: &pb.StructuredQuery_Filter{FilterType: &pb.StructuredQuery_Filter_FieldFilter{FieldFilter: &pb.StructuredQuery_FieldFilter{
+				Field: &pb.StructuredQuery_FieldReference{FieldPath: field}, Op: pb.StructuredQuery_FieldFilter_LESS_THAN_OR_EQUAL,
+				Value: &pb.Value{ValueType: &pb.Value_TimestampValue{TimestampValue: timestamppb.New(now)}},
+			}}},
+		}},
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "Firestore TTL query failed: %v", err)
+	}
+	var names []string
+	for {
+		response, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return names, nil
+		}
+		if err != nil {
+			return nil, status.Errorf(codes.Unavailable, "Firestore TTL query failed: %v", err)
+		}
+		if name := response.GetDocument().GetName(); name != "" {
+			names = append(names, name)
+		}
+	}
 }
