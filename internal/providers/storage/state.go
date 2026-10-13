@@ -35,6 +35,17 @@ type projectState struct {
 	// SoftDeleted holds soft-deleted object generations by bucket, name, and
 	// generation until their hard-delete time (softdelete.go).
 	SoftDeleted map[string]softObject
+	// Notifications holds each bucket's notification configurations in ID
+	// order, and NotificationIDs the last ID each bucket assigned.
+	Notifications   map[string][]notificationConfig
+	NotificationIDs map[string]int
+}
+
+// notificationConfig is one stored notification configuration. Origin is the
+// emulator origin of the request that created it; payload links use it.
+type notificationConfig struct {
+	bucketconfig.Notification
+	ID, Origin string
 }
 type Catalog struct {
 	// Serialize publication/reset across provider store and shared index. Backend
@@ -50,7 +61,8 @@ type Catalog struct {
 
 func NewCatalog(index *state.Index) *Catalog {
 	return &Catalog{store: state.NewStore(func() projectState {
-		return projectState{Buckets: map[string]Bucket{}, Folders: map[string]Folder{}, Uploads: map[string]*uploadSession{}, SoftDeleted: map[string]softObject{}}
+		return projectState{Buckets: map[string]Bucket{}, Folders: map[string]Folder{}, Uploads: map[string]*uploadSession{}, SoftDeleted: map[string]softObject{},
+			Notifications: map[string][]notificationConfig{}, NotificationIDs: map[string]int{}}
 	}, state.GlobalScope), index: index, scopes: map[state.Scope]bool{}}
 }
 func BucketResource(name string) string { return "//storage.googleapis.com/projects/_/buckets/" + name }
@@ -130,6 +142,9 @@ func (c *Catalog) ForgetBucket(scope state.Scope, name string) error {
 		// GCP soft-deletes the bucket itself; that is not modeled, so its
 		// soft-deleted objects go with it.
 		maps.DeleteFunc(value.SoftDeleted, func(_ string, object softObject) bool { return object.Bucket == name })
+		// Deleting a bucket deletes its notification configurations.
+		delete(value.Notifications, name)
+		delete(value.NotificationIDs, name)
 		return nil
 	}); err != nil {
 		return fmt.Errorf("delete bucket %s: %w", name, err)
@@ -147,6 +162,52 @@ func (c *Catalog) Reset(scope state.Scope) error {
 	c.index.RemoveScope(serviceName, scope)
 	delete(c.scopes, scope)
 	return nil
+}
+
+// addNotification stores a bucket's new notification configuration under the
+// bucket's next ID.
+func (c *Catalog) addNotification(scope state.Scope, bucket string, config notificationConfig) (notificationConfig, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.store.With(scope, func(value *projectState) error {
+		if _, ok := value.Buckets[bucket]; !ok {
+			return errBucketAbsent
+		}
+		value.NotificationIDs[bucket]++
+		config.ID = strconv.Itoa(value.NotificationIDs[bucket])
+		value.Notifications[bucket] = append(value.Notifications[bucket], config)
+		return nil
+	}); err != nil {
+		return config, fmt.Errorf("add a notification to %s: %w", bucket, err)
+	}
+	return config, nil
+}
+
+// notifications returns a copy of a bucket's notification configurations.
+func (c *Catalog) notifications(scope state.Scope, bucket string) []notificationConfig {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var configs []notificationConfig
+	_ = c.store.With(scope, func(value *projectState) error {
+		configs = slices.Clone(value.Notifications[bucket])
+		return nil
+	})
+	return configs
+}
+
+// deleteNotification removes one notification configuration and reports
+// whether it existed.
+func (c *Catalog) deleteNotification(scope state.Scope, bucket, id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	removed := false
+	_ = c.store.With(scope, func(value *projectState) error {
+		before := len(value.Notifications[bucket])
+		value.Notifications[bucket] = slices.DeleteFunc(value.Notifications[bucket], func(config notificationConfig) bool { return config.ID == id })
+		removed = len(value.Notifications[bucket]) < before
+		return nil
+	})
+	return removed
 }
 
 // lifecycleRules returns the lifecycle rules of each bucket in every scope

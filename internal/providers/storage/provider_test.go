@@ -161,7 +161,7 @@ func TestProviderFailsClosedForUnsupportedFeatures(t *testing.T) {
 	// A path no route claims stays UNIMPLEMENTED; a Storage route this
 	// provider does not serve is a 400 gap, which clients do not retry.
 	f.request("admin@project-a.test", "GET", "/_internal/healthcheck", nil, 501)
-	for _, path := range []string{"/storage/v1/b/owned-bucket/notificationConfigs", "/storage/v1/b/owned-bucket/acl"} {
+	for _, path := range []string{"/storage/v1/b/owned-bucket/defaultObjectAcl", "/storage/v1/b/owned-bucket/acl"} {
 		if body := f.request("admin@project-a.test", "GET", path, nil, 400).Body.String(); !strings.Contains(body, "Storage coverage gap") {
 			t.Fatalf("%s: %s", path, body)
 		}
@@ -316,12 +316,30 @@ func TestConcurrentBucketRequests(t *testing.T) {
 	f := setup(t)
 	bucket := "/storage/v1/b/race-bucket"
 	folders := bucket + "/folders"
+	// The lifecycle worker sweeps while the requests run.
+	done := make(chan struct{})
+	swept := make(chan struct{})
+	go func() {
+		defer close(swept)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				f.p.sweepLifecycle(t.Context())
+			}
+		}
+	}()
+	defer func() { close(done); <-swept }()
+	lifecycle := map[string]any{"lifecycle": map[string]any{"rule": []any{map[string]any{"action": map[string]any{"type": "Delete"}, "condition": map[string]any{"age": 0}}}}}
 	providertest.Hammer(t, f.g, admin, 8, 10, func(int) []providertest.Request {
 		return []providertest.Request{
 			{Method: "POST", Path: "/storage/v1/b?project=" + testProject, Body: bucketBody, Want: []int{200, 409}},
 			{Method: "GET", Path: bucket, Want: []int{200, 404}},
 			{Method: "GET", Path: "/storage/v1/b?project=" + testProject, Want: []int{200}},
 			{Method: "PATCH", Path: bucket, Body: map[string]any{"labels": map[string]any{"worker": "w"}}, Want: []int{200, 404}},
+			{Method: "PATCH", Path: bucket, Body: lifecycle, Want: []int{200, 404}},
+			{Method: "GET", Path: bucket + "/notificationConfigs", Want: []int{200, 404}},
 			{Method: "POST", Path: folders, Body: map[string]any{"name": "reports"}, Want: []int{200, 404, 409}},
 			{Method: "GET", Path: folders + "/reports", Want: []int{200, 404}},
 			{Method: "GET", Path: folders, Want: []int{200, 404}},

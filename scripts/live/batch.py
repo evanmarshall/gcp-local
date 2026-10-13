@@ -140,7 +140,11 @@ def lane(entry: Entry, scopes: Path) -> str:
     if entry.option == "--gcp-live-scope-file":
         service = json.loads(scope_file(entry, scopes).read_text())["services"][0]
         # The compute scenarios create VPC networks; together they'd exceed the quota.
-        return "compute" if service in COMPUTE_SCOPES else service
+        if service in COMPUTE_SCOPES:
+            return "compute"
+        # A Storage scenario with its own scope (notifications) still takes
+        # the Storage fixture's one-bucket lock.
+        return "storage" if service.startswith("storage") else service
     return entry.name
 
 

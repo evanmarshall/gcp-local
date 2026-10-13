@@ -235,7 +235,17 @@ func (p *Provider) patchObject(ctx context.Context, b *memoryBackend, req reques
 		return response, err
 	}
 	b.updateOverlay(req.bucket, req.object, generation, now, func(overlay *objectOverlay) { patch.apply(overlay, now) })
-	return b.forward(ctx, http.MethodGet, objectPath(req.bucket, req.object), nil, nil, nil)
+	return p.patched(ctx, b, req)
+}
+
+// patched reads the patched object back and sends its OBJECT_METADATA_UPDATE
+// notifications.
+func (p *Provider) patched(ctx context.Context, b *memoryBackend, req request) (*gateway.RESTResponse, error) {
+	response, err := b.forward(ctx, http.MethodGet, objectPath(req.bucket, req.object), nil, nil, nil)
+	if err == nil && response.Status == http.StatusOK {
+		p.notify(req.scope, req.bucket, bucketconfig.EventMetadataUpdate, createdObject(response), nil)
+	}
+	return response, err
 }
 
 // patchTarget reads the generation a patch names, or the live one, and checks
@@ -419,6 +429,7 @@ func (p *Provider) serveRewrite(ctx context.Context, b *memoryBackend, req rewri
 	response, err := p.copyRetaining(ctx, b, req, source)
 	if err == nil {
 		p.created(b, req.scope, req.bucket, createdObject(response))
+		p.notifyWrite(ctx, b, req.scope, req.bucket, createdObject(response), current)
 		p.decorate(b, req.scope, req.bucket, response)
 	}
 	finishResponse(response, id, req.rest.Host)
@@ -1255,5 +1266,6 @@ func (p *Provider) restoreObject(ctx context.Context, b *memoryBackend, req requ
 		return nil, err
 	}
 	p.created(b, req.scope, req.bucket, createdObject(stored))
+	p.notifyWrite(ctx, b, req.scope, req.bucket, createdObject(stored), current)
 	return stored, nil
 }

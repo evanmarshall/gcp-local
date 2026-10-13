@@ -21,6 +21,11 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/providers/storage/bucketconfig"
 	"github.com/evanmarshall/gcp-local/internal/state"
+
+	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"github.com/evanmarshall/gcp-local/internal/iam"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func (p *Provider) patchBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, name string) (*gateway.RESTResponse, error) {
@@ -544,5 +549,221 @@ func (p *Provider) lifecycleDelete(ctx context.Context, b *memoryBackend, scope 
 	if err := keep(response); err != nil {
 		return err
 	}
+	if response.Status == http.StatusNoContent {
+		p.notifyRemoval(scope, bucket, object, !archive, nil)
+	}
 	return b.prune(ctx, bucket, name, generation)
+}
+
+// publicationQueue bounds the notification messages waiting for delivery;
+// a full queue makes the object change that sends one wait.
+const publicationQueue = 1024
+
+// publishMethod is the Pub/Sub RPC notifications are delivered through.
+const publishMethod = "/google.pubsub.v1.Publisher/Publish"
+
+// publication is one notification message for the delivery worker.
+type publication struct {
+	agent      gateway.Call
+	topic      string
+	data       []byte
+	attributes map[string]string
+}
+
+// deliver publishes queued notification messages through the Pub/Sub
+// provider as the Storage service agent until ctx ends. Pub/Sub authorizes
+// the agent for pubsub.topics.publish on each message; a refused or failed
+// publish drops that message, and later changes still publish.
+func (p *Provider) deliver(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case message := <-p.publications:
+			call := message.agent
+			call.Context, call.Method, call.Resource = ctx, publishMethod, message.topic
+			_, _ = p.registry.Invoke(call, &pubsubpb.PublishRequest{Topic: message.topic, Messages: []*pubsubpb.PubsubMessage{
+				{Data: message.data, Attributes: message.attributes},
+			}})
+		}
+	}
+}
+
+// storageAgent is the project's Cloud Storage service agent, named by
+// project number as GCP names it (recorded: storage-notifications
+// "service-agent").
+func (p *Provider) storageAgent(project string) (gateway.Call, string, bool) {
+	resource, ok := p.index.Get(provider.ProjectResource(project))
+	if !ok || resource.Number == "" {
+		return gateway.Call{}, "", false
+	}
+	email := "service-" + resource.Number + "@gs-project-accounts.iam.gserviceaccount.com"
+	return gateway.Call{Project: project, Principal: gateway.Principal{
+		State: gateway.Authenticated, Subject: "serviceAccount:" + email, Project: project,
+		Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"},
+	}}, email, true
+}
+
+// executeNotification serves the notification configuration methods and the
+// project's service account.
+func (p *Provider) executeNotification(req request) (*gateway.RESTResponse, error) {
+	switch req.call.Method {
+	case MethodServiceAccountGet:
+		_, email, ok := p.storageAgent(req.call.Project)
+		if !ok {
+			return nil, gap("the Storage service agent needs the project's number in the resource index")
+		}
+		return &gateway.RESTResponse{JSON: map[string]any{keyKind: "storage#serviceAccount", "email_address": email}}, nil
+	case MethodNotificationsInsert:
+		return p.createNotification(req)
+	case MethodNotificationsDelete:
+		if p.catalog.deleteNotification(req.scope, req.bucket, req.rest.Path["notification"]) {
+			return &gateway.RESTResponse{Status: http.StatusNoContent}, nil
+		}
+		return notificationMissing(), nil
+	}
+	return p.readNotifications(req), nil
+}
+
+// notificationMissing answers a request for a configuration that doesn't
+// exist (recorded: storage-notifications "get-missing", "deleted-get").
+func notificationMissing() *gateway.RESTResponse {
+	return wireError(404, "notFound", "The requested resource was not found.")
+}
+
+// readNotifications serves notifications.list and notifications.get.
+func (p *Provider) readNotifications(req request) *gateway.RESTResponse {
+	configs := p.catalog.notifications(req.scope, req.bucket)
+	if req.call.Method == MethodNotificationsGet {
+		for _, config := range configs {
+			if config.ID == req.rest.Path["notification"] {
+				return &gateway.RESTResponse{JSON: notificationDocument(req.bucket, config)}
+			}
+		}
+		return notificationMissing()
+	}
+	documents := make([]map[string]any, 0, len(configs))
+	for _, config := range configs {
+		documents = append(documents, notificationDocument(req.bucket, config))
+	}
+	result := provider.ListBody("items", documents, "")
+	result[keyKind] = "storage#notifications"
+	return &gateway.RESTResponse{JSON: result}
+}
+
+// createNotification serves notifications.insert. GCP refuses a topic that
+// doesn't exist, or that the Storage service agent can't publish to, with
+// its recorded errors (storage-notifications "create-missing-topic",
+// "create-without-grant").
+func (p *Provider) createNotification(req request) (*gateway.RESTResponse, error) {
+	config, err := bucketconfig.ParseNotification(req.rest.JSON)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // GCP's refusal, rendered as is
+	}
+	agent, email, ok := p.storageAgent(req.scope.Project)
+	if !ok {
+		return nil, gap("the Storage service agent needs the project's number in the resource index")
+	}
+	if _, found := p.index.Get(config.Topic); !found {
+		return wireError(400, "invalid", "Cloud Pub/Sub topic '"+config.Topic+"' not found, or user '"+email+"' does not have permission to it."), nil
+	}
+	agent.Context, agent.Method, agent.Resource = req.call.Context, methodNotificationPublish, config.Topic
+	if _, err := p.iam.Authorize(agent, iam.Target{Name: config.Topic}, nil); err != nil {
+		if status.Code(err) != codes.PermissionDenied {
+			return nil, gap("authorizing the Storage service agent on the topic: " + status.Convert(err).Message())
+		}
+		// GCP's message repeats "to" (recorded: "create-without-grant").
+		return wireError(403, "forbidden", "The service account '"+email+"' does not have permission to publish messages to "+
+			"to the Cloud Pub/Sub topic '"+config.Topic+"', or that topic does not exist."), nil
+	}
+	stored, err := p.catalog.addNotification(req.scope, req.bucket, notificationConfig{Notification: config, Origin: "http://" + req.rest.Host})
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: notificationDocument(req.bucket, stored)}, nil
+}
+
+// notificationDocument is the wire shape of one notification configuration
+// (notifications resource): optional fields appear only when set (recorded:
+// storage-notifications "create-filtered", "create-unfiltered-short-topic").
+func notificationDocument(bucket string, config notificationConfig) map[string]any {
+	document := map[string]any{
+		keyKind: "storage#notification", "id": config.ID, "topic": config.Topic, "payload_format": config.PayloadFormat,
+		"etag": config.ID, "selfLink": config.Origin + "/storage/v1/b/" + url.PathEscape(bucket) + "/notificationConfigs/" + config.ID,
+	}
+	if len(config.EventTypes) > 0 {
+		document["event_types"] = slices.Clone(config.EventTypes)
+	}
+	if len(config.CustomAttributes) > 0 {
+		document["custom_attributes"] = maps.Clone(config.CustomAttributes)
+	}
+	if config.ObjectNamePrefix != "" {
+		document["object_name_prefix"] = config.ObjectNamePrefix
+	}
+	return document
+}
+
+// notify queues the messages one object change sends to the bucket's
+// matching notification configurations, as GCP sends them (recorded:
+// storage-notifications "finalize", "metadata-update", "delete"). object is
+// the generation the event names; extra adds the overwrite attributes.
+func (p *Provider) notify(scope state.Scope, bucket, event string, object map[string]any, extra map[string]string) {
+	configs := p.catalog.notifications(scope, bucket)
+	agent, _, ok := p.storageAgent(scope.Project)
+	if len(configs) == 0 || object == nil || !ok {
+		return
+	}
+	name, generation := documentName(object), fmt.Sprint(object[keyGeneration])
+	eventTime := p.now().UTC().Format(time.RFC3339Nano)
+	for _, config := range configs {
+		if !config.Matches(event, name) {
+			continue
+		}
+		attributes := map[string]string{
+			"notificationConfig": "projects/_/buckets/" + bucket + "/notificationConfigs/" + config.ID,
+			"eventType":          event, "payloadFormat": config.PayloadFormat, "bucketId": bucket,
+			"objectId": name, "objectGeneration": generation, "eventTime": eventTime,
+		}
+		maps.Copy(attributes, extra)
+		maps.Copy(attributes, config.CustomAttributes)
+		var data []byte
+		if config.PayloadFormat == bucketconfig.PayloadJSON {
+			document := maps.Clone(object)
+			publishLinks(document, config.Origin)
+			encoded, err := json.Marshal(document)
+			if err != nil {
+				continue
+			}
+			data = encoded
+		}
+		p.publications <- publication{agent: agent, topic: strings.TrimPrefix(config.Topic, bucketconfig.TopicPrefix), data: data, attributes: attributes}
+	}
+}
+
+// notifyWrite sends the events of a write that created object, replacing
+// the live generation replaced (nil when none): OBJECT_FINALIZE, and
+// OBJECT_ARCHIVE in a versioned bucket or OBJECT_DELETE otherwise for the
+// replaced one, with the overwrite attributes GCP documents
+// (storage/docs/pubsub-notifications#attributes).
+func (p *Provider) notifyWrite(ctx context.Context, b *memoryBackend, scope state.Scope, bucket string, object, replaced map[string]any) {
+	if object == nil || len(p.catalog.notifications(scope, bucket)) == 0 {
+		return
+	}
+	if replaced == nil {
+		p.notify(scope, bucket, bucketconfig.EventFinalize, object, nil)
+		return
+	}
+	p.notify(scope, bucket, bucketconfig.EventFinalize, object, map[string]string{"overwroteGeneration": fmt.Sprint(replaced[keyGeneration])})
+	versioned, _ := b.versioned(ctx, bucket)
+	p.notifyRemoval(scope, bucket, replaced, !versioned, map[string]string{"overwrittenByGeneration": fmt.Sprint(object[keyGeneration])})
+}
+
+// notifyRemoval sends OBJECT_DELETE for a generation removed for good, or
+// OBJECT_ARCHIVE for a live one a versioned bucket kept as noncurrent.
+func (p *Provider) notifyRemoval(scope state.Scope, bucket string, object map[string]any, permanent bool, extra map[string]string) {
+	event := bucketconfig.EventDelete
+	if !permanent {
+		event = bucketconfig.EventArchive
+	}
+	p.notify(scope, bucket, event, object, extra)
 }

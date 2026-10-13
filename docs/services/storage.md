@@ -1,6 +1,6 @@
 # Cloud Storage
 
-Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, lifecycle rules, retention policies and Bucket Lock, object holds and object retention, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-five scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
+Uniform-access buckets and objects over the JSON API and XML object paths, with IAM enforced on every call. Resumable uploads, V4 signed URLs, object metadata patches, `objects.rewrite`, object versioning, lifecycle rules, retention policies and Bucket Lock, object holds and object retention, Pub/Sub notifications, soft delete and restore, and public access prevention work. The backend is [fake-gcs-server v1.56.1](https://github.com/fsouza/fake-gcs-server/tree/896ece51e49eed0946089f3089f6343855c0d106) running in-process with no listener ([pin](../../third_party/fake-gcs-server/manifest.json)). Twenty-five scenarios are recorded against GCP; rewrite with a request body, public members under inherited prevention, and the XML paths other than signed URLs are modeled locally, not recorded.
 
 ## Use
 
@@ -43,7 +43,7 @@ Buckets report uniform access under both names, each with a `lockedTime` 90 days
 
 ## Methods
 
-20 of 88 JSON API methods run.
+25 of 88 JSON API methods run.
 
 | Resource | Methods | Notes |
 | --- | --- | --- |
@@ -51,6 +51,8 @@ Buckets report uniform access under both names, each with a `lockedTime` 90 days
 | Buckets | `list` | `prefix`, [paging](#lists), `returnPartialSuccess` (every bucket is reachable, so `unreachable` is omitted) |
 | Buckets | `patch` | `labels` (merges keys, null removes a key), `softDeletePolicy.retentionDurationSeconds`, `versioning.enabled`, `retentionPolicy` (null removes it), `defaultEventBasedHold`, and `lifecycle` per [lifecycle](#lifecycle); advances metageneration and etag |
 | Buckets | `lockRetentionPolicy` | Requires `ifMetagenerationMatch`; locks the retention policy per [retention](#retention-and-holds) |
+| Notifications | `insert`, `list`, `get`, `delete` | Per [notifications](#notifications); deleted with their bucket |
+| Projects | `serviceAccount.get` | The project's Storage service agent, `service-NUMBER@gs-project-accounts.iam.gserviceaccount.com` |
 | Buckets | `getIamPolicy`, `setIamPolicy` | Version-3 conditions on `resource.name`; public members per [public access prevention](#public-access-prevention) |
 | Buckets | `getStorageLayout` | `locationType` and no `hierarchicalNamespace`, as gcloud reads them |
 | Objects | `insert` | Media, multipart, and resumable uploads, up to 128 MiB per object (larger is the 400 gap) |
@@ -101,6 +103,19 @@ Bucket insert and patch take `lifecycle.rule` with the `Delete`, `SetStorageClas
 - `AbortIncompleteMultipartUpload` is accepted and does nothing: XML API multipart uploads are not modeled.
 - The worker acts as the project's Storage service agent; GCP requires no role for lifecycle actions.
 - `customTime` (object patch) moves only forward: an earlier time is 400 `Custom time cannot be decreased. Previously: T. Attempting to set: T.`, and `null` leaves it.
+
+## Notifications
+
+Notification configurations publish object changes to Pub/Sub through the local Pub/Sub provider, as the project's Storage service agent. Run with `-services storage,pubsub`. Not recorded: a draft of `storage-notifications` observed the configuration behavior, the publisher check, and the finalize, metadata-update, and delete messages on 2026-10-13; the overwrite attributes, `OBJECT_ARCHIVE`, and lifecycle events are modeled from GCP's documentation. The scenario's recording waits on a sandbox run.
+
+Grant the agent `roles/pubsub.publisher` on the topic first, as in GCP.
+
+- `insert` needs the agent to hold `pubsub.topics.publish` on the topic: without it, 403 `The service account 'AGENT' does not have permission to publish messages to to the Cloud Pub/Sub topic 'TOPIC', or that topic does not exist.`; for a topic that doesn't exist, 400 `Cloud Pub/Sub topic 'TOPIC' not found, or user 'AGENT' does not have permission to it.`
+- `topic` takes `//pubsub.googleapis.com/projects/P/topics/T` or `projects/P/topics/T` and reports the first. `payload_format` is `JSON_API_V1` or `NONE`. Unknown `event_types` are dropped; none left means every event. `custom_attributes` and `object_name_prefix` are optional. A missing topic or payload format is 400 `required`; a malformed topic is 400 `invalid`.
+- Events: `OBJECT_FINALIZE` for an upload, rewrite, or restore; `OBJECT_METADATA_UPDATE` for a patch; `OBJECT_DELETE` for a deletion or a replaced generation; `OBJECT_ARCHIVE` when a versioned bucket keeps the generation as noncurrent. Lifecycle deletions send them too.
+- Attributes: `notificationConfig`, `eventType`, `payloadFormat`, `bucketId`, `objectId`, `objectGeneration`, `eventTime`, the custom attributes, and `overwroteGeneration` or `overwrittenByGeneration` on an overwrite. `JSON_API_V1` sends the object resource; its links use the origin of the request that created the configuration.
+- Delivery is asynchronous through a queue. Pub/Sub authorizes each publish as the agent; a refused publish drops that message. A `SetStorageClass` lifecycle action sends nothing.
+- `projects.serviceAccount.get` needs `resourcemanager.projects.get`; `notifications.insert` and `delete` need `storage.buckets.get` and `storage.buckets.update`; `list` and `get` need `storage.buckets.get`.
 
 ## Retention and holds
 
@@ -204,7 +219,7 @@ Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PR
 - Patching a noncurrent generation returns the gap.
 - A hold set to `null`, object retention in a bucket created without `enableObjectRetention`, and a `retentionPolicy` without `retentionPeriod` return the gap.
 - Lifecycle values GCP may accept but the emulator does not model return the gap: a negative `daysSinceCustomTime` or `daysSinceNoncurrentTime`, a value of another JSON type, and `SetStorageClass` to `REGIONAL`, `DURABLE_REDUCED_AVAILABILITY`, or `MULTI_REGIONAL` outside a region.
-- No ACLs, requester pays, encryption keys, notifications, or compose.
+- No ACLs, requester pays, encryption keys, or compose.
 - Bucket soft delete is not modeled: a deleted bucket and its soft-deleted objects are gone at once. `softDeleted` on `buckets.list` and `buckets.get`, and `buckets.restore`, return the 400 gap. `objects.restore` in a bucket whose policy is `0` returns the gap.
 - Soft-deleted media (`alt=media`), preconditions on a soft-deleted read, soft-deleted listings longer than one page or with other options, and `restoreToken` return the gap.
 - Organization policies are not modeled ([public access prevention](#public-access-prevention)). `publicAccessPrevention: unspecified` returns the gap.

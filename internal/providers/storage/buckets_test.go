@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
@@ -866,4 +868,140 @@ func TestLifecycleSweep(t *testing.T) {
 	f.p.sweepLifecycle(t.Context())
 	listing := decodeBody(t, f.request(admin, "GET", "/storage/v1/b/pruned/o?versions=true", nil, 200).Body.Bytes())
 	expectf(t, len(itemList(listing["items"])) == 1, "noncurrent generations kept: %v", listing)
+}
+
+// published collects the messages the provider publishes through Pub/Sub.
+func published(t *testing.T, f *fixture) chan *pubsubpb.PublishRequest {
+	t.Helper()
+	messages := make(chan *pubsubpb.PublishRequest, 32)
+	if err := f.p.registry.Register(publishMethod, func(call gateway.Call, raw any) (any, error) {
+		request, ok := raw.(*pubsubpb.PublishRequest)
+		if !ok || call.Principal.Subject != "serviceAccount:service-123456@gs-project-accounts.iam.gserviceaccount.com" {
+			t.Errorf("publish as %s of %T", call.Principal.Subject, raw)
+		}
+		messages <- request
+		return &pubsubpb.PublishResponse{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return messages
+}
+
+// receive waits for count messages and returns their attributes and payloads.
+func receive(t *testing.T, messages chan *pubsubpb.PublishRequest, count int) []*pubsubpb.PubsubMessage {
+	t.Helper()
+	var found []*pubsubpb.PubsubMessage
+	for len(found) < count {
+		select {
+		case request := <-messages:
+			found = append(found, request.GetMessages()...)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("received %d of %d messages", len(found), count)
+		}
+	}
+	return found
+}
+
+// notifiedBucket creates a bucket, its topic in the index, and a grant of the
+// Storage service agent on it, and returns the configurations path and the
+// published messages.
+func notifiedBucket(t *testing.T, f *fixture, grant bool) (string, chan *pubsubpb.PublishRequest) {
+	t.Helper()
+	f.bucket(testProject, "notified", 200)
+	messages := published(t, f)
+	if err := f.p.index.Put("pubsub", state.Resource{Name: notifiedTopic, Service: "pubsub", Kind: "topic", Parent: provider.ProjectResource(testProject),
+		Scope: state.Scope{Project: testProject, Location: state.Global}}); err != nil {
+		t.Fatal(err)
+	}
+	if grant {
+		if _, err := f.p.iam.SetPolicy(notifiedTopic, iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.publisher", Members: []string{"serviceAccount:" + storageAgentEmail}}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return "/storage/v1/b/notified/notificationConfigs", messages
+}
+
+const (
+	notifiedTopic     = "//pubsub.googleapis.com/projects/project-a/topics/events"
+	storageAgentEmail = "service-123456@gs-project-accounts.iam.gserviceaccount.com"
+)
+
+// TestNotificationConfigurations follows storage-notifications: the service
+// agent, the publisher check, and configuration validation, listing, reads,
+// and deletes.
+func TestNotificationConfigurations(t *testing.T) {
+	f := setup(t)
+	agent := decodeBody(t, f.request(admin, "GET", "/storage/v1/projects/project-a/serviceAccount", nil, 200).Body.Bytes())
+	expectf(t, agent["email_address"] == storageAgentEmail, "agent: %v", agent)
+	refused(t, f.request("stranger@project-a.test", "GET", "/storage/v1/projects/project-a/serviceAccount", nil, 403).Body.String(),
+		"stranger@project-a.test does not have resourcemanager.projects.get access to the Google Cloud project.")
+	f.bucket(testProject, "unindexed", 200)
+	refused(t, f.request(admin, "POST", "/storage/v1/b/unindexed/notificationConfigs", []byte(`{"topic":"`+notifiedTopic+`","payload_format":"NONE"}`), 400).Body.String(),
+		"Cloud Pub/Sub topic '"+notifiedTopic+"' not found, or user '"+storageAgentEmail+"' does not have permission to it.")
+	configs, _ := notifiedBucket(t, f, false)
+	refused(t, f.request(admin, "POST", configs, []byte(`{"topic":"`+notifiedTopic+`","payload_format":"NONE"}`), 403).Body.String(),
+		"The service account '"+storageAgentEmail+"' does not have permission to publish messages to "+"to the Cloud Pub/Sub topic '"+notifiedTopic+"', or that topic does not exist.")
+	if _, err := f.p.iam.SetPolicy(notifiedTopic, iam.Policy{Bindings: []iam.Binding{{Role: "roles/pubsub.publisher", Members: []string{"serviceAccount:" + storageAgentEmail}}}}); err != nil {
+		t.Fatal(err)
+	}
+	filtered := decodeBody(t, f.request(admin, "POST", configs, []byte(`{"topic":"`+notifiedTopic+`","payload_format":"JSON_API_V1",`+
+		`"event_types":["OBJECT_FINALIZE","OBJECT_EXPLODE"],"object_name_prefix":"n-"}`), 200).Body.Bytes())
+	expectf(t, fmt.Sprint(filtered["event_types"]) == "[OBJECT_FINALIZE]", "unknown event types kept: %v", filtered)
+	short := decodeBody(t, f.request(admin, "POST", configs, []byte(`{"topic":"projects/project-a/topics/events","payload_format":"NONE"}`), 200).Body.Bytes())
+	expectf(t, short["topic"] == notifiedTopic && short["event_types"] == nil, "short topic: %v", short)
+	for body, message := range map[string]string{
+		`{"topic":"` + notifiedTopic + `","payload_format":"XML"}`: "You must specify a payload format in the 'payload_format' field.",
+		`{"topic":"not-a-topic","payload_format":"NONE"}`:          "Invalid Google Cloud Pub/Sub topic. It should look like '//pubsub.googleapis.com/projects/*/topics/*.'",
+		`{"payload_format":"NONE"}`:                                "You must specify a Cloud Pub/Sub topic in the 'topic' field.",
+	} {
+		refused(t, f.request(admin, "POST", configs, []byte(body), 400).Body.String(), message)
+	}
+	listing := decodeBody(t, f.request(admin, "GET", configs, nil, 200).Body.Bytes())
+	expectf(t, len(itemList(listing["items"])) == 2, "list: %v", listing)
+	f.request(admin, "GET", configs+"/1", nil, 200)
+	refused(t, f.request(admin, "GET", configs+"/9", nil, 404).Body.String(), "The requested resource was not found.")
+	f.request(admin, "DELETE", configs+"/1", nil, 204)
+	f.request(admin, "DELETE", configs+"/1", nil, 404)
+}
+
+// eventsOf returns each received message's event type and payload format
+// with the overwrite attribute it carries.
+func eventsOf(messages []*pubsubpb.PubsubMessage) map[string]string {
+	events := map[string]string{}
+	for _, message := range messages {
+		attributes := message.GetAttributes()
+		events[attributes["eventType"]+"/"+attributes["payloadFormat"]] = attributes["overwroteGeneration"] + attributes["overwrittenByGeneration"]
+	}
+	return events
+}
+
+// TestNotificationEvents follows storage-notifications: object changes
+// publish to each matching configuration as the Storage service agent.
+func TestNotificationEvents(t *testing.T) {
+	f := setup(t)
+	configs, messages := notifiedBucket(t, f, true)
+	f.request(admin, "POST", configs, []byte(`{"topic":"`+notifiedTopic+`","payload_format":"JSON_API_V1","custom_attributes":{"source":"test"},`+
+		`"event_types":["OBJECT_FINALIZE","OBJECT_DELETE"],"object_name_prefix":"n-"}`), 200)
+	f.request(admin, "POST", configs, []byte(`{"topic":"`+notifiedTopic+`","payload_format":"NONE"}`), 200)
+	upload := "/upload/storage/v1/b/notified/o?uploadType=media&name=n-1"
+	first := decodeBody(t, f.request(admin, "POST", upload, []byte("one"), 200).Body.Bytes())
+	for _, message := range receive(t, messages, 2) {
+		attributes := message.GetAttributes()
+		expectf(t, attributes["eventType"] == "OBJECT_FINALIZE" && attributes["objectGeneration"] == first[keyGeneration], "attributes: %v", attributes)
+		var payload map[string]any
+		if attributes["payloadFormat"] == "JSON_API_V1" {
+			expectf(t, json.Unmarshal(message.GetData(), &payload) == nil && payload["selfLink"] != nil, "payload: %s", message.GetData())
+			expectf(t, attributes["source"] == "test" && attributes["notificationConfig"] == "projects/_/buckets/notified/notificationConfigs/1", "attributes: %v", attributes)
+		}
+	}
+	second := decodeBody(t, f.request(admin, "POST", upload, []byte("two"), 200).Body.Bytes())
+	events := eventsOf(receive(t, messages, 4))
+	expectf(t, events["OBJECT_FINALIZE/JSON_API_V1"] == first[keyGeneration] && events["OBJECT_DELETE/NONE"] == second[keyGeneration], "overwrite events: %v", events)
+	f.request(admin, "PATCH", "/storage/v1/b/notified/o/n-1", []byte(`{"metadata":{"k":"v"}}`), 200)
+	expectf(t, eventsOf(receive(t, messages, 1))["OBJECT_METADATA_UPDATE/NONE"] == "", "no metadata update")
+	f.request(admin, "PATCH", "/storage/v1/b/notified", []byte(`{"versioning":{"enabled":true}}`), 200)
+	f.request(admin, "DELETE", "/storage/v1/b/notified/o/n-1", nil, 204)
+	archived := eventsOf(receive(t, messages, 1))
+	_, ok := archived["OBJECT_ARCHIVE/NONE"]
+	expectf(t, ok, "a versioned delete did not archive: %v", archived)
 }

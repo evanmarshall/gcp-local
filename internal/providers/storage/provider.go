@@ -37,6 +37,8 @@ type Provider struct {
 	registry *gateway.Registry
 	// now is the clock lifecycle conditions, retention, and holds read.
 	now func() time.Time
+	// publications queues notification messages for the delivery worker.
+	publications chan publication
 }
 
 // Config carries the provider's injectable dependencies. A nil Now is wall
@@ -57,6 +59,8 @@ var registeredMethods = []string{
 	MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete,
 	MethodFoldersInsert, MethodFoldersGet, MethodFoldersList, MethodFoldersDelete,
 	MethodXMLGet, MethodXMLPut, MethodObjectsRewrite, MethodObjectsPatch, MethodObjectsRestore,
+	MethodNotificationsInsert, MethodNotificationsList, MethodNotificationsGet, MethodNotificationsDelete,
+	MethodServiceAccountGet,
 }
 
 // New registers the Storage provider. Its background work stops when ctx ends.
@@ -64,7 +68,8 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 	if registry == nil || manager == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	p := &Provider{index: index, catalog: NewCatalog(index), iam: engine, manager: manager, registry: registry, now: config.Now}
+	p := &Provider{index: index, catalog: NewCatalog(index), iam: engine, manager: manager, registry: registry, now: config.Now,
+		publications: make(chan publication, publicationQueue)}
 	if p.now == nil {
 		p.now = time.Now
 	}
@@ -88,6 +93,7 @@ func New(ctx context.Context, config Config, registry *gateway.Registry, manager
 		return nil, err
 	}
 	go p.runLifecycle(ctx)
+	go p.deliver(ctx)
 	return p, nil
 }
 
@@ -278,6 +284,11 @@ func denialText(call gateway.Call, target, permission string) (int, string, stri
 		kind = "object"
 	}
 	message := fmt.Sprintf("%s does not have %s access to the Google Cloud Storage %s. Permission '%s' denied on resource '%s' (or it may not exist).", actor, permission, kind, permission, target)
+	if permission == permissionProjectsGet {
+		// GCP names no resource here (recorded: storage-notifications
+		// "service-agent-denied"), and appends a troubleshooter link.
+		return httpCode, reason, fmt.Sprintf("%s does not have %s access to the Google Cloud project. Permission '%s' denied on resource (or it may not exist).", actor, permission, permission)
+	}
 	// Some denials omit the permission and resource sentence (recorded:
 	// storage-object-replacement, storage-object-retention "unlocked-set-denied").
 	if (call.Method == MethodObjectsInsert && permission == MethodObjectsDelete) || permission == permissionSetRetention {
@@ -301,7 +312,7 @@ type request struct {
 }
 
 func isProjectMethod(method string) bool {
-	return method == MethodBucketsInsert || method == MethodBucketsList
+	return method == MethodBucketsInsert || method == MethodBucketsList || method == MethodServiceAccountGet
 }
 
 func isFolderMethod(method string) bool { return strings.HasPrefix(method, "storage.folders.") }
@@ -364,6 +375,10 @@ func (p *Provider) newRequest(call gateway.Call, r *gateway.RESTRequest) (reques
 		return request{}, nil, err
 	}
 	req := request{call: call, rest: r, bucket: r.Path[keyBucket], object: r.Path["object"]}
+	if call.Method == MethodServiceAccountGet {
+		// The project is the path's; the gateway reads only bucket methods'.
+		req.call.Project = r.Path["projectId"]
+	}
 	if call.Method == MethodObjectsInsert {
 		upload, err := parseUpload(r)
 		if err != nil {
@@ -718,6 +733,8 @@ func (p *Provider) execute(ctx context.Context, b *memoryBackend, req request, c
 		return p.executeFolder(req.call.Method, req.rest, req.scope, req.bucket)
 	case strings.HasPrefix(req.call.Method, "storage.buckets."):
 		return p.executeBucket(ctx, b, req)
+	case strings.HasPrefix(req.call.Method, "storage.notifications."), req.call.Method == MethodServiceAccountGet:
+		return p.executeNotification(req)
 	}
 	return p.executeObject(ctx, b, req, current)
 }
@@ -799,7 +816,7 @@ func (p *Provider) writeObject(ctx context.Context, b *memoryBackend, req reques
 	if err := keep(response); err != nil {
 		return nil, err
 	}
-	return p.written(b, req, response), nil
+	return p.written(ctx, b, req, response, current), nil
 }
 
 // replaceable checks an insert's preconditions against the live object it
@@ -827,14 +844,15 @@ func (p *Provider) retainWrite(ctx context.Context, b *memoryBackend, req reques
 }
 
 // written finishes a successful insert: the new generation takes the
-// bucket's default hold, and an XML API insert answers with its empty body
-// and object headers.
-func (p *Provider) written(b *memoryBackend, req request, response *gateway.RESTResponse) *gateway.RESTResponse {
+// bucket's default hold, its notifications go out, and an XML API insert
+// answers with its empty body and object headers.
+func (p *Provider) written(ctx context.Context, b *memoryBackend, req request, response *gateway.RESTResponse, replaced map[string]any) *gateway.RESTResponse {
 	if req.call.Method != MethodObjectsInsert || response.Status != http.StatusOK {
 		return response
 	}
 	object := createdObject(response)
 	p.created(b, req.scope, req.bucket, object)
+	p.notifyWrite(ctx, b, req.scope, req.bucket, object, replaced)
 	if req.xml && object != nil {
 		return xmlapi.Stored(object)
 	}
@@ -866,10 +884,20 @@ func (p *Provider) readOrDeleteObject(ctx context.Context, b *memoryBackend, req
 		return response, err
 	}
 	noContentOnSuccess(response)
-	if removed, _ := current[keyGeneration].(string); response.Status == http.StatusNoContent {
-		return response, b.prune(ctx, req.bucket, req.object, removed)
+	if response.Status != http.StatusNoContent {
+		return response, nil
 	}
-	return response, nil
+	return response, p.deleted(ctx, b, req, current)
+}
+
+// deleted finishes a successful delete of the generation current: its
+// notifications go out, and its overlay goes once the generation is gone.
+func (p *Provider) deleted(ctx context.Context, b *memoryBackend, req request, current map[string]any) error {
+	if len(p.catalog.notifications(req.scope, req.bucket)) > 0 {
+		versioned, _ := b.versioned(ctx, req.bucket)
+		p.notifyRemoval(req.scope, req.bucket, current, req.rest.Query.Get(keyGeneration) != "" || !versioned, nil)
+	}
+	return b.prune(ctx, req.bucket, req.object, fmt.Sprint(current[keyGeneration]))
 }
 
 // currentObject reads the metadata of an object's live generation, or of the
@@ -1202,6 +1230,19 @@ func RegisterPermissions(engine *iam.Engine) error {
 		// denial names storage.buckets.get first (recorded: storage-bucket-lock
 		// "lock-denied").
 		MethodBucketsLock: {Baseline: []string{permissionBucketsGet, permissionBucketsUpdate}},
+		// notifications/insert and delete need storage.buckets.update; GCP's
+		// denial names storage.buckets.get first (recorded:
+		// storage-notifications "create-denied").
+		MethodNotificationsInsert: {Baseline: []string{permissionBucketsGet, permissionBucketsUpdate}},
+		MethodNotificationsDelete: {Baseline: []string{permissionBucketsGet, permissionBucketsUpdate}},
+		MethodNotificationsList:   {Baseline: []string{permissionBucketsGet}},
+		MethodNotificationsGet:    {Baseline: []string{permissionBucketsGet}},
+		// projects/serviceAccount/get needs resourcemanager.projects.get
+		// (recorded: storage-notifications "service-agent-denied").
+		MethodServiceAccountGet: {Baseline: []string{permissionProjectsGet}},
+		// The Storage service agent publishes notifications; GCP refuses a
+		// configuration whose topic the agent can't publish to.
+		methodNotificationPublish: {Baseline: []string{"pubsub.topics.publish"}},
 		// buckets/getStorageLayout requires storage.objects.list.
 		MethodBucketsGetLayout: {Baseline: []string{permissionObjectsList}},
 		MethodObjectsList:      {Baseline: []string{MethodObjectsList}},
@@ -1243,6 +1284,14 @@ const (
 	MethodBucketsSetIamPolicy = "storage.buckets.setIamPolicy"
 	MethodBucketsGetLayout    = "storage.buckets.getStorageLayout"
 	MethodBucketsLock         = "storage.buckets.lockRetentionPolicy"
+	MethodNotificationsInsert = "storage.notifications.insert"
+	MethodNotificationsList   = "storage.notifications.list"
+	MethodNotificationsGet    = "storage.notifications.get"
+	MethodNotificationsDelete = "storage.notifications.delete"
+	MethodServiceAccountGet   = "storage.projects.serviceAccount.get"
+	// methodNotificationPublish is the engine-only plan for the Storage
+	// service agent's publish permission on a notification topic.
+	methodNotificationPublish = "storage.notifications.publish"
 	MethodFoldersCreate       = "storage.folders.create"
 	MethodFoldersInsert       = "storage.folders.insert"
 	MethodFoldersGet          = "storage.folders.get"
@@ -1277,6 +1326,7 @@ const (
 	permissionObjectsRestore      = "storage.objects.restore"
 	permissionObjectsUpdate       = "storage.objects.update"
 	permissionSetRetention        = "storage.objects.setRetention"
+	permissionProjectsGet         = "resourcemanager.projects.get"
 	permissionOverrideRetention   = "storage.objects.overrideUnlockedRetention"
 )
 
