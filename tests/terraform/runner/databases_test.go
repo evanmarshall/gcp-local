@@ -465,3 +465,129 @@ func testAccSpannerDestroy(t *testing.T, name string) func(*terraform.State) err
 		return nil
 	}
 }
+
+// localSQLCase drives one Cloud SQL case through the adapter plumbing. An
+// insert initializes and starts a real PostgreSQL server before it answers,
+// so requests get a longer timeout than the other cases.
+func localSQLCase(t *testing.T, test resource.TestCase) {
+	t.Helper()
+	for i, step := range test.Steps {
+		if step.Config == "" {
+			continue
+		}
+		step.ConfigPlanChecks.PostApplyPostRefresh = append(step.ConfigPlanChecks.PostApplyPostRefresh, plancheck.ExpectEmptyPlan())
+		step.Config = fmt.Sprintf(`provider "google" {
+ project = %q
+ access_token = %q
+ sql_custom_endpoint = %q
+ universe_domain = "gcp-local.invalid"
+ request_timeout = "60s"
+ add_terraform_attribution_label = false
+}
+`, projectID, fixtureToken, endpoint+"/sql/v1beta4/") + step.Config
+		test.Steps[i] = step
+	}
+	resource.Test(t, test)
+}
+
+// TestLocalSQLDatabaseInstance creates a PostgreSQL instance with backups,
+// TLS, an authorized network, and a flag, plus a database and a user;
+// updates the TLS mode, networks, and backups in place; and destroys them.
+func TestLocalSQLDatabaseInstance(t *testing.T) {
+	name := spannerName()
+	localSQLCase(t, resource.TestCase{
+		PreCheck:          func() { preCheck(t) },
+		ExternalProviders: pinnedProvider(),
+		CheckDestroy:      testSQLDestroy(name),
+		Steps: []resource.TestStep{
+			{
+				Config: testSQLConfig(name, "ENCRYPTED_ONLY", 3, ""),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("google_sql_database_instance.db", "settings.0.backup_configuration.0.enabled", "true"),
+					resource.TestCheckResourceAttr("google_sql_database_instance.db", "settings.0.backup_configuration.0.point_in_time_recovery_enabled", "true"),
+					resource.TestCheckResourceAttr("google_sql_database_instance.db", "settings.0.ip_configuration.0.ssl_mode", "ENCRYPTED_ONLY"),
+					resource.TestCheckResourceAttr("google_sql_database_instance.db", "settings.0.ip_configuration.0.authorized_networks.#", "1"),
+					resource.TestCheckResourceAttr("google_sql_database_instance.db", "settings.0.database_flags.0.value", "60"),
+					resource.TestCheckResourceAttrSet("google_sql_database_instance.db", "server_ca_cert.0.cert"),
+					resource.TestCheckResourceAttr("google_sql_database.app", "name", "app"),
+					resource.TestCheckResourceAttr("google_sql_user.app", "name", "app"),
+				),
+			},
+			{
+				Config: testSQLConfig(name, "TRUSTED_CLIENT_CERTIFICATE_REQUIRED", 5, `
+  authorized_networks {
+   name  = "docs"
+   value = "203.0.113.0/24"
+  }`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("google_sql_database_instance.db", "settings.0.ip_configuration.0.ssl_mode", "TRUSTED_CLIENT_CERTIFICATE_REQUIRED"),
+					resource.TestCheckResourceAttr("google_sql_database_instance.db", "settings.0.ip_configuration.0.authorized_networks.#", "2"),
+					resource.TestCheckResourceAttr("google_sql_database_instance.db", "settings.0.backup_configuration.0.transaction_log_retention_days", "5"),
+				),
+			},
+		},
+	})
+}
+
+// testSQLConfig renders the instance, a database, and a user.
+func testSQLConfig(name, sslMode string, logDays int, networks string) string {
+	return fmt.Sprintf(`
+resource "google_sql_database_instance" "db" {
+ name                = "%s"
+ database_version    = "POSTGRES_16"
+ region              = "us-central1"
+ deletion_protection = false
+ settings {
+  tier              = "db-f1-micro"
+  edition           = "ENTERPRISE"
+  availability_type = "ZONAL"
+  backup_configuration {
+   enabled                        = true
+   start_time                     = "03:00"
+   point_in_time_recovery_enabled = true
+   transaction_log_retention_days = %d
+   backup_retention_settings {
+    retained_backups = 5
+   }
+  }
+  ip_configuration {
+   ipv4_enabled = true
+   ssl_mode     = "%s"
+   authorized_networks {
+    name  = "loopback"
+    value = "127.0.0.1/32"
+   }%s
+  }
+  database_flags {
+   name  = "max_connections"
+   value = "60"
+  }
+ }
+}
+
+resource "google_sql_database" "app" {
+ name     = "app"
+ instance = google_sql_database_instance.db.name
+}
+
+resource "google_sql_user" "app" {
+ name     = "app"
+ instance = google_sql_database_instance.db.name
+ password = "app-secret"
+}
+`, name, logDays, sslMode, networks)
+}
+
+// testSQLDestroy requires the instance to be gone.
+func testSQLDestroy(name string) func(*terraform.State) error {
+	return func(_ *terraform.State) error {
+		code, err := bqAPI("/sql/v1beta4/projects/" + projectID + "/instances/" + name)
+		if err != nil {
+			return err
+		}
+		if code != http.StatusNotFound {
+			return fmt.Errorf("instance %s still exists (status %d)", name, code)
+		}
+		return nil
+	}
+}
