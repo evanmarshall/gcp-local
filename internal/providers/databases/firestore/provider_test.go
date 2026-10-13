@@ -351,15 +351,19 @@ func TestFieldPatchRefusalsChangeNothing(t *testing.T) {
 		// Recorded in firestore-document-lifecycle.
 		{fieldPatch, `{"ttlConfig":{},"unknownField":1}`, http.StatusBadRequest, `Invalid JSON payload received. Unknown name \"unknownField\" at 'field': Cannot find field.`},
 		{fieldPatch, `{"indexConfig":{"indexes":[{"queryScope":"COLLECTION"}]}}`, http.StatusNotImplemented, "Firestore coverage gap: indexConfig is not modeled"},
-		{testFieldPath + "?updateMask=indexConfig", `{}`, http.StatusNotImplemented, `Firestore coverage gap: field updateMask \"indexConfig\"`},
+		{testFieldPath + "?updateMask=indexes", `{}`, http.StatusNotImplemented, `Firestore coverage gap: field updateMask \"indexes\"`},
 	} {
 		recorder := h.invokeRaw(fieldAdmin, http.MethodPatch, refusal.path, refusal.body)
 		if recorder.Code != refusal.code || !strings.Contains(recorder.Body.String(), refusal.message) {
 			t.Errorf("%s %s = %d %s, want %q", refusal.path, refusal.body, recorder.Code, recorder.Body.String(), refusal.message)
 		}
 	}
+	// Resetting only the index configuration leaves the TTL policy.
+	if recorder := h.invoke(fieldAdmin, http.MethodPatch, testFieldPath+"?updateMask=indexConfig", map[string]any{}); recorder.Code != http.StatusOK {
+		t.Fatalf("index reset = %d %s", recorder.Code, recorder.Body.String())
+	}
 	if body := h.invoke(fieldAdmin, http.MethodGet, testFieldPath, nil).Body.String(); !strings.Contains(body, `"ttlConfig":{"state"`) {
-		t.Fatalf("a refused patch changed the field: %s", body)
+		t.Fatalf("a refused or index-only patch changed the TTL policy: %s", body)
 	}
 }
 
@@ -387,8 +391,8 @@ func TestFieldPatchIsAnOperation(t *testing.T) {
 		t.Fatalf("finished operation = %v", operation)
 	}
 	h.expectBody(fieldAdmin, testFieldPath, `"state":"ACTIVE"`)
-	// Disabling TTL removes the policy.
-	h.invoke(fieldAdmin, http.MethodPatch, fieldPatch, map[string]any{})
+	// Terraform's destroy resets both configurations, which removes the policy.
+	h.invoke(fieldAdmin, http.MethodPatch, testFieldPath+"?updateMask=indexConfig,ttlConfig", map[string]any{})
 	if body := h.invoke(fieldAdmin, http.MethodGet, testFieldPath, nil).Body.String(); strings.Contains(body, "ttlConfig") {
 		t.Fatalf("field after disabling TTL = %s", body)
 	}

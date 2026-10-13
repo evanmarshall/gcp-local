@@ -98,7 +98,7 @@ sh scripts/check/backend/firestore.sh         # provider and Python SDK against 
 ## Gaps
 
 - Batch writes, listeners, and TTL deletion are not recorded.
-- Index exemptions (`indexConfig`, or `updateMask=indexConfig`) and operation `cancel` and `delete` return 501.
+- Index exemptions (a non-default `indexConfig`) and operation `cancel` and `delete` return 501. `updateMask=indexConfig` with no `indexConfig` (Terraform's destroy) is accepted and changes nothing.
 - Composite index requirements are not enforced.
 - Not served: `Write` stream, `PartitionQuery`, `ExecutePipeline`, REST `:listen`, named databases, and Admin API other than collection-group fields and operations.
 - Documents are in memory; reset or restart discards them.

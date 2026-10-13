@@ -346,32 +346,20 @@ func (p *Provider) fieldUpdate(request *gateway.RESTRequest, scope state.Scope) 
 	if err := provider.DecodeProto(request.JSON, "field", body, gap, "indexConfig"); err != nil {
 		return nil, err
 	}
-	if err := ttlMask(request); err != nil {
+	setsTTL, err := ttlMask(request)
+	if err != nil {
 		return nil, err
 	}
 	name := projectField(scope.Project, collection, field)
 	change := "ADD"
-	if body.GetTtlConfig() == nil {
+	if setsTTL && body.GetTtlConfig() == nil {
 		change = "REMOVE"
 	}
 	id, err := p.operations.Start(scope, name, change)
 	if err != nil {
 		return nil, err
 	}
-	now := p.clock()
-	active := now.Add(operationLatency)
-	var done map[string]any
-	_ = p.scopes.With(scope, func(s *scopeState) error {
-		key := collection + "/" + field
-		if body.GetTtlConfig() == nil {
-			delete(s.fields, key)
-		} else if s.fields[key] == nil {
-			s.fields[key] = &fieldRecord{ActiveAt: active}
-		}
-		// The operation's response is the field once it finishes.
-		done = fieldWire(scope.Project, collection, field, s.fields[key], active)
-		return nil
-	})
+	done := p.applyTTL(scope, collection, field, setsTTL, body.GetTtlConfig() != nil)
 	done["@type"] = "type.googleapis.com/google.firestore.admin.v1.Field"
 	p.operations.Finish(scope, id, done, nil)
 	operation, err := p.operations.Get(scope, id)
@@ -381,14 +369,43 @@ func (p *Provider) fieldUpdate(request *gateway.RESTRequest, scope state.Scope) 
 	return &gateway.RESTResponse{JSON: renameOperation(scope, operation)}, nil
 }
 
-// ttlMask refuses an update mask naming anything but the TTL policy.
-func ttlMask(request *gateway.RESTRequest) error {
-	for path := range strings.SplitSeq(request.Query.Get("updateMask"), ",") {
-		if path != "" && path != "ttlConfig" && path != "ttl_config" {
-			return gap("field updateMask " + strconv.Quote(path))
+// applyTTL turns a field's TTL policy on or off when the patch sets it and
+// returns the field as the operation's response reports it once finished.
+func (p *Provider) applyTTL(scope state.Scope, collection, field string, setsTTL, enable bool) map[string]any {
+	active := p.clock().Add(operationLatency)
+	var done map[string]any
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		key := collection + "/" + field
+		switch {
+		case !setsTTL:
+		case !enable:
+			delete(s.fields, key)
+		case s.fields[key] == nil:
+			s.fields[key] = &fieldRecord{ActiveAt: active}
+		}
+		done = fieldWire(scope.Project, collection, field, s.fields[key], active)
+		return nil
+	})
+	return done
+}
+
+// ttlMask refuses an update mask naming anything but the TTL policy and the
+// index configuration. Terraform's destroy masks both to reset them; an
+// indexConfig that isn't the default is refused when the body is decoded.
+// It reports whether the patch sets the TTL policy: no mask, or one naming it.
+func ttlMask(request *gateway.RESTRequest) (bool, error) {
+	mask := request.Query.Get("updateMask")
+	ttl := mask == ""
+	for path := range strings.SplitSeq(mask, ",") {
+		switch path {
+		case "ttlConfig", "ttl_config":
+			ttl = true
+		case "", "indexConfig", "index_config":
+		default:
+			return false, gap("field updateMask " + strconv.Quote(path))
 		}
 	}
-	return nil
+	return ttl, nil
 }
 
 func projectField(project, collection, field string) string {
