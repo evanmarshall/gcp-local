@@ -11,6 +11,8 @@ from gcp_validation.services.vertexai import run_scenario
               'backend': 'not-applicable'},
     contract_files=(
         'gcp_validation/services/vertexai.py',
+        'gcp_validation/services/denials.py',
+        'gcp_validation/errors.py',
         'gcp_validation/live_rest.py',
         'gcp_validation/sandbox.py',
         'tests/conformance/vertexai/conftest.py',

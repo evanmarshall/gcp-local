@@ -3,8 +3,10 @@ package vertexai
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -243,5 +245,129 @@ func TestConfigRejectsAmbiguousBackends(t *testing.T) {
 		if err := (&Provider{}).configure(config); err == nil {
 			t.Fatalf("config accepted: %+v", config)
 		}
+	}
+}
+
+// errorMessage reads a REST error's message.
+func errorMessage(t *testing.T, recorder *httptest.ResponseRecorder) string {
+	t.Helper()
+	message, _ := at(t, decode(t, recorder), "error", "message").(string)
+	return message
+}
+
+// Unknown models are GCP's 404, and a method an endpoint's model doesn't
+// serve is GCP's refusal or a gap (recorded where GCP answers).
+func TestModelCatalog(t *testing.T) {
+	h := newHarness(t, Config{})
+	for _, model := range []string{"gemini-2.5-pro", "gemini-2.5-flash-lite", "gemini-2.5-flash-image"} {
+		if ok := h.call(modelPath+model+":countTokens", prompt("hi"), actorUser); ok.Code != http.StatusOK {
+			t.Fatalf("%s: %d", model, ok.Code)
+		}
+	}
+	for _, model := range []string{"gemini-2.0-flash", "gemini-nonexistent-model"} {
+		missing := h.call(modelPath+model+":generateContent", prompt("hi"), actorUser)
+		want := "Publisher model `projects/" + testProject + "/locations/us-central1/publishers/google/models/" + model + "` was not found or your project does not have access to it."
+		if missing.Code != http.StatusNotFound || !strings.HasPrefix(errorMessage(t, missing), want) {
+			t.Fatalf("%s: %d %s", model, missing.Code, missing.Body)
+		}
+	}
+	for _, item := range []struct {
+		suffix string
+		body   any
+		code   int
+		want   string
+	}{
+		{testEmbedding + ":countTokens", prompt("hi"), 400, "Should provide instances for text model prediction."},
+		{testEmbedding + ":countTokens", map[string]any{"instances": []any{map[string]any{"content": "hi"}}}, 501, "instances is not modeled"},
+		{testEmbedding + ":generateContent", prompt("hi"), 501, "Vertex AI coverage gap: generateContent on an embedding model"},
+		{testEmbedding + ":streamGenerateContent", prompt("hi"), 501, "streamGenerateContent on an embedding model"},
+		{testModel + ":embedContent", map[string]any{"content": turn(actorUser, map[string]any{"text": "hi"})}, 501, "embedContent is served only for embedding models"},
+	} {
+		got := h.call(modelPath+item.suffix, item.body, actorUser)
+		if got.Code != item.code || !strings.Contains(errorMessage(t, got), item.want) {
+			t.Fatalf("%s: %d %s", item.suffix, got.Code, got.Body)
+		}
+	}
+}
+
+// Request bodies are decoded strictly: unknown names are GCP's 400, fields
+// the backends don't model are gaps, and safety settings that would block
+// are gaps (the backends don't rate harm).
+func TestStrictGenerationBodies(t *testing.T) {
+	h := newHarness(t, Config{})
+	with := func(extra map[string]any) map[string]any {
+		body := prompt("hi")
+		maps.Copy(body, extra)
+		return body
+	}
+	generate, count := modelPath+testModel+":generateContent", modelPath+testModel+":countTokens"
+	safety := []any{map[string]any{"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}}
+	for _, item := range []struct {
+		path string
+		body any
+		code int
+		want string
+	}{
+		{generate, with(map[string]any{"notAField": 1}), 400, `Invalid JSON payload received. Unknown name "notAField": Cannot find field.`},
+		{count, with(map[string]any{"safetySettings": safety}), 400, `Invalid JSON payload received. Unknown name "safetySettings": Cannot find field.`},
+		{generate, map[string]any{"contents": []any{}}, 400, "Unable to submit request because at least one contents field is required."},
+		{generate, with(map[string]any{"safetySettings": []any{map[string]any{"category": "HARM_CATEGORY_NOT_A_CATEGORY", "threshold": "BLOCK_NONE"}}}), 400,
+			`Invalid value at 'safety_settings[0].category' (type.googleapis.com/google.cloud.aiplatform.v1.HarmCategory), "HARM_CATEGORY_NOT_A_CATEGORY"`},
+		{generate, with(map[string]any{"safetySettings": []any{map[string]any{"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"}}}), 501,
+			"safetySettings threshold BLOCK_MEDIUM_AND_ABOVE is not modeled"},
+		{generate, with(map[string]any{"cachedContent": "projects/p/locations/l/cachedContents/c"}), 501, "cachedContent is not modeled"},
+		{generate, with(map[string]any{"generationConfig": map[string]any{"presencePenalty": 0.5}}), 501, "generationConfig.presencePenalty is not modeled"},
+		{generate, with(map[string]any{"generationConfig": map[string]any{"responseModalities": []any{"IMAGE"}}}), 501, "generationConfig.responseModalities is not modeled"},
+		{generate, with(map[string]any{"generationConfig": map[string]any{"thinkingConfig": map[string]any{"includeThoughts": true}}}), 501, "generationConfig.thinkingConfig.includeThoughts is not modeled"},
+		{generate, with(map[string]any{"tools": []any{map[string]any{"googleSearch": map[string]any{}}}}), 501, "tool googleSearch is not supported"},
+		{generate, with(map[string]any{"toolConfig": map[string]any{"functionCallingConfig": map[string]any{"mode": "VALIDATED"}}}), 501, "function calling mode VALIDATED is not modeled"},
+		{generate, map[string]any{"contents": []any{turn(actorUser, map[string]any{"fileData": map[string]any{"fileUri": "gs://b/o"}})}}, 501, "contents.parts.fileData is not modeled"},
+		{generate, with(map[string]any{"systemInstruction": turn("system", map[string]any{"videoMetadata": map[string]any{"fps": 1}})}), 501, "systemInstruction.parts.videoMetadata is not modeled"},
+		{modelPath + testEmbedding + ":predict", map[string]any{"instances": []any{map[string]any{"content": "x"}}, "notAField": 1}, 400, `Unknown name "notAField": Cannot find field.`},
+	} {
+		got := h.call(item.path, item.body, actorUser)
+		if got.Code != item.code || !strings.Contains(errorMessage(t, got), item.want) {
+			t.Fatalf("%v: %d %s", item.body, got.Code, got.Body)
+		}
+	}
+	// Modeled options: safety settings that block nothing, labels, a thinking
+	// budget (the stub spends none), and keys GCP's Value fields accept.
+	for _, item := range []struct {
+		path string
+		body any
+	}{
+		{generate, with(map[string]any{"safetySettings": safety, "labels": map[string]any{"team": "a"},
+			"generationConfig": map[string]any{"thinkingConfig": map[string]any{"thinkingBudget": 0}, "presencePenalty": 0}})},
+		{generate, with(map[string]any{"safety_settings": []any{map[string]any{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF", "method": "SEVERITY"}}})},
+		{modelPath + testEmbedding + ":predict", map[string]any{"instances": []any{map[string]any{"content": "x", "task_type": "RETRIEVAL_QUERY", "notRead": 1}}, "parameters": map[string]any{"autoTruncate": true}}},
+	} {
+		if got := h.call(item.path, item.body, actorUser); got.Code != http.StatusOK {
+			t.Fatalf("%v: %d %s", item.body, got.Code, got.Body)
+		}
+	}
+}
+
+// The stub stops before the first stop sequence, as a model does.
+func TestStubHonorsStopSequences(t *testing.T) {
+	h := newHarness(t, Config{})
+	body := prompt("hi")
+	body["generationConfig"] = map[string]any{"stopSequences": []any{"received"}}
+	text, _ := at(t, h.generate(body), "candidates", 0, "content", "parts", 0, "text").(string)
+	if strings.Contains(text, "received") || !strings.HasPrefix(text, stubMarker) {
+		t.Fatalf("text = %q", text)
+	}
+}
+
+// A denial names the model and carries GCP's ErrorInfo (recorded).
+func TestDenialCarriesErrorInfo(t *testing.T) {
+	h := newHarness(t, Config{})
+	denied := h.call(modelPath+testModel+":generateContent", prompt("hi"), actorViewer)
+	name := "projects/" + testProject + "/locations/us-central1/publishers/google/models/" + testModel
+	if message := errorMessage(t, denied); denied.Code != 403 || message != "Permission 'aiplatform.endpoints.predict' denied on resource '//aiplatform.googleapis.com/"+name+"' (or it may not exist)." {
+		t.Fatalf("denial: %d %q", denied.Code, message)
+	}
+	detail, _ := at(t, decode(t, denied), "error", "details", 0).(map[string]any)
+	if detail["reason"] != "IAM_PERMISSION_DENIED" || detail["domain"] != "aiplatform.googleapis.com" || at(t, detail, "metadata", "resource") != name {
+		t.Fatalf("details: %v", detail)
 	}
 }

@@ -95,7 +95,7 @@ func ollamaHarness(t *testing.T) (*harness, *fakeOllama) {
 	t.Helper()
 	fake := newFakeOllama(t)
 	h := newHarness(t, Config{Backend: BackendOllama, OllamaURL: fake.server.URL, Models: map[string]string{
-		testModel: "llama3.2", testEmbedding: "nomic-embed-text", "broken": "missing",
+		testModel: "llama3.2", testEmbedding: "nomic-embed-text", "gemini-2.5-pro": "missing",
 	}})
 	return h, fake
 }
@@ -170,10 +170,10 @@ func TestOllamaEmbeddingsAndErrors(t *testing.T) {
 	if values := list(t, value, "predictions", 0, "embeddings", "values"); !reflect.DeepEqual(values, []any{0.1, 0.2, 0.3, 0.4}) || fake.last()[keyModel] != "nomic-embed-text" {
 		t.Fatalf("embedding = %v sent %v", values, fake.last())
 	}
-	if unmapped := h.call(modelPath+"gemini-2.0-pro:generateContent", prompt("hi"), actorUser); unmapped.Code != http.StatusNotFound {
+	if unmapped := h.call(modelPath+"gemini-2.5-flash-lite:generateContent", prompt("hi"), actorUser); unmapped.Code != http.StatusNotFound {
 		t.Fatalf("unmapped model: %d %s", unmapped.Code, unmapped.Body)
 	}
-	if missing := h.call(modelPath+"broken:generateContent", prompt("hi"), actorUser); missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), "no such model") {
+	if missing := h.call(modelPath+"gemini-2.5-pro:generateContent", prompt("hi"), actorUser); missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), "no such model") {
 		t.Fatalf("missing Ollama model: %d %s", missing.Code, missing.Body)
 	}
 	fake.server.Close()

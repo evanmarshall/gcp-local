@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -66,9 +65,33 @@ var (
 type Provider struct {
 	index   *state.Index
 	engine  *iam.Engine
+	gate    provider.Gate
 	model   Model
 	backend string
 	clock   func() time.Time
+}
+
+// The recorded denial (vertexai-inference-authorization) names the model, with
+// an ErrorInfo; GCP's troubleshooter link is not reproduced. Vertex AI
+// supplies no resource attributes to IAM Conditions (recorded:
+// logging-conditional-access), so none are set.
+const (
+	modelDenial = "Permission '%s' denied on resource '//aiplatform.googleapis.com/%s' (or it may not exist)."
+	modelDomain = "aiplatform.googleapis.com"
+)
+
+// The publisher models GCP serves in us-central1 (recorded: countTokens on
+// each in vertexai-inference-authorization). Any other ID is GCP's 404.
+var (
+	generativeModels = names("gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-image")
+	embeddingModels  = names("text-embedding-005", "text-embedding-004", "text-multilingual-embedding-002", "gemini-embedding-001")
+)
+
+// modelNotFound is GCP's 404 for a model it doesn't serve (recorded).
+func modelNotFound(t target) error {
+	return status.Errorf(codes.NotFound, "Publisher model `%s` was not found or your project does not have access to it. "+
+		"Ensure you are using a valid model name and that the model is available in the specified region. "+
+		"For more information, see: https://docs.cloud.google.com/gemini-enterprise-agent-platform/resources/locations.", t.name())
 }
 
 // configure builds the configured backend.
@@ -96,7 +119,8 @@ func New(_ context.Context, registry *gateway.Registry, index *state.Index, engi
 	if registry == nil || index == nil || engine == nil {
 		return nil, errProviderShape
 	}
-	p := &Provider{index: index, engine: engine, clock: time.Now}
+	p := &Provider{index: index, engine: engine, clock: time.Now,
+		gate: provider.Gate{Engine: engine, Message: modelDenial, Domain: modelDomain}}
 	if err := p.configure(config); err != nil {
 		return nil, err
 	}
@@ -123,10 +147,13 @@ type target struct {
 	project, location, model string
 }
 
-// resource is the model's canonical resource name.
-func (t target) resource() string {
-	return "//aiplatform.googleapis.com/projects/" + t.project + "/locations/" + t.location + "/publishers/google/models/" + t.model
+// name is the model's relative resource name.
+func (t target) name() string {
+	return "projects/" + t.project + "/locations/" + t.location + "/publishers/google/models/" + t.model
 }
+
+// resource is the model's canonical resource name.
+func (t target) resource() string { return "//aiplatform.googleapis.com/" + t.name() }
 
 // resolve validates the path and maps a project number to its ID.
 func (p *Provider) resolve(request *gateway.RESTRequest) (target, error) {
@@ -154,32 +181,20 @@ func (p *Provider) handle(call gateway.Call, raw any) (any, error) {
 		return nil, err
 	}
 	call.Project, call.Location, call.Resource = t.project, t.location, t.resource()
-	decision, err := p.engine.Authorize(call, iam.Target{Name: "//cloudresourcemanager.googleapis.com/projects/" + t.project}, nil)
+	decision, err := p.gate.Check(call, iam.Target{Name: provider.ProjectResource(t.project)}, t.name())
 	if err != nil {
-		return nil, denial(call, t, err)
+		return nil, err
+	}
+	if !generativeModels[t.model] && !embeddingModels[t.model] {
+		return nil, modelNotFound(t)
 	}
 	response, err := p.execute(call, request, t)
 	if err != nil {
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
+	response = provider.WithDecision(response, decision)
 	response.Headers.Set("X-Gcp-Local-Model-Backend", p.backend)
 	return response, nil
-}
-
-// denial renders an authorization failure in the Vertex AI shape.
-func denial(call gateway.Call, t target, err error) error {
-	switch status.Code(err) {
-	case codes.PermissionDenied:
-		return status.Errorf(codes.PermissionDenied, "Permission '%s' denied on resource '%s' (or it may not exist).", permissionPredict, t.resource())
-	case codes.Unauthenticated:
-		return status.Error(codes.Unauthenticated, "Request is missing required authentication credential. Expected OAuth 2 access token, login cookie or other valid authentication credential.")
-	default:
-		return fmt.Errorf("authorize %s: %w", call.Method, err)
-	}
 }
 
 // execute dispatches an authorized call.
@@ -196,10 +211,34 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, t ta
 	}
 }
 
+// errEmbeddingCount is GCP's countTokens refusal on an embedding model given
+// contents (recorded).
+var errEmbeddingCount = provider.Invalid("Should provide instances for text model prediction.")
+
+// generationBody decodes a generation or countTokens body. On an embedding
+// model, generation is a gap and countTokens is GCP's refusal (recorded).
+func generationBody(method string, raw []byte, model string) (GenerateRequest, error) {
+	if method != methodCount {
+		var body GenerateRequest
+		if embeddingModels[model] {
+			return body, gap(strings.TrimPrefix(method, methodPrefix) + " on an embedding model")
+		}
+		return body, decodeBody(raw, &body, generateFields)
+	}
+	var counted countRequest
+	if err := decodeBody(raw, &counted, countFields); err != nil {
+		return GenerateRequest{}, err
+	}
+	if embeddingModels[model] {
+		return GenerateRequest{}, errEmbeddingCount
+	}
+	return counted.generate(), nil
+}
+
 // generate serves generateContent, streamGenerateContent, and countTokens.
 func (p *Provider) generate(call gateway.Call, request *gateway.RESTRequest, t target) (*gateway.RESTResponse, error) {
-	var body GenerateRequest
-	if err := decodeBody(request.JSON, &body); err != nil {
+	body, err := generationBody(call.Method, request.JSON, t.model)
+	if err != nil {
 		return nil, err
 	}
 	if err := body.validate(); err != nil {
@@ -250,23 +289,16 @@ func countResponse(body *GenerateRequest) *gateway.RESTResponse {
 	}}
 }
 
-// embeddingModel reports whether a model ID names a text embedding model.
-func embeddingModel(model string) bool { return strings.Contains(model, "embedding") }
-
 // maxDimensions is the largest supported output size.
 const maxDimensions = 3072
 
-// predictRequest is the text-embedding predict body.
+// predictRequest is the PredictRequest body. Instances and parameters are
+// google.protobuf.Value: GCP accepts keys a model doesn't read (recorded), so
+// they are read leniently; the embedding stub reads content and
+// outputDimensionality, and Ollama the content.
 type predictRequest struct {
-	Instances []struct {
-		Content  *string `json:"content"`
-		TaskType string  `json:"task_type,omitempty"`
-		Title    string  `json:"title,omitempty"`
-	} `json:"instances"`
-	Parameters struct {
-		OutputDimensionality int   `json:"outputDimensionality,omitempty"`
-		AutoTruncate         *bool `json:"autoTruncate,omitempty"`
-	} `json:"parameters"`
+	Instances  []json.RawMessage `json:"instances"`
+	Parameters json.RawMessage   `json:"parameters"`
 }
 
 // texts validates the instances and returns their content.
@@ -275,13 +307,27 @@ func (r *predictRequest) texts() ([]string, error) {
 		return nil, provider.Invalid("instances must not be empty")
 	}
 	texts := make([]string, len(r.Instances))
-	for i, instance := range r.Instances {
-		if instance.Content == nil {
+	for i, raw := range r.Instances {
+		var instance struct {
+			Content *string `json:"content"`
+		}
+		if json.Unmarshal(raw, &instance) != nil || instance.Content == nil {
 			return nil, provider.Invalid("Each instance needs a content string")
 		}
 		texts[i] = *instance.Content
 	}
 	return texts, nil
+}
+
+// dimensions reads parameters.outputDimensionality; 0 means the model's size.
+func (r *predictRequest) dimensions() (int, error) {
+	var parameters struct {
+		OutputDimensionality int `json:"outputDimensionality"`
+	}
+	if len(r.Parameters) > 0 && json.Unmarshal(r.Parameters, &parameters) != nil {
+		return 0, provider.Invalid("Invalid parameters")
+	}
+	return parameters.OutputDimensionality, nil
 }
 
 // checkDimensions rejects an output size outside the supported range.
@@ -309,18 +355,22 @@ func (p *Provider) embed(ctx context.Context, model string, texts []string, dime
 
 // predict serves text-embedding models through the predict method.
 func (p *Provider) predict(ctx context.Context, request *gateway.RESTRequest, t target) (*gateway.RESTResponse, error) {
-	if !embeddingModel(t.model) {
+	if !embeddingModels[t.model] {
 		return nil, gap("predict is served only for text embedding models")
 	}
 	var body predictRequest
-	if err := json.Unmarshal(request.JSON, &body); err != nil {
-		return nil, provider.Invalid("Invalid JSON payload received.")
+	if err := provider.DecodeJSON(request.JSON, "", &body, gap, provider.Fields{}); err != nil {
+		return nil, err
 	}
 	texts, err := body.texts()
 	if err != nil {
 		return nil, err
 	}
-	vectors, err := p.embed(ctx, t.model, texts, body.Parameters.OutputDimensionality)
+	dimensions, err := body.dimensions()
+	if err != nil {
+		return nil, err
+	}
+	vectors, err := p.embed(ctx, t.model, texts, dimensions)
 	if err != nil {
 		return nil, err
 	}
@@ -339,13 +389,19 @@ func (p *Provider) predict(ctx context.Context, request *gateway.RESTRequest, t 
 	}}, nil
 }
 
-// embedConfig carries the embedContent options, top-level or nested.
+// embedConfig carries the embedContent options, top-level or nested. The
+// stub's vectors don't depend on the task type or title, and it never
+// truncates, so it reads only the size.
 type embedConfig struct {
 	TaskType             string `json:"taskType,omitempty"`
 	Title                string `json:"title,omitempty"`
 	OutputDimensionality int    `json:"outputDimensionality,omitempty"`
 	AutoTruncate         *bool  `json:"autoTruncate,omitempty"`
 }
+
+// embedFields are the embedContent fields embedRequest lacks.
+var embedFields = provider.Fields{Unmodeled: append(contentFields("content"),
+	"embedContentConfig.documentOcr", "embedContentConfig.audioTrackExtraction", "embedContentConfig.mimeType")}
 
 // embedRequest is the embedContent body.
 type embedRequest struct {
@@ -373,8 +429,11 @@ func (r *embedRequest) text() (string, int, error) {
 
 // embedContent serves the Gemini embedding method.
 func (p *Provider) embedContent(ctx context.Context, request *gateway.RESTRequest, t target) (*gateway.RESTResponse, error) {
+	if !embeddingModels[t.model] {
+		return nil, gap("embedContent is served only for embedding models")
+	}
 	var body embedRequest
-	if err := decodeBody(request.JSON, &body); err != nil {
+	if err := decodeBody(request.JSON, &body, embedFields); err != nil {
 		return nil, err
 	}
 	text, dimensions, err := body.text()

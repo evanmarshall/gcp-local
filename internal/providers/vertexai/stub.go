@@ -54,6 +54,9 @@ func (Stub) Generate(_ context.Context, model string, request *GenerateRequest, 
 	} else {
 		result.Parts = []Part{{Text: stubText(model, request, requestDigest(request))}}
 	}
+	if text := result.Parts[0].Text; text != "" {
+		result.Parts[0].Text = cutAtStop(text, request.config().StopSequences)
+	}
 	if limit := request.config().MaxOutputTokens; limit > 0 && result.Parts[0].Text != "" {
 		if text, cut := truncateTokens(result.Parts[0].Text, limit); cut {
 			result.Parts[0].Text, result.FinishReason = text, "MAX_TOKENS"
@@ -71,6 +74,18 @@ func (Stub) Generate(_ context.Context, model string, request *GenerateRequest, 
 		}
 	}
 	return result, nil
+}
+
+// cutAtStop ends text before the first stop sequence it contains, as a
+// model stops generating there; the finish reason stays STOP.
+func cutAtStop(text string, stops []string) string {
+	end := len(text)
+	for _, stop := range stops {
+		if index := strings.Index(text, stop); stop != "" && index >= 0 && index < end {
+			end = index
+		}
+	}
+	return text[:end]
 }
 
 // stubChunks splits a text answer into three deterministic pieces; a function
@@ -118,10 +133,10 @@ func stubText(model string, request *GenerateRequest, digest string) string {
 func callable(request *GenerateRequest) []FunctionDeclaration {
 	declarations := request.declarations()
 	mode, allowed := request.callingMode()
-	if len(declarations) == 0 || mode == "NONE" {
+	if len(declarations) == 0 || mode == modeNone {
 		return nil
 	}
-	if _, answered := lastFunctionResponse(request); answered && mode != "ANY" {
+	if _, answered := lastFunctionResponse(request); answered && mode != modeAny {
 		return nil
 	}
 	if len(allowed) == 0 {

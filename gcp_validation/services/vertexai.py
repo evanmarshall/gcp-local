@@ -9,12 +9,14 @@ embedding, and creates no resources.
 import json
 from pathlib import Path
 
+from gcp_validation.errors import detailed
 from gcp_validation.evidence import SnapshotCase, now
 from gcp_validation.live_rest import LiveScope, Observations, OwnedRun, Response, RestClient
 from gcp_validation.sandbox import Sandbox
+from gcp_validation.services.denials import iam_denial
 
 SERVICE = 'aiplatform'
-LIMITS = {'max_generate_calls': 2, 'max_output_tokens': 16, 'max_run_seconds': 300}
+LIMITS = {'max_generate_calls': 3, 'max_output_tokens': 16, 'max_run_seconds': 300}
 LIVE_ENDPOINT = 'https://us-central1-aiplatform.googleapis.com'
 REGION = 'us-central1'
 MODEL = 'gemini-2.5-flash'
@@ -25,6 +27,13 @@ GENERATE = {**PROMPT,
                                  # Without this, 2.5 models spend the token cap on thinking.
                                  'thinkingConfig': {'thinkingBudget': 0}}}
 USAGE_COUNTS = frozenset({'promptTokenCount', 'totalTokenCount'})
+# countTokens answers 200 for a served generative model, 400 for an embedding model, and
+# 404 for an unknown or retired one (gemini-2.0-flash in us-central1 by 2026-10).
+CATALOG_PROBES = ('gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
+                  'gemini-2.5-flash-image', 'gemini-2.0-flash', 'gemini-nonexistent-model',
+                  'text-embedding-005', 'text-embedding-004', 'text-multilingual-embedding-002',
+                  'gemini-embedding-001')
+SAFETY = [{'category': 'HARM_CATEGORY_DANGEROUS_CONTENT', 'threshold': 'BLOCK_NONE'}]
 
 
 def load_scope(filename: str, sandbox: Sandbox, mode: str) -> LiveScope:
@@ -93,6 +102,31 @@ def embedding(response: Response) -> dict:
             'prediction_fields': sorted(prediction), 'dimensions': len(values)}
 
 
+def refusals(run: InferenceRun, snapshot: SnapshotCase, observe: Observations) -> None:
+    """Record the model catalog, safety settings, and refused request bodies."""
+    snapshot.match('count-tokens-models', {model: run.call(model, 'countTokens', PROMPT).status
+                                           for model in CATALOG_PROBES})
+    snapshot.match('unknown-model', detailed(observe, run.call(
+        'gemini-nonexistent-model', 'generateContent', GENERATE)))
+    snapshot.match('count-tokens-embedding-model', detailed(observe, run.call(
+        EMBEDDING, 'countTokens', PROMPT)))
+    snapshot.match('safety-block-none', generation(run.call(
+        MODEL, 'generateContent', {**GENERATE, 'safetySettings': SAFETY})))
+    unknown_category = [{'category': 'HARM_CATEGORY_NOT_A_CATEGORY', 'threshold': 'BLOCK_NONE'}]
+    snapshot.match('safety-unknown-category', observe.error(run.call(
+        MODEL, 'generateContent', {**PROMPT, 'safetySettings': unknown_category})))
+    snapshot.match('count-tokens-safety-settings', detailed(observe, run.call(
+        MODEL, 'countTokens', {**PROMPT, 'safetySettings': SAFETY})))
+    snapshot.match('unknown-field', detailed(observe, run.call(
+        MODEL, 'generateContent', {**PROMPT, 'notAField': 1})))
+    snapshot.match('unknown-config-field', observe.error(run.call(
+        MODEL, 'generateContent', {**PROMPT, 'generationConfig': {'notAField': 1}})))
+    snapshot.match('mistyped-field', observe.error(run.call(
+        MODEL, 'generateContent', {**PROMPT, 'generationConfig': {'temperature': 'hot'}})))
+    snapshot.match('empty-contents', detailed(observe, run.call(
+        MODEL, 'generateContent', {'contents': []})))
+
+
 def run_scenario(run: InferenceRun, snapshot: SnapshotCase) -> None:
     """Record the same selected observations in local, recording, and revalidation runs."""
     client = run.client
@@ -105,10 +139,17 @@ def run_scenario(run: InferenceRun, snapshot: SnapshotCase) -> None:
     snapshot.match('generate-content', generation(run.call(MODEL, 'generateContent', GENERATE)))
     streamed = run.call(MODEL, 'streamGenerateContent', GENERATE, query={'alt': 'sse'})
     snapshot.match('stream-generate-content', stream(streamed))
-    snapshot.match('denied-generate', observe.error(
-        run.call(MODEL, 'generateContent', GENERATE, actor='denied')))
+    snapshot.match('denied-generate', iam_denial(observe, run.call(
+        MODEL, 'generateContent', GENERATE, actor='denied')))
+    snapshot.match('denied-count-tokens', iam_denial(observe, run.call(
+        MODEL, 'countTokens', PROMPT, actor='denied')))
+    refusals(run, snapshot, observe)
     instances = {'instances': [{'content': 'ready'}]}
     snapshot.match('embedding', embedding(run.call(
         EMBEDDING, 'predict', {**instances, 'parameters': {'outputDimensionality': 8}})))
-    snapshot.match('denied-embedding', observe.error(
-        run.call(EMBEDDING, 'predict', instances, actor='denied')))
+    snapshot.match('denied-embedding', iam_denial(observe, run.call(
+        EMBEDDING, 'predict', instances, actor='denied')))
+    snapshot.match('unknown-embedding-model', detailed(observe, run.call(
+        'text-embedding-999', 'predict', instances)))
+    snapshot.match('predict-unknown-field', detailed(observe, run.call(
+        EMBEDDING, 'predict', {**instances, 'notAField': 1})))

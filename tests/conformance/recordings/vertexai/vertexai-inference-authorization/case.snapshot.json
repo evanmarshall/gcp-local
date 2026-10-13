@@ -1,6 +1,6 @@
 {
   "vertexai-inference-authorization": {
-    "recorded-date": "12-10-2026, 17:34:46",
+    "recorded-date": "13-10-2026, 01:25:17",
     "recorded-content": {
       "count-tokens": {
         "fields": [
@@ -37,8 +37,135 @@
       },
       "denied-generate": {
         "code": 403,
+        "details": [
+          {
+            "domain": "aiplatform.googleapis.com",
+            "metadata": {
+              "permission": "aiplatform.endpoints.predict",
+              "resource": "projects/<project>/locations/us-central1/publishers/google/models/gemini-2.5-flash"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'aiplatform.endpoints.predict' denied on resource '//aiplatform.googleapis.com/projects/<project>/locations/us-central1/publishers/google/models/gemini-2.5-flash' (or it may not exist).",
         "status": "PERMISSION_DENIED"
+      },
+      "denied-count-tokens": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "aiplatform.googleapis.com",
+            "metadata": {
+              "permission": "aiplatform.endpoints.predict",
+              "resource": "projects/<project>/locations/us-central1/publishers/google/models/gemini-2.5-flash"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'aiplatform.endpoints.predict' denied on resource '//aiplatform.googleapis.com/projects/<project>/locations/us-central1/publishers/google/models/gemini-2.5-flash' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "count-tokens-models": {
+        "gemini-2.0-flash": 404,
+        "gemini-2.5-flash": 200,
+        "gemini-2.5-flash-image": 200,
+        "gemini-2.5-flash-lite": 200,
+        "gemini-2.5-pro": 200,
+        "gemini-embedding-001": 400,
+        "gemini-nonexistent-model": 404,
+        "text-embedding-004": 400,
+        "text-embedding-005": 400,
+        "text-multilingual-embedding-002": 400
+      },
+      "unknown-model": {
+        "code": 404,
+        "details": [],
+        "http_status": 404,
+        "message": "Publisher model `projects/<project>/locations/us-central1/publishers/google/models/gemini-nonexistent-model` was not found or your project does not have access to it. Ensure you are using a valid model name and that the model is available in the specified region. For more information, see: https://docs.cloud.google.com/gemini-enterprise-agent-platform/resources/locations.",
+        "status": "NOT_FOUND"
+      },
+      "count-tokens-embedding-model": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Should provide instances for text model prediction.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "safety-block-none": {
+        "candidates": 1,
+        "fields": [
+          "candidates",
+          "createTime",
+          "modelVersion",
+          "responseId",
+          "usageMetadata"
+        ],
+        "finish_reason_present": true,
+        "has_text": true,
+        "http_status": 200,
+        "role": "model",
+        "usage_counts": [
+          "promptTokenCount",
+          "totalTokenCount"
+        ]
+      },
+      "safety-unknown-category": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "count-tokens-safety-settings": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"safetySettings\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"safetySettings\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"notAField\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"notAField\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-config-field": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "mistyped-field": {
+        "code": 400,
+        "http_status": 400,
+        "status": "INVALID_ARGUMENT"
+      },
+      "empty-contents": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Unable to submit request because at least one contents field is required. Learn more: https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/gemini",
+        "status": "INVALID_ARGUMENT"
       },
       "embedding": {
         "dimensions": 8,
@@ -53,8 +180,43 @@
       },
       "denied-embedding": {
         "code": 403,
+        "details": [
+          {
+            "domain": "aiplatform.googleapis.com",
+            "metadata": {
+              "permission": "aiplatform.endpoints.predict",
+              "resource": "projects/<project>/locations/us-central1/publishers/google/models/text-embedding-005"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'aiplatform.endpoints.predict' denied on resource '//aiplatform.googleapis.com/projects/<project>/locations/us-central1/publishers/google/models/text-embedding-005' (or it may not exist).",
         "status": "PERMISSION_DENIED"
+      },
+      "unknown-embedding-model": {
+        "code": 404,
+        "details": [],
+        "http_status": 404,
+        "message": "Publisher model `projects/<project>/locations/us-central1/publishers/google/models/text-embedding-999` was not found or your project does not have access to it. Ensure you are using a valid model name and that the model is available in the specified region. For more information, see: https://docs.cloud.google.com/gemini-enterprise-agent-platform/resources/locations.",
+        "status": "NOT_FOUND"
+      },
+      "predict-unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"notAField\": Cannot find field."
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"notAField\": Cannot find field.",
+        "status": "INVALID_ARGUMENT"
       }
     }
   }

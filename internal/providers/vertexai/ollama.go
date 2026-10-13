@@ -168,7 +168,7 @@ func chatBody(alias string, request *GenerateRequest, stream bool) map[string]an
 // ollamaTools converts the callable function declarations.
 func ollamaTools(request *GenerateRequest) []map[string]any {
 	mode, allowed := request.callingMode()
-	if mode == "NONE" {
+	if mode == modeNone {
 		return nil
 	}
 	var tools []map[string]any
