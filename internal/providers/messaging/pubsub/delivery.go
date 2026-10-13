@@ -839,10 +839,11 @@ func (p *Provider) relayUpstream(call gateway.Call, b driver, upstream pb.Subscr
 			failures <- err
 			return
 		}
+		pulled := len(response.GetReceivedMessages())
 		response.ReceivedMessages = p.expire(call.Context, b, first.GetSubscription(), response.GetReceivedMessages())
 		p.track(first.GetSubscription(), response.GetReceivedMessages())
-		if len(response.GetReceivedMessages()) == 0 {
-			continue
+		if pulled > 0 && len(response.GetReceivedMessages()) == 0 {
+			continue // every message expired; keepalive answers still go out
 		}
 		if err := downstream.Send(response); err != nil {
 			failures <- err

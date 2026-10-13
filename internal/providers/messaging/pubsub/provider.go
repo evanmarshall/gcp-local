@@ -674,9 +674,9 @@ var listPaging = provider.Paging{Default: maxPageSize, Max: maxPageSize, Invalid
 
 // listPage reads every page of a list from the emulator, orders the items by
 // name, and returns the page the request asks for, with GCP's recorded
-// refusals (pubsub-rest-data-plane). GCP lists topics by name; subscriptions
-// and snapshots come in an order it doesn't document, and name order is the
-// local choice.
+// refusals (pubsub-rest-data-plane). GCP doesn't document list order, and
+// recorded runs listed both topics and subscriptions in neither name nor
+// creation order; name order is the local choice.
 func listPage[R pageable, P proto.Message, T interface {
 	proto.Message
 	GetName() string

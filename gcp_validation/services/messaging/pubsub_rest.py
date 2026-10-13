@@ -364,9 +364,9 @@ def probe_requests(
 def observe_lists(
     fixture: DataPlaneFixture, snapshot: SnapshotCase, observe: Observations
 ) -> None:
-    """Create the second topic and subscription, then observe list order and paging.
+    """Create the second topic and subscription, then observe list membership and paging.
 
-    Other runs may share the sandbox project; only the owned pair's order is recorded.
+    Other runs may share the sandbox project; only the owned pair is recorded.
     """
     second_topic = f"/v1/projects/{fixture.project}/topics/{fixture.second}"
     second_sub = f"/v1/projects/{fixture.project}/subscriptions/{fixture.second}"
@@ -392,12 +392,12 @@ def observe_lists(
         first = listing(pageSize="1")
         token = first.json().get("nextPageToken", "")
         second = listing(pageSize="1", pageToken=token)
-        # Topics list in name order; subscriptions in an order GCP doesn't
-        # document (neither name nor creation), so only membership is recorded.
+        # GCP doesn't document list order, and it varied between runs for both
+        # kinds (neither name nor creation order), so only membership is recorded.
         listed = [observe.text(n) for n in names if n in owned]
         snapshot.match(f"{kind}-list", {
             "http_status": everything.status, "fields": sorted(everything.json()),
-            **({"owned_order": listed} if kind == "topics" else {"owned": sorted(listed)}),
+            "owned": sorted(listed),
             "first_status": first.status, "first_count": len(first.json().get(kind, [])),
             "first_has_next": bool(token), "second_status": second.status,
             "second_count": len(second.json().get(kind, [])),
