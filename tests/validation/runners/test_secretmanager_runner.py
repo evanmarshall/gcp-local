@@ -27,7 +27,7 @@ def test_scope_requires_exact_approved_contract(tmp_path):
     sandbox = ns(project='sandbox-project', project_number='123')
     assert LiveScope.load(scope_file(tmp_path), sandbox, "record").project == 'sandbox-project'
     for changes in ({'approved': False}, {'services': ['storage']}, {'project_number': '456'},
-                    {'limits': dict(LIMITS, max_secrets=LIMITS['max_secrets'] + 1)}, {'scheduled_runs': True}):
+                    {'limits': {**LIMITS, 'max_secrets': 3}}, {'scheduled_runs': True}):
         with pytest.raises(ValueError):
             LiveScope.load(scope_file(tmp_path, **changes), sandbox, "record")
     with pytest.raises(ValueError):
