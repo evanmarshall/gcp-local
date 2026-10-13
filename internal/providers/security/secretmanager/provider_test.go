@@ -217,7 +217,7 @@ func TestDestroyBoundaryAndMetadataRead(t *testing.T) {
 func TestListUpdateAndDeleteLifecycle(t *testing.T) {
 	h := newHarness(t)
 	h.create(replicationAuto())
-	recorder := h.invoke(http.MethodPatch, "/v1/projects/"+testProject+"/secrets/"+testSecret, map[string]any{
+	recorder := h.invoke(http.MethodPatch, "/v1/projects/"+testProject+"/secrets/"+testSecret+"?updateMask=labels", map[string]any{
 		"labels": map[string]any{"env": "synthetic"},
 	}, "actor")
 	if recorder.Code != 200 {

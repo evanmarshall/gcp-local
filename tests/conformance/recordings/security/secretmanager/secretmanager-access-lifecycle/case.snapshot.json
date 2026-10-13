@@ -1,6 +1,6 @@
 {
   "secretmanager-access-lifecycle": {
-    "recorded-date": "12-10-2026, 22:37:38",
+    "recorded-date": "13-10-2026, 02:00:50",
     "recorded-content": {
       "created": {
         "fields": [
@@ -34,12 +34,34 @@
       },
       "denied-access": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "secretmanager.versions.access"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'secretmanager.versions.access' denied on resource (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "denied-missing-version": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "secretmanager.versions.access"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'secretmanager.versions.access' denied on resource (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "accessor-granted": {
@@ -73,12 +95,34 @@
       },
       "accessor-cannot-read-metadata": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "secretmanager.versions.get"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'secretmanager.versions.get' denied on resource (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "accessor-cannot-add-version": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "secretmanager.versions.add"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'secretmanager.versions.add' denied on resource (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "oversize-payload": {
@@ -141,6 +185,312 @@
           "DESTROYED"
         ]
       },
+      "update-stale-etag": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "The etag provided in the request does not match the resource's current etag. Please retry the whole read-modify-write with exponential backoff.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "update-no-mask": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Field [update_mask] is required.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "update-replication": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Existing secret has automatic replication, but requested secret does not. Updating secret replication is not supported.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "update-invalid-annotation": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "[gcp-local/purpose] must follow pattern [a-z0-9A-Z]+([_\\.\\-]*[a-z0-9A-Z]+)*), be less than 64 characters, and must have a UTF encoding of less than 128 bytes",
+        "status": "INVALID_ARGUMENT"
+      },
+      "updated": {
+        "annotations": {
+          "gcp-local.purpose": "conformance"
+        },
+        "fields": [
+          "annotations",
+          "createTime",
+          "etag",
+          "labels",
+          "name",
+          "replication"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local",
+          "phase": "updated"
+        }
+      },
+      "labels-restored": {
+        "annotations": {
+          "gcp-local.purpose": "conformance"
+        },
+        "fields": [
+          "annotations",
+          "createTime",
+          "etag",
+          "labels",
+          "name",
+          "replication"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        }
+      },
+      "add-checksum-mismatch": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "Provided SecretPayload.data crc32c does not match calculated crc32c.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "add-checksum-match": {
+        "clientSpecifiedPayloadChecksum": true,
+        "fields": [
+          "clientSpecifiedPayloadChecksum",
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "name": "<secret-by-number>/versions/2",
+        "state": "ENABLED"
+      },
+      "disable-stale-etag": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "The etag provided in the request does not match the resource's current etag. Please retry the whole read-modify-write with exponential backoff.",
+        "status": "FAILED_PRECONDITION"
+      },
+      "disable-current-etag": {
+        "fields": [
+          "clientSpecifiedPayloadChecksum",
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "DISABLED"
+      },
+      "enable-after-disable": {
+        "fields": [
+          "clientSpecifiedPayloadChecksum",
+          "createTime",
+          "etag",
+          "name",
+          "replicationStatus",
+          "state"
+        ],
+        "http_status": 200,
+        "state": "ENABLED"
+      },
+      "unknown-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\" at 'secret': Cannot find field.",
+                "field": "secret"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\" at 'secret': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "unknown-nested-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid JSON payload received. Unknown name \"unknownField\" at 'secret.replication.automatic': Cannot find field.",
+                "field": "secret.replication.automatic"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid JSON payload received. Unknown name \"unknownField\" at 'secret.replication.automatic': Cannot find field.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "mistyped-field": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'secret.labels' (type.googleapis.com/google.cloud.secretmanager.v1.Secret.LabelsEntry), \"x\"",
+                "field": "secret.labels"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'secret.labels' (type.googleapis.com/google.cloud.secretmanager.v1.Secret.LabelsEntry), \"x\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "second-created": {
+        "annotations": {
+          "gcp-local.purpose": "conditions"
+        },
+        "fields": [
+          "annotations",
+          "createTime",
+          "etag",
+          "labels",
+          "name",
+          "replication"
+        ],
+        "http_status": 200,
+        "labels": {
+          "gcp-local-run": "<run>",
+          "managed-by": "gcp-local"
+        },
+        "name": "<second-by-number>"
+      },
+      "second-versions": [
+        200,
+        200
+      ],
+      "conditions-granted": {
+        "bindings": [
+          {
+            "condition": {
+              "expression": "resource.type == \"secretmanager.googleapis.com/SecretVersion\" && resource.service == \"secretmanager.googleapis.com\" && resource.name == \"<second-by-number>/versions/2\"",
+              "title": "version-two"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/secretmanager.secretAccessor"
+          },
+          {
+            "condition": {
+              "expression": "resource.type == \"secretmanager.googleapis.com/Secret\" && resource.name == \"<second-by-number>\"",
+              "title": "secret-only"
+            },
+            "members": [
+              "serviceAccount:<allowed>"
+            ],
+            "role": "roles/secretmanager.viewer"
+          }
+        ],
+        "http_status": 200,
+        "version": 3
+      },
+      "conditional-access": {
+        "latest": 403,
+        "secret_get": 200,
+        "version_get": 403,
+        "version_one": 403,
+        "version_two": 200,
+        "versions_list": 200
+      },
+      "conditional-denied": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "secretmanager.versions.access"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'secretmanager.versions.access' denied on resource (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "versions-order": {
+        "http_status": 200,
+        "names": [
+          "<secret-by-number>/versions/2",
+          "<secret-by-number>/versions/1"
+        ]
+      },
+      "versions-paged": {
+        "first_fields": [
+          "nextPageToken",
+          "totalSize",
+          "versions"
+        ],
+        "first_names": [
+          "<secret-by-number>/versions/2"
+        ],
+        "first_status": 200,
+        "second_fields": [
+          "totalSize",
+          "versions"
+        ],
+        "second_names": [
+          "<secret-by-number>/versions/1"
+        ],
+        "second_status": 200
+      },
+      "versions-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "page_token [not-a-page-token] is invalid. Please retry with a valid token or retry the initial List request.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "versions-negative-size": {
+        "fields": [
+          "totalSize",
+          "versions"
+        ],
+        "http_status": 200
+      },
+      "secrets-paged": {
+        "first_count": 1,
+        "first_has_next": true,
+        "first_status": 200,
+        "owned_order": [
+          "<second-by-number>",
+          "<secret-by-number>"
+        ],
+        "second_count": 1,
+        "second_status": 200
+      },
+      "secrets-invalid-token": {
+        "code": 400,
+        "details": [],
+        "http_status": 400,
+        "message": "page_token [not-a-page-token] is invalid. Please retry with a valid token or retry the initial List request.",
+        "status": "INVALID_ARGUMENT"
+      },
+      "secrets-negative-size": {
+        "fields": [
+          "secrets",
+          "totalSize"
+        ],
+        "http_status": 200
+      },
       "deleted": {
         "http_status": 200
       },
@@ -151,12 +501,34 @@
       },
       "absent-denied": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "secretmanager.secrets.get"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'secretmanager.secrets.get' denied on resource (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "absent-denied-access": {
         "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "secretmanager.versions.access"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
         "http_status": 403,
+        "message": "Permission 'secretmanager.versions.access' denied on resource (or it may not exist).",
         "status": "PERMISSION_DENIED"
       },
       "cleanup": {

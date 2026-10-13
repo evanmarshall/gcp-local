@@ -6,7 +6,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -166,15 +165,6 @@ func MapList(value any) []map[string]any {
 		}
 	}
 	return result
-}
-
-// DecodeObject decodes a JSON object request body.
-func DecodeObject(body []byte) (map[string]any, error) {
-	var value map[string]any
-	if json.Unmarshal(body, &value) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid request body")
-	}
-	return value, nil
 }
 
 // NoBackend is the backend factory of a provider whose state is metadata only:

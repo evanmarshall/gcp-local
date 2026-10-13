@@ -16,8 +16,8 @@ var SecretManagerRoutes = []contract.Route{
 	{Method: "secretmanager.versions.list", Verb: "GET", Path: "/v1/projects/{project}/secrets/{secret}/versions", JSONBody: false, Media: false},
 	{Method: "secretmanager.versions.get", Verb: "GET", Path: "/v1/projects/{project}/secrets/{secret}/versions/{version}", JSONBody: false, Media: false},
 	{Method: "secretmanager.versions.access", Verb: "GET", Path: "/v1/projects/{project}/secrets/{secret}/versions/{version}:access", JSONBody: false, Media: false},
-	{Method: "secretmanager.versions.destroy", Verb: "POST", Path: "/v1/projects/{project}/secrets/{secret}/versions/{version}:destroy", JSONBody: false, Media: false},
-	{Method: "secretmanager.versions.disable", Verb: "POST", Path: "/v1/projects/{project}/secrets/{secret}/versions/{version}:disable", JSONBody: false, Media: false},
-	{Method: "secretmanager.versions.enable", Verb: "POST", Path: "/v1/projects/{project}/secrets/{secret}/versions/{version}:enable", JSONBody: false, Media: false},
+	{Method: "secretmanager.versions.destroy", Verb: "POST", Path: "/v1/projects/{project}/secrets/{secret}/versions/{version}:destroy", JSONBody: true, Media: false},
+	{Method: "secretmanager.versions.disable", Verb: "POST", Path: "/v1/projects/{project}/secrets/{secret}/versions/{version}:disable", JSONBody: true, Media: false},
+	{Method: "secretmanager.versions.enable", Verb: "POST", Path: "/v1/projects/{project}/secrets/{secret}/versions/{version}:enable", JSONBody: true, Media: false},
 	{Method: "secretmanager.locations.list", Verb: "GET", Path: "/v1/projects/{project}/locations", JSONBody: false, Media: false},
 }

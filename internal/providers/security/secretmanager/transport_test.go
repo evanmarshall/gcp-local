@@ -32,7 +32,7 @@ const (
 )
 
 // filterGap is the refusal of a list filter on either transport.
-const filterGap = "Secret Manager coverage gap: list filters are not implemented"
+const filterGap = "Secret Manager coverage gap: list filter is not implemented"
 
 // grpcConn serves the harness gateway over an in-memory gRPC listener.
 func grpcConn(t *testing.T, h *harness) *grpc.ClientConn {

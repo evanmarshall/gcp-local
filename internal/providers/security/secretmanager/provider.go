@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"regexp"
 	"time"
 
@@ -63,6 +62,7 @@ var permissions = map[string]string{
 type Provider struct {
 	index   *state.Index
 	engine  *iam.Engine
+	gate    provider.Gate
 	manager *backend.Manager
 	scopes  *state.Store[scopeState]
 	clock   func() time.Time
@@ -81,6 +81,9 @@ func New(_ context.Context, registry *gateway.Registry, manager *backend.Manager
 	}
 	p := &Provider{
 		index: index, engine: engine, manager: manager,
+		// Recorded: secretmanager-access-lifecycle "denied-access".
+		gate: provider.Gate{Engine: engine, Index: index, Message: provider.PermissionDeniedUnnamed,
+			Domain: "iam.googleapis.com", OmitResource: true},
 		scopes: state.NewStore(newScopeState, state.GlobalScope),
 		clock:  time.Now,
 	}
@@ -117,24 +120,27 @@ func (p *Provider) Reset(scope state.Scope) error {
 	return nil
 }
 
-// secretRecord is one stored secret and its versions.
+// secretRecord is one stored secret and its versions. Replication is
+// always automatic.
 type secretRecord struct {
 	Name        string
-	Replication map[string]any
 	Versions    map[string]*versionRecord
 	Labels      map[string]string
+	Annotations map[string]string
 	CreatedAt   time.Time
 	Revision    int
 }
 
-// versionRecord is one stored secret version.
+// versionRecord is one stored secret version. ClientChecksum records that
+// the add request carried a verified CRC32C.
 type versionRecord struct {
-	Number      string
-	Payload     []byte
-	State       string // ENABLED, DISABLED, DESTROYED
-	CreatedAt   time.Time
-	DestroyedAt time.Time
-	Revision    int
+	Number         string
+	Payload        []byte
+	State          string // ENABLED, DISABLED, DESTROYED
+	CreatedAt      time.Time
+	DestroyedAt    time.Time
+	Revision       int
+	ClientChecksum bool
 }
 
 // scopeState is one project slice of provider state.
@@ -222,14 +228,14 @@ func (p *Provider) serve(call gateway.Call, request *gateway.RESTRequest, scope 
 	missing := id != "" && record == nil
 	checked := target
 	if missing {
-		checked = iam.Target{Name: provider.ProjectResource(scope.Project)}
+		checked.Name = provider.ProjectResource(scope.Project)
 	}
-	decision, err := p.engine.Authorize(call, checked, nil)
+	if id != "" {
+		checked.Attributes = p.attributes(call.Method, scope.Project, id, request.Path["version"])
+	}
+	decision, err := p.gate.Check(call, checked, checked.Attributes.Name)
 	if err != nil {
-		if provider.Unverified(err) {
-			return nil, fmt.Errorf("authorize %s: %w", call.Method, err)
-		}
-		return p.denied(call, decision, target), nil
+		return nil, err
 	}
 	if missing {
 		return nil, provider.NotFound("secrets", id)
@@ -240,20 +246,26 @@ func (p *Provider) serve(call gateway.Call, request *gateway.RESTRequest, scope 
 	if err != nil {
 		return nil, err
 	}
-	if response.Headers == nil {
-		response.Headers = http.Header{}
-	}
-	response.Headers.Set("X-Gcp-Local-Decision-Id", decision.ID)
-	return response, nil
+	return provider.WithDecision(response, decision), nil
 }
 
-// denied renders the Secret Manager denial shape.
-func (p *Provider) denied(call gateway.Call, decision iam.Decision, target iam.Target) *gateway.RESTResponse {
-	permission := provider.DeniedPermission(decision)
-	actor := call.Principal.Subject
-	code := 403
-	if call.Principal.State != gateway.Authenticated {
-		actor, code = "Anonymous caller", 401
+// versionMethods are checked on the addressed version; the other secret
+// methods on the secret.
+var versionMethods = map[string]bool{
+	methodVersionsGet: true, methodVersionsAccess: true, methodVersionsDestroy: true,
+	methodVersionsDisable: true, methodVersionsEnable: true,
+}
+
+// attributes are the IAM condition attributes of the secret or version a
+// method is checked on, named with the project number and the version as
+// requested. Recorded "conditional-access": a SecretVersion condition on
+// versions/2 grants access to versions/2 but not to versions/latest, and a
+// Secret condition grants the secret and its version list.
+func (p *Provider) attributes(method, project, id, version string) iam.ResourceAttributes {
+	name := secretWireName(p.wireProject(project), id)
+	if versionMethods[method] {
+		return iam.ResourceAttributes{Name: name + "/versions/" + version,
+			Type: "secretmanager.googleapis.com/SecretVersion", Service: "secretmanager.googleapis.com"}
 	}
-	return provider.WireError(code, "PERMISSION_DENIED", fmt.Sprintf("%s does not have %s access to %s.", actor, permission, target.Name))
+	return iam.ResourceAttributes{Name: name, Type: "secretmanager.googleapis.com/Secret", Service: "secretmanager.googleapis.com"}
 }

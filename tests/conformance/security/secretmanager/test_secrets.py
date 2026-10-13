@@ -10,6 +10,8 @@ from gcp_validation.services.security.secretmanager import run_scenario
     versions={'sdk': 'urllib;google-auth/2.56.2', 'provider': 'not-applicable', 'backend': 'not-applicable'},
     contract_files=(
         'gcp_validation/services/security/secretmanager.py',
+        'gcp_validation/services/security/refusals.py',
+        'gcp_validation/errors.py',
         'gcp_validation/sandbox.py',
         'tests/conformance/security/secretmanager/conftest.py',
     ),

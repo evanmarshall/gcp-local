@@ -3,20 +3,25 @@ package secretmanager
 import (
 	"cmp"
 	"encoding/base64"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"maps"
+	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
+	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // maxPayload is the recorded cloud payload limit (64 KiB).
@@ -25,23 +30,83 @@ const maxPayload = 64 << 10
 // castagnoli is the CRC32C table for payload checksums.
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
-// labelsOf copies a wire label map.
-func labelsOf(value any) map[string]string {
-	labels := map[string]string{}
-	if values, ok := value.(map[string]any); ok {
-		for key, label := range values {
-			labels[key] = provider.Text(label)
-		}
-	}
-	return labels
-}
-
 // version states.
 const (
 	stateEnabled   = "ENABLED"
 	stateDisabled  = "DISABLED"
 	stateDestroyed = "DESTROYED"
 )
+
+// unmodeled are the Secret fields a create or update refuses when set.
+// Rotation, expiration, aliases, delayed destruction, topics, and
+// customer-managed encryption all change behavior later (#93); none is
+// stored and ignored. User-managed replication is refused on create; an
+// update names it in the recorded refusal of a replication change.
+var unmodeled = []string{
+	"topics", "expireTime", "ttl", "rotation", "versionAliases", "versionDestroyTtl",
+	"customerManagedEncryption", "replication.automatic.customerManagedEncryption",
+}
+
+// Recorded refusals (secretmanager-access-lifecycle).
+var (
+	// "update-stale-etag" and "disable-stale-etag".
+	errStaleETag = status.Error(codes.FailedPrecondition, "The etag provided in the request does not match the resource's current etag. "+
+		"Please retry the whole read-modify-write with exponential backoff.")
+	// "update-no-mask".
+	errNoMask = status.Error(codes.InvalidArgument, "Field [update_mask] is required.")
+	// "update-replication", from automatic to user-managed.
+	errReplicationChange = status.Error(codes.InvalidArgument, "Existing secret has automatic replication, but requested secret does not. "+
+		"Updating secret replication is not supported.")
+	// "add-checksum-mismatch".
+	errChecksum = status.Error(codes.InvalidArgument, "Provided SecretPayload.data crc32c does not match calculated crc32c.")
+	// errBadToken marks Page's refusal, which invalidToken words with the token.
+	errBadToken = errors.New("invalid page token")
+)
+
+// paging is every list's: a server-chosen default (the whole list here),
+// at most 25000 per page, as documented. A negative size reads as unset
+// (recorded "versions-negative-size").
+var paging = provider.Paging{Default: 25000, Max: 25000, InvalidToken: errBadToken}
+
+// page returns one page of ordered items and its list body, adding the
+// totalSize GCP reports (recorded "versions-paged").
+func page[T any](items []T, query url.Values, field string, render func(T) any) (map[string]any, error) {
+	if size, err := strconv.Atoi(query.Get("pageSize")); err == nil && size < 0 {
+		query = maps.Clone(query)
+		query.Del("pageSize")
+	}
+	selected, next, err := provider.Page(items, query, paging, gap)
+	if errors.Is(err, errBadToken) {
+		// Recorded "versions-invalid-token" and "secrets-invalid-token".
+		return nil, status.Errorf(codes.InvalidArgument, "page_token [%s] is invalid. Please retry with a valid token or retry the initial List request.", query.Get("pageToken"))
+	}
+	if err != nil {
+		return nil, err
+	}
+	rendered := make([]any, 0, len(selected))
+	for _, item := range selected {
+		rendered = append(rendered, render(item))
+	}
+	body := provider.ListBody(field, rendered, next)
+	if len(items) > 0 {
+		body["totalSize"] = len(items)
+	}
+	return body, nil
+}
+
+// annotationKey is the recorded annotation key rule ("update-invalid-annotation").
+var annotationKey = regexp.MustCompile(`^[a-z0-9A-Z]+([_.\-]*[a-z0-9A-Z]+)*$`)
+
+// checkAnnotations refuses a key GCP refuses, in key order.
+func checkAnnotations(annotations map[string]string) error {
+	for _, key := range slices.Sorted(maps.Keys(annotations)) {
+		if !annotationKey.MatchString(key) || utf8.RuneCountInString(key) >= 64 || len(key) >= 128 {
+			return status.Errorf(codes.InvalidArgument, "[%s] must follow pattern [a-z0-9A-Z]+([_\\.\\-]*[a-z0-9A-Z]+)*), "+
+				"be less than 64 characters, and must have a UTF encoding of less than 128 bytes", key)
+		}
+	}
+	return nil
+}
 
 // execute dispatches one authorized method on the locked scope state; record
 // is the addressed secret, nil for project-level methods.
@@ -50,14 +115,15 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 	case methodSecretsCreate:
 		return p.create(request, scope, s)
 	case methodSecretsList:
-		if request.Query.Get("filter") != "" {
-			return nil, gap("list filters are not implemented")
-		}
-		return p.list(scope, s), nil
+		return p.list(request, scope, s)
 	case methodLocationsList:
-		return &gateway.RESTResponse{JSON: map[string]any{"locations": []any{
-			map[string]any{"locationId": "us-central1"},
-		}}}, nil
+		body, err := page([]string{"us-central1"}, request.Query, "locations", func(id string) any {
+			return map[string]any{"locationId": id}
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &gateway.RESTResponse{JSON: body}, nil
 	case methodSecretsGet, methodSecretsUpdate, methodSecretsDelete, methodSecretsGetIam, methodSecretsSetIam:
 		return p.executeSecret(call, request, scope, s, record)
 	default:
@@ -73,7 +139,7 @@ func (p *Provider) executeSecret(call gateway.Call, request *gateway.RESTRequest
 	case methodSecretsUpdate:
 		return p.update(request, scope, record)
 	case methodSecretsDelete:
-		return p.delete(scope, s, record)
+		return p.delete(request, scope, s, record)
 	case methodSecretsGetIam:
 		return p.getIam(scope, record)
 	default:
@@ -87,10 +153,14 @@ func (p *Provider) executeVersion(call gateway.Call, request *gateway.RESTReques
 	case methodVersionsAdd:
 		return p.addVersion(request, scope, record)
 	case methodVersionsList:
-		if request.Query.Get("filter") != "" {
-			return nil, gap("list filters are not implemented")
+		project := p.wireProject(scope.Project)
+		body, err := page(sortedVersions(record), request.Query, "versions", func(version *versionRecord) any {
+			return versionDocument(project, record, version)
+		})
+		if err != nil {
+			return nil, err
 		}
-		return p.versionsList(scope, record)
+		return &gateway.RESTResponse{JSON: body}, nil
 	case methodVersionsGet:
 		return p.versionGet(request, scope, record)
 	case methodVersionsAccess:
@@ -98,25 +168,30 @@ func (p *Provider) executeVersion(call gateway.Call, request *gateway.RESTReques
 	case methodVersionsDestroy:
 		return p.versionDestroy(request, scope, record)
 	case methodVersionsDisable:
-		return p.versionSetState(request, scope, record, stateDisabled)
+		return p.versionSetState(request, scope, record, stateDisabled, &secretmanagerpb.DisableSecretVersionRequest{})
 	case methodVersionsEnable:
-		return p.versionSetState(request, scope, record, stateEnabled)
+		return p.versionSetState(request, scope, record, stateEnabled, &secretmanagerpb.EnableSecretVersionRequest{})
 	default:
 		return nil, gap("this method is not implemented")
 	}
 }
 
-// secretDocument renders the secret wire shape.
+// secretDocument renders the secret wire shape. Replication is always
+// automatic: user-managed replication is refused, not echoed.
 func secretDocument(project string, record *secretRecord) map[string]any {
-	labels := map[string]string{}
-	maps.Copy(labels, record.Labels)
-	return map[string]any{
-		keyName:       secretWireName(project, record.Name),
-		"replication": record.Replication,
-		"labels":      labels,
-		"createTime":  provider.Stamp(record.CreatedAt),
-		"etag":        etag(record.CreatedAt, record.Revision),
+	document := map[string]any{
+		keyName:          secretWireName(project, record.Name),
+		fieldReplication: map[string]any{"automatic": map[string]any{}},
+		"createTime":     provider.Stamp(record.CreatedAt),
+		"etag":           etag(record.CreatedAt, record.Revision),
 	}
+	if len(record.Labels) > 0 {
+		document["labels"] = maps.Clone(record.Labels)
+	}
+	if len(record.Annotations) > 0 {
+		document["annotations"] = maps.Clone(record.Annotations)
+	}
+	return document
 }
 
 // versionDocument renders one version wire shape without its payload.
@@ -131,12 +206,24 @@ func versionDocument(project string, record *secretRecord, version *versionRecor
 	if version.State == stateDestroyed {
 		document["destroyTime"] = provider.Stamp(version.DestroyedAt)
 	}
+	if version.ClientChecksum {
+		document["clientSpecifiedPayloadChecksum"] = true
+	}
 	return document
 }
 
 // etag renders a quoted revision tag that changes with each mutation.
 func etag(created time.Time, revision int) string {
 	return strconv.Quote(strconv.FormatInt(created.UnixNano()+int64(revision), 16))
+}
+
+// checkETag refuses a request etag that isn't the resource's current one;
+// an empty etag skips the check.
+func checkETag(given, current string) error {
+	if given != "" && given != current {
+		return errStaleETag
+	}
+	return nil
 }
 
 // versionOf resolves a version number or the "latest" alias (newest enabled).
@@ -152,8 +239,9 @@ func versionOf(record *secretRecord, id string) *versionRecord {
 	return nil
 }
 
-// sortedVersions returns the secret's versions newest-first. Version ids are
-// decimal integers assigned in order, so they compare as numbers, not text.
+// sortedVersions returns the secret's versions newest-first (recorded
+// "versions-order"). Version ids are decimal integers assigned in order, so
+// they compare as numbers, not text.
 func sortedVersions(record *secretRecord) []*versionRecord {
 	ordered := slices.Collect(maps.Values(record.Versions))
 	slices.SortFunc(ordered, func(a, b *versionRecord) int {
@@ -168,18 +256,31 @@ func versionNumber(id string) int {
 	return number
 }
 
+// decodeSecret strictly decodes a create or update body. A create also
+// refuses user-managed replication.
+func decodeSecret(raw []byte, create bool) (*secretmanagerpb.Secret, error) {
+	refused := unmodeled
+	if create {
+		refused = append(slices.Clone(unmodeled), "replication.userManaged")
+	}
+	secret := &secretmanagerpb.Secret{}
+	if err := provider.DecodeProto(raw, "secret", secret, gap, refused...); err != nil {
+		return nil, err
+	}
+	return secret, checkAnnotations(secret.GetAnnotations())
+}
+
 // create stores one secret in the locked scope state.
 func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope, s *scopeState) (*gateway.RESTResponse, error) {
-	body, err := provider.DecodeObject(request.JSON)
+	body, err := decodeSecret(request.JSON, true)
 	if err != nil {
 		return nil, err
 	}
-	id, idErr := secretID(request, body)
+	id, idErr := secretID(request, body.GetName())
 	if idErr != nil {
 		return nil, idErr
 	}
-	replication, ok := body["replication"].(map[string]any)
-	if !ok || len(replication) == 0 {
+	if body.GetReplication().GetAutomatic() == nil {
 		return nil, status.Error(codes.InvalidArgument, "A secret requires a replication policy")
 	}
 	if s.secrets[id] != nil {
@@ -192,38 +293,100 @@ func (p *Provider) create(request *gateway.RESTRequest, scope state.Scope, s *sc
 		return nil, fmt.Errorf("index the secret: %w", err)
 	}
 	record := &secretRecord{
-		Name: id, Replication: replication, Labels: labelsOf(body["labels"]),
+		Name: id, Labels: maps.Clone(body.GetLabels()), Annotations: maps.Clone(body.GetAnnotations()),
 		Versions: map[string]*versionRecord{}, CreatedAt: p.clock(),
 	}
 	s.secrets[id] = record
 	return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}, nil
 }
 
-// list returns the project's secrets from the locked scope state.
-func (p *Provider) list(scope state.Scope, s *scopeState) *gateway.RESTResponse {
-	names := slices.Sorted(maps.Keys(s.secrets))
-	items := make([]any, 0, len(names))
-	for _, name := range names {
-		items = append(items, secretDocument(p.wireProject(scope.Project), s.secrets[name]))
-	}
-	return &gateway.RESTResponse{JSON: map[string]any{"secrets": items}}
-}
-
-// update replaces the labels of one locked secret.
-func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	body, err := provider.DecodeObject(request.JSON)
+// list returns one page of the project's secrets in name order. Recorded
+// "secrets-paged": a secret created later but named first lists first.
+func (p *Provider) list(request *gateway.RESTRequest, scope state.Scope, s *scopeState) (*gateway.RESTResponse, error) {
+	project := p.wireProject(scope.Project)
+	body, err := page(slices.Sorted(maps.Keys(s.secrets)), request.Query, "secrets", func(name string) any {
+		return secretDocument(project, s.secrets[name])
+	})
 	if err != nil {
 		return nil, err
 	}
-	if labels, ok := body["labels"].(map[string]any); ok {
-		record.Labels = labelsOf(labels)
-		record.Revision++
+	return &gateway.RESTResponse{JSON: body}, nil
+}
+
+// Secret fields an update mask may name.
+const (
+	fieldLabels      = "labels"
+	fieldAnnotations = "annotations"
+	fieldReplication = "replication"
+)
+
+// maskFields maps each update mask path, camelCase or snake_case, to the
+// field it names: the modeled ones and every top-level unmodeled one.
+var maskFields = func() map[string]string {
+	fields := map[string]string{}
+	for _, field := range append([]string{fieldLabels, fieldAnnotations, fieldReplication}, unmodeled...) {
+		if !strings.Contains(field, ".") {
+			fields[field], fields[snake(field)] = field, field
+		}
 	}
+	return fields
+}()
+
+// snake spells a camelCase field name in snake_case.
+func snake(name string) string {
+	var spelled strings.Builder
+	for _, letter := range name {
+		if 'A' <= letter && letter <= 'Z' {
+			spelled.WriteByte('_')
+			letter += 'a' - 'A'
+		}
+		spelled.WriteRune(letter)
+	}
+	return spelled.String()
+}
+
+// update applies the masked fields of one locked secret. The whole request
+// is validated before anything changes. Clearing an unmodeled field is a
+// no-op, since none is ever set.
+func (p *Provider) update(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
+	body, err := decodeSecret(request.JSON, false)
+	if err != nil {
+		return nil, err
+	}
+	mask := request.Query.Get("updateMask")
+	if mask == "" {
+		return nil, errNoMask
+	}
+	fields := map[string]bool{}
+	for path := range strings.SplitSeq(mask, ",") {
+		field, ok := maskFields[strings.TrimSpace(path)]
+		if !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "Invalid update_mask path %q", path)
+		}
+		fields[field] = true
+	}
+	if fields[fieldReplication] && body.GetReplication().GetAutomatic() == nil {
+		return nil, errReplicationChange
+	}
+	if err := checkETag(body.GetEtag(), etag(record.CreatedAt, record.Revision)); err != nil {
+		return nil, err
+	}
+	if fields[fieldLabels] {
+		record.Labels = maps.Clone(body.GetLabels())
+	}
+	if fields[fieldAnnotations] {
+		record.Annotations = maps.Clone(body.GetAnnotations())
+	}
+	record.Revision++
 	return &gateway.RESTResponse{JSON: secretDocument(p.wireProject(scope.Project), record)}, nil
 }
 
-// delete removes one locked secret, its versions, and its index entry.
-func (p *Provider) delete(scope state.Scope, s *scopeState, record *secretRecord) (*gateway.RESTResponse, error) {
+// delete removes one locked secret, its versions, and its index entry. A
+// stale etag query refuses it.
+func (p *Provider) delete(request *gateway.RESTRequest, scope state.Scope, s *scopeState, record *secretRecord) (*gateway.RESTResponse, error) {
+	if err := checkETag(request.Query.Get("etag"), etag(record.CreatedAt, record.Revision)); err != nil {
+		return nil, err
+	}
 	if err := p.index.Remove(serviceName, scope, secretResource(scope.Project, record.Name)); err != nil {
 		return nil, fmt.Errorf("unindex the secret: %w", err)
 	}
@@ -240,51 +403,39 @@ func (p *Provider) getIam(scope state.Scope, record *secretRecord) (*gateway.RES
 	return &gateway.RESTResponse{JSON: policy}, nil
 }
 
-// setIam stores one unconditional version-1 secret policy.
+// setIam stores one secret policy; conditional bindings need version 3.
 func (p *Provider) setIam(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	var envelope struct {
-		Policy iam.Policy `json:"policy"`
+	decoded, err := provider.DecodePolicy(request.JSON, gap)
+	if err != nil {
+		return nil, err
 	}
-	if json.Unmarshal(request.JSON, &envelope) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid IAM policy")
-	}
-	policy, err := p.engine.SetPolicy(secretResource(scope.Project, record.Name), envelope.Policy)
+	policy, err := p.engine.SetPolicy(secretResource(scope.Project, record.Name), decoded)
 	if err != nil {
 		return nil, fmt.Errorf("write secret policy: %w", err)
 	}
 	return &gateway.RESTResponse{JSON: policy}, nil
 }
 
-// addVersion stores one payload as the next version.
+// addVersion stores one payload as the next version. A supplied CRC32C must
+// match the payload, and the version then reports it.
 func (p *Provider) addVersion(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	var envelope struct {
-		Payload struct {
-			Data string `json:"data"`
-		} `json:"payload"`
+	var body secretmanagerpb.AddSecretVersionRequest
+	if err := provider.DecodeProto(request.JSON, "", &body, gap); err != nil {
+		return nil, err
 	}
-	if json.Unmarshal(request.JSON, &envelope) != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid version payload")
-	}
-	payload, err := base64Decode(envelope.Payload.Data)
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, "Invalid base64 payload")
-	}
+	payload := body.GetPayload().GetData()
 	if len(payload) > maxPayload {
 		return nil, status.Errorf(codes.InvalidArgument, "The payload exceeds %d bytes", maxPayload)
 	}
-	version := &versionRecord{Number: nextVersion(record), Payload: payload, State: stateEnabled, CreatedAt: p.clock()}
+	given := body.GetPayload().DataCrc32C
+	if given != nil && uint32(*given) != crc32.Checksum(payload, castagnoli) { //nolint:gosec // a CRC32C carried in an int64
+		return nil, errChecksum
+	}
+	version := &versionRecord{
+		Number: nextVersion(record), Payload: payload, State: stateEnabled, CreatedAt: p.clock(), ClientChecksum: given != nil,
+	}
 	record.Versions[version.Number] = version
 	return &gateway.RESTResponse{JSON: versionDocument(p.wireProject(scope.Project), record, version)}, nil
-}
-
-// versionsList returns the secret's versions newest-first.
-func (p *Provider) versionsList(scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
-	versions := sortedVersions(record)
-	items := make([]any, 0, len(versions))
-	for _, version := range versions {
-		items = append(items, versionDocument(p.wireProject(scope.Project), record, version))
-	}
-	return &gateway.RESTResponse{JSON: map[string]any{"versions": items}}, nil
 }
 
 func (p *Provider) versionGet(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
@@ -310,17 +461,30 @@ func (p *Provider) versionAccess(request *gateway.RESTRequest, scope state.Scope
 	return &gateway.RESTResponse{JSON: map[string]any{
 		"name": versionWireName(p.wireProject(scope.Project), record.Name, version.Number),
 		"payload": map[string]any{
-			"data":       base64Encode(version.Payload),
+			"data":       base64.StdEncoding.EncodeToString(version.Payload),
 			"dataCrc32c": strconv.FormatUint(uint64(crc32.Checksum(version.Payload, castagnoli)), 10),
 		},
 	}}, nil
 }
 
+// etagged is a version state-change request message.
+type etagged interface {
+	proto.Message
+	GetEtag() string
+}
+
 // versionDestroy permanently destroys one version's payload.
 func (p *Provider) versionDestroy(request *gateway.RESTRequest, scope state.Scope, record *secretRecord) (*gateway.RESTResponse, error) {
+	var body secretmanagerpb.DestroySecretVersionRequest
+	if err := provider.DecodeProto(request.JSON, "", &body, gap); err != nil {
+		return nil, err
+	}
 	version := versionOf(record, request.Path["version"])
 	if version == nil {
 		return nil, provider.NotFound("versions", request.Path["version"])
+	}
+	if err := checkETag(body.GetEtag(), etag(version.CreatedAt, version.Revision)); err != nil {
+		return nil, err
 	}
 	if version.State == stateDestroyed {
 		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is already destroyed", version.Number)
@@ -341,26 +505,18 @@ func nextVersion(record *secretRecord) string {
 	return strconv.Itoa(highest + 1)
 }
 
-// base64Decode decodes the wire base64 payload.
-func base64Decode(value string) ([]byte, error) {
-	if decoded, err := base64.StdEncoding.DecodeString(value); err == nil {
-		return decoded, nil
+// versionSetState disables or re-enables one version; body is the method's
+// request message, whose etag must be current when set.
+func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Scope, record *secretRecord, state string, body etagged) (*gateway.RESTResponse, error) {
+	if err := provider.DecodeProto(request.JSON, "", body, gap); err != nil {
+		return nil, err
 	}
-	decoded, urlErr := base64.URLEncoding.DecodeString(value)
-	if urlErr != nil {
-		return nil, fmt.Errorf("decode base64 payload: %w", urlErr)
-	}
-	return decoded, nil
-}
-
-// base64Encode encodes one payload to the wire base64 shape.
-func base64Encode(payload []byte) string { return base64.StdEncoding.EncodeToString(payload) }
-
-// versionSetState disables or re-enables one version.
-func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Scope, record *secretRecord, state string) (*gateway.RESTResponse, error) {
 	version := versionOf(record, request.Path["version"])
 	if version == nil {
 		return nil, provider.NotFound("versions", request.Path["version"])
+	}
+	if err := checkETag(body.GetEtag(), etag(version.CreatedAt, version.Revision)); err != nil {
+		return nil, err
 	}
 	if version.State == stateDestroyed {
 		return nil, status.Errorf(codes.InvalidArgument, "Version %s of the secret is destroyed", version.Number)
@@ -371,10 +527,10 @@ func (p *Provider) versionSetState(request *gateway.RESTRequest, scope state.Sco
 }
 
 // secretID resolves the secret id from the path, the body name, or the query.
-func secretID(request *gateway.RESTRequest, body map[string]any) (string, error) {
+func secretID(request *gateway.RESTRequest, name string) (string, error) {
 	id := request.Path["secret"]
 	if id == "" {
-		id = provider.LastSegment(provider.Text(body["name"]))
+		id = provider.LastSegment(name)
 	}
 	if id == "" {
 		id = request.Query.Get("secretId")

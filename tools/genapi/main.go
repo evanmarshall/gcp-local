@@ -1000,10 +1000,11 @@ func secretManagerRows() []route {
 		{"secretmanager.versions.list", http.MethodGet, base + "/secrets/{secret}/versions", false, false},
 		{"secretmanager.versions.get", http.MethodGet, base + "/secrets/{secret}/versions/{version}", false, false},
 		{"secretmanager.versions.access", http.MethodGet, base + "/secrets/{secret}/versions/{version}:access", false, false},
-		// The real destroy/disable/enable read no request body.
-		{"secretmanager.versions.destroy", http.MethodPost, base + "/secrets/{secret}/versions/{version}:destroy", false, false},
-		{"secretmanager.versions.disable", http.MethodPost, base + "/secrets/{secret}/versions/{version}:disable", false, false},
-		{"secretmanager.versions.enable", http.MethodPost, base + "/secrets/{secret}/versions/{version}:enable", false, false},
+		// destroy/disable/enable bodies carry the version etag
+		// (recording secretmanager-access-lifecycle "disable-stale-etag").
+		{"secretmanager.versions.destroy", http.MethodPost, base + "/secrets/{secret}/versions/{version}:destroy", true, false},
+		{"secretmanager.versions.disable", http.MethodPost, base + "/secrets/{secret}/versions/{version}:disable", true, false},
+		{"secretmanager.versions.enable", http.MethodPost, base + "/secrets/{secret}/versions/{version}:enable", true, false},
 		{"secretmanager.locations.list", http.MethodGet, base + "/locations", false, false},
 	}
 }
