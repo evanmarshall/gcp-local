@@ -1,6 +1,6 @@
 {
   "bigquery-api-surface": {
-    "recorded-date": "13-10-2026, 01:18:52",
+    "recorded-date": "13-10-2026, 02:37:54",
     "recorded-content": {
       "dataset-created": {
         "description": "owned",
@@ -162,6 +162,105 @@
           "gcp-local-run": "<run>",
           "managed-by": "gcp-local"
         }
+      },
+      "dataset-policy-version-v3": {
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200
+      },
+      "dataset-policy-version-v1": {
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200
+      },
+      "dataset-policy-version-v2": {
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200
+      },
+      "dataset-policy-version-mistyped": {
+        "code": 400,
+        "details": [
+          {
+            "fieldViolations": [
+              {
+                "description": "Invalid value at 'access_policy_version' (TYPE_INT32), \"many\"",
+                "field": "access_policy_version"
+              }
+            ],
+            "type": "type.googleapis.com/google.rpc.BadRequest"
+          }
+        ],
+        "errors": [
+          {
+            "message": "Invalid value at 'access_policy_version' (TYPE_INT32), \"many\"",
+            "reason": "invalid"
+          }
+        ],
+        "http_status": 400,
+        "message": "Invalid value at 'access_policy_version' (TYPE_INT32), \"many\"",
+        "status": "INVALID_ARGUMENT"
+      },
+      "dataset-patch-policy-v3": {
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "description",
+          "etag",
+          "friendlyName",
+          "id",
+          "kind",
+          "labels",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200
       },
       "datasets-list": {
         "fields": [

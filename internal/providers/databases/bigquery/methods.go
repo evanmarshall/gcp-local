@@ -207,9 +207,26 @@ func refuseOptions(query url.Values, names ...string) error {
 	return nil
 }
 
+// policyVersion reads accessPolicyVersion, which the google Terraform
+// provider sends on dataset inserts, reads, and patches. GCP accepts any
+// int32 (recorded: 1, 2, and 3) and refuses anything else with a BadRequest.
+// The provider's access lists hold no conditions, so every version renders
+// them the same.
+func policyVersion(query url.Values) error {
+	text := query.Get("accessPolicyVersion")
+	if text == "" {
+		return nil
+	}
+	if _, err := strconv.ParseInt(text, 10, 32); err != nil {
+		description := fmt.Sprintf("Invalid value at 'access_policy_version' (TYPE_INT32), %q", text)
+		return provider.FieldViolation("access_policy_version", description)
+	}
+	return nil
+}
+
 // datasetsCreate validates and stores one dataset.
 func (p *Provider) datasetsCreate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	if err := refuseOptions(request.Query, "accessPolicyVersion"); err != nil {
+	if err := policyVersion(request.Query); err != nil {
 		return nil, err
 	}
 	body, err := decodeDataset(request)
@@ -311,7 +328,10 @@ func addDescriptors(document map[string]any, labels map[string]string, friendlyN
 }
 
 func (p *Provider) datasetsGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	if err := refuseOptions(request.Query, "datasetView", "accessPolicyVersion"); err != nil {
+	if err := refuseOptions(request.Query, "datasetView"); err != nil {
+		return nil, err
+	}
+	if err := policyVersion(request.Query); err != nil {
 		return nil, err
 	}
 	dataset := request.Path[keyDatasetID]
@@ -390,7 +410,10 @@ func datasetItem(project string, record *datasetRecord) map[string]any {
 // description change only when the body names them (recorded). The whole
 // body is validated before anything changes.
 func (p *Provider) datasetsUpdate(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
-	if err := refuseOptions(request.Query, "updateMode", "accessPolicyVersion"); err != nil {
+	if err := refuseOptions(request.Query, "updateMode"); err != nil {
+		return nil, err
+	}
+	if err := policyVersion(request.Query); err != nil {
 		return nil, err
 	}
 	dataset := request.Path[keyDatasetID]

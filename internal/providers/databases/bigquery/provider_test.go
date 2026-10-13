@@ -545,6 +545,12 @@ func TestUnmodeledFieldsAreGaps(t *testing.T) {
 	want(t, "nested column option", h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", nested), 501,
 		"BigQuery coverage gap: schema.fields.fields.maxLength is not modeled")
 	want(t, "table view", h.invoke(http.MethodGet, testDatasets+"/"+testDataset+"/tables/t?view=BASIC", nil), 501, "BigQuery coverage gap: query parameter view")
+	tagged := func(names []string) map[string]any {
+		return with(table, "schema", map[string]any{"fields": []any{map[string]any{"name": "a", "type": "STRING", "policyTags": map[string]any{"names": names}}}})
+	}
+	want(t, "policy tags", h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", tagged([]string{"projects/p/locations/us/taxonomies/1/policyTags/2"})),
+		501, "BigQuery coverage gap: column policyTags (column a)")
+	want(t, "empty policy tags", h.invoke(http.MethodPost, testDatasets+"/"+testDataset+"/tables", tagged([]string{})), 200, `"tableId":"t"`)
 }
 
 // pick follows keys and indexes into decoded JSON; a missing step is nil.
@@ -746,4 +752,20 @@ func (h *harness) expectAs(token, verb, path string, code int) {
 	if recorder := h.invokeAs(token, verb, path, nil); recorder.Code != code {
 		h.t.Errorf("%s %s as %s = %d %s, want %d", verb, path, token, recorder.Code, recorder.Body.String(), code)
 	}
+}
+
+// TestAccessPolicyVersionIsAccepted serves accessPolicyVersion on dataset
+// inserts, reads, and patches, as the google Terraform provider sends it:
+// any int32 is accepted and anything else refused, as recorded.
+func TestAccessPolicyVersionIsAccepted(t *testing.T) {
+	h := newHarness(t)
+	h.expect(http.MethodPost, testDatasets+"?accessPolicyVersion=3", map[string]any{"datasetReference": map[string]any{"datasetId": testDataset}}, 200)
+	dataset := testDatasets + "/" + testDataset
+	for _, version := range []string{"1", "2", "3"} {
+		h.expect(http.MethodGet, dataset+"?accessPolicyVersion="+version, nil, 200)
+	}
+	h.expect(http.MethodPatch, dataset+"?accessPolicyVersion=3", map[string]any{}, 200)
+	message := `Invalid value at 'access_policy_version' (TYPE_INT32), "many"`
+	expectRefusal(t, "mistyped", h.invoke(http.MethodGet, dataset+"?accessPolicyVersion=many", nil), 400, message,
+		map[string]any{"message": message, "reason": "invalid"})
 }

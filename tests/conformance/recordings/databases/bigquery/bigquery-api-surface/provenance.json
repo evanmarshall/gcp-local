@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-13T01:18:52.736456+00:00",
+  "recorded_at": "2026-10-13T02:37:54.525903+00:00",
   "scenario": {
     "id": "bigquery-api-surface",
     "service": "bigquery",
     "transport": "rest-v1",
-    "revision": "e33f8e7629722dc5bfb04535dbe5b69a2907a736b060e1db303534d9c6407c9e",
+    "revision": "103ce7ac4202015054729a72b4347bf9c60e04b2dcf31f1ea0d82058b58f3edc",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "c8ea9ef769ae1124a27c0ca2d1852c3927cd76f2129ccd6aac5a540efd0cd733",
+  "snapshot_sha256": "4f0379d8a222416c0eab6560c88925f96a68aac370e771cb1e89fa2ef624d719",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",

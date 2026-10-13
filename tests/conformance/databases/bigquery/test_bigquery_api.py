@@ -239,6 +239,16 @@ def observe_datasets(
         "dataset-patch-name",
         described(observe, fixture.call("PATCH", body={"friendlyName": "renamed"})),
     )
+    # The google Terraform provider sends accessPolicyVersion on dataset reads and writes.
+    for label, version in (("v3", "3"), ("v1", "1"), ("v2", "2"), ("mistyped", "many")):
+        snapshot.match(
+            "dataset-policy-version-" + label,
+            bq_error(observe, fixture.call("GET", query={"accessPolicyVersion": version})),
+        )
+    snapshot.match(
+        "dataset-patch-policy-v3",
+        bq_error(observe, fixture.call("PATCH", query={"accessPolicyVersion": "3"}, body={})),
+    )
     second = fixture.create(fixture.second)
     if second.status != 200:
         raise AssertionError(f"Second dataset create returned HTTP {second.status}")

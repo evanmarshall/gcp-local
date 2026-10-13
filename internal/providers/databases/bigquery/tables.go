@@ -82,7 +82,7 @@ var tableFields = provider.Fields{
 // model, at every nesting depth BigQuery allows (15).
 func columnOptions() []string {
 	options := []string{
-		"generatedColumn", "maxLength", "precision", "policyTags", "timestampPrecision", "dataPolicies",
+		"generatedColumn", "maxLength", "precision", "timestampPrecision", "dataPolicies",
 		"dataGovernanceTagsInfo", "defaultValueExpression", "roundingMode", "rangeElementType", "collation",
 		"dataPolicyList", "foreignTypeDefinition", "categories", "scale",
 	}
@@ -96,12 +96,31 @@ func columnOptions() []string {
 }
 
 // columnSchema is one modeled column of a table schema.
+// PolicyTags is accepted only empty: the google Terraform provider sends
+// {"names": []} on every column.
 type columnSchema struct {
 	Name        string         `json:"name"`
 	Type        string         `json:"type"`
 	Mode        string         `json:"mode"`
 	Description string         `json:"description"`
 	Fields      []columnSchema `json:"fields"`
+	PolicyTags  *struct {
+		Names []string `json:"names"`
+	} `json:"policyTags"`
+}
+
+// taggedColumn names the first column, at any depth, that carries policy
+// tags, or "".
+func taggedColumn(columns []columnSchema) string {
+	for _, column := range columns {
+		if column.PolicyTags != nil && len(column.PolicyTags.Names) > 0 {
+			return column.Name
+		}
+		if name := taggedColumn(column.Fields); name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 // tableBody is the slice of the Table resource tables.insert and
@@ -129,6 +148,11 @@ func decodeTableBody(raw []byte) (tableBody, error) {
 	var body tableBody
 	if err := provider.DecodeJSON(raw, "", &body, gap, tableFields); err != nil {
 		return body, err
+	}
+	if body.Fields != nil {
+		if column := taggedColumn(body.Fields.Fields); column != "" {
+			return body, gap("column policyTags (column " + column + ")")
+		}
 	}
 	var schema struct {
 		Schema map[string]any `json:"schema"`
