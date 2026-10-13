@@ -412,17 +412,25 @@ func publishLinks(value map[string]any, origin string) {
 		value["selfLink"] = origin + "/storage/v1/b/" + url.PathEscape(name)
 	}
 	for _, key := range []string{"items", "resource"} {
-		switch nested := value[key].(type) {
-		case []any:
-			for _, item := range nested {
-				if document, ok := item.(map[string]any); ok {
-					publishLinks(document, origin)
-				}
-			}
-		case map[string]any:
-			publishLinks(nested, origin)
+		for _, document := range nestedDocuments(value[key]) {
+			publishLinks(document, origin)
 		}
 	}
+}
+
+// nestedDocuments returns the documents a response field holds: a backend
+// list ([]any), a list the provider pages itself ([]map[string]any, from
+// provider.ListBody), or one document.
+func nestedDocuments(value any) []map[string]any {
+	switch nested := value.(type) {
+	case []any:
+		return itemList(nested)
+	case []map[string]any:
+		return nested
+	case map[string]any:
+		return []map[string]any{nested}
+	}
+	return nil
 }
 
 // resolveTarget derives the IAM target and backend scope for one request. A

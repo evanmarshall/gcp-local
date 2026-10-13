@@ -662,7 +662,10 @@ func TestObjectListPagingMatchesGCP(t *testing.T) {
 	first := listPages(t, f, base+"maxResults=2")[0]
 	f.request(admin, "POST", "/upload/storage/v1/b/list-bucket/o?uploadType=media&name=0", []byte("0"), 200)
 	second := decodeBody(t, f.request(admin, "GET", base+"maxResults=2&pageToken="+url.QueryEscape(first.next), nil, 200).Body.Bytes())
-	expectf(t, documentName(itemList(second["items"])[0]) == "b-1", "page after a-2 = %v", second)
+	listed := itemList(second["items"])[0]
+	expectf(t, documentName(listed) == "b-1", "page after a-2 = %v", second)
+	// rclone downloads a listed object from its mediaLink.
+	expectf(t, strings.HasPrefix(fmt.Sprint(listed["mediaLink"]), "http://example.com/download/storage/v1/b/list-bucket/o/b-1?"), "listed object links = %v", listed)
 }
 
 // TestBucketListPagingAndPartialSuccess pages buckets by name, lists nothing
@@ -679,6 +682,8 @@ func TestBucketListPagingAndPartialSuccess(t *testing.T) {
 		got = append(got, fmt.Sprint(page.items))
 	}
 	expectf(t, fmt.Sprint(got) == "[[page-a page-b] [page-c]]", "bucket pages = %v", got)
+	first := itemList(decodeBody(t, f.request(admin, "GET", base, nil, 200).Body.Bytes())["items"])[0]
+	expectf(t, first["selfLink"] == "http://example.com/storage/v1/b/page-a", "listed bucket links = %v", first)
 	all := decodeBody(t, f.request(admin, "GET", base+"&maxResults=0&prefix=page-", nil, 200).Body.Bytes())
 	_, unreachable := all["unreachable"]
 	expectf(t, len(itemList(all["items"])) == 3 && !unreachable && all["kind"] == "storage#buckets", "maxResults=0 = %v", all)
