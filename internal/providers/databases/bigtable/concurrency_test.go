@@ -1,11 +1,17 @@
 package bigtable
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/evanmarshall/gcp-local/internal/gateway"
+	"github.com/evanmarshall/gcp-local/internal/iam"
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/providers/provider/providertest"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // TestPatchIsAtomic rejects an invalid instance update without changing the
@@ -108,5 +114,32 @@ func TestTableCreateRacingInstanceDelete(t *testing.T) {
 	h.instance()
 	if body := h.invoke(http.MethodGet, instance+"/tables", nil).Body.String(); strings.Contains(body, testTable) {
 		t.Fatalf("a deleted instance's table survived in the backend: %s", body)
+	}
+}
+
+// TestInstancePolicyNeverWritesTheProjectPolicy covers an instance policy
+// call authorized at the project, because the instance was unpublished when
+// Nearest picked the target, that finds the instance recreated by the time it
+// takes the lock. It must read NOT_FOUND and leave the project's policy alone;
+// writing it there revoked the caller's own project grant.
+func TestInstancePolicyNeverWritesTheProjectPolicy(t *testing.T) {
+	h := newHarness(t)
+	h.instance()
+	project := provider.ProjectResource(testProject)
+	before, err := h.engine.GetPolicy(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := gateway.Call{Context: context.Background(), Method: methodInstancesSetIam,
+		Principal: gateway.Principal{State: gateway.Authenticated, Subject: testActor, Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}}
+	request := &gateway.RESTRequest{Path: map[string]string{"project": testProject, "instance": testInstance}}
+	_, err = h.provider.policy(call, request, provider.ProjectScope(testProject), iam.Target{Name: project}, func(name string) (iam.Policy, error) {
+		return h.engine.SetPolicy(name, iam.Policy{})
+	})
+	if status.Code(err) != codes.NotFound || !strings.Contains(status.Convert(err).Message(), "Instance projects/"+testProject+"/instances/"+testInstance+" not found.") {
+		t.Fatalf("policy call at the project = %v", err)
+	}
+	if after, _ := h.engine.GetPolicy(project); len(after.Bindings) != len(before.Bindings) {
+		t.Fatalf("the project policy changed: %+v", after)
 	}
 }

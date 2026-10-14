@@ -71,7 +71,7 @@ func (p *Provider) getPolicy(call gateway.Call, request *gateway.RESTRequest, sc
 func (p *Provider) policy(call gateway.Call, request *gateway.RESTRequest, scope state.Scope, target iam.Target, change func(string) (iam.Policy, error)) (*gateway.RESTResponse, error) {
 	var response *gateway.RESTResponse
 	err := p.withInstance(scope, request.Path["instance"], func(*scopeState, *instanceRecord) error {
-		if err := p.publishedTable(call, request, target); err != nil {
+		if err := p.publishedTarget(call, request, target); err != nil {
 			return err
 		}
 		if _, err := p.gate.Check(call, target, target.Name); err != nil {
@@ -90,15 +90,19 @@ func (p *Provider) policy(call gateway.Call, request *gateway.RESTRequest, scope
 	return response, nil
 }
 
-// publishedTable requires a table policy method's table to be published and
-// to be the authorization target; instance methods pass.
-func (p *Provider) publishedTable(call gateway.Call, request *gateway.RESTRequest, target iam.Target) error {
-	if call.Method != methodTablesGetIam && call.Method != methodTablesSetIam {
-		return nil
+// publishedTarget requires the authorization target to be the policy
+// method's own published resource: the table for a table method, the instance
+// for an instance method. Nearest falls back to the parent when the resource
+// is unpublished; if the resource was created after that pick, the call must
+// read NOT_FOUND, not read or replace the parent's policy.
+func (p *Provider) publishedTarget(call gateway.Call, request *gateway.RESTRequest, target iam.Target) error {
+	project, instance := request.Path["project"], request.Path["instance"]
+	want, missing := instanceResource(project, instance), status.Errorf(codes.NotFound, "Instance %s not found.", provider.InstanceName(project, instance))
+	if call.Method == methodTablesGetIam || call.Method == methodTablesSetIam {
+		want, missing = tableResource(project, instance, request.Path["table"]), tableNotFound(tableName(project, instance, request.Path["table"]))
 	}
-	table := tableResource(request.Path["project"], request.Path["instance"], request.Path["table"])
-	if _, published := p.index.Get(table); !published || target.Name != table {
-		return tableNotFound(tableName(request.Path["project"], request.Path["instance"], request.Path["table"]))
+	if _, published := p.index.Get(want); !published || target.Name != want {
+		return missing
 	}
 	return nil
 }
