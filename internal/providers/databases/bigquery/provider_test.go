@@ -1080,7 +1080,7 @@ func TestPartitionExpiration(t *testing.T) {
 	h.createLayout("ingest", map[string]any{"timePartitioning": map[string]any{"type": "DAY", "expirationMs": "172800000"}})
 	ds := testDatasets + "/" + testDataset + "/tables/"
 	h.expect(http.MethodPost, testQueries, map[string]any{"query": "INSERT INTO " + testDataset + ".days (ts, name) VALUES " +
-		"(CURRENT_TIMESTAMP(), 'new'), (TIMESTAMP '2001-01-01 00:00:00', 'old'), (NULL, 'unpartitioned'); " +
+		"(CURRENT_TIMESTAMP(), 'new'), (TIMESTAMP '2001-01-01', 'old'), (NULL, 'unpartitioned'); " +
 		"INSERT INTO " + testDataset + ".months (d, name) VALUES (CURRENT_DATE(), 'new'), (DATE '2001-01-01', 'old'); " +
 		"INSERT INTO " + testDataset + ".ingest (name) VALUES ('new')"}, 200)
 	h.rowsAre("expired partition unread", h.queryAs(testToken, "SELECT name FROM "+testDataset+".days ORDER BY name", nil), "new", "unpartitioned")

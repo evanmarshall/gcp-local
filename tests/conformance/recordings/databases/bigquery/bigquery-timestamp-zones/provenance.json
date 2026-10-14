@@ -1,0 +1,50 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-14T02:08:52.307739+00:00",
+  "scenario": {
+    "id": "bigquery-timestamp-zones",
+    "service": "bigquery",
+    "transport": "rest-v1",
+    "revision": "d4f96e0cf22cb1f41a95ad7efbf8b9394c484b5e1abef0f38c50f4427d033645",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "bdd6d4e7874f30ae164a911cfc0fdc82b99cec10afbf2949d7835e59b6392ff6",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/databases/bigquery.py": "b00e9a3e63e3dc49e42042c6b7ce7a29e71ca3932f4f40234617c60aae09ce65",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/databases/bigquery/conftest.py": "51022741e89f1a70218b45eaf78471a329874ee50fe8569a1040df398cc2b055"
+    },
+    "scope": {
+      "services": [
+        "bigquery"
+      ],
+      "location": "global",
+      "limits": {
+        "max_datasets": 1,
+        "max_tables": 1,
+        "max_rows": 4,
+        "max_queries": 4,
+        "max_run_seconds": 600
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

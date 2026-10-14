@@ -19,6 +19,7 @@ Measured 2026-10-12 with Go 1.26.8:
 
 - Each project gets a private in-memory engine through the backend manager. Reset discards it. The provider owns datasets and table metadata; the engine owns columns and rows.
 - The authorization parse rewrites every table path to its canonical `` `project`.`dataset`.`table` ``. The engine resolves names loosely (a bare `t` can match any dataset's `t`) and folds case. Names the engine can't keep apart are refused: case-only differences, and paths that share a storage name (`ds.t_x` and `ds_t.x`).
-- The process runs in UTC (`RequireUTC`). googlesqlite decodes DATE values through `time.Local`.
+- The process runs in UTC (`RequireUTC`): googlesqlite builds DATE and TIMESTAMP values with `time.Unix` and renders them in `time.Local`, so the engine forces the process zone.
+- The analyzer's default time zone is America/Los_Angeles, applied to every string folded into a `TIMESTAMP` and back. googlesqlite exposes no setting and go-googlesql v0.3.0 has no time zone constructor, so the provider reaches the shared analyzer options with `go:linkname` and sets the zero time zone handle, which is UTC (`analyzeInUTC`). An engine upgrade must keep `TestTimestampsReadAsUTC` and `bigquery-timestamp-zones` passing.
 - The GoogleSQL module's wasm memory is freed only by Go finalizers, and the Go collector can't see it fill. Without help it passes 2 GiB in about 250 table create and drop cycles, and every later call panics. The provider runs the collector every 32 module calls (`collectModuleGarbage`).
 - Building the core needs about 6 GiB of memory; moo machines get 8 GiB ([moo](../contributing/moo.md)).

@@ -1,6 +1,6 @@
 # BigQuery
 
-BigQuery v2 runs GoogleSQL on an embedded engine: queries with joins, aggregates, CTEs, window functions, and parameters; DML; DDL for tables and views; and scripts. Every table a query names is authorized before it runs. Datasets with access lists, authorized views, partitioned and clustered tables, expiration, streaming inserts, `tabledata.list`, and `jobs.list` are served. Errors carry GCP's v2 body with `errors[].reason`. Six scenarios are recorded against GCP.
+BigQuery v2 runs GoogleSQL on an embedded engine: queries with joins, aggregates, CTEs, window functions, and parameters; DML; DDL for tables and views; and scripts. Every table a query names is authorized before it runs. Datasets with access lists, authorized views, partitioned and clustered tables, expiration, streaming inserts, `tabledata.list`, and `jobs.list` are served. Errors carry GCP's v2 body with `errors[].reason`. Seven scenarios are recorded against GCP.
 
 ## Use
 
@@ -25,7 +25,7 @@ client.query("SELECT name, COUNT(*) FROM shop.orders o JOIN shop.people p ON o.p
 | Jobs | `jobs.query`, `jobs.insert`, `jobs.get`, `jobs.getQueryResults` | GoogleSQL only. `jobs.insert` takes query jobs and finishes them before returning (`DONE`). Named and positional parameters, `defaultDataset`, `dryRun`, `maxResults`, page tokens, top-level `fields`, and `formatOptions` are served. A `jobs.query` retry with the same `requestId` within 15 minutes returns the first run's job |
 | Jobs | `jobs.list` | The caller's jobs, newest first; `allUsers=true` needs `bigquery.jobs.listAll`. `projection`, `stateFilter`, `minCreationTime`, `maxCreationTime`, `maxResults`, `pageToken` |
 
-Statements: `SELECT` (joins, subqueries, CTEs, `UNNEST`, window functions, `QUALIFY`, pipe syntax), `INSERT`, `UPDATE`, `DELETE`, `MERGE` from a table, `TRUNCATE TABLE`, `CREATE [OR REPLACE] TABLE [AS SELECT]`, `CREATE [OR REPLACE] VIEW`, `DROP TABLE`, `DROP VIEW`, and scripts with `DECLARE`, `SET`, `IF`, loops, and `BEGIN`…`END`. A script returns its last result. DML returns `numDmlAffectedRows` and `dmlStats`; DML and `CREATE` return the target table's schema.
+Statements: `SELECT` (joins, subqueries, CTEs, `UNNEST`, window functions, `QUALIFY`, pipe syntax), `INSERT`, `UPDATE`, `DELETE`, `MERGE` from a table, `TRUNCATE TABLE`, `CREATE [OR REPLACE] TABLE [AS SELECT]`, `CREATE [OR REPLACE] VIEW`, `DROP TABLE`, `DROP VIEW`, and scripts with `DECLARE`, `SET`, `IF`, loops, and `BEGIN`…`END`. A script returns its last result. DML returns `numDmlAffectedRows` and `dmlStats`; DML and `CREATE` return the target table's schema. A `TIMESTAMP` string without a zone reads as UTC: literals, casts, `TIMESTAMP(string)`, and a string compared with a `TIMESTAMP` (recorded), and a string inserted into a `TIMESTAMP` column (tested locally). A `TIMESTAMP` literal cast to `STRING` renders as `2020-01-01 12:00:00+00` (recorded).
 
 ## Partitioning and clustering
 
@@ -90,6 +90,7 @@ Baselines come from recorded `roles/bigquery.*` snapshots (`admin`, `dataEditor`
 | `bigquery-partitioning-expiration` | 2026-10-13 | Time-unit, ingestion-time, and range partitioning and clustering on insert, get, and list; eight refusals; `requirePartitionFilter` refusals for `SELECT` and `DELETE`; an expired partition left unread; `_PARTITIONTIME` and `_PARTITIONDATE` values, `SELECT *` without them, and the unrecognized name on a column-partitioned table; patches of clustering, the filter, and partition expiration, and the refused type change; `expirationTime` set, patched, cleared, and refused in the past; dataset default expirations applied to partitioned and unpartitioned tables, refused below an hour, cleared |
 | `bigquery-dataset-access` | 2026-10-13 | The default access list; dataset IAM still allowlisted after access edits; group, `iamMember`, and `userByEmail` entries and their order; an authorized view read by a caller who reaches the view through a nested group and is denied on the source table (query, rows, get) and on an unauthorized view; an authorized dataset; the denied identity's 403s; refused view, group, role, and role-less entries |
 | `bigquery-sql-engine` | 2026-10-12 | `CREATE TABLE`, `INSERT`, `CREATE TABLE AS SELECT`, a DDL table's schema, a join with `GROUP BY`/`HAVING`, a CTE with a subquery and functions, named and positional parameters, a default dataset, a script, `UPDATE`, `DELETE`, `MERGE`, a view, `tabledata.list`, a table-level reader that can read its table but gets 403 joining a second table and 403 on DML, missing table 404, unknown column 400, `DROP VIEW`, `DROP TABLE` |
+| `bigquery-timestamp-zones` | 2026-10-14 | UTC readings of `TIMESTAMP '2020-01-01'`, a literal with a time, `CAST` of a string with and without a time, `TIMESTAMP(string)`, `TIMESTAMP_TRUNC` and `DATE` at 23:30 and 00:30 UTC, a `TIMESTAMP` cast to `STRING`, a string compared with a `TIMESTAMP`, and an explicit `America/New_York` zone |
 
 Statistics such as `totalBytesProcessed` are stand-ins (`"0"`); only their presence is recorded.
 
@@ -119,7 +120,7 @@ Not modeled:
 
 - `MERGE` reports no `numDmlAffectedRows`. Tables created by DDL report no `REQUIRED` modes or descriptions. `insertId` deduplication, streaming buffer limits, and `jobs.cancel`.
 - Streamed rows get their partition time at once; GCP leaves `_PARTITIONTIME` NULL while they sit in the streaming buffer.
-- The engine reads a date-only `TIMESTAMP '2020-01-01'` literal, and a string cast to `TIMESTAMP`, in America/Los_Angeles instead of UTC; spell the time (`TIMESTAMP '2020-01-01 00:00:00'`).
+- A `TIMESTAMP` column cast to `STRING` renders as `2020-01-01T12:00:00Z`, not GoogleSQL's `2020-01-01 12:00:00+00`; `STRING(ts)` renders the latter. Not recorded.
 - Messages of unrecorded refusals (range bounds, a negative partition expiration, an entry naming two members, an unknown special group, a missing authorized dataset) are the emulator's.
 - List default page sizes (1,000) are not recorded. Query-time denials of a table use the table form recorded for `tables.get`; GCP's query wording is not recorded.
 - State is in memory; restart discards it.

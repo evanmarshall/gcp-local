@@ -1,0 +1,120 @@
+{
+  "bigquery-timestamp-zones": {
+    "recorded-date": "14-10-2026, 02:08:52",
+    "recorded-content": {
+      "timestamp-zones": {
+        "fields": [
+          "cacheHit",
+          "creationTime",
+          "endTime",
+          "jobComplete",
+          "jobCreationReason",
+          "jobReference",
+          "kind",
+          "location",
+          "pageRowCount",
+          "queryId",
+          "rows",
+          "schema",
+          "startTime",
+          "statementType",
+          "totalBytesBilled",
+          "totalBytesProcessed",
+          "totalRows",
+          "totalSlotMs"
+        ],
+        "http_status": 200,
+        "jobComplete": true,
+        "job_reference_fields": [
+          "jobId",
+          "location",
+          "projectId"
+        ],
+        "rows": [
+          [
+            "1577836800",
+            "1577880000",
+            "1577880000",
+            "1577836800",
+            "1577836800",
+            "1577880000",
+            "1577836800",
+            "2020-01-01",
+            "2020-01-02",
+            "2020-01-01 12:00:00+00",
+            "true",
+            "1577898000"
+          ]
+        ],
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "literal_date",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "literal_time",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "cast_time",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "cast_date",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "function_date",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "function_time",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "trunc_day",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "date_before_midnight",
+              "type": "DATE"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "date_after_midnight",
+              "type": "DATE"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "as_string",
+              "type": "STRING"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "coerced_equal",
+              "type": "BOOLEAN"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "explicit_zone",
+              "type": "INTEGER"
+            }
+          ]
+        },
+        "totalRows": "1"
+      },
+      "cleanup": {
+        "dataset_absent": true
+      }
+    }
+  }
+}

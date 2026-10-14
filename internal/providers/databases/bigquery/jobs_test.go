@@ -421,6 +421,26 @@ func TestQueryFeatures(t *testing.T) {
 		map[string]any{"defaultDataset": map[string]any{"datasetId": "shop"}}), "ada")
 }
 
+// TestTimestampsReadAsUTC reads every string without a zone as UTC, as
+// BigQuery does (recorded in bigquery-timestamp-zones); the engine's analyzer
+// defaults to America/Los_Angeles.
+func TestTimestampsReadAsUTC(t *testing.T) {
+	h := newHarness(t)
+	h.rowsAre("timestamp-zones", h.queryAs(testToken, "SELECT UNIX_SECONDS(TIMESTAMP '2020-01-01'), "+
+		"UNIX_SECONDS(TIMESTAMP '2020-01-01 12:00:00'), UNIX_SECONDS(CAST('2020-01-01 12:00:00' AS TIMESTAMP)), "+
+		"UNIX_SECONDS(SAFE_CAST('2020-01-01' AS TIMESTAMP)), UNIX_SECONDS(TIMESTAMP('2020-01-01')), "+
+		"UNIX_SECONDS(TIMESTAMP_TRUNC(TIMESTAMP '2020-01-01 23:30:00', DAY)), DATE(TIMESTAMP '2020-01-01 23:30:00'), "+
+		"CAST(TIMESTAMP '2020-01-01 12:00:00' AS STRING), TIMESTAMP '2020-01-01 12:00:00+00' = '2020-01-01 12:00:00', "+
+		"UNIX_SECONDS(TIMESTAMP '2020-01-01 12:00:00 America/New_York')", nil),
+		"1577836800,1577880000,1577880000,1577836800,1577836800,1577836800,2020-01-01,2020-01-01 12:00:00+00,true,1577898000")
+	h.dataset()
+	ds := testDataset + "."
+	h.rowsAre("create", h.queryAs(testToken, "CREATE TABLE "+ds+"times (ts TIMESTAMP)", nil))
+	h.rowsAre("insert a string", h.queryAs(testToken, "INSERT INTO "+ds+"times (ts) VALUES ('2020-01-01 12:00:00')", nil))
+	h.rowsAre("compare with a string", h.queryAs(testToken, "SELECT UNIX_SECONDS(ts) FROM "+ds+"times WHERE ts = '2020-01-01 12:00:00'", nil),
+		"1577880000")
+}
+
 // The parser the engine replaced ignored parameters (audit).
 func TestQueryParameters(t *testing.T) {
 	h := newHarness(t)
@@ -811,8 +831,8 @@ func TestPartitionFilterAndPseudoColumns(t *testing.T) {
 	h.expect(http.MethodPatch, testDatasets+"/"+testDataset+"/tables/ingest", map[string]any{"requirePartitionFilter": false}, 200)
 
 	h.rowsAre("inserts", h.queryAs(testToken, "INSERT INTO "+ds+"ingest (name, n) VALUES ('now', 1); "+
-		"INSERT INTO "+ds+"ingest (_PARTITIONTIME, name, n) VALUES (TIMESTAMP '2020-01-01 00:00:00', 'past', 2); "+
-		"INSERT INTO "+ds+"ingest VALUES (TIMESTAMP '2021-01-01 00:00:00', NULL, 'listless', 3)", nil))
+		"INSERT INTO "+ds+"ingest (_PARTITIONTIME, name, n) VALUES (TIMESTAMP '2020-01-01', 'past', 2); "+
+		"INSERT INTO "+ds+"ingest VALUES (TIMESTAMP '2021-01-01', NULL, 'listless', 3)", nil))
 	h.rowsAre("pseudo-columns", h.queryAs(testToken, "SELECT name, IF(n = 1, NULL, _PARTITIONTIME) AS pt, IF(n = 1, NULL, i._PARTITIONDATE), "+
 		"_PARTITIONTIME = TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), DAY) FROM "+ds+"ingest i WHERE _PARTITIONDATE < '2021-01-01' OR n = 1 ORDER BY n", nil),
 		"now,NULL,NULL,true", "past,1.5778368E9,2020-01-01,false")

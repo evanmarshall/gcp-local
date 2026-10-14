@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+	_ "unsafe" // linkname reaches the engine's analyzer options; see analyzerOptions
 
 	"github.com/evanmarshall/gcp-local/internal/backend"
+	googlesql "github.com/goccy/go-googlesql"
 	"github.com/goccy/googlesqlite"
 )
 
@@ -28,11 +31,42 @@ type engineBackend struct {
 	conn *sql.Conn
 }
 
-// RequireUTC sets the process's local time zone to UTC. The engine
-// (googlesqlite v0.3.1, value.DateFromInt64Value) decodes DATE values through
-// time.Local, which shifts them a day on hosts west of UTC; GCP reports UTC.
-// Each binary that serves BigQuery calls it before it starts.
+// RequireUTC sets the process's local time zone to UTC. The engine's Go
+// runtime (googlesqlite v0.3.1) builds DATE and TIMESTAMP values with
+// time.Unix and no zone (value.DateFromInt64Value, the value decoder, the
+// literal encoder), so they render in time.Local, a day off on hosts west of
+// UTC; GCP reports UTC. Each binary that serves BigQuery calls it before it
+// starts.
 func RequireUTC() { time.Local = time.UTC } //nolint:gosmopolitan // the engine reads time.Local; see above
+
+// analyzerOptions returns the engine's one GoogleSQL analyzer configuration,
+// shared by every connection (googlesqlite v0.3.1,
+// internal.getSharedAnalyzerOptions). googlesqlite exposes no setting for it,
+// so it is reached by name.
+//
+//go:linkname analyzerOptions github.com/goccy/googlesqlite/internal.getSharedAnalyzerOptions
+func analyzerOptions() (*googlesql.AnalyzerOptions, error)
+
+// analyzeInUTC sets the analyzer's default time zone to UTC, as BigQuery's.
+// The analyzer defaults to America/Los_Angeles and applies it wherever it
+// folds a string into a TIMESTAMP or a TIMESTAMP into a string: literals
+// (TIMESTAMP '2020-01-01'), casts of literals, string literals compared with
+// or inserted into TIMESTAMP columns, and CAST(TIMESTAMP ... AS STRING).
+// go-googlesql v0.3.0 has no time zone constructor; a zero handle is the
+// zero absl::TimeZone, whose null zone is UTC. Tests assert UTC results.
+var analyzeInUTC = sync.OnceValue(func() error {
+	if err := googlesql.Init(); err != nil {
+		return fmt.Errorf("initialize GoogleSQL: %w", err)
+	}
+	options, err := analyzerOptions()
+	if err != nil {
+		return fmt.Errorf("GoogleSQL analyzer options: %w", err)
+	}
+	if err := options.SetDefaultTimeZone(&googlesql.TimeZone{}); err != nil {
+		return fmt.Errorf("GoogleSQL analyzer time zone: %w", err)
+	}
+	return nil
+})
 
 // moduleCalls counts calls into the GoogleSQL module since the last
 // collection.
@@ -59,6 +93,9 @@ func collectModuleGarbage() {
 var errEngineStopped = errors.New("bigquery engine is stopped")
 
 func (e *engineBackend) Start(ctx context.Context) error {
+	if err := analyzeInUTC(); err != nil {
+		return err
+	}
 	db, err := sql.Open("googlesqlite", ":memory:")
 	if err != nil {
 		return fmt.Errorf("open the bigquery engine: %w", err)
