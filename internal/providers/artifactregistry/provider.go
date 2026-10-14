@@ -153,9 +153,15 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.operation(scope, operationPrefix+request.Path[pathOperation])
 	default:
 		// The policy is read or written under the repository's lock, so a
-		// racing delete cannot unregister it in between.
+		// racing delete cannot unregister it in between. Nearest falls back
+		// to the project when the repository is missing; if it was created
+		// after that pick, the call reads 404 rather than reading or
+		// replacing the project's policy.
 		var response *gateway.RESTResponse
 		err := p.withRepository(scope, repository, func(*scopeState, *repositoryRecord) error {
+			if target.Name != repositoryResource(scope, repository) {
+				return errNotFound
+			}
 			var policyErr error
 			if call.Method == methodReposGetIam {
 				response, policyErr = p.getIam(request, target)

@@ -45,6 +45,7 @@ type harness struct {
 	engine  *iam.Engine
 	index   *state.Index
 	manager *backend.Manager
+	spanner *Provider
 	mu      sync.Mutex
 	fakes   map[string][]*fakeDriver
 }
@@ -72,7 +73,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	h.manager = backend.NewManager(time.Second, time.Second)
 	registry := gateway.NewRegistry()
-	_, err = newProvider(registry, h.manager, h.index, engine, func(scope state.Scope) (backend.Backend, error) {
+	h.spanner, err = newProvider(registry, h.manager, h.index, engine, func(scope state.Scope) (backend.Backend, error) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		fake := newFakeDriver()
@@ -392,6 +393,41 @@ func TestDatabaseRequestsRacingDelete(t *testing.T) {
 			{Method: http.MethodPost, Path: database + ":getIamPolicy", Body: map[string]any{}, Want: []int{200, 404}},
 		}
 	})
+}
+
+// TestPolicyNeverWritesTheProjectPolicy covers an instance or database policy
+// call authorized at the project, because the resource was unindexed when
+// Nearest picked the target, that runs after the resource is recreated. It
+// must read NOT_FOUND and leave the project's policy alone.
+func TestPolicyNeverWritesTheProjectPolicy(t *testing.T) {
+	h := newHarness(t)
+	h.createInstance()
+	h.expect(h.invoke(adminToken, http.MethodPost, testPath+"/databases", createDatabase(testDatabase)), http.StatusOK)
+	project := provider.ProjectResource(testProject)
+	before, err := h.engine.GetPolicy(project)
+	must(t, err)
+	instance := map[string]string{pathProject: testProject, pathInstance: testInstance}
+	database := map[string]string{pathProject: testProject, pathInstance: testInstance, pathDatabase: testDatabase}
+	for _, test := range []struct {
+		method string
+		path   map[string]string
+		name   string
+	}{
+		{methodInstancesSetIam, instance, provider.InstanceName(testProject, testInstance)},
+		{methodInstancesGetIam, instance, provider.InstanceName(testProject, testInstance)},
+		{methodDatabasesSetIam, database, databaseName(testProject, testInstance, testDatabase)},
+		{methodDatabasesGetIam, database, databaseName(testProject, testInstance, testDatabase)},
+	} {
+		call := gateway.Call{Context: context.Background(), Method: test.method}
+		request := &gateway.RESTRequest{Path: test.path, JSON: []byte(`{"policy":{}}`)}
+		_, err := h.spanner.execute(call, request, provider.ProjectScope(testProject), iam.Target{Name: project})
+		if status.Code(err) != codes.NotFound || status.Convert(err).Message() != "Resource not found: "+fullName(test.name) {
+			t.Fatalf("%s at the project = %v", test.method, err)
+		}
+	}
+	if after, _ := h.engine.GetPolicy(project); len(after.Bindings) != len(before.Bindings) {
+		t.Fatalf("the project policy changed: %+v", after)
+	}
 }
 
 // errorBody decodes a REST error.
