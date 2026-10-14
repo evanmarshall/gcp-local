@@ -227,7 +227,7 @@ Re-recording `storage-cross-project` needs a peer project. Set `GCP_TEST_PEER_PR
 
 - A coverage gap returns 400 `Storage coverage gap: ...`, not 501. This is a deliberate exception to `UNIMPLEMENTED`: the Go client retries every 5xx without limit, so a 501 would hang it.
 - No Storage method answers 5xx or 429. Every refusal has the JSON API's body (`error.code`, `error.message`, `error.errors[]` with `domain` and `reason`), or an XML error document on the XML API. A failure inside the emulator that GCP would not have (a backend 5xx, a broken invariant) returns 400 `Storage emulator fault: ...`. A missing bucket on the XML API is 404 `NoSuchBucket`, as in GCP (recorded: `storage-go-client-projection`); only a path whose first segment can't name a bucket returns the gateway's 501.
-- Outside the provider, the shared gateway still renders a malformed or rejected bearer token (401) and a JSON body over 2 MiB (429) in the generic error body.
+- A malformed `Authorization` header is 401 `Invalid Credentials` (`authError`), or `AuthenticationRequired` on the XML API, as GCP returns (probed 2026-10-13, not recorded). A JSON body over 2 MiB is 413 `Request Too Large` (`uploadTooLarge`), GCP's answer for oversized metadata.
 - 128 MiB per object; uploads are buffered whole in memory, and a larger upload is the 400 gap. Chunk sizes are not checked against 256 KiB multiples.
 - Folder `rename` and `deleteRecursive` return the gap; managed folders are not modeled.
 - `folders.list` refuses `delimiter`, `startOffset`, and `endOffset`; `includeTrailingDelimiter=true` and `matchGlob` on `objects.list` return the gap.

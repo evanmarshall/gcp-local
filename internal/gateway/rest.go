@@ -133,7 +133,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		request, call, err := g.restRequest(r, &route)
 		if err != nil {
-			writeError(w, err)
+			writeRouteError(w, route.contract.Method, err)
 			return
 		}
 		w.Header().Set("X-Gcp-Local-Trace-Id", call.TraceID)
@@ -278,13 +278,12 @@ func restBody(r *http.Request, route *compiledRoute, request *RESTRequest) error
 	if !route.contract.JSONBody {
 		return nil
 	}
-	const maxJSON = 2 << 20
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxJSON+1))
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "Unable to read JSON body")
 	}
 	if len(body) > maxJSON {
-		return status.Error(codes.ResourceExhausted, "JSON request exceeds two MiB")
+		return errPayloadTooLarge
 	}
 	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || string(trimmed) == "null" {
 		// Google's front end reads an absent body as the empty request

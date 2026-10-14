@@ -46,11 +46,12 @@ var (
 type PrincipalState string
 
 const (
-	servicePubsub                = "pubsub"
-	Anonymous     PrincipalState = "anonymous"
-	Unknown       PrincipalState = "unknown"
-	Authenticated PrincipalState = "authenticated"
-	Expired       PrincipalState = "expired"
+	servicePubsub                 = "pubsub"
+	serviceStorage                = "storage"
+	Anonymous      PrincipalState = "anonymous"
+	Unknown        PrincipalState = "unknown"
+	Authenticated  PrincipalState = "authenticated"
+	Expired        PrincipalState = "expired"
 )
 
 type Principal struct {
@@ -121,8 +122,8 @@ func (r *Registry) registerRoutes() {
 		routes  []contract.Route
 		service string
 	}{
-		{storage.StorageRoutes, "storage"},
-		{storage.StorageXMLRoutes, "storage"},
+		{storage.StorageRoutes, serviceStorage},
+		{storage.StorageXMLRoutes, serviceStorage},
 		{run.RunRoutes, "run"},
 		{compute.ComputeRoutes, "compute"},
 		{secretmanager.SecretManagerRoutes, "secretmanager"},

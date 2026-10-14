@@ -32,6 +32,12 @@ func traceID(trace []string) string {
 	return generated
 }
 
+// invalidCredentials is Google's 401 message for an Authorization header it
+// can't use: another scheme, an empty bearer, or extra fields (probed on
+// BigQuery, Compute, Cloud SQL, and Secret Manager, 2026-10-13).
+const invalidCredentials = "Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid" +
+	" authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project."
+
 // bearerToken extracts the bearer credential from a single Authorization header.
 func bearerToken(authorization []string) (string, bool) {
 	fields := strings.Fields(authorization[0])
@@ -42,14 +48,14 @@ func bearerToken(authorization []string) (string, bool) {
 }
 
 func (g *Gateway) newCall(ctx context.Context, method string, authorization, trace []string) (Call, error) {
-	call := Call{Context: ctx, Method: method, Location: "global", Principal: Principal{State: Anonymous}}
+	call := Call{Context: ctx, Method: method, Location: global, Principal: Principal{State: Anonymous}}
 	call.TraceID = traceID(trace)
 	if len(authorization) == 0 {
 		return call, nil
 	}
 	bearer, ok := bearerToken(authorization)
 	if !ok {
-		return call, status.Error(codes.Unauthenticated, "Malformed authorization header")
+		return call, status.Error(codes.Unauthenticated, invalidCredentials)
 	}
 	if g.resolve == nil {
 		call.Principal.State = Unknown

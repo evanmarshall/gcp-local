@@ -42,7 +42,7 @@ func (g *Gateway) transcode(ctx context.Context, binding contract.Transcoding, r
 		return nil, err
 	}
 	// The call matches what the REST gateway builds for this route.
-	restCall := Call{Context: call.Context, Method: binding.REST, Location: "global", Principal: call.Principal, TraceID: call.TraceID, Resource: path}
+	restCall := Call{Context: call.Context, Method: binding.REST, Location: global, Principal: call.Principal, TraceID: call.TraceID, Resource: path}
 	result, err := g.Registry.Invoke(restCall, rest)
 	if err != nil {
 		return nil, err
