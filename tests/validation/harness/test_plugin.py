@@ -24,7 +24,7 @@ def run_suite(tmp_path, source, *args, synthetic=False):
     if synthetic:
         (tmp_path / "conftest.py").write_text("""
 from functools import partial
-import gcp_validation.pytest_plugin as plugin
+import gcp_validation.runner.plugin as plugin
 plugin.SnapshotCase = partial(plugin.SnapshotCase, source="synthetic")
 """)
     env = os.environ.copy()
@@ -39,7 +39,7 @@ plugin.SnapshotCase = partial(plugin.SnapshotCase, source="synthetic")
             "-p",
             "pytest_socket",
             "-p",
-            "gcp_validation.pytest_plugin",
+            "gcp_validation.runner.plugin",
             "-q",
             "--gcp-artifacts",
             str(tmp_path / "artifacts"),

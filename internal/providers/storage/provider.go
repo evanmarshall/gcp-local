@@ -52,9 +52,10 @@ type Config struct {
 // errProviderShape rejects an incomplete provider construction.
 var errProviderShape = errors.New("storage requires registry, lifecycle, index, and iam")
 
-// registeredMethods are the gateway routes this provider serves. Folder create
+// RegisteredMethods are the gateway routes this provider serves; every other
+// generated route gets a 400 gap (docs/services/storage.md#gaps). Folder create
 // arrives as storage.folders.insert from the generated route table.
-var registeredMethods = []string{
+var RegisteredMethods = []string{
 	MethodBucketsInsert, MethodBucketsList, MethodBucketsGet, MethodBucketsPatch, MethodBucketsDelete,
 	MethodBucketsGetIamPolicy, MethodBucketsSetIamPolicy, MethodBucketsGetLayout, MethodBucketsLock,
 	MethodObjectsInsert, MethodObjectsList, MethodObjectsGet, MethodObjectsDelete,
@@ -105,7 +106,7 @@ func (p *Provider) registerRoutes(registry *gateway.Registry) error {
 	for _, route := range storageapi.StorageRoutes {
 		handlers[route.Method] = storageErrors(unsupported)
 	}
-	for _, method := range registeredMethods {
+	for _, method := range RegisteredMethods {
 		handlers[method] = storageErrors(p.handle)
 	}
 	for method, handler := range handlers {

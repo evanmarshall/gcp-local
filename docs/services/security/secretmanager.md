@@ -1,6 +1,6 @@
 # Secret Manager
 
-Secret Manager v1 over REST and gRPC: secrets, versions, payload access, per-secret IAM, location listing (REST only), and the secret lifecycle policies: user-managed replication, rotation with Pub/Sub notifications, expiration, version aliases, and delayed destruction. Modeled locally in provider state. Three scenarios are recorded against GCP over REST (`secretmanager-access-lifecycle`, `secretmanager-secret-policies`, `secretmanager-rotation-events`); gRPC is not recorded.
+Secret Manager v1 over REST and gRPC: secrets, versions, payload access, per-secret IAM, location listing (REST only), and the secret lifecycle policies: user-managed replication, rotation with Pub/Sub notifications, expiration, version aliases, and delayed destruction. Modeled locally in provider state. Three scenarios are recorded against GCP over REST (`secretmanager-access-lifecycle`, `secretmanager-secret-policies`, `secretmanager-rotation-events`) and one over both REST and gRPC (`secretmanager-transport-parity`).
 
 ## Use
 
@@ -93,7 +93,9 @@ The lifecycle scenarios are in `tests/conformance/security/secretmanager/policie
 | `secretmanager-secret-policies` | Topics without the agent's grant and a missing topic; rotation, expiration, alias, destroy-TTL, and replica refusals; user-managed replicas, topics, rotation, `ttl`, and `versionDestroyTtl` on create, get, and each version; alias set, get, access, and refusals; replication, expiration, topic, and rotation patches; delayed destroy, a second destroy, and cancel |
 | `secretmanager-rotation-events` | A 120 s `ttl` secret's deletion and a rotation 310 s ahead; every notification on one subscription (types, attribute names, data fields); the rotation schedule after `SECRET_ROTATE` |
 
-They need the sandbox's Secret Manager service agent (`gcloud beta services identity create --service=secretmanager.googleapis.com`); the run grants it `roles/pubsub.publisher` on its own topic only. Both run in about 6 minutes. Record with a `--gcp-live-scope-file` scope for service `secretmanager` (`LIMITS` in `gcp_validation/services/security/secretmanager/policies.py`).
+`secretmanager-transport-parity` (`tests/conformance/security/secretmanager/transports/`, recorded 2026-10-14, in the weekly drift job) sends each step over REST to one secret and over gRPC to another and records both results and their differences: create, a duplicate create, get, addVersion, access (payload checked), versions list, a missing secret, a malformed secret ID, denied get and access with their `ErrorInfo`, disable, access to the disabled version, and delete. GCP answered every step identically on both transports, messages included. It creates two secrets with one version each and deletes both; record it with a `--gcp-live-scope-file` scope for service `secretmanager` (`LIMITS` in `gcp_validation/services/security/secretmanager/transports.py`).
+
+The policy scenarios need the sandbox's Secret Manager service agent (`gcloud beta services identity create --service=secretmanager.googleapis.com`); the run grants it `roles/pubsub.publisher` on its own topic only. Both run in about 6 minutes. Record with a `--gcp-live-scope-file` scope for service `secretmanager` (`LIMITS` in `gcp_validation/services/security/secretmanager/policies.py`).
 
 ## Gaps
 
@@ -103,4 +105,4 @@ They need the sandbox's Secret Manager service agent (`gcloud beta services iden
 - Expiry, rotation, and scheduled destruction run on the process clock; restarting gcp-local loses them with the rest of the state.
 - No regional secrets: `projects/*/locations/*/secrets` routes are `UNIMPLEMENTED`. Replica locations are checked only for a region-shaped name.
 - A `getIamPolicy` `requestedPolicyVersion` below 3 still returns conditional bindings.
-- Locations, policy reads, and all of gRPC are not recorded. Annotation total size (16 KiB) is not checked. State is in memory.
+- Locations, policy reads, and gRPC beyond the `secretmanager-transport-parity` steps are not recorded. Annotation total size (16 KiB) is not checked. State is in memory.

@@ -311,7 +311,8 @@ func (p *Provider) create(call gateway.Call, request *gateway.RESTRequest, scope
 		return nil, err
 	}
 	if s.secrets[id] != nil {
-		return provider.WireError(409, "ALREADY_EXISTS", "secret "+id+" already exists"), nil
+		// recorded: secretmanager-transport-parity "create-duplicate"
+		return provider.WireError(409, "ALREADY_EXISTS", "Secret ["+secretWireName(p.wireProject(scope.Project), id)+"] already exists."), nil
 	}
 	if err := p.index.Put(serviceName, state.Resource{
 		Name: secretResource(scope.Project, id), Service: serviceName,
@@ -606,7 +607,9 @@ func (p *Provider) versionAccess(request *gateway.RESTRequest, scope state.Scope
 		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is destroyed", version.Number)
 	}
 	if version.State == stateDisabled {
-		return nil, status.Errorf(codes.FailedPrecondition, "Version %s of the secret is disabled", version.Number)
+		// recorded: secretmanager-transport-parity "access-disabled"
+		return nil, status.Errorf(codes.FailedPrecondition, "Secret Version [%s] is in DISABLED state.",
+			versionWireName(p.wireProject(scope.Project), record.Name, version.Number))
 	}
 	return &gateway.RESTResponse{JSON: map[string]any{
 		"name": versionWireName(p.wireProject(scope.Project), record.Name, version.Number),
@@ -702,7 +705,8 @@ func secretID(request *gateway.RESTRequest, name string) (string, error) {
 		id = request.Query.Get("secretId")
 	}
 	if !uidPattern.MatchString(id) {
-		return "", status.Errorf(codes.InvalidArgument, "Invalid secret name %q", id)
+		// recorded: secretmanager-transport-parity "create-malformed-id"
+		return "", status.Errorf(codes.InvalidArgument, "The provided Secret ID [%s] does not match the expected format [[a-zA-Z_0-9]+]", id)
 	}
 	return id, nil
 }

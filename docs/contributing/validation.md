@@ -1,6 +1,6 @@
 # Validation
 
-Recordings are integration tests. Each conformance scenario runs once against a real GCP sandbox to record behavior; CI's `recordings` job then replays every recording against gcp-local and fails unless each one is verified. The runner is a pytest plugin in `gcp_validation/` built on `localstack-snapshot`. Recordings live in `tests/conformance/recordings/<service path>/<id>/`, where the service path is `storage`, `databases/spanner`, and so on; the scenario that replays one lives under `tests/conformance/<service path>/`. [Coverage](../coverage.md) lists them per service.
+Recordings are integration tests. Each conformance scenario runs once against a real GCP sandbox to record behavior; CI's `recordings` job then replays every recording against gcp-local and fails unless each one is verified. The runner is a pytest plugin (`gcp_validation/runner/plugin.py`) built on `localstack-snapshot`. Recordings live in `tests/conformance/recordings/<service path>/<id>/`, where the service path is `storage`, `databases/spanner`, and so on; the scenario that replays one lives under `tests/conformance/<service path>/`. [Coverage](../coverage.md) lists them per service.
 
 ## What a recording proves
 
@@ -83,6 +83,17 @@ S=~/.config/gcp-local/PROJECT/scopes   # private, outside Git
 6. Raise `Unsupported`, `Unverified`, or `Inconclusive` from `gcp_validation.evidence` when they apply. A mismatch raises `Divergence`. Failed cleanup is an error and publishes no candidate.
 
 The plugin compares or persists only after every teardown succeeds. Don't call snapshot finalization yourself. It ignores the upstream `SNAPSHOT_UPDATE` and `SNAPSHOT_RAW` flags.
+
+## Dual-transport scenarios
+
+A dual-transport scenario sends each step over REST and gRPC and records both results and their differences. `secretmanager-transport-parity` is the example.
+
+1. Make a `RestClient` (`gcp_validation/live_rest.py`) and a `GrpcClient(rest, "SERVICE.googleapis.com")` (`gcp_validation/runner/rpc.py`). The gRPC client reuses the REST client's identities and tokens. Locally it dials the REST port plus one (127.0.0.1:4567, where `tools/storage-conformance` and `cmd/gcp-local` listen); live it dials `SERVICE.googleapis.com:443` over TLS.
+2. Call `grpc.call(actor, "/google.cloud.x.v1.Service/Method", request, ResponseType, params={"name": ...})`. `request` is a protobuf message (build it from proto3 JSON with `json_format.ParseDict`); `params` become `x-goog-request-params` and must name the selected project. A `Reply` carries the status name, the response as proto3 JSON, and the `google.rpc.Status` with its details.
+3. Pass the REST `Response` and the gRPC `Reply` to `parity(observe, response, reply, fields)` (`gcp_validation/runner/parity.py`) and match the result. Both sides normalize to the status name, field names, selected fields, message, and `google.rpc` details; `differences` lists the keys where they disagree. GCP's own transports may differ, and the emulator must differ the same way.
+4. Name resources so both transports alias to the same value (one secret per transport, both `<secret>`), and use `transport="rest-v1+grpc-v1"`. List `gcp_validation/runner/rpc.py` and `parity.py` in `contract_files`.
+
+`grpc` and the service's message types load on first call; they are in `requirements/services.txt`, which the recordings job and the drift job install, not in the offline harness.
 
 ## Promote a recording
 

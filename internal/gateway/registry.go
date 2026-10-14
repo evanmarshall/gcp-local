@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/evanmarshall/gcp-local/api/generated/artifactregistry"
@@ -240,6 +241,78 @@ func (r *Registry) Providers() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// ServedMethod is one method a provider serves on one transport: a REST route
+// ID with its "VERB path" bindings, or a gRPC method name with the REST
+// routes it is transcoded onto, if any.
+type ServedMethod struct {
+	Service, Method string
+	GRPC            bool
+	Routes          []string
+}
+
+// Served lists every method a provider serves, sorted by service and method:
+// REST routes and gRPC methods with a handler, and gRPC methods transcoded
+// onto a route with a handler, under that route's service. The transport
+// matrix check reads it (docs/architecture/transports.md).
+func (g *Gateway) Served() []ServedMethod {
+	r := g.Registry
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	served := append(r.handledMethods(g.routes), g.transcodedMethods()...)
+	sort.Slice(served, func(i, j int) bool {
+		if served[i].Service != served[j].Service {
+			return served[i].Service < served[j].Service
+		}
+		return served[i].Method < served[j].Method
+	})
+	return served
+}
+
+// handled reports whether a method has a handler. The caller holds the lock.
+func (r *Registry) handled(method string) bool {
+	return r.unary[method] != nil || r.stream[method] != nil
+}
+
+// handledMethods lists the gRPC methods and REST routes with a handler. The
+// caller holds the lock.
+func (r *Registry) handledMethods(routes []compiledRoute) []ServedMethod {
+	var served []ServedMethod
+	for method, info := range r.contracts {
+		if r.handled(method) && strings.HasPrefix(method, "/") {
+			served = append(served, ServedMethod{Service: info.service, Method: method, GRPC: true})
+		}
+	}
+	paths := map[string][]string{}
+	for _, route := range routes {
+		if r.handled(route.contract.Method) {
+			paths[route.contract.Method] = append(paths[route.contract.Method], route.contract.Verb+" "+route.contract.Path)
+		}
+	}
+	for method, bindings := range paths {
+		served = append(served, ServedMethod{Service: r.contracts[method].service, Method: method, Routes: bindings})
+	}
+	return served
+}
+
+// transcodedMethods lists the gRPC methods transcoded onto a handled route,
+// under each route's service. The caller holds the registry lock.
+func (g *Gateway) transcodedMethods() []ServedMethod {
+	served := make([]ServedMethod, 0, len(g.transcoded))
+	for method, bindings := range g.transcoded {
+		routes := map[string][]string{}
+		for _, binding := range bindings {
+			if g.Registry.handled(binding.REST) {
+				service := g.Registry.contracts[binding.REST].service
+				routes[service] = append(routes[service], binding.REST)
+			}
+		}
+		for service, ids := range routes {
+			served = append(served, ServedMethod{Service: service, Method: method, GRPC: true, Routes: ids})
+		}
+	}
+	return served
 }
 
 // missing explains a method with no handler: a service this server was not

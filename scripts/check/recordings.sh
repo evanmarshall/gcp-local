@@ -10,6 +10,17 @@ cd "$(dirname "$0")/../.."
 GCP_LOCAL_TEST_PYTHON=${GCP_LOCAL_TEST_PYTHON:-"$PWD/.venv-tools/bin/python"}
 export GCP_LOCAL_TEST_PYTHON
 sh scripts/go.sh build -tags=conformance -o bin/storage-conformance ./tools/storage-conformance
+# The transport matrix registers every provider, so it needs every backend
+# and runs here; a skip is a failure (docs/architecture/transports.md).
+matrix=$(sh scripts/go.sh test -count=1 -run '^TestTransportMatrix$' -v ./cmd/gcp-local) || {
+    printf '%s\n' "$matrix" >&2
+    exit 1
+}
+case $matrix in *"--- SKIP"*)
+    printf '%s\n' "$matrix" >&2
+    exit 1
+    ;;
+esac
 sh scripts/go.sh test -c -tags=pubsubintegration -race -o bin/pubsub-integration ./internal/providers/messaging/pubsub
 # GCP_LOCAL_LOW_DISK=1 frees the build cache before the servers start, because
 # a moo guest disk can't hold it and Cloud SQL data (docs/contributing/moo.md).

@@ -1,0 +1,303 @@
+{
+  "secretmanager-transport-parity": {
+    "recorded-date": "14-10-2026, 02:26:53",
+    "recorded-content": {
+      "create": {
+        "differences": [],
+        "grpc": {
+          "code": "OK",
+          "fields": [
+            "createTime",
+            "etag",
+            "labels",
+            "name",
+            "replication"
+          ],
+          "labels": {
+            "gcp-local-run": "<run>",
+            "managed-by": "gcp-local"
+          },
+          "name": "<secret>",
+          "replication": {
+            "automatic": {}
+          }
+        },
+        "rest": {
+          "code": "OK",
+          "fields": [
+            "createTime",
+            "etag",
+            "labels",
+            "name",
+            "replication"
+          ],
+          "labels": {
+            "gcp-local-run": "<run>",
+            "managed-by": "gcp-local"
+          },
+          "name": "<secret>",
+          "replication": {
+            "automatic": {}
+          }
+        }
+      },
+      "create-duplicate": {
+        "differences": [],
+        "grpc": {
+          "code": "ALREADY_EXISTS",
+          "details": [],
+          "message": "Secret [<secret>] already exists."
+        },
+        "rest": {
+          "code": "ALREADY_EXISTS",
+          "details": [],
+          "message": "Secret [<secret>] already exists."
+        }
+      },
+      "get": {
+        "differences": [],
+        "grpc": {
+          "code": "OK",
+          "fields": [
+            "createTime",
+            "etag",
+            "labels",
+            "name",
+            "replication"
+          ],
+          "labels": {
+            "gcp-local-run": "<run>",
+            "managed-by": "gcp-local"
+          },
+          "name": "<secret>",
+          "replication": {
+            "automatic": {}
+          }
+        },
+        "rest": {
+          "code": "OK",
+          "fields": [
+            "createTime",
+            "etag",
+            "labels",
+            "name",
+            "replication"
+          ],
+          "labels": {
+            "gcp-local-run": "<run>",
+            "managed-by": "gcp-local"
+          },
+          "name": "<secret>",
+          "replication": {
+            "automatic": {}
+          }
+        }
+      },
+      "add-version": {
+        "differences": [],
+        "grpc": {
+          "code": "OK",
+          "fields": [
+            "createTime",
+            "etag",
+            "name",
+            "replicationStatus",
+            "state"
+          ],
+          "name": "<secret>/versions/1",
+          "state": "ENABLED"
+        },
+        "rest": {
+          "code": "OK",
+          "fields": [
+            "createTime",
+            "etag",
+            "name",
+            "replicationStatus",
+            "state"
+          ],
+          "name": "<secret>/versions/1",
+          "state": "ENABLED"
+        }
+      },
+      "access": {
+        "differences": [],
+        "grpc": {
+          "code": "OK",
+          "fields": [
+            "name",
+            "payload"
+          ],
+          "name": "<secret>/versions/1"
+        },
+        "rest": {
+          "code": "OK",
+          "fields": [
+            "name",
+            "payload"
+          ],
+          "name": "<secret>/versions/1"
+        }
+      },
+      "list-versions": {
+        "differences": [],
+        "grpc": {
+          "code": "OK",
+          "fields": [
+            "totalSize",
+            "versions"
+          ],
+          "totalSize": 1
+        },
+        "rest": {
+          "code": "OK",
+          "fields": [
+            "totalSize",
+            "versions"
+          ],
+          "totalSize": 1
+        }
+      },
+      "get-missing": {
+        "differences": [],
+        "grpc": {
+          "code": "NOT_FOUND",
+          "details": [],
+          "message": "Secret [<secret>-missing] not found."
+        },
+        "rest": {
+          "code": "NOT_FOUND",
+          "details": [],
+          "message": "Secret [<secret>-missing] not found."
+        }
+      },
+      "create-malformed-id": {
+        "differences": [],
+        "grpc": {
+          "code": "INVALID_ARGUMENT",
+          "details": [],
+          "message": "The provided Secret ID [bad id!] does not match the expected format [[a-zA-Z_0-9]+]"
+        },
+        "rest": {
+          "code": "INVALID_ARGUMENT",
+          "details": [],
+          "message": "The provided Secret ID [bad id!] does not match the expected format [[a-zA-Z_0-9]+]"
+        }
+      },
+      "get-denied": {
+        "differences": [],
+        "grpc": {
+          "code": "PERMISSION_DENIED",
+          "details": [
+            {
+              "domain": "iam.googleapis.com",
+              "metadata": {
+                "permission": "secretmanager.secrets.get"
+              },
+              "reason": "IAM_PERMISSION_DENIED",
+              "type": "type.googleapis.com/google.rpc.ErrorInfo"
+            }
+          ],
+          "message": "Permission 'secretmanager.secrets.get' denied on resource (or it may not exist)."
+        },
+        "rest": {
+          "code": "PERMISSION_DENIED",
+          "details": [
+            {
+              "domain": "iam.googleapis.com",
+              "metadata": {
+                "permission": "secretmanager.secrets.get"
+              },
+              "reason": "IAM_PERMISSION_DENIED",
+              "type": "type.googleapis.com/google.rpc.ErrorInfo"
+            }
+          ],
+          "message": "Permission 'secretmanager.secrets.get' denied on resource (or it may not exist)."
+        }
+      },
+      "access-denied": {
+        "differences": [],
+        "grpc": {
+          "code": "PERMISSION_DENIED",
+          "details": [
+            {
+              "domain": "iam.googleapis.com",
+              "metadata": {
+                "permission": "secretmanager.versions.access"
+              },
+              "reason": "IAM_PERMISSION_DENIED",
+              "type": "type.googleapis.com/google.rpc.ErrorInfo"
+            }
+          ],
+          "message": "Permission 'secretmanager.versions.access' denied on resource (or it may not exist)."
+        },
+        "rest": {
+          "code": "PERMISSION_DENIED",
+          "details": [
+            {
+              "domain": "iam.googleapis.com",
+              "metadata": {
+                "permission": "secretmanager.versions.access"
+              },
+              "reason": "IAM_PERMISSION_DENIED",
+              "type": "type.googleapis.com/google.rpc.ErrorInfo"
+            }
+          ],
+          "message": "Permission 'secretmanager.versions.access' denied on resource (or it may not exist)."
+        }
+      },
+      "disable": {
+        "differences": [],
+        "grpc": {
+          "code": "OK",
+          "fields": [
+            "createTime",
+            "etag",
+            "name",
+            "replicationStatus",
+            "state"
+          ],
+          "state": "DISABLED"
+        },
+        "rest": {
+          "code": "OK",
+          "fields": [
+            "createTime",
+            "etag",
+            "name",
+            "replicationStatus",
+            "state"
+          ],
+          "state": "DISABLED"
+        }
+      },
+      "access-disabled": {
+        "differences": [],
+        "grpc": {
+          "code": "FAILED_PRECONDITION",
+          "details": [],
+          "message": "Secret Version [<secret>/versions/1] is in DISABLED state."
+        },
+        "rest": {
+          "code": "FAILED_PRECONDITION",
+          "details": [],
+          "message": "Secret Version [<secret>/versions/1] is in DISABLED state."
+        }
+      },
+      "delete": {
+        "differences": [],
+        "grpc": {
+          "code": "OK",
+          "fields": []
+        },
+        "rest": {
+          "code": "OK",
+          "fields": []
+        }
+      },
+      "cleanup": {
+        "secrets_absent": true
+      }
+    }
+  }
+}

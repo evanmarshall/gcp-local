@@ -294,7 +294,9 @@ func main() {
 	}
 	http, err := net.Listen("tcp", "127.0.0.1:4566")
 	must(err)
-	grpc, err := net.Listen("tcp", "127.0.0.1:0")
+	// Dual-transport scenarios dial gRPC on the REST port plus one, as
+	// cmd/gcp-local listens (gcp_validation/runner/rpc.py).
+	grpc, err := net.Listen("tcp", "127.0.0.1:4567")
 	must(err)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

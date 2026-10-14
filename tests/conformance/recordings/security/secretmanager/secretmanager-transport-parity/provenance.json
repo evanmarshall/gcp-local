@@ -1,0 +1,51 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-14T02:26:53.323512+00:00",
+  "scenario": {
+    "id": "secretmanager-transport-parity",
+    "service": "secretmanager",
+    "transport": "rest-v1+grpc-v1",
+    "revision": "4128b4b1fcb83b019c10a481142b50f104ac072f348cbbb25c579705ff82b204",
+    "versions": {
+      "sdk": "urllib;grpcio/1.84.0;google-cloud-secret-manager/2.31.0 (messages only);google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "28b4e4639b4f18eeb269f72a4bb2d6aac3648914bcc69664df897749f1de68a7",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/security/secretmanager/transports.py": "cf54e4aa0d9194b34d9dd611084f3049cb9fc8a03d19a0269350a1b0675899fd",
+      "gcp_validation/runner/rpc.py": "9960ca0a66b57c4c6852d694f43a5551638d1a61bbfc4d0d6d37235718c7b2c1",
+      "gcp_validation/runner/parity.py": "083cfa2cd8d1410cdf2b7912884dd78ca863eb8eaf4c5e093d2753e4d4d8e5e6",
+      "gcp_validation/services/security/refusals.py": "7e5c208b9472d70b50966390e74a6cea0d0f34de2ae5eb01121bf4ef526a8f7e",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/secretmanager/transports/conftest.py": "dd5854ff6485dbaea22b3a99036535b5d5c45f10c7ecf0581c3316caa46ebc7f"
+    },
+    "scope": {
+      "services": [
+        "secretmanager"
+      ],
+      "location": "global",
+      "limits": {
+        "max_secrets": 2,
+        "max_versions": 2,
+        "max_run_seconds": 600
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

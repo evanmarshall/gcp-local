@@ -260,7 +260,8 @@ func (p *Provider) serve(call gateway.Call, request *gateway.RESTRequest, scope 
 		return nil, err
 	}
 	if missing {
-		return nil, provider.NotFound("secrets", id)
+		// recorded: secretmanager-transport-parity "get-missing"
+		return nil, status.Errorf(codes.NotFound, "Secret [%s] not found.", secretWireName(p.wireProject(scope.Project), id))
 	}
 	call.Resource = target.Name
 	call.Location = scope.Location
