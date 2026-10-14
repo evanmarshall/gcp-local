@@ -407,10 +407,12 @@ func (p *Provider) forget(scope state.Scope, resource string) error {
 	return nil
 }
 
-// forgetTable unpublishes a deleted table under its instance's lock, which
-// policy calls hold while they check, authorize, and change the policy.
+// forgetTable unpublishes a deleted table under the scope lock, which policy
+// calls hold while they check, authorize, and change the policy. It doesn't
+// require the instance: a table delete that finishes after its instance's
+// delete must still unpublish the table.
 func (p *Provider) forgetTable(scope state.Scope, instance, table string) error {
-	return p.withInstance(scope, instance, func(*scopeState, *instanceRecord) error {
+	return p.scopes.With(scope, func(*scopeState) error { //nolint:wrapcheck // forget wraps its own error
 		return p.forget(scope, tableResource(scope.Project, instance, table))
 	})
 }

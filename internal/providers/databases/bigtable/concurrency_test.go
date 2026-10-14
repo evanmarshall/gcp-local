@@ -78,3 +78,35 @@ func TestTablePolicyRacingRecreate(t *testing.T) {
 		}
 	})
 }
+
+// TestTableCreateRacingInstanceDelete races table creates and deletes against
+// deleting their instance. A table whose create or delete finishes after the
+// instance delete removed the instance must not stay published (its IAM
+// hierarchy would be incomplete, and every later call on it a 501) or stay in
+// the backend.
+func TestTableCreateRacingInstanceDelete(t *testing.T) {
+	h := newHarness(t)
+	instance := testInstances + "/" + testInstance
+	providertest.Hammer(t, h.gate, testToken, 8, 10, func(worker int) []providertest.Request {
+		if worker%2 == 0 {
+			return []providertest.Request{
+				{Method: http.MethodPost, Path: testInstances, Body: createBody(), Want: []int{200, 409}},
+				{Method: http.MethodDelete, Path: instance, Want: []int{200, 404}},
+			}
+		}
+		return []providertest.Request{
+			{Method: http.MethodPost, Path: instance + "/tables", Body: map[string]any{"tableId": testTable}, Want: []int{200, 404, 409}},
+			{Method: http.MethodDelete, Path: instance + "/tables/" + testTable, Want: []int{200, 404}},
+		}
+	})
+	for _, resource := range h.index.Owned(serviceName) {
+		if _, found := h.index.Get(resource.Parent); resource.Kind == kindTable && !found {
+			t.Fatalf("table %s is published without its instance", resource.Name)
+		}
+	}
+	h.invoke(http.MethodDelete, instance, nil)
+	h.instance()
+	if body := h.invoke(http.MethodGet, instance+"/tables", nil).Body.String(); strings.Contains(body, testTable) {
+		t.Fatalf("a deleted instance's table survived in the backend: %s", body)
+	}
+}

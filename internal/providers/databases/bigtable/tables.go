@@ -77,9 +77,16 @@ func (t tableAdmin) create(ctx context.Context) (*gateway.RESTResponse, error) {
 	if err != nil {
 		return nil, tableStatus(err, name)
 	}
-	if indexErr := t.provider.index.Put(serviceName, t.tableIndexed(request.GetTableId())); indexErr != nil {
+	// Publish under the instance's lock: an instance delete that finished
+	// meanwhile leaves no instance, and the table is rolled back.
+	if indexErr := t.provider.withInstance(t.scope, t.request.Path["instance"], func(*scopeState, *instanceRecord) error {
+		return t.provider.index.Put(serviceName, t.tableIndexed(request.GetTableId()))
+	}); indexErr != nil {
 		if _, undoErr := t.admin.DeleteTable(ctx, &adminpb.DeleteTableRequest{Name: created.GetName()}); undoErr != nil {
 			return nil, fmt.Errorf("index the table (%w) and roll back (%w)", indexErr, undoErr)
+		}
+		if status.Code(indexErr) == codes.NotFound {
+			return nil, indexErr
 		}
 		return nil, fmt.Errorf("index the table: %w", indexErr)
 	}
@@ -283,21 +290,50 @@ func (t tableAdmin) deleteInstance(ctx context.Context) (*gateway.RESTResponse, 
 			return nil, forgetErr
 		}
 	}
-	if err := t.provider.removeInstance(t.scope, instance); err != nil {
+	if err := t.removeInstance(ctx); err != nil {
 		return nil, err
 	}
 	return emptyResponse(), nil
 }
 
-// removeInstance drops the record and its index entry together, as on create.
-func (p *Provider) removeInstance(scope state.Scope, instance string) error {
-	return p.withInstance(scope, instance, func(s *scopeState, _ *instanceRecord) error {
-		if err := p.forget(scope, instanceResource(scope.Project, instance)); err != nil {
+// removeInstance unpublishes the instance and deletes the tables created
+// after deleteInstance listed them.
+func (t tableAdmin) removeInstance(ctx context.Context) error {
+	late, err := t.provider.removeInstance(t.scope, t.request.Path["instance"])
+	if err != nil {
+		return err
+	}
+	for _, table := range late {
+		if _, deleteErr := t.admin.DeleteTable(ctx, &adminpb.DeleteTableRequest{Name: table}); deleteErr != nil && status.Code(deleteErr) != codes.NotFound {
+			return backendStatus(deleteErr)
+		}
+	}
+	return nil
+}
+
+// removeInstance drops the record and its index entry together, as on create,
+// and unpublishes the tables published since the delete listed them. It
+// returns those tables' names for the caller to delete from the backend.
+func (p *Provider) removeInstance(scope state.Scope, instance string) ([]string, error) {
+	var late []string
+	err := p.withInstance(scope, instance, func(s *scopeState, _ *instanceRecord) error {
+		parent := instanceResource(scope.Project, instance)
+		for _, resource := range p.index.Owned(serviceName) {
+			if resource.Kind != kindTable || resource.Parent != parent {
+				continue
+			}
+			if err := p.forget(scope, resource.Name); err != nil {
+				return err
+			}
+			late = append(late, tableName(scope.Project, instance, provider.LastSegment(resource.Name)))
+		}
+		if err := p.forget(scope, parent); err != nil {
 			return err
 		}
 		delete(s.instances, instance)
 		return nil
 	})
+	return late, err
 }
 
 // render encodes one admin response message in the REST JSON mapping.
