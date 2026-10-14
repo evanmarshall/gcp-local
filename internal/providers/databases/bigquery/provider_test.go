@@ -370,6 +370,37 @@ func TestTablePolicyIsItsOwn(t *testing.T) {
 	want(t, "recreated table drops the old grant", h.invokeAs("reader", http.MethodGet, tables+testTable+"/data", nil), 403, "bigquery.tables.getData")
 }
 
+// TestTablePolicyIsAuthorizedOnTheCurrentTable covers a table setIamPolicy
+// authorized by a grant on the table, which is deleted and recreated before
+// the policy write. The recreated table has a fresh policy, so the write must
+// be refused, not land on a table the caller holds no grant on.
+func TestTablePolicyIsAuthorizedOnTheCurrentTable(t *testing.T) {
+	h := newHarness(t)
+	h.table()
+	tables := testDatasets + "/" + testDataset + "/tables"
+	resource := tableResource(testProject, testDataset, testTable)
+	if _, err := h.engine.SetPolicy(resource, iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/bigquery.dataOwner", Members: []string{account("owner")}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	h.expect(http.MethodDelete, tables+"/"+testTable, nil, 204)
+	h.expect(http.MethodPost, tables, map[string]any{
+		"tableReference": map[string]any{"datasetId": testDataset, "tableId": testTable},
+		"schema":         map[string]any{"fields": []any{map[string]any{"name": "title", "type": "STRING"}}},
+	}, 200)
+	call := gateway.Call{Context: context.Background(), Method: methodTablesSetIam,
+		Principal: gateway.Principal{State: gateway.Authenticated, Subject: account("owner"), Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}}
+	request := &gateway.RESTRequest{Path: map[string]string{"project": testProject, keyDatasetID: testDataset, keyTableID: testTable},
+		JSON: []byte(`{"policy":{"bindings":[{"role":"roles/bigquery.dataOwner","members":["` + account("owner") + `"]}]}}`)}
+	if _, err := h.bq.execute(call, request, provider.ProjectScope(testProject)); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("policy write on the recreated table = %v", err)
+	}
+	if policy, _ := h.engine.GetPolicy(resource); len(policy.Bindings) != 0 {
+		t.Fatalf("the recreated table's policy changed: %+v", policy)
+	}
+}
+
 // A recreated dataset and table start with empty policies, as in GCP. The
 // index removal on delete drops the old policy for every provider, BigQuery
 // included. (Table policies are stored on their dataset here.)

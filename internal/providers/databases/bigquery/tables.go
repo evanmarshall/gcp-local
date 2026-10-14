@@ -688,28 +688,59 @@ func columnList(schema map[string]any) string {
 
 // tableIam reads or writes the table's own IAM policy, which inherits the
 // dataset's through the index ancestry; it never touches the dataset policy.
+// The caller was authorized before the scope lock; a table deleted and
+// recreated since has a fresh policy, so the call is authorized again on the
+// current table under the lock that guards its existence, and the policy is
+// read or written under that same lock.
 func (p *Provider) tableIam(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
-	if p.tableCopy(scope, dataset, table) == nil {
-		return nil, tableNotFound(scope.Project, dataset, table)
-	}
 	resource := tableResource(scope.Project, dataset, table)
+	version, write, err := tablePolicyRequest(call, request)
+	if err != nil {
+		return nil, err
+	}
+	var response *gateway.RESTResponse
+	err = p.scopes.With(scope, func(s *scopeState) error {
+		if record := s.tables[tableKey(dataset, table)]; record == nil || record.expired(p.clock()) {
+			return tableNotFound(scope.Project, dataset, table)
+		}
+		decision, err := p.gate.Check(call, iam.Target{Name: resource}, resource)
+		if err := refused(call, call.Method, resource, decision, err); err != nil {
+			return err
+		}
+		response, err = p.applyTablePolicy(resource, version, write)
+		return err
+	})
+	if err != nil {
+		return nil, err //nolint:wrapcheck // wire statuses
+	}
+	return response, nil
+}
+
+// tablePolicyRequest decodes a table getIamPolicy's requested version, or a
+// setIamPolicy's policy.
+func tablePolicyRequest(call gateway.Call, request *gateway.RESTRequest) (int, *iam.Policy, error) {
 	if call.Method == methodTablesGetIam {
 		version, err := provider.RequestedPolicyVersion(request, "options.requestedPolicyVersion", gap)
-		if err != nil {
-			return nil, err //nolint:wrapcheck // wire statuses
-		}
+		return version, nil, err //nolint:wrapcheck // wire statuses
+	}
+	policy, err := decodeTablePolicy(request.JSON)
+	if err != nil {
+		return 0, nil, err
+	}
+	return 0, &policy, nil
+}
+
+// applyTablePolicy reads the table's policy at version, or writes write.
+func (p *Provider) applyTablePolicy(resource string, version int, write *iam.Policy) (*gateway.RESTResponse, error) {
+	if write == nil {
 		policy, err := p.engine.GetPolicy(resource)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "read the table policy: %v", err)
 		}
 		return &gateway.RESTResponse{JSON: policy.View(version).Wire()}, nil
 	}
-	policy, err := decodeTablePolicy(request.JSON)
-	if err != nil {
-		return nil, err
-	}
-	stored, err := p.engine.SetPolicy(resource, policy)
+	stored, err := p.engine.SetPolicy(resource, *write)
 	if err != nil {
 		if _, ok := status.FromError(err); ok {
 			return nil, err //nolint:wrapcheck // already a wire status

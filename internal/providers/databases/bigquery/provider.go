@@ -147,15 +147,21 @@ func (p *Provider) authorize(call gateway.Call, method, project, resource string
 		candidates = append(candidates[:len(candidates)-1], name, candidates[len(candidates)-1])
 	}
 	decision, _, err := provider.Nearest(p.gate, p.scopes, provider.ProjectScope(project), call, resource, candidates...)
+	return decision, refused(call, method, resource, decision, err)
+}
+
+// refused renders an authorization error as BigQuery's refusal: a denial
+// naming resource, or the 401 for a call without credentials naming method.
+func refused(call gateway.Call, method, resource string, decision iam.Decision, err error) error {
 	switch {
 	case err == nil:
-		return decision, nil
+		return nil
 	case status.Code(err) == codes.PermissionDenied:
-		return decision, denied(decision, resource)
+		return denied(decision, resource)
 	case status.Code(err) == codes.Unauthenticated && call.Principal.State == gateway.Anonymous:
-		return decision, credentialsMissing(method)
+		return credentialsMissing(method)
 	default:
-		return decision, err
+		return err
 	}
 }
 
