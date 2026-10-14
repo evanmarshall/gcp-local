@@ -64,10 +64,9 @@ func updateMask(mask string) (map[string]bool, error) {
 // masked returns the policy a set request stores: the stored policy with
 // the masked fields replaced (recorded: project-iam-policy-versions). A
 // masked field the request omits is cleared: "bindings" without bindings
-// removes every binding. bindings brings the request's version (and local
-// deny rules and boundary); the etag is checked whenever the request has
-// one, masked or not. A policy with a conditional binding takes only a
-// version-3 request, whatever the mask.
+// removes every binding. bindings brings the request's version; the etag is
+// checked whenever the request has one, masked or not. A policy with a
+// conditional binding takes only a version-3 request, whatever the mask.
 func (r policyRequest) masked(stored iam.Policy) (iam.Policy, error) {
 	if stored.View(3).Version == 3 && r.policy.Version < 3 {
 		return iam.Policy{}, provider.Invalid(fmt.Sprintf("Specified policy version (%d) must be at least 3 based on the policy's contents. "+
@@ -76,7 +75,6 @@ func (r policyRequest) masked(stored iam.Policy) (iam.Policy, error) {
 	result := stored
 	if r.mask["bindings"] {
 		result.Bindings = r.policy.Bindings
-		result.DenyRules, result.PAB = r.policy.DenyRules, r.policy.PAB
 	}
 	if r.mask["bindings"] || r.mask["version"] {
 		result.Version = r.policy.Version

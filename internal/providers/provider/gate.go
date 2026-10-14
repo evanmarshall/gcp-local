@@ -164,6 +164,14 @@ func (g Gate) Denial(call gateway.Call, decision iam.Decision, resource string) 
 	if strings.Contains(message, "%") {
 		message = fmt.Sprintf(message, permission, resource)
 	}
+	// A refusal by a deny policy ends "due to an IAM deny policy." where
+	// the generic one ends "(or it may not exist)." (recorded for IAM
+	// service accounts: iam-deny-policy-enforcement).
+	if deniedByPolicy(decision, permission) {
+		if trimmed, ok := strings.CutSuffix(message, " (or it may not exist)."); ok {
+			message = trimmed + " due to an IAM deny policy."
+		}
+	}
 	if g.Domain == "" {
 		return status.Error(codes.PermissionDenied, message)
 	}
@@ -172,6 +180,16 @@ func (g Gate) Denial(call gateway.Call, decision iam.Decision, resource string) 
 		delete(metadata, "resource")
 	}
 	return ErrorInfo(codes.PermissionDenied, message, "IAM_PERMISSION_DENIED", g.Domain, metadata)
+}
+
+// deniedByPolicy reports whether a deny policy refused permission.
+func deniedByPolicy(decision iam.Decision, permission string) bool {
+	for _, check := range decision.Checks {
+		if check.Permission == permission && !check.Allowed {
+			return check.DeniedBy != ""
+		}
+	}
+	return false
 }
 
 // WithDecision sets the decision ID header, which the gateway forwards to gRPC

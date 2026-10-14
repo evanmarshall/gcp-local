@@ -61,6 +61,7 @@ ROLES = {
         "iam.serviceAccountAdmin", "iam.serviceAccountKeyAdmin", "iam.serviceAccountViewer",
     ),
     "customroles": ("iam.roleAdmin", "iam.roleViewer"),
+    "denypolicies": ("iam.denyAdmin", "iam.denyReviewer"),
     "resourcemanager": (
         "resourcemanager.projectIamAdmin",
         "resourcemanager.projectMover",

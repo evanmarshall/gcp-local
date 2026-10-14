@@ -109,6 +109,7 @@ func NewRegistry() *Registry {
 	r.registerData("bigtable", bigtable.BigtableTableAdminMethods)
 	r.registerData("iam", iam.IAMAdminMethods)
 	r.registerData("iam", iam.IAMCredentialsMethods)
+	r.registerData("iam", iam.IAMPoliciesMethods)
 	r.registerData("resourcemanager", resourcemanager.FoldersMethods)
 	r.registerData("resourcemanager", resourcemanager.OrganizationsMethods)
 	r.registerData("resourcemanager", resourcemanager.ProjectsMethods)
@@ -135,6 +136,7 @@ func (r *Registry) registerRoutes() {
 		{artifactregistry.ArtifactRegistryRoutes, "artifactregistry"},
 		{resourcemanager.ResourceManagerRoutes, "resourcemanager"},
 		{iam.IAMRoutes, "iam"},
+		{iam.IAMPoliciesRoutes, "iam"},
 		{orgpolicy.OrgPolicyRoutes, "orgpolicy"},
 		{cloudtasks.CloudTasksRoutes, "cloudtasks"},
 		{cloudscheduler.CloudSchedulerRoutes, "cloudscheduler"},

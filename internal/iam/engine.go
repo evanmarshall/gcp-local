@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -48,6 +48,11 @@ type Check struct {
 	Role        string   `json:"role,omitempty"`
 	Member      string   `json:"member,omitempty"`
 	Conditions  []string `json:"conditions_evaluated,omitempty"`
+	// DenyPolicies names every deny policy evaluated on the ancestry;
+	// DeniedBy the deny rule that refused the permission, as "rule N of
+	// policies/.../denypolicies/ID".
+	DenyPolicies []string `json:"deny_policies_considered,omitempty"`
+	DeniedBy     string   `json:"denied_by,omitempty"`
 }
 type Decision struct {
 	ID        string            `json:"id"`
@@ -92,14 +97,18 @@ type Engine struct {
 	customRoles CustomRoleLookup
 	rules       map[string]Rule
 	policies    map[string]storedPolicy
-	unsupported map[string]unsupportedPolicy
-	orgPolicies map[string]map[string]*orgpolicypb.Policy
-	perimeters  map[string][]string
-	revision    uint64
-	decisions   map[string]Decision
-	order       []string
-	signingKeys map[string]map[string]signingKey
-	directory   directory
+	// denyPolicies are each hierarchy node's IAM v2 deny policies, in
+	// creation order; boundaries its declared principal access boundary.
+	denyPolicies map[string][]denyPolicy
+	boundaries   map[string]*PABPolicy
+	unsupported  map[string]unsupportedPolicy
+	orgPolicies  map[string]map[string]*orgpolicypb.Policy
+	perimeters   map[string][]string
+	revision     uint64
+	decisions    map[string]Decision
+	order        []string
+	signingKeys  map[string]map[string]signingKey
+	directory    directory
 }
 
 // errPlanExists rejects a second permission plan for one method.
@@ -139,7 +148,7 @@ func New(index *state.Index) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := &Engine{index: index, roles: catalog.permissions, definitions: catalog.definitions, testable: catalog.testable, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string]map[string]*orgpolicypb.Policy{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}
+	engine := &Engine{index: index, roles: catalog.permissions, definitions: catalog.definitions, testable: catalog.testable, rules: map[string]Rule{}, policies: map[string]storedPolicy{}, denyPolicies: map[string][]denyPolicy{}, boundaries: map[string]*PABPolicy{}, unsupported: map[string]unsupportedPolicy{}, orgPolicies: map[string]map[string]*orgpolicypb.Policy{}, perimeters: map[string][]string{}, decisions: map[string]Decision{}, signingKeys: map[string]map[string]signingKey{}}
 	// A resource that leaves the index takes its policy with it, whichever
 	// provider deleted it: GCP gives a recreated resource an empty policy.
 	// A delete racing a same-name recreate can drop the new policy, never
@@ -507,7 +516,7 @@ func (e *Engine) collectChecks(decision *Decision, permissions []string, ancesto
 func (e *Engine) evaluatePermission(decision *Decision, ancestors []state.Resource, permission string, principal gateway.Principal) Check {
 	check := Check{Permission: permission, Target: decision.Method, Policies: []string{}}
 	if denyMatch := e.denialPhase(ancestors, permission, principal, decision, &check); denyMatch != "" {
-		check.Conditions = append(check.Conditions, "denied by "+denyMatch)
+		check.DeniedBy = denyMatch
 		return check
 	}
 	for _, ancestor := range ancestors {
@@ -594,6 +603,8 @@ func cloneDecision(value Decision) Decision {
 	value.Checks = append([]Check(nil), value.Checks...)
 	for i := range value.Checks {
 		value.Checks[i].Policies = append([]string(nil), value.Checks[i].Policies...)
+		value.Checks[i].DenyPolicies = append([]string(nil), value.Checks[i].DenyPolicies...)
+		value.Checks[i].Conditions = append([]string(nil), value.Checks[i].Conditions...)
 	}
 	return value
 }
@@ -613,80 +624,6 @@ func (e *Engine) Decision(id string) (Decision, bool) {
 	return cloneDecision(decision), ok
 }
 
-// denialPhase evaluates every deny rule at every ancestor independently and
-// returns the first that applies. An exception exempts the principal from its
-// own rule only.
-func (e *Engine) denialPhase(ancestors []state.Resource, permission string, principal gateway.Principal, decision *Decision, check *Check) string {
-	match := ""
-	for _, ancestor := range ancestors {
-		check.Policies = append(check.Policies, ancestor.Name)
-		for index, deny := range e.policies[ancestor.Name].denies {
-			if match == "" && deny.applies(permission, principal, decision, check) {
-				match = fmt.Sprintf("deny rule %d on %s", index, ancestor.Name)
-			}
-		}
-	}
-	return match
-}
-
-// applies reports whether one deny rule denies the check. GCP applies a rule
-// whose denial condition is true or cannot be evaluated.
-func (d storedDeny) applies(permission string, principal gateway.Principal, decision *Decision, check *Check) bool {
-	identities := denyIdentities(principal, decision.memberships)
-	if !permissionDenied(permission, d.rule) || !slices.ContainsFunc(d.rule.DeniedPrincipals, identities) {
-		return false
-	}
-	if slices.ContainsFunc(d.rule.ExceptionPrincipals, identities) {
-		check.Conditions = append(check.Conditions, "deny rule excepts the principal")
-		return false
-	}
-	if d.condition == nil {
-		return true
-	}
-	matched, err := d.condition.evaluate(decision.conditions)
-	switch {
-	case err != nil:
-		check.Conditions = append(check.Conditions, "denial condition "+d.condition.title+" could not be evaluated; the rule applies")
-		return true
-	case matched:
-		check.Conditions = append(check.Conditions, "denial condition "+d.condition.title+" matched")
-		return true
-	}
-	check.Conditions = append(check.Conditions, "denial condition "+d.condition.title+" did not match")
-	return false
-}
-
-// permissionDenied reports whether the rule covers one permission. Stored
-// rules hold v1 permission names (storage.objects.get).
-func permissionDenied(permission string, rule DenyRule) bool {
-	covers := func(denied string) bool {
-		return denied == permission || (strings.HasSuffix(denied, "*") && strings.HasPrefix(permission, strings.TrimSuffix(denied, "*")))
-	}
-	return slices.ContainsFunc(rule.DeniedPermissions, covers) && !slices.ContainsFunc(rule.ExceptionPermissions, covers)
-}
-
-// publicPrincipalSet is the deny-policy identifier for every caller,
-// including anonymous ones.
-const publicPrincipalSet = "principalSet://goog/public:all"
-
-// denyIdentities returns a matcher for the deny-policy identifiers that name
-// the principal: the public set, GCP's v2 identifiers, the allow-policy
-// member form the local engine also accepts, and the groups containing it
-// (memberships; deny rules can't name a domain).
-func denyIdentities(principal gateway.Principal, memberships map[string]bool) func(string) bool {
-	names := map[string]bool{publicPrincipalSet: true}
-	if principal.State == gateway.Authenticated {
-		names[principal.Subject] = true
-		if email, ok := strings.CutPrefix(principal.Subject, "user:"); ok {
-			names[userIdentifierPrefix+email] = true
-		}
-		if email, ok := strings.CutPrefix(principal.Subject, "serviceAccount:"); ok {
-			names[serviceAccountIdentifierPrefix+email] = true
-		}
-	}
-	return func(identifier string) bool { return names[identifier] || memberships[strings.ToLower(identifier)] }
-}
-
 // pabViolation enforces principal access boundaries. A service account
 // NAME@PROJECT.iam.gserviceaccount.com is enrolled in the principal sets of its
 // project and that project's folders and organization; a boundary stored on
@@ -699,7 +636,7 @@ func (e *Engine) pabViolation(ancestors []state.Resource, principal gateway.Prin
 	}
 	enrolled := false
 	for _, set := range sets {
-		pab := e.policies[set.Name].pab
+		pab := e.boundaries[set.Name]
 		if pab == nil {
 			continue
 		}
@@ -780,4 +717,32 @@ func (e *Engine) collectSignals(ancestors []state.Resource, decision *Decision) 
 			})
 		}
 	}
+}
+
+// ServeHTTP serves the decision lookup, GET /_local/iam/decisions/ID.
+func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	const prefix = "/_local/iam/decisions/"
+	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, prefix) {
+		http.NotFound(w, r)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, prefix)
+	decoded, err := hex.DecodeString(id)
+	if err != nil || len(decoded) != 16 {
+		http.NotFound(w, r)
+		return
+	}
+	decision, ok := e.Decision(id)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	encoded, err := json.Marshal(decision)
+	if err != nil {
+		http.Error(w, `{"error":"response encoding failed"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(encoded)
 }

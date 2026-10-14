@@ -468,7 +468,7 @@ func TestConcurrentPoliciesAndBoundedDecisionRetention(t *testing.T) {
 }
 func TestBootstrapIsExplicitAndRejectsIncompleteHierarchy(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "iam.json")
-	config := iam.Config{Resources: []state.Resource{{Name: projectA, Kind: kindProject, Service: resourceManagerService, Scope: state.Scope{Project: testProject, Location: state.Global}}}, Policies: map[string]iam.Policy{projectA: {Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{fixture}}}}}}
+	config := iam.Config{Resources: []state.Resource{{Name: projectA, Kind: kindProject, Service: resourceManagerService, Scope: state.Scope{Project: testProject, Location: state.Global}}}, Policies: map[string]iam.ConfigPolicy{projectA: {Policy: iam.Policy{Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{fixture}}}}}}}
 	raw := mustMarshal(t, config)
 	mustWriteFile(t, path, raw)
 	engine, index, err := iam.Load(path)
@@ -575,33 +575,6 @@ func TestConditionAttributesAndTimeMatchRecording(t *testing.T) {
 	grant(`request.time < timestamp("2000-01-01T00:00:00Z")`)
 	if _, err := engine.Authorize(read, named("public-a.txt"), nil); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("expired condition was allowed: %v", err)
-	}
-}
-
-func TestDenyRulesOverrideAllowBindings(t *testing.T) {
-	engine, _ := setup(t)
-	read := call(testObjectGet, fixture, testProject)
-	deny := iam.Policy{Version: 3, DenyRules: []iam.DenyRule{{
-		DeniedPrincipals:  []string{fixture},
-		DeniedPermissions: []string{testObjectGet},
-	}}}
-	if _, err := engine.SetPolicy(object().Parent, deny); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.Authorize(read, object(), nil); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("deny did not override the allow: %v", err)
-	}
-	// An exception principal for the same rule restores the allow.
-	deny.DenyRules[0].ExceptionPrincipals = []string{fixture}
-	if _, err := engine.SetPolicy(object().Parent, deny); err != nil {
-		t.Fatal(err)
-	}
-	decision, err := engine.Authorize(read, object(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !decision.Checks[0].Allowed || len(decision.Checks[0].Conditions) == 0 {
-		t.Fatalf("exception did not restore the allow: %+v", decision.Checks[0])
 	}
 }
 
@@ -878,23 +851,9 @@ func TestDirectoryMemberConditions(t *testing.T) {
 	}
 }
 
-// A deny rule naming a group denies its nested members over an allow; a group
-// exception exempts its members from that rule only.
-func TestDirectoryGroupDeny(t *testing.T) {
-	engine, _ := setupWith(t, testDirectory())
-	set(t, engine, object().Parent, testViewerRole, nestedAccount, bob)
-	deny := iam.DenyRule{DeniedPrincipals: []string{"principalSet://goog/group/team@example.com"}, DeniedPermissions: []string{testObjectGet}}
-	mustSet(t, engine, projectA, projectAdmin(iam.Policy{DenyRules: []iam.DenyRule{deny}}))
-	denied(t, engine, call(testObjectGet, nestedAccount, testProject), "a nested group member escaped the deny:")
-	deny.ExceptionPrincipals = []string{"group:leads@example.com"}
-	mustSet(t, engine, projectA, projectAdmin(iam.Policy{DenyRules: []iam.DenyRule{deny}}))
-	grantedBy(t, engine, call(testObjectGet, nestedAccount, testProject), object().Parent, "group exception")
-	denied(t, engine, call(testObjectGet, carol, testProject), "a non-member was granted:")
-}
-
 // Group and domain members outside the directory are refused at write time
-// with GCP's errors (storage-iam-directory), in allow bindings and deny rules,
-// so no stored policy names a group that grants or denies nothing.
+// with GCP's errors (storage-iam-directory), so no stored policy names a group
+// that grants nothing.
 func TestDirectoryRefusesUnknownMembers(t *testing.T) {
 	engine, _ := setupWith(t, testDirectory())
 	refusals := map[string]string{
@@ -912,12 +871,6 @@ func TestDirectoryRefusesUnknownMembers(t *testing.T) {
 			t.Fatalf("%s: %v", member, err)
 		}
 	}
-	_, err := engine.SetPolicy(projectA, iam.Policy{Version: 3, DenyRules: []iam.DenyRule{{DeniedPrincipals: []string{fixture},
-		ExceptionPrincipals: []string{"group:missing@example.com"}, DeniedPermissions: []string{testObjectGet}}}})
-	if status.Convert(err).Message() != "Group missing@example.com does not exist." {
-		t.Fatal("deny rule with an unknown group:", err)
-	}
-	grantedBy(t, engine, call(testObjectGet, fixture, testProject), projectA, "a refused deny policy was stored")
 }
 
 // The directory is fixed before any policy and must be resolvable.
@@ -946,7 +899,7 @@ func TestDirectoryDeclaration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "iam.json")
 	mustWriteFile(t, path, mustMarshal(t, iam.Config{
 		Resources: []state.Resource{{Name: projectA, Kind: kindProject, Service: resourceManagerService, Scope: state.Scope{Project: testProject, Location: state.Global}}},
-		Policies:  map[string]iam.Policy{projectA: {Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{teamGroup}}}}},
+		Policies:  map[string]iam.ConfigPolicy{projectA: {Policy: iam.Policy{Bindings: []iam.Binding{{Role: "roles/storage.admin", Members: []string{teamGroup}}}}}},
 		Directory: testDirectory(),
 	}))
 	if _, _, err := iam.Load(path); err != nil {

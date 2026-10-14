@@ -20,7 +20,6 @@ import (
 	runapi "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
-	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/identity"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -513,22 +512,6 @@ func TestCreateRefusesSecretEnvironmentSources(t *testing.T) {
 	}
 	if len(h.runtime.started) != 0 {
 		t.Fatalf("a refused template launched %v", h.runtime.started)
-	}
-}
-
-func TestGRPCPolicyOmitsLocalDenyRules(t *testing.T) {
-	g := newGRPCHarness(t)
-	client := g.services(t, ownerSubject)
-	g.deploy(t, client)
-	if _, err := g.engine.SetPolicy(serviceResource("demo-project", "us-central1", "svc"), iam.Policy{
-		Version: 3, Bindings: []iam.Binding{{Role: "roles/run.invoker", Members: []string{"allUsers"}}},
-		DenyRules: []iam.DenyRule{{DeniedPrincipals: []string{peerSubject}, DeniedPermissions: []string{"run.routes.invoke"}}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	policy, err := client.GetIamPolicy(context.Background(), &iampb.GetIamPolicyRequest{Resource: serviceReference})
-	if err != nil || len(policy.GetBindings()) != 1 || policy.GetBindings()[0].GetMembers()[0] != "allUsers" {
-		t.Fatalf("GetIamPolicy with deny rules = %v, %v", policy, err)
 	}
 }
 

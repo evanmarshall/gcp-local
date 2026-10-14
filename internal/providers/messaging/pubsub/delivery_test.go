@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
+	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
 	pb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
@@ -366,8 +367,7 @@ func TestSnapshotLifecycleAndAuthorization(t *testing.T) {
 	_, err = as(subscriber+"Seek", testSub, &pb.SeekRequest{Subscription: testSub, Target: &pb.SeekRequest_Snapshot{Snapshot: "projects/project-a/snapshots/absent"}})
 	expectRefusal(t, "absent snapshot", err, codes.NotFound, "Snapshot does not exist")
 	// A deny on consume blocks snapshot creation even for the project admin.
-	_, err = p.iam.SetPolicy(canonical(testSub), iam.Policy{Version: 3, DenyRules: []iam.DenyRule{{DeniedPrincipals: []string{owner}, DeniedPermissions: []string{"pubsub.subscriptions.consume"}}}})
-	must(t, err)
+	denyAtProject(t, p, owner, "pubsub.googleapis.com/subscriptions.consume")
 	second := "projects/project-a/snapshots/second"
 	_, err = as(subscriber+"CreateSnapshot", second, &pb.CreateSnapshotRequest{Name: second, Subscription: testSub})
 	expectRefusal(t, "snapshot of a denied source", err, codes.PermissionDenied, "pubsub.subscriptions.consume")
@@ -379,6 +379,19 @@ func TestSnapshotLifecycleAndAuthorization(t *testing.T) {
 	if _, found := p.labels.Load(canonical(snapshotName)); found {
 		t.Fatal("deleted snapshot kept its labels")
 	}
+}
+
+// denyAtProject attaches a deny policy to the test project denying member
+// one permission.
+func denyAtProject(t *testing.T, p *Provider, member, permission string) {
+	t.Helper()
+	node, ok := p.index.Get(provider.ProjectResource(testProject))
+	if !ok {
+		t.Fatal("the test project is not indexed")
+	}
+	rule := &iamv2.DenyRule{DeniedPrincipals: []string{iam.DenyPrincipal(member)}, DeniedPermissions: []string{permission}}
+	_, err := p.iam.PutDenyPolicy(node, "deny", &iamv2.Policy{Rules: []*iamv2.PolicyRule{{Kind: &iamv2.PolicyRule_DenyRule{DenyRule: rule}}}}, time.Now())
+	must(t, err)
 }
 
 func TestResetClearsDeliveryStateAndLabels(t *testing.T) {

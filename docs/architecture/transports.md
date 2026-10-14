@@ -26,7 +26,7 @@ What Google serves comes from two sources:
 | `cloudtasks` | REST, gRPC | 16 | 15 | cloudtasks.locations.list | none |
 | `compute` | Compute REST; Network Management REST, gRPC | 46 | 0 | networkmanagement.connectivityTests.create, networkmanagement.connectivityTests.delete, networkmanagement.connectivityTests.get, networkmanagement.connectivityTests.list, networkmanagement.connectivityTests.rerun | none |
 | `firestore` | REST, gRPC; Listen and Write gRPC | 18 | 14 | firestore.fields.get, firestore.fields.update, firestore.operations.cancel, firestore.operations.delete, firestore.operations.get, firestore.operations.list | none |
-| `iam` | REST, gRPC | 29 | 20 | IAM.CreateServiceAccountKey, IAM.SignBlob, IAM.SignJwt | none |
+| `iam` | REST, gRPC | 35 | 26 | IAM.CreateServiceAccountKey, IAM.SignBlob, IAM.SignJwt | none |
 | `logging` | REST, gRPC | 4 | 4 | none | none |
 | `orgpolicy` | REST, gRPC | 21 | 7 | none | none |
 | `pubsub` | REST, gRPC; StreamingPull gRPC | 28 | 30 | none | Subscriber.CreateSnapshot, Subscriber.DeleteSnapshot, Subscriber.GetSnapshot, Subscriber.ListSnapshots, Subscriber.Seek |

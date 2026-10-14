@@ -73,7 +73,6 @@ func main() {
 	write("databases/spanner/spanner_routes.go", spannerRoutes(), *check)
 	write("databases/bigtable/bigtable_routes.go", bigtableRoutes(), *check)
 	write("artifactregistry/artifactregistry_routes.go", artifactRegistryRoutes(), *check)
-	write("security/iam/iam_routes.go", iamRoutes(), *check)
 	write("messaging/cloudtasks/cloudtasks_routes.go", cloudTasksRoutes(), *check)
 	write("messaging/cloudscheduler/cloudscheduler_routes.go", cloudSchedulerRoutes(), *check)
 	write("databases/memorystore/redis_routes.go", redisRoutes(), *check)
@@ -96,10 +95,9 @@ func main() {
 	write("databases/spanner/spanner_database_admin_dispatch.go", transcodedDispatch(spannerDatabaseAdminRPC), *check)
 	write("databases/bigtable/bigtable_instance_admin_dispatch.go", transcodedDispatch(bigtableInstanceAdminRPC), *check)
 	write("databases/bigtable/bigtable_table_admin_dispatch.go", transcodedDispatch(bigtableTableAdminRPC), *check)
-	write("security/iam/iam_admin_dispatch.go", transcodedDispatch(iamAdminRPC), *check)
-	write("security/iam/iam_credentials_dispatch.go", transcodedDispatch(iamCredentialsRPC), *check)
 	writeResourceManager(*check)
 	writeOrgPolicy(*check)
+	writeIAM(*check)
 	write("mixin/operations_dispatch.go", operationsDispatch(), *check)
 }
 

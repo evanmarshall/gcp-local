@@ -64,7 +64,7 @@ Rules:
 `internal/iam` answers one question: may this principal perform these permission checks on this target? Details are in [the IAM guide](architecture/iam.md).
 
 - Each provider registers a permission plan per method: baseline permissions plus permissions added by named request or state features. A plan cannot drop baseline checks. An unresolved feature is an error, not an assumption.
-- Evaluation walks the target's ancestry in the resource index (resource, project, folder, organization) and unions allow bindings. It also evaluates IAM conditions (CEL), deny rules, and principal access boundary policies.
+- Evaluation walks the target's ancestry in the resource index (resource, project, folder, organization) and unions allow bindings. It also evaluates IAM conditions (CEL), IAM v2 deny policies, and principal access boundaries.
 - Roles come from committed snapshots of real predefined roles in `internal/iam/roles/`, checked against `manifest.json` at load.
 - Unsupported configuration (`MarkUnsupported`) fails closed even when an allow binding matches.
 - Every decision gets an ID and a record. `bin/gcp-local why-denied ID` prints it.

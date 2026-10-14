@@ -405,3 +405,84 @@ func testCustomRoleDestroyed(name string) func(*terraform.State) error {
 		return nil
 	}
 }
+
+// denyParent is the URL-encoded attachment point google_iam_deny_policy
+// takes as its parent.
+const denyParent = "cloudresourcemanager.googleapis.com%2Fprojects%2F" + projectID
+
+// TestLocalIamDenyPolicy creates a project deny policy, updates its display
+// name and rule in place (the provider sends the etag), imports it, and
+// destroys it, polling each IAM v2 operation.
+func TestLocalIamDenyPolicy(t *testing.T) {
+	config := func(display, exception string) string {
+		return fmt.Sprintf(`
+resource "google_iam_deny_policy" "keys" {
+ parent       = %q
+ name         = "tf-deny-keys"
+ display_name = %q
+ rules {
+  description = "no key creation"
+  deny_rule {
+   denied_principals    = ["principal://iam.googleapis.com/projects/-/serviceAccounts/denied@%s.iam.gserviceaccount.com"]
+   denied_permissions   = ["iam.googleapis.com/serviceAccountKeys.create"]
+   exception_principals = [%s]
+  }
+ }
+}
+`, denyParent, display, projectID, exception)
+	}
+	step := func(display, exception string) resource.TestStep {
+		return resource.TestStep{
+			Config: config(display, exception),
+			ConfigPlanChecks: resource.ConfigPlanChecks{PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()}},
+			Check: resource.ComposeTestCheckFunc(
+				resource.TestCheckResourceAttr("google_iam_deny_policy.keys", "display_name", display),
+				resource.TestCheckResourceAttrSet("google_iam_deny_policy.keys", "etag"),
+			),
+		}
+	}
+	steps := []resource.TestStep{
+		step("deny keys", ""),
+		step("deny keys, except fixture", fmt.Sprintf("%q", "principal://iam.googleapis.com/projects/-/serviceAccounts/fixture@"+projectID+".iam.gserviceaccount.com")),
+		{ResourceName: "google_iam_deny_policy.keys", ImportState: true, ImportStateVerify: true,
+			ImportStateId: denyParent + "/tf-deny-keys"},
+	}
+	for i := range steps {
+		if steps[i].Config != "" {
+			steps[i].Config = fmt.Sprintf(`provider "google" {
+ project = %q
+ access_token = %q
+ iam2_custom_endpoint = %q
+ universe_domain = "gcp-local.invalid"
+ request_timeout = "2s"
+ add_terraform_attribution_label = false
+}
+`, projectID, fixtureToken, endpoint+"/v2/") + steps[i].Config
+		}
+	}
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { preCheck(t) },
+		ExternalProviders: pinnedProvider(),
+		CheckDestroy:      testDenyPolicyDeleted,
+		Steps:             steps,
+	})
+}
+
+// testDenyPolicyDeleted requires the destroyed deny policy to read back absent.
+func testDenyPolicyDeleted(*terraform.State) error {
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+		endpoint+"/v2/policies/"+denyParent+"/denypolicies/tf-deny-keys", nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+fixtureToken)
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("deny policy after destroy: HTTP %d", response.StatusCode)
+	}
+	return nil
+}

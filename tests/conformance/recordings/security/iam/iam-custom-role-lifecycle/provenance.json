@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-12T23:30:22.225532+00:00",
+  "recorded_at": "2026-10-14T02:20:36.768950+00:00",
   "scenario": {
     "id": "iam-custom-role-lifecycle",
     "service": "iam",
     "transport": "rest-v1",
-    "revision": "2f7e2f5dfca8ec5dbc8bcc390eed46afc00ec70fc800bd305a4b093d7ebddece",
+    "revision": "95815b3742b39aac958ce3bd9bb9edb5fb40244a26179bebf7a7e814480289f0",
     "versions": {
       "sdk": "urllib;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "07955313e37cdfda881647785e682447650cd70113c249eb750a590843a59b46",
+  "snapshot_sha256": "31a5abb5c39f9b55b4c16a8975715fefcf9b19c6fbfe92485dbfd1f59bc6e49d",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",
@@ -22,7 +22,7 @@
   },
   "context": {
     "contract_files": {
-      "gcp_validation/services/security/customroles.py": "9a2052565ee9eaee6fac3b785e55c161a2bcb56568fb3a2806e3e82a2e636111",
+      "gcp_validation/services/security/iam/customroles.py": "9a2052565ee9eaee6fac3b785e55c161a2bcb56568fb3a2806e3e82a2e636111",
       "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
       "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98"
     },

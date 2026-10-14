@@ -1,0 +1,48 @@
+{
+  "source": "gcp",
+  "reviewed": true,
+  "cleanup": "passed",
+  "recorded_at": "2026-10-14T02:30:34.832032+00:00",
+  "scenario": {
+    "id": "iam-deny-policy-lifecycle",
+    "service": "iam",
+    "transport": "rest-v2",
+    "revision": "70cee6f35d64161598aafa27e680d2e15e38ce7b25b02628e7020a933bd7600b",
+    "versions": {
+      "sdk": "urllib;google-auth/2.56.2",
+      "provider": "not-applicable",
+      "backend": "not-applicable"
+    }
+  },
+  "snapshot_sha256": "056b7fb6913964e2e5cc252965f63ee1eebdfeae53bd99fe3571d24e981f7dfc",
+  "runner_versions": {
+    "pytest": "9.0.2",
+    "pytest-socket": "0.8.1",
+    "localstack-snapshot": "0.3.3"
+  },
+  "context": {
+    "contract_files": {
+      "gcp_validation/services/security/iam/denypolicies.py": "fe0769405151312ff4c8035ca15858aa7ce8e4ede4b2626cbe5a6228ee4fe83f",
+      "gcp_validation/services/security/refusals.py": "7e5c208b9472d70b50966390e74a6cea0d0f34de2ae5eb01121bf4ef526a8f7e",
+      "gcp_validation/live_rest.py": "60bcb1769964be65fb240dff13ce7134b2a37aa9223b18c3e1e2b637d4c53501",
+      "gcp_validation/sandbox.py": "6794858c3473ecc431bcd8ce1ff056e26acf416a0304c2a5a3579bb5aac07e98",
+      "tests/conformance/security/iam/deny/conftest.py": "92b0daad67a99668ac03d1f691f64d0fb3cae28187a5b436cc009f63c578bf0f"
+    },
+    "scope": {
+      "services": [
+        "denypolicies"
+      ],
+      "location": "global",
+      "limits": {
+        "max_deny_policies": 1,
+        "max_run_seconds": 1800
+      },
+      "cleanup_required": true,
+      "identities": [
+        "fixture",
+        "allowed",
+        "denied"
+      ]
+    }
+  }
+}

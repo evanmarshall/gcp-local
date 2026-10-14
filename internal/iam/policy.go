@@ -25,16 +25,15 @@ type Binding struct {
 	Members   []string        `json:"members"`
 	Condition json.RawMessage `json:"condition,omitempty"`
 }
+
+// Policy is a google.iam.v1 allow policy.
 type Policy struct {
-	Version   int        `json:"version"`
-	Bindings  []Binding  `json:"bindings"`
-	DenyRules []DenyRule `json:"denyRules,omitempty"`
+	Version  int       `json:"version"`
+	Bindings []Binding `json:"bindings"`
 	// AuditConfigs are stored and returned on projects, folders, and
 	// organizations. They aren't enforced: no audit logs are written.
 	AuditConfigs []AuditConfig `json:"auditConfigs,omitempty"`
-	// PAB is the principal access boundary policy attached to this resource.
-	PAB  *PABPolicy `json:"principalAccessBoundary,omitempty"`
-	ETag string     `json:"etag"`
+	ETag         string        `json:"etag"`
 }
 
 // AuditConfig is one service's audit logging configuration in an allow policy.
@@ -50,7 +49,8 @@ type AuditLogConfig struct {
 }
 
 // PABPolicy bounds the resources the principal set of the resource-manager
-// node it is stored on may reach; see pabViolation.
+// node it is declared on may reach; see pabViolation. Only the bootstrap
+// configuration declares one.
 type PABPolicy struct {
 	Rules []PABRule `json:"rules"`
 }
@@ -60,21 +60,6 @@ type PABRule struct {
 	BoundCloudResources []string `json:"boundCloudResources"`
 }
 
-// DenyRule is one v3 deny rule: a principal set that must not use a
-// permission set, with optional exceptions and a denial condition.
-type DenyRule struct {
-	DeniedPrincipals     []string        `json:"deniedPrincipals"`
-	ExceptionPrincipals  []string        `json:"exceptionPrincipals,omitempty"`
-	DeniedPermissions    []string        `json:"deniedPermissions"`
-	ExceptionPermissions []string        `json:"exceptionPermissions,omitempty"`
-	DenialCondition      json.RawMessage `json:"denialCondition,omitempty"`
-}
-
-// storedDeny is a compiled deny rule.
-type storedDeny struct {
-	rule      DenyRule
-	condition *evaluated
-}
 type unsupportedPolicy struct {
 	features []string
 	owner    string
@@ -86,8 +71,6 @@ type storedPolicy struct {
 	owner      string
 	scope      state.Scope
 	conditions []conditionGuard
-	denies     []storedDeny
-	pab        *PABPolicy
 }
 
 func clonePolicy(p Policy) Policy {
@@ -157,10 +140,6 @@ func (e *Engine) setPolicy(decisionID, resource string, policy Policy) (Policy, 
 	if err := checkConditionalWrite(previous, policy); err != nil {
 		return Policy{}, err
 	}
-	denies, err := e.compileDenies(policy.DenyRules, directory)
-	if err != nil {
-		return Policy{}, err
-	}
 	conditions, err := e.compileBindings(policy.Bindings, directory, roleContext{resource: resource, previous: previous, lookup: lookup})
 	if err != nil {
 		return Policy{}, err
@@ -171,18 +150,17 @@ func (e *Engine) setPolicy(decisionID, resource string, policy Policy) (Policy, 
 	if err := e.checkMemberDomains(decisionID, resource, previous, policy); err != nil {
 		return Policy{}, err
 	}
-	return e.storePolicy(resource, owner, policy, conditions, denies)
+	return e.storePolicy(resource, owner, policy, conditions)
 }
 
-// checkPlacement refuses the policy parts only resource-manager nodes hold: a
-// principal access boundary (projects, folders, organizations) and audit
-// configs, which are stored there and not modeled elsewhere.
+// resourceManager is the service that owns organizations, folders, and
+// projects in the index.
+const resourceManager = "resourcemanager"
+
+// checkPlacement refuses audit configs outside resource-manager nodes, where
+// they are stored and not modeled elsewhere.
 func checkPlacement(owner state.Resource, policy Policy) error {
-	node := owner.Service == "resourcemanager"
-	if policy.PAB != nil && (!node || owner.Kind == "") {
-		return status.Error(codes.InvalidArgument, "A principal access boundary binds only to a project, folder, or organization principal set")
-	}
-	if len(policy.AuditConfigs) > 0 && !node {
+	if len(policy.AuditConfigs) > 0 && owner.Service != resourceManager {
 		return status.Error(codes.Unimplemented, "Audit configs on a "+owner.Service+" resource policy are not modeled")
 	}
 	return nil
@@ -199,16 +177,11 @@ func checkConditionalWrite(previous, policy Policy) error {
 	return nil
 }
 
-// validatePolicyShape checks the version, version-gated features, deny rule
-// shape, and binding count before any binding is compiled.
+// validatePolicyShape checks the version, version-gated features, and
+// binding count before any binding is compiled.
 func validatePolicyShape(policy Policy) error {
 	if err := validateVersion(policy); err != nil {
 		return err
-	}
-	for _, rule := range policy.DenyRules {
-		if len(rule.DeniedPrincipals) == 0 || len(rule.DeniedPermissions) == 0 {
-			return status.Error(codes.InvalidArgument, "A deny rule requires denied principals and permissions")
-		}
 	}
 	if len(policy.Bindings) > 1000 {
 		return status.Error(codes.InvalidArgument, "Policy has too many bindings")
@@ -230,97 +203,7 @@ func validateVersion(policy Policy) error {
 				"For more information, please refer to https://cloud.google.com/iam/help/allow-policies/versions.", max(policy.Version, 1))
 		}
 	}
-	if len(policy.DenyRules) > 0 {
-		return status.Error(codes.Unimplemented, "Deny rules require policy version 3")
-	}
 	return nil
-}
-
-// Deny-policy identifier prefixes, the project node prefix, and its kind.
-const (
-	userIdentifierPrefix           = "principal://goog/subject/"
-	serviceAccountIdentifierPrefix = "principal://iam.googleapis.com/projects/-/serviceAccounts/"
-	projectNodePrefix              = "//cloudresourcemanager.googleapis.com/projects/"
-	kindProject                    = "project"
-)
-
-// compileDenies validates each deny rule's principals and permissions and
-// compiles its optional denial condition. An identifier or permission the
-// engine cannot match is refused, so a rule never silently fails to deny; a
-// group must be in the directory, which can't change once policies exist.
-func (e *Engine) compileDenies(rules []DenyRule, directory directory) ([]storedDeny, error) {
-	var compiled []storedDeny
-	for _, rule := range rules {
-		for _, principal := range append(append([]string(nil), rule.DeniedPrincipals...), rule.ExceptionPrincipals...) {
-			if err := checkDenyPrincipal(principal, directory); err != nil {
-				return nil, err
-			}
-		}
-		denied, err := e.denyPermissions(rule.DeniedPermissions)
-		if err != nil {
-			return nil, err
-		}
-		excepted, err := e.denyPermissions(rule.ExceptionPermissions)
-		if err != nil {
-			return nil, err
-		}
-		deny := storedDeny{rule: DenyRule{DeniedPrincipals: append([]string(nil), rule.DeniedPrincipals...),
-			ExceptionPrincipals: append([]string(nil), rule.ExceptionPrincipals...), DeniedPermissions: denied, ExceptionPermissions: excepted}}
-		if len(rule.DenialCondition) > 0 {
-			condition, err := compileCondition(rule.DenialCondition)
-			if err != nil {
-				return nil, status.Error(codes.Unimplemented, err.Error())
-			}
-			deny.condition = condition
-		}
-		compiled = append(compiled, deny)
-	}
-	return compiled, nil
-}
-
-// checkDenyPrincipal refuses a deny principal the engine can't match: a
-// group outside the directory, or an unsupported identifier.
-func checkDenyPrincipal(principal string, directory directory) error {
-	if strings.HasPrefix(principal, "group:") || strings.HasPrefix(principal, groupSetPrefix) {
-		_, err := directory.checkMember(principal)
-		return err
-	}
-	if !denyPrincipalSupported(principal) {
-		return status.Error(codes.Unimplemented, "Deny principal identifier is unsupported: "+principal)
-	}
-	return nil
-}
-
-// denyPrincipalSupported accepts the public set, GCP's v2 user and service
-// account identifiers, and the allow-policy user:/serviceAccount: members.
-func denyPrincipalSupported(principal string) bool {
-	if principal == publicPrincipalSet {
-		return true
-	}
-	for _, prefix := range []string{userIdentifierPrefix, serviceAccountIdentifierPrefix, "user:", "serviceAccount:"} {
-		if email, ok := strings.CutPrefix(principal, prefix); ok && strings.Contains(email, "@") {
-			return true
-		}
-	}
-	return false
-}
-
-// denyPermissions converts v2 names (storage.googleapis.com/objects.get) to
-// the v1 names checks use, and refuses a name no pinned role contains. A
-// trailing * matches every permission with that prefix.
-func (e *Engine) denyPermissions(permissions []string) ([]string, error) {
-	converted := make([]string, 0, len(permissions))
-	for _, permission := range permissions {
-		if service, rest, ok := strings.Cut(permission, ".googleapis.com/"); ok {
-			permission = service + "." + rest
-		}
-		prefix, wildcard := strings.CutSuffix(permission, "*")
-		if (wildcard && !strings.Contains(prefix, ".")) || (!wildcard && !e.roleGrants(permission)) {
-			return nil, status.Error(codes.Unimplemented, "Deny permission is outside the pinned roles: "+permission)
-		}
-		converted = append(converted, permission)
-	}
-	return converted, nil
 }
 
 // roleContext is what role validation reads: the policy's resource, its
@@ -405,7 +288,7 @@ func checkMember(member string, directory directory) error {
 
 // storePolicy commits a compiled policy under the etag check and assigns the
 // next revision as its etag.
-func (e *Engine) storePolicy(resource string, owner state.Resource, policy Policy, conditions []conditionGuard, denies []storedDeny) (Policy, error) {
+func (e *Engine) storePolicy(resource string, owner state.Resource, policy Policy, conditions []conditionGuard) (Policy, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	previous := emptyPolicy()
@@ -422,8 +305,7 @@ func (e *Engine) storePolicy(resource string, owner state.Resource, policy Polic
 	}
 	policy.ETag = base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(e.revision, 10)))
 	e.policies[resource] = storedPolicy{
-		policy: policy, owner: owner.Service, scope: owner.Scope,
-		conditions: conditions, denies: denies, pab: policy.PAB,
+		policy: policy, owner: owner.Service, scope: owner.Scope, conditions: conditions,
 	}
 	return clonePolicy(policy), nil
 }
@@ -441,13 +323,15 @@ func (e *Engine) MarkUnsupported(resource string, features []string) error {
 	return nil
 }
 
-// Forget drops everything attached to one resource: its allow policy,
-// unsupported markers, organization policies, and perimeter membership. The
-// index calls it whenever a resource is removed.
+// Forget drops everything attached to one resource: its allow policy, deny
+// policies, boundary, unsupported markers, organization policies, and
+// perimeter membership. The index calls it whenever a resource is removed.
 func (e *Engine) Forget(resource string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.policies, resource)
+	delete(e.denyPolicies, resource)
+	delete(e.boundaries, resource)
 	delete(e.unsupported, resource)
 	delete(e.orgPolicies, resource)
 	delete(e.perimeters, resource)
@@ -528,10 +412,10 @@ func (e *Engine) ClearScope(owner string, scope state.Scope) {
 	e.clearSigningKeys(owner, scope)
 }
 
-// Wire renders a policy as GCP returns it: a policy without bindings, deny
-// rules, audit configs, or a boundary reads back as only its etag.
+// Wire renders a policy as GCP returns it: a policy without bindings or
+// audit configs reads back as only its etag.
 func (p Policy) Wire() any {
-	if len(p.Bindings) == 0 && len(p.DenyRules) == 0 && len(p.AuditConfigs) == 0 && p.PAB == nil {
+	if len(p.Bindings) == 0 && len(p.AuditConfigs) == 0 {
 		return map[string]any{"etag": p.ETag}
 	}
 	return p

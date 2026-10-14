@@ -37,6 +37,7 @@ import (
 	cloudtasksprovider "github.com/evanmarshall/gcp-local/internal/providers/messaging/cloudtasks"
 	"github.com/evanmarshall/gcp-local/internal/providers/messaging/pubsub"
 	cloudkmsprovider "github.com/evanmarshall/gcp-local/internal/providers/security/cloudkms"
+	denypolicyprovider "github.com/evanmarshall/gcp-local/internal/providers/security/denypolicy"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/security/iam"
 	orgpolicyprovider "github.com/evanmarshall/gcp-local/internal/providers/security/orgpolicy"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/resourcemanager"
@@ -333,6 +334,7 @@ var standardProviders = []standardProvider{
 	{"artifactregistry", "Artifact Registry", discard(artifactregistryprovider.New)},
 	{"resourcemanager", "resourcemanager", discard(resourcemanagerprovider.New)},
 	{"orgpolicy", "Organization Policy", discard(orgpolicyprovider.New)},
+	{"iam", "IAM deny policies", discard(denypolicyprovider.New)},
 }
 
 // assembleStandard registers the selected standard providers.

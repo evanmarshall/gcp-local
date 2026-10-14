@@ -13,7 +13,6 @@ import (
 	"github.com/evanmarshall/gcp-local/internal/gateway"
 	"github.com/evanmarshall/gcp-local/internal/iam"
 	"github.com/evanmarshall/gcp-local/internal/providers/messaging/pubsub/schemadef"
-	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"github.com/evanmarshall/gcp-local/internal/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -305,9 +304,7 @@ func TestSchemaAuthorizationBeforeTheBackend(t *testing.T) {
 	_, err = invokeAs(registry, reader, schemaService+"CommitSchema", protoSchema1, &pb.CommitSchemaRequest{Name: protoSchema1, Schema: &pb.Schema{Name: protoSchema1, Type: pb.Schema_PROTOCOL_BUFFER, Definition: protoEvent}})
 	expectCode(t, err, codes.PermissionDenied)
 	// Without pubsub.schemas.attach, a topic cannot name the schema.
-	admin := iam.Binding{Role: roleAdmin, Members: []string{owner}}
-	_, err = p.iam.SetPolicy(provider.ProjectResource(testProject), iam.Policy{Version: 3, Bindings: []iam.Binding{admin}, DenyRules: []iam.DenyRule{{DeniedPrincipals: []string{owner}, DeniedPermissions: []string{"pubsub.schemas.attach"}}}})
-	must(t, err)
+	denyAtProject(t, p, owner, "pubsub.googleapis.com/schemas.attach")
 	_, err = as(publisher+"CreateTopic", schemaTopic, &pb.Topic{Name: schemaTopic, SchemaSettings: &pb.SchemaSettings{Schema: protoSchema1, Encoding: pb.Encoding_JSON}})
 	expectCode(t, err, codes.PermissionDenied)
 	_, err = as(publisher+"CreateTopic", schemaTopic, &pb.Topic{Name: schemaTopic})

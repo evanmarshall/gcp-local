@@ -64,7 +64,7 @@ func TestIDTokensRequireAccountGrantAndValidateClaims(t *testing.T) {
 	parent := "//cloudresourcemanager.googleapis.com/projects/" + project
 	config := iam.Config{Resources: []state.Resource{{Name: parent, Service: "resourcemanager", Kind: "project", Scope: state.Scope{Project: project, Location: state.Global}}},
 		ServiceAccounts: []iam.ServiceAccount{{Project: project, Email: pushWorkerEmail, UniqueID: "123456789012345678901"}},
-		Policies:        map[string]iam.Policy{account: {Bindings: []iam.Binding{{Role: "roles/iam.serviceAccountTokenCreator", Members: []string{agent}}}}}}
+		Policies:        map[string]iam.ConfigPolicy{account: {Policy: iam.Policy{Bindings: []iam.Binding{{Role: "roles/iam.serviceAccountTokenCreator", Members: []string{agent}}}}}}}
 	engine, tokens := loadIDTokens(t, config)
 	now := time.Now()
 	tokens.now = func() time.Time { return now }

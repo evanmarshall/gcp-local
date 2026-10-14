@@ -54,7 +54,7 @@ def test_scope_contracts_match_the_loaders() -> None:
 
 
 def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
-    """Same-service scenarios run in order; project policy writers run alone."""
+    """Same-service scenarios run in order; project policy writers and deny policies run alone."""
     lanes, alone = batch["schedule"](batch["plan"](), scope_tree(tmp_path))
     names = {key: [entry.name for entry in members] for key, members in lanes.items()}
     assert len(names["storage"]) >= 10
@@ -67,7 +67,8 @@ def test_lock_sharing_entries_share_a_lane(tmp_path: Path) -> None:
     }
     assert set(names["compute"]) == compute
     assert sorted(entry.name for entry in alone) == [
-        "logging-test_cloudlogging_conditions", "security-resourcemanager-test_policy",
+        "logging-test_cloudlogging_conditions", "security-iam-deny-test_deny_enforcement",
+        "security-iam-deny-test_deny_lifecycle", "security-resourcemanager-test_policy",
         "security-resourcemanager-versions-test_versions"]
     # The read-only hierarchy scenario shares no lock; only project-policy writers run alone.
     laned = [name for members in names.values() for name in members]
@@ -88,8 +89,10 @@ def test_exclusive_entries_run_after_every_lane(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setitem(run.__globals__, "execute", fake)
     lanes, alone = batch["schedule"](batch["plan"](), scope_tree(tmp_path))
     failed = run(lanes, alone, argparse.Namespace(jobs=4))
-    assert order[-3:] == [
+    assert sorted(order[-5:]) == [
         "logging-test_cloudlogging_conditions",
+        "security-iam-deny-test_deny_enforcement",
+        "security-iam-deny-test_deny_lifecycle",
         "security-resourcemanager-test_policy",
         "security-resourcemanager-versions-test_versions",
     ]

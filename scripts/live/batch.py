@@ -35,11 +35,15 @@ replay = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(replay)
 
 # These rewrite the project IAM policy; concurrent policy writes from other
-# scenarios' temporary grants would fail on the policy etag.
+# scenarios' temporary grants would fail on the policy etag. The deny policy
+# scenarios attach deny policies to the project, which apply to every
+# concurrent caller.
 EXCLUSIVE = frozenset({
     "tests/conformance/security/resourcemanager/test_policy.py",
     "tests/conformance/logging/test_cloudlogging_conditions.py",
     "tests/conformance/security/resourcemanager/versions/test_versions.py",
+    "tests/conformance/security/iam/deny/test_deny_lifecycle.py",
+    "tests/conformance/security/iam/deny/test_deny_enforcement.py",
 })
 # Scope services of the compute scenarios, which share one lane.
 COMPUTE_SCOPES = frozenset({"networking", "vmconnectivity", "vmserviceaccounts", "computelists"})

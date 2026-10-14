@@ -40,9 +40,9 @@ Permissions are checked on the parent project or organization. gRPC serves every
 
 | Recording | Date (UTC) | Observes |
 | --- | --- | --- |
-| `iam-custom-role-lifecycle` | 2026-10-12 | Project role create, get, list (`BASIC`, `FULL`, `showDeleted`), 409 duplicate, 403 for an ungranted caller, 400 for `view` on get, unknown, unsupported, and above-project permissions, bad ID and stage; the role granted on a service account allows a read, delete denies it, undelete allows it again, a permission patch denies it; deleted-role 400s for delete, patch, and recreate; stale etag 409; policies with a deleted, missing, other-project, and malformed role |
+| `iam-custom-role-lifecycle` | 2026-10-14 | Project role create, get, list (`BASIC`, `FULL`, `showDeleted`), 409 duplicate, 403 for an ungranted caller, 400 for `view` on get, unknown, unsupported, and above-project permissions, bad ID and stage; the role granted on a service account allows a read, delete denies it, undelete allows it again, a permission patch denies it; deleted-role 400s for delete, patch, and recreate; stale etag 409; policies with a deleted, missing, other-project, and malformed role |
 
-To re-record, approve a `customroles` scope (`LIMITS` in `gcp_validation/services/security/customroles.py`) and grant the fixture identity `roles/iam.roleAdmin` for the run. Every run uses a new role ID, because deleted IDs stay reserved for weeks.
+To re-record, approve a `customroles` scope (`LIMITS` in `gcp_validation/services/security/iam/customroles.py`) and grant the fixture identity `roles/iam.roleAdmin` for the run. Every run uses a new role ID, because deleted IDs stay reserved for weeks.
 
 ```sh
 .venv-tools/bin/python -m pytest tests/conformance/security/iam/test_custom_roles.py -q \

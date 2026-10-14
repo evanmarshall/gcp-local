@@ -1,0 +1,269 @@
+{
+  "iam-deny-policy-enforcement": {
+    "recorded-date": "14-10-2026, 02:30:56",
+    "recorded-content": {
+      "granted-read": {
+        "email": "<account>",
+        "http_status": 200
+      },
+      "ungranted-read": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "iam.serviceAccounts.get",
+              "resource": "projects/-/serviceAccounts/<unique-id>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'iam.serviceAccounts.get' denied on resource '//iam.googleapis.com/projects/-/serviceAccounts/<unique-id>' (or it may not exist).",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-written": {
+        "done": null,
+        "fields": [
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata": {
+          "fields": [
+            "@type",
+            "createTime"
+          ],
+          "type": "type.googleapis.com/google.iam.v2.PolicyOperationMetadata"
+        },
+        "name": "policies/cloudresourcemanager.googleapis.com%2Fprojects%2F<project-number>/denypolicies/<policy>/operations/<operation>",
+        "response": {
+          "displayName": "<marker>",
+          "fields": [
+            "@type",
+            "createTime",
+            "displayName",
+            "etag",
+            "kind",
+            "name",
+            "rules",
+            "uid",
+            "updateTime"
+          ],
+          "kind": "DenyPolicy",
+          "name": "policies/cloudresourcemanager.googleapis.com%2Fprojects%2F<project-number>/denypolicies/<policy>",
+          "rules": [
+            {
+              "denyRule": {
+                "deniedPermissions": [
+                  "iam.googleapis.com/serviceAccounts.get"
+                ],
+                "deniedPrincipals": [
+                  "principal://iam.googleapis.com/projects/-/serviceAccounts/<allowed>"
+                ]
+              }
+            }
+          ],
+          "type": "type.googleapis.com/google.iam.v2.Policy"
+        }
+      },
+      "denied-read": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "iam.serviceAccounts.get",
+              "resource": "projects/-/serviceAccounts/<unique-id>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'iam.serviceAccounts.get' denied on resource '//iam.googleapis.com/projects/-/serviceAccounts/<unique-id>' due to an IAM deny policy.",
+        "status": "PERMISSION_DENIED"
+      },
+      "denied-other-permission": {
+        "http_status": 200
+      },
+      "exempted-written": {
+        "done": null,
+        "fields": [
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata": {
+          "fields": [
+            "@type",
+            "createTime"
+          ],
+          "type": "type.googleapis.com/google.iam.v2.PolicyOperationMetadata"
+        },
+        "name": "policies/cloudresourcemanager.googleapis.com%2Fprojects%2F<project-number>/denypolicies/<policy>/operations/<operation>",
+        "response": {
+          "displayName": "<marker>",
+          "fields": [
+            "@type",
+            "createTime",
+            "displayName",
+            "etag",
+            "kind",
+            "name",
+            "rules",
+            "uid",
+            "updateTime"
+          ],
+          "kind": "DenyPolicy",
+          "name": "policies/cloudresourcemanager.googleapis.com%2Fprojects%2F<project-number>/denypolicies/<policy>",
+          "rules": [
+            {
+              "denyRule": {
+                "deniedPermissions": [
+                  "iam.googleapis.com/serviceAccounts.get"
+                ],
+                "deniedPrincipals": [
+                  "principal://iam.googleapis.com/projects/-/serviceAccounts/<allowed>"
+                ],
+                "exceptionPrincipals": [
+                  "principal://iam.googleapis.com/projects/-/serviceAccounts/<allowed>"
+                ]
+              }
+            }
+          ],
+          "type": "type.googleapis.com/google.iam.v2.Policy"
+        }
+      },
+      "exempted-read": {
+        "http_status": 200
+      },
+      "exempted-other-permission": {
+        "http_status": 200
+      },
+      "group-denied-written": {
+        "done": null,
+        "fields": [
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata": {
+          "fields": [
+            "@type",
+            "createTime"
+          ],
+          "type": "type.googleapis.com/google.iam.v2.PolicyOperationMetadata"
+        },
+        "name": "policies/cloudresourcemanager.googleapis.com%2Fprojects%2F<project-number>/denypolicies/<policy>/operations/<operation>",
+        "response": {
+          "displayName": "<marker>",
+          "fields": [
+            "@type",
+            "createTime",
+            "displayName",
+            "etag",
+            "kind",
+            "name",
+            "rules",
+            "uid",
+            "updateTime"
+          ],
+          "kind": "DenyPolicy",
+          "name": "policies/cloudresourcemanager.googleapis.com%2Fprojects%2F<project-number>/denypolicies/<policy>",
+          "rules": [
+            {
+              "denyRule": {
+                "deniedPermissions": [
+                  "iam.googleapis.com/serviceAccounts.get"
+                ],
+                "deniedPrincipals": [
+                  "principalSet://goog/group/gcp-local-allowed@stitchwink.com"
+                ]
+              }
+            }
+          ],
+          "type": "type.googleapis.com/google.iam.v2.Policy"
+        }
+      },
+      "group-denied-read": {
+        "code": 403,
+        "details": [
+          {
+            "domain": "iam.googleapis.com",
+            "metadata": {
+              "permission": "iam.serviceAccounts.get",
+              "resource": "projects/-/serviceAccounts/<unique-id>"
+            },
+            "reason": "IAM_PERMISSION_DENIED",
+            "type": "type.googleapis.com/google.rpc.ErrorInfo"
+          }
+        ],
+        "http_status": 403,
+        "message": "Permission 'iam.serviceAccounts.get' denied on resource '//iam.googleapis.com/projects/-/serviceAccounts/<unique-id>' due to an IAM deny policy.",
+        "status": "PERMISSION_DENIED"
+      },
+      "group-denied-other-permission": {
+        "http_status": 200
+      },
+      "deleted": {
+        "done": null,
+        "fields": [
+          "metadata",
+          "name",
+          "response"
+        ],
+        "http_status": 200,
+        "metadata": {
+          "fields": [
+            "@type",
+            "createTime"
+          ],
+          "type": "type.googleapis.com/google.iam.v2.PolicyOperationMetadata"
+        },
+        "name": "policies/cloudresourcemanager.googleapis.com%2Fprojects%2F<project-number>/denypolicies/<policy>/operations/<operation>",
+        "response": {
+          "displayName": "<marker>",
+          "fields": [
+            "@type",
+            "createTime",
+            "deleteTime",
+            "displayName",
+            "etag",
+            "kind",
+            "name",
+            "rules",
+            "updateTime"
+          ],
+          "kind": "DenyPolicy",
+          "name": "policies/cloudresourcemanager.googleapis.com%2Fprojects%2F<project-number>/denypolicies/<policy>",
+          "rules": [
+            {
+              "denyRule": {
+                "deniedPermissions": [
+                  "iam.googleapis.com/serviceAccounts.get"
+                ],
+                "deniedPrincipals": [
+                  "principalSet://goog/group/gcp-local-allowed@stitchwink.com"
+                ]
+              }
+            }
+          ],
+          "type": "type.googleapis.com/google.iam.v2.Policy"
+        }
+      },
+      "restored-read": {
+        "http_status": 200
+      },
+      "cleanup": {
+        "account_absent": true,
+        "policies_absent": true,
+        "role_inactive": true
+      }
+    }
+  }
+}

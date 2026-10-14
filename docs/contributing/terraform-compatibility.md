@@ -36,6 +36,7 @@ These have no upstream counterpart. Their configurations and assertions are gcp-
 | `TestLocalSQLDatabaseInstance` | PostgreSQL instance with backups and point-in-time recovery, `ssl_mode`, an authorized network, and a flag, plus a database and a user; in-place update (PUT) of `ssl_mode`, networks, and log retention; empty plan; 404 after destroy |
 | `TestLocalProjectIamPolicy` | Project IAM policy replace; runs last because it replaces the whole policy |
 | `TestLocalOrgPolicyProject` | `google_org_policy_policy` with a `gcp.resourceLocations` rule on a project under a seeded folder, a bucket in `europe-west1` refused by it, the rule widened so the bucket is created, import, empty plan, 404 after destroy. Runs without the sandbox organization's policies (`-sandbox-org-policies=false`), since `TestLocalServiceAccount` creates a key |
+| `TestLocalIamDenyPolicy` | `google_iam_deny_policy` on the project through polled IAM v2 operations, display name and rule updated in place with the etag, import, empty plan, 404 after destroy |
 
 These cases prove the released provider accepts gcp-local's responses. They are not recorded from real GCP and never run against it; the API outcomes they rely on are recorded separately ([coverage](../coverage.md)).
 

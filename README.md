@@ -68,12 +68,12 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 | [Spanner](docs/services/databases/spanner.md) | Official Google emulator | SQL queries, DML, reads, mutations, transactions |
 | [Bigtable](docs/services/databases/bigtable.md) | Official Google emulator code | Row reads, scans, mutations over gRPC; not recorded |
 | [Artifact Registry](docs/services/artifactregistry.md) | gcp-local | Repositories only; no push or pull |
-| [IAM](docs/services/security/serviceaccounts.md) and [project IAM](docs/services/security/project-iam.md) | gcp-local | Service accounts and policies; impersonation (`generateAccessToken`, `generateIdToken`, `signJwt`, `signBlob`) |
+| [IAM](docs/services/security/serviceaccounts.md) and [project IAM](docs/services/security/project-iam.md) | gcp-local | Service accounts and policies; impersonation (`generateAccessToken`, `generateIdToken`, `signJwt`, `signBlob`); [deny policies](docs/services/security/iam-deny.md) |
 | [Resource Manager](docs/services/security/resourcemanager.md) | gcp-local | Folders, project moves, and organization and folder IAM inherited by everything under them |
 | [Organization Policy](docs/services/security/orgpolicy.md) | gcp-local | Policies on organizations, folders, and projects; 6 constraints enforced on Storage and IAM requests |
 | [VPC networking](docs/services/networking.md) | gcp-local | Connectivity verdicts; no real traffic |
 
-IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage, Cloud SQL, Memorystore, Secret Manager, and Cloud KMS; on other services a condition that reads `resource.*` grants nothing. Deny rules and principal access boundaries for service accounts are enforced locally but not recorded; ([IAM](docs/architecture/iam.md)). Organization policies are enforced for 6 constraints; VPC Service Controls are not enforced ([Organization Policy](docs/services/security/orgpolicy.md)).
+IAM allow policies use predefined roles recorded from Google Cloud. IAM conditions are recorded for Storage, Cloud SQL, Memorystore, Secret Manager, and Cloud KMS; on other services a condition that reads `resource.*` grants nothing. IAM v2 deny policies are served and enforced on every service, recorded on a project ([deny policies](docs/services/security/iam-deny.md)); principal access boundaries are local-only and not recorded ([IAM](docs/architecture/iam.md)). Organization policies are enforced for 6 constraints; VPC Service Controls are not enforced ([Organization Policy](docs/services/security/orgpolicy.md)).
 
 ## How it works
 

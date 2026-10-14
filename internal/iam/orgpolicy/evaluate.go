@@ -191,7 +191,25 @@ func conditionHolds(rule *orgpolicypb.PolicySpec_PolicyRule) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	out, _, err := compiled.program.Eval(map[string]any{"resource": &emptypb.Empty{}})
+	return compiled.evaluate()
+}
+
+// TagCondition compiles and evaluates a tag-function condition, as IAM deny
+// rules' denial conditions take them. Tags aren't modeled, so the value is
+// fixed. It returns the value, whether the condition could be evaluated,
+// and an error for a condition that doesn't compile.
+func TagCondition(expression string) (bool, bool, error) {
+	compiled, err := compile(expression)
+	if err != nil {
+		return false, false, err
+	}
+	value, err := compiled.evaluate()
+	return value, err == nil, nil
+}
+
+// evaluate runs a compiled condition against an untagged resource.
+func (c *condition) evaluate() (bool, error) {
+	out, _, err := c.program.Eval(map[string]any{"resource": &emptypb.Empty{}})
 	if err != nil {
 		return false, fmt.Errorf("evaluate the rule condition: %w", err)
 	}

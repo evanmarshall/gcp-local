@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from gcp_validation.live_rest import RestClient
-from gcp_validation.services.security import customroles
-from gcp_validation.services.security.customroles import CustomRoleFixture, run_scenario
+from gcp_validation.services.security.iam import customroles
+from gcp_validation.services.security.iam.customroles import CustomRoleFixture, run_scenario
 
 # This module's scope contract differs from the directory's service accounts.
 SERVICE = customroles.SERVICE
@@ -39,7 +39,7 @@ def custom_role(gcp_snapshot, gcp_target, pytestconfig):
     versions={'sdk': 'urllib;google-auth/2.56.2', 'provider': 'not-applicable',
               'backend': 'not-applicable'},
     contract_files=(
-        'gcp_validation/services/security/customroles.py',
+        'gcp_validation/services/security/iam/customroles.py',
         'gcp_validation/live_rest.py',
         'gcp_validation/sandbox.py',
     ),

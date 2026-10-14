@@ -76,6 +76,6 @@ The scenario creates and changes nothing, costs nothing, needs no temporary gran
 
 - Not recorded: every success path that needs organization roles, which the sandbox doesn't have: folder create, get, list, search, rename, move, delete, and undelete; folder and organization IAM reads and writes; organization get and search results; project move; inheritance from organizations and folders; and the business-rule failures above. They are modeled locally and tested in `internal/providers/security/resourcemanager`.
 - `folders.move` checks the folder (its current parent included) and the destination; GCP documents the current and the new parent.
-- Not implemented: project create, update, delete, and undelete (`UNIMPLEMENTED`); folder tags and capabilities; organization domains (`displayName`, `directoryCustomerId`, `domain:` queries); project labels; wildcard and other search operators; purging a deleted folder after 30 days; deny policies attached to organizations and folders.
+- Not implemented: project create, update, delete, and undelete (`UNIMPLEMENTED`); folder tags and capabilities; organization domains (`displayName`, `directoryCustomerId`, `domain:` queries); project labels; wildcard and other search operators; purging a deleted folder after 30 days. Deny policies on organizations, folders, and projects are the IAM v2 API ([deny policies](iam-deny.md)).
 - Organizations and folders aren't project-scoped: a service reset doesn't touch them.
 - A Terraform `google_project` move isn't tested: project create isn't modeled.

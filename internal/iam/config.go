@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
+	iamv2 "cloud.google.com/go/iam/apiv2/iampb"
 	"cloud.google.com/go/orgpolicy/apiv2/orgpolicypb"
 	"github.com/evanmarshall/gcp-local/internal/iam/orgpolicy"
 	"github.com/evanmarshall/gcp-local/internal/state"
+	"google.golang.org/genproto/googleapis/type/expr"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -31,10 +34,17 @@ var (
 )
 
 type Config struct {
-	Resources       []state.Resource    `json:"resources"`
-	Policies        map[string]Policy   `json:"policies"`
-	Unsupported     map[string][]string `json:"unsupported,omitempty"`
-	ServiceAccounts []ServiceAccount    `json:"service_accounts,omitempty"`
+	Resources []state.Resource        `json:"resources"`
+	Policies  map[string]ConfigPolicy `json:"policies"`
+	// DenyPolicies declares IAM v2 deny policies in the API's JSON form, each
+	// named policies/ATTACHMENT/denypolicies/ID on a declared organization,
+	// folder, or project. They are the records the IAM v2 API serves.
+	DenyPolicies []json.RawMessage `json:"deny_policies,omitempty"`
+	// Boundaries declares principal access boundaries by hierarchy node.
+	// They are local-only: the IAM v3 boundary API isn't implemented.
+	Boundaries      map[string]PABPolicy `json:"principal_access_boundaries,omitempty"`
+	Unsupported     map[string][]string  `json:"unsupported,omitempty"`
+	ServiceAccounts []ServiceAccount     `json:"service_accounts,omitempty"`
 	// OrgPolicies declares Organization Policy v2 policies in the API's JSON
 	// form, each named PARENT/policies/CONSTRAINT on a declared organization,
 	// folder, or project. They are the same records the Organization Policy
@@ -93,10 +103,47 @@ func readConfig(path string) (Config, error) {
 	return decodeConfig(file)
 }
 
-// publishPolicies loads the declared allow policies and unsupported features.
+// ConfigPolicy is an allow policy as the configuration declares it. The
+// legacy denyRules and principalAccessBoundary fields predate the IAM v2
+// deny policies and the boundary key; they load as those.
+type ConfigPolicy struct {
+	Policy
+	DenyRules []LegacyDenyRule `json:"denyRules,omitempty"`
+	PAB       *PABPolicy       `json:"principalAccessBoundary,omitempty"`
+}
+
+// LegacyDenyRule is a deny rule in the retired allow-policy form, which
+// took allow-policy members and v1 permission names.
+type LegacyDenyRule struct {
+	DeniedPrincipals     []string        `json:"deniedPrincipals"`
+	ExceptionPrincipals  []string        `json:"exceptionPrincipals,omitempty"`
+	DeniedPermissions    []string        `json:"deniedPermissions"`
+	ExceptionPermissions []string        `json:"exceptionPermissions,omitempty"`
+	DenialCondition      json.RawMessage `json:"denialCondition,omitempty"`
+}
+
+// LegacyDenyPolicyID is the ID a policy's legacy denyRules load under.
+const LegacyDenyPolicyID = "bootstrap-deny-rules"
+
+// publishPolicies loads the declared allow policies, deny policies,
+// boundaries, and unsupported features.
 func (e *Engine) publishPolicies(config Config) error {
 	for resource, policy := range config.Policies {
-		if _, err := e.SetPolicy(resource, policy); err != nil {
+		if err := e.publishPolicy(resource, policy); err != nil {
+			return err
+		}
+	}
+	for _, raw := range config.DenyPolicies {
+		policy := &iamv2.Policy{}
+		if err := protojson.Unmarshal(raw, policy); err != nil {
+			return fmt.Errorf("%w: deny_policies: %w", errConfigInvalid, err)
+		}
+		if err := e.declareDenyPolicy(policy); err != nil {
+			return fmt.Errorf("deny policy %s: %w", policy.GetName(), err)
+		}
+	}
+	for node, boundary := range config.Boundaries {
+		if err := e.DeclareBoundary(node, boundary); err != nil {
 			return err
 		}
 	}
@@ -126,6 +173,118 @@ func (e *Engine) publishSignalFamilies(config Config) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// publishPolicy loads one declared allow policy and its legacy fields.
+func (e *Engine) publishPolicy(resource string, policy ConfigPolicy) error {
+	if _, err := e.SetPolicy(resource, policy.Policy); err != nil {
+		return err
+	}
+	if len(policy.DenyRules) > 0 {
+		if err := e.declareLegacyDeny(resource, policy.DenyRules); err != nil {
+			return err
+		}
+	}
+	if policy.PAB != nil {
+		return e.DeclareBoundary(resource, *policy.PAB)
+	}
+	return nil
+}
+
+// declareDenyPolicy stores a deny policy named by its attachment point.
+func (e *Engine) declareDenyPolicy(policy *iamv2.Policy) error {
+	attachment, id, ok := ParseDenyPolicyName(policy.GetName())
+	if !ok {
+		return fmt.Errorf("%w: deny policy name %q", errConfigInvalid, policy.GetName())
+	}
+	node, found := DenyNode(e.index, attachment)
+	if !found {
+		return fmt.Errorf("%w: deny policy attachment point %s is not declared", errConfigInvalid, attachment)
+	}
+	_, err := e.PutDenyPolicy(node, id, policy, time.Now())
+	return err
+}
+
+// declareLegacyDeny loads a policy's legacy denyRules as the deny policy
+// LegacyDenyPolicyID on the same node, which must be a project, folder, or
+// organization. Members become v2 identifiers (user:E as
+// principal://goog/subject/E, serviceAccount:E as
+// principal://iam.googleapis.com/projects/-/serviceAccounts/E, group:E as
+// principalSet://goog/group/E) and v1 permissions v2 names
+// (storage.objects.get as storage.googleapis.com/objects.get); the result is
+// validated as the API validates it.
+func (e *Engine) declareLegacyDeny(resource string, legacy []LegacyDenyRule) error {
+	node, found := e.index.Get(resource)
+	if !found || !strings.HasPrefix(resource, hierarchyPrefix) {
+		return fmt.Errorf("%w: denyRules on %s: deny policies attach only to projects, folders, and organizations", errConfigInvalid, resource)
+	}
+	rules := make([]*iamv2.PolicyRule, 0, len(legacy))
+	for _, rule := range legacy {
+		deny := &iamv2.DenyRule{DeniedPrincipals: v2Principals(rule.DeniedPrincipals), ExceptionPrincipals: v2Principals(rule.ExceptionPrincipals),
+			DeniedPermissions: v2Permissions(rule.DeniedPermissions), ExceptionPermissions: v2Permissions(rule.ExceptionPermissions)}
+		if len(rule.DenialCondition) > 0 {
+			condition := &expr.Expr{}
+			if err := protojson.Unmarshal(rule.DenialCondition, condition); err != nil {
+				return fmt.Errorf("%w: denyRules on %s: %w", errConfigInvalid, resource, err)
+			}
+			deny.DenialCondition = condition
+		}
+		rules = append(rules, &iamv2.PolicyRule{Kind: &iamv2.PolicyRule_DenyRule{DenyRule: deny}})
+	}
+	if _, err := e.PutDenyPolicy(node, LegacyDenyPolicyID, &iamv2.Policy{Rules: rules}, time.Now()); err != nil {
+		return fmt.Errorf("denyRules on %s: %w", resource, err)
+	}
+	return nil
+}
+
+// v2Principals rewrites allow-policy members as deny-policy identifiers.
+func v2Principals(members []string) []string {
+	converted := make([]string, 0, len(members))
+	for _, member := range members {
+		converted = append(converted, DenyPrincipal(member))
+	}
+	return converted
+}
+
+// DenyPrincipal is the deny-policy identifier of an allow-policy member:
+// user:E is principal://goog/subject/E, serviceAccount:E is
+// principal://iam.googleapis.com/projects/-/serviceAccounts/E, and group:E
+// is principalSet://goog/group/E. Other members are returned unchanged.
+func DenyPrincipal(member string) string {
+	forms := []struct{ member, identifier string }{
+		{"user:", userIdentifierPrefix}, {"serviceAccount:", serviceAccountIdentifierPrefix}, {"group:", groupSetPrefix},
+	}
+	for _, form := range forms {
+		if email, ok := strings.CutPrefix(member, form.member); ok {
+			return form.identifier + email
+		}
+	}
+	return member
+}
+
+// v2Permissions rewrites v1 permission names (storage.objects.get) as
+// deny-policy names (storage.googleapis.com/objects.get).
+func v2Permissions(permissions []string) []string {
+	converted := make([]string, 0, len(permissions))
+	for _, permission := range permissions {
+		if service, rest, ok := strings.Cut(permission, "."); ok && !strings.Contains(permission, ".googleapis.com/") {
+			permission = service + ".googleapis.com/" + rest
+		}
+		converted = append(converted, permission)
+	}
+	return converted
+}
+
+// DeclareBoundary stores a principal access boundary for the principal set
+// of a project, folder, or organization (see pabViolation).
+func (e *Engine) DeclareBoundary(node string, boundary PABPolicy) error {
+	if resource, ok := e.index.Get(node); !ok || resource.Service != resourceManager || resource.Kind == "" {
+		return fmt.Errorf("%w: a principal access boundary binds only to a declared project, folder, or organization: %s", errConfigInvalid, node)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.boundaries[node] = &PABPolicy{Rules: slices.Clone(boundary.Rules)}
 	return nil
 }
 
@@ -166,14 +325,14 @@ func decodeConfig(file *os.File) (Config, error) {
 // duplicates, non-global locations, and shapes the hierarchy cannot anchor.
 func publishHierarchy(index *state.Index, engine *Engine, resources []state.Resource, seen map[string]bool) error {
 	for _, resource := range resources {
-		if resource.Service != "resourcemanager" || resource.Scope.Location != state.Global || seen[resource.Name] {
+		if resource.Service != resourceManager || resource.Scope.Location != state.Global || seen[resource.Name] {
 			return errConfigHierarchy
 		}
 		if err := validateHierarchyResource(resource); err != nil {
 			return err
 		}
 		seen[resource.Name] = true
-		if err := index.Put("resourcemanager", resource); err != nil {
+		if err := index.Put(resourceManager, resource); err != nil {
 			return fmt.Errorf("publish hierarchy resource %s: %w", resource.Name, err)
 		}
 	}

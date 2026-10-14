@@ -15,12 +15,12 @@ Each provider registers its plans with `Engine.Register` when it starts (Storage
 ## Evaluation
 
 - The engine walks the target (or its validated anchor, such as a bucket) through the resource index to project, folder, and organization, and unions allow bindings. [Resource Manager](../services/security/resourcemanager.md) creates and moves folders and moves projects; a move changes the walk at once, and the moved node keeps its policy.
-- `Permitted` answers `testIamPermissions`: the tested permissions the caller holds, through the same walk, boundaries, deny rules, and bindings, limited to those its OAuth scopes cover. It needs no permission plan.
+- `Permitted` answers `testIamPermissions`: the tested permissions the caller holds, through the same walk, boundaries, deny policies, and bindings, limited to those its OAuth scopes cover. It needs no permission plan.
 - Caller project and resource project are separate. A role in the caller's project doesn't grant access to a foreign resource.
 - Missing parents, cycles, conflicting ownership, and unverified target shapes fail closed.
 - Members: exact `user:` and `serviceAccount:`, `allUsers`, `allAuthenticatedUsers`, and the [directory's](#groups-and-domains) `group:`, `principalSet://goog/group/`, and `domain:`. Absent credentials never become an administrator; unknown or expired tokens stay unauthenticated.
 - OAuth scopes are checked before policy: when none of the token's scopes covers every permission the plan resolves to, the call is 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`. `cloud-platform` covers every plan; the [scope table](../guides/local-identity.md#oauth-scopes) lists the rest. Scopes outside the allowlist cover nothing.
-- Deny rules run before allow bindings, and principal access boundaries run before both ([below](#conditions-deny-rules-and-boundaries)).
+- [Deny policies](#deny-policies) run before allow bindings, and [principal access boundaries](#principal-access-boundaries) run before both.
 - `MarkUnsupported` stores known advanced configuration as a fail-closed marker; a matching allow can't bypass it.
 - Roles: the pinned predefined roles and [custom roles](#custom-roles). Not supported: other predefined roles (no committed snapshot), and `principal://` or `principalSet://` members other than groups (workforce and workload identity pools, `cloudIdentityCustomerId`), which are refused with `UNIMPLEMENTED`.
 
@@ -28,27 +28,30 @@ Policies are stored once per owning service and scope, returned as copies, and r
 
 A resource that leaves the index takes its policy with it, whichever provider deleted it, so a resource recreated with the same name starts with an empty policy, as in GCP. Deleting a service account also rewrites every grant to it as `deleted:serviceAccount:EMAIL?uid=UNIQUE_ID`; an account recreated with the same email has a new unique ID and inherits nothing ([GCP](https://cloud.google.com/iam/docs/service-accounts-delete-undelete)). Policies accept that form back, so read-modify-write keeps working. Undelete isn't modeled.
 
-## Conditions, deny rules, and boundaries
+## Conditions
 
-Only allow-binding conditions on Storage and Compute subnetworks are recorded against GCP (`storage-iam-conditions`, `compute-lists-operations-iam`). Deny rules and principal access boundaries are enforced locally and not recorded.
+Allow-binding conditions are recorded against GCP on Storage (`storage-iam-conditions`), Compute subnetworks (`compute-lists-operations-iam`), and for one conditional project grant each on Cloud SQL and Memorystore (`cloudsql-postgres-instance-admin`, `memorystore-redis-instance-admin`).
 
-**Conditions (CEL).** Expressions see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers supply the `resource.*` values through `iam.Target.Attributes` (or `provider.Gate.Attributes`); Storage, Cloud SQL, Spanner, Firestore, Memorystore, Secret Manager, and Cloud KMS do (Memorystore supplies `resource.name` and `resource.service`). Compute supplies `resource.name` (`projects/P/regions/R/subnetworks/S`) and `resource.service` for its resources, and no `resource.type`: on GCP a condition `resource.type == "compute.googleapis.com/Subnetwork"` grants nothing (recorded). IAM service accounts don't, because GCP doesn't (recorded in `serviceaccount-lifecycle-authorization`). An attribute the provider didn't supply is absent, so reading it is an evaluation error, not `""`. An allow binding grants only when its condition returns `true`; `false`, an error, or a non-boolean grants nothing. So `!resource.name.startsWith("x")` grants nothing on a service without `resource.name`. GCP documents the same outcome: a condition part that reads an attribute the resource doesn't provide "is never interpreted as granting access" ([attribute reference](https://cloud.google.com/iam/docs/conditions-attribute-reference)).
+Expressions see `resource.name`, `resource.type`, `resource.service`, and `request.time`. Providers supply the `resource.*` values through `iam.Target.Attributes` (or `provider.Gate.Attributes`); Storage, Cloud SQL, Spanner, Firestore, Memorystore, Secret Manager, and Cloud KMS do (Memorystore supplies `resource.name` and `resource.service`). Compute supplies `resource.name` (`projects/P/regions/R/subnetworks/S`) and `resource.service` for its resources, and no `resource.type`: on GCP a condition `resource.type == "compute.googleapis.com/Subnetwork"` grants nothing (recorded). IAM service accounts don't, because GCP doesn't (recorded in `serviceaccount-lifecycle-authorization`). An attribute the provider didn't supply is absent, so reading it is an evaluation error, not `""`. An allow binding grants only when its condition returns `true`; `false`, an error, or a non-boolean grants nothing. So `!resource.name.startsWith("x")` grants nothing on a service without `resource.name`. GCP documents the same outcome: a condition part that reads an attribute the resource doesn't provide "is never interpreted as granting access" ([attribute reference](https://cloud.google.com/iam/docs/conditions-attribute-reference)).
 
-**Deny rules** (`denyRules` on a v3 policy) are checked at every node of the target's ancestry, each rule independently:
+## Deny policies
 
-- A rule applies when it lists the permission (not in `exceptionPermissions`), names the caller in `deniedPrincipals`, doesn't name the caller in its own `exceptionPrincipals`, and its `denialCondition` is absent, `true`, or can't be evaluated. GCP: "If the condition evaluates to `true` or cannot be evaluated, the deny rule applies" ([deny overview](https://cloud.google.com/iam/docs/deny-overview)). An exception exempts the caller from that rule only.
-- Any applying rule denies, regardless of allow bindings. An anonymous caller gets 401, others 403.
-- Principals: `principalSet://goog/public:all` (every caller, including anonymous), `principal://goog/subject/EMAIL`, `principal://iam.googleapis.com/projects/-/serviceAccounts/EMAIL`, `principalSet://goog/group/EMAIL` for a [directory](#groups-and-domains) group, and the local-only `user:EMAIL` / `serviceAccount:EMAIL` / `group:EMAIL`. A group outside the directory is refused at write time with 400 "Group EMAIL does not exist.", so a stored rule never names a group it can't resolve. Anything else, such as `domain:` or `principalSet://goog/cloudIdentityCustomerId/`, is refused with `UNIMPLEMENTED`.
-- Permissions: v1 (`storage.objects.get`) or v2 (`storage.googleapis.com/objects.get`) names, with a trailing `*` as a prefix match. A name outside the pinned roles is refused with `UNIMPLEMENTED`.
-- Deny rules are stored on the resource's own policy. GCP attaches separate deny policies to organizations, folders, and projects; that API isn't implemented.
+IAM v2 deny policies attach to organizations, folders, and projects; the engine stores them per node and the [IAM v2 API](../services/security/iam-deny.md) reads and writes them. Recorded against GCP: `iam-deny-policy-lifecycle` and `iam-deny-policy-enforcement`.
 
-**Principal access boundaries** (`principalAccessBoundary` on a project, folder, or organization policy; refused elsewhere with `INVALID_ARGUMENT`):
+- Every deny policy on the target's ancestry is checked, each rule independently, before allow bindings. A rule applies when it covers the permission and not its `exceptionPermissions`, names the caller (directly, through a [directory](#groups-and-domains) group, or `principalSet://goog/public:all`), doesn't exempt the caller, and its denial condition is absent, true, or can't be evaluated ([deny overview](https://cloud.google.com/iam/docs/deny-overview)). An exemption exempts the caller from that rule only.
+- An applying rule refuses the permission whatever the allow bindings grant: 401 for an anonymous caller, 403 otherwise. The check records the rule (`denied_by`) and every deny policy considered; [providers](../services/security/iam-deny.md#evaluation) word the 403 as GCP does.
+- Denial conditions take only tag functions. Resources carry no tags, so their value is fixed when the policy is written.
+- A node that leaves the index takes its deny policies with it.
 
-- A boundary binds the principal set of the node it's stored on. A service account `NAME@PROJECT.iam.gserviceaccount.com` is enrolled in the sets of its project and that project's folders and organization.
+Deny rules used to be stored on the allow policy (`denyRules` in `setIamPolicy`), which GCP doesn't accept. `setIamPolicy` now refuses that field as an unknown field. The [bootstrap config](#bootstrap-config) still loads it.
+
+## Principal access boundaries
+
+Principal access boundaries are local-only: they come from the [bootstrap config](#bootstrap-config), no API serves them, and nothing about them is recorded (the sandbox has no principal access boundary admin grant).
+
+- A boundary binds the principal set of the project, folder, or organization it is declared on. A service account `NAME@PROJECT.iam.gserviceaccount.com` is enrolled in the sets of its project and that project's folders and organization.
 - An enrolled caller may reach only targets inside the union of its boundaries' `boundCloudResources` (by resource name or `projects/NUMBER`) and their descendants. Anything else is 403 before allow or deny evaluation.
-- Not enrolled: users (Workspace domains aren't modeled), Google-managed service agents, workload and workforce pools, and anonymous callers. Boundary conditions and enforcement versions aren't modeled.
-
-Not recorded: deny rules and boundaries need organization-level setup (`roles/iam.denyAdmin` and principal access boundary admin are grantable only at an organization), which the sandbox doesn't allow ([#33](https://github.com/evanmarshall/gcp-local/issues/33), [#18](https://github.com/evanmarshall/gcp-local/issues/18)). Conditions on Cloud SQL and Memorystore are recorded for one conditional project grant each (`cloudsql-postgres-instance-admin`, `memorystore-redis-instance-admin`).
+- Not enrolled: users (Workspace domains aren't modeled), Google-managed service agents, workload and workforce pools, and anonymous callers. The IAM v3 `principalAccessBoundaryPolicies` and `policyBindings` APIs, boundary conditions, and enforcement versions aren't modeled. GCP's boundary semantics are not claimed.
 
 ## Organization policy
 
@@ -85,11 +88,11 @@ Storage returns its stored policy at any requested version: a version-1 read of 
 - `domain:NAME` covers every `user:` whose email is in a declared domain. Service accounts are never domain members.
 - `customer_id` (optional, `C` and at least 5 letters or digits) names the customer `iam.allowedPolicyMemberDomains` admits: users of the declared domains, the declared groups, and service accounts of indexed projects ([Organization Policy](../services/security/orgpolicy.md#enforced-constraints)).
 - Emails and domains compare without case. Policies read back members as written.
-- Groups work in allow bindings (with or without conditions), deny rules, and deny exceptions. The decision record names the matching group or domain member.
+- Groups work in allow bindings (with or without conditions) and, as `principalSet://goog/group/`, in deny rules and exemptions. The decision record names the matching group or domain member.
 - A policy naming a group or domain outside the directory is refused with GCP's 400 errors: "Group EMAIL does not exist.", "Domain NAME does not exist.", a `group:` naming a service account, and empty or malformed references (recorded: `storage-iam-directory`). The same applies to `-iam-config` policies, which fail the load.
 - The directory is fixed at startup: there is no reload, and declaring it after any policy is stored fails. Restart the core to change it.
 
-Recorded (`storage-iam-groups`): bucket reads granted through a real group, through a group nesting it, and through a conditional binding naming the nested group; the non-member is denied and each revocation takes effect. The sandbox keeps two [standing groups](../contributing/gcp-sandbox.md#standing-groups) for it. Not recorded: a grant through a `domain:` (the sandbox callers are service accounts, which no domain covers) and a deny policy naming a group (deny policies are attached at the project and need `iam.denyAdmin`, which the fixture doesn't hold). Not modeled: Workspace users outside groups (`group:` naming a user is "does not exist", not GCP's "is of type user"), `deleted:group:`, dynamic groups, and principal access boundary enrollment by group or domain.
+Recorded (`storage-iam-groups`): bucket reads granted through a real group, through a group nesting it, and through a conditional binding naming the nested group; the non-member is denied and each revocation takes effect. `iam-deny-policy-enforcement` records a deny rule naming the group. The sandbox keeps two [standing groups](../contributing/gcp-sandbox.md#standing-groups) for them. Not recorded: a grant through a `domain:` (the sandbox callers are service accounts, which no domain covers). Not modeled: Workspace users outside groups (`group:` naming a user is "does not exist", not GCP's "is of type user"), `deleted:group:`, dynamic groups, and principal access boundary enrollment by group or domain.
 
 ## Custom roles
 
@@ -102,7 +105,7 @@ The IAM provider owns custom roles ([IAM roles](../services/security/iam-roles.m
 
 ## Role snapshots
 
-`internal/iam/roles/` holds 84 predefined roles read from GCP with `roles.get` (full view), and `testable-permissions.json`, the project's `queryTestablePermissions` result grouped by custom-role support level, recorded on 2026-10-12 and 2026-10-13 UTC (the nine folder, organization, and project-mover roles, and the two Organization Policy roles). `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. `roles.get` and `roles.list` serve these snapshots, and custom roles are validated against the testable permissions. Builds and tests never fetch roles.
+`internal/iam/roles/` holds 86 predefined roles read from GCP with `roles.get` (full view), and `testable-permissions.json`, the project's `queryTestablePermissions` result grouped by custom-role support level, recorded on 2026-10-12 and 2026-10-13 UTC (the nine folder, organization, and project-mover roles, the two Organization Policy roles, and, on 2026-10-14, `iam.denyAdmin` and `iam.denyReviewer`). `manifest.json` records source and hashes; the engine verifies them at load and rejects launch stages other than GA and BETA. `roles.get` and `roles.list` serve these snapshots, and custom roles are validated against the testable permissions. Builds and tests never fetch roles.
 
 To propose a refresh (read-only; needs an authorized account and quota project):
 
@@ -120,7 +123,9 @@ Each run also records the quota project's testable permissions. Review permissio
 `-iam-config` loads an explicit owner-only (`0600`) JSON file:
 
 - `resources`: organization, folder, and project references with `service`, `kind`, `parent`, `number`, and `scope`. A project can be the root.
-- `policies`: allow policies keyed by resource name.
+- `policies`: allow policies keyed by resource name. A policy's legacy `denyRules` load as the deny policy `bootstrap-deny-rules` on the same node, which must be a project, folder, or organization: `user:E`, `serviceAccount:E`, and `group:E` become `principal://goog/subject/E`, `principal://iam.googleapis.com/projects/-/serviceAccounts/E`, and `principalSet://goog/group/E`, and `storage.objects.get` becomes `storage.googleapis.com/objects.get`. The result is validated as the API validates it, so wildcards other than `RESOURCE.*` and conditions on anything but tags fail the load. A legacy `principalAccessBoundary` loads as that node's boundary.
+- `deny_policies`: optional [deny policies](../services/security/iam-deny.md#use) in the IAM v2 JSON form, each named `policies/ATTACHMENT/denypolicies/ID` on a declared node.
+- `principal_access_boundaries`: optional [boundaries](#principal-access-boundaries) by node name, each `{"rules": [{"boundCloudResources": [...]}]}`.
 - `unsupported`: optional fail-closed feature markers.
 - `service_accounts`: optional local account email, project, and numeric unique ID, used for [Pub/Sub push](../services/messaging/pubsub.md) tokens.
 - `directory`: optional [groups and domains](#groups-and-domains), and the `customer_id` domain-restricted sharing admits.

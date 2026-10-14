@@ -44,6 +44,7 @@ import (
 	pubsubprovider "github.com/evanmarshall/gcp-local/internal/providers/messaging/pubsub"
 	runprovider "github.com/evanmarshall/gcp-local/internal/providers/run"
 	"github.com/evanmarshall/gcp-local/internal/providers/security/cloudkms"
+	denypolicyprovider "github.com/evanmarshall/gcp-local/internal/providers/security/denypolicy"
 	iamadminprovider "github.com/evanmarshall/gcp-local/internal/providers/security/iam"
 	orgpolicyprovider "github.com/evanmarshall/gcp-local/internal/providers/security/orgpolicy"
 	resourcemanagerprovider "github.com/evanmarshall/gcp-local/internal/providers/security/resourcemanager"
@@ -87,6 +88,13 @@ func main() {
 	terraformFolder := "//cloudresourcemanager.googleapis.com/folders/271828182845"
 	must(index.Put("resourcemanager", state.Resource{Name: organization, Service: "resourcemanager", Kind: "organization", Scope: state.Scope{Location: state.Global}}))
 	must(index.Put("resourcemanager", state.Resource{Name: terraformFolder, Service: "resourcemanager", Kind: "folder", Parent: organization, Scope: state.Scope{Location: state.Global}}))
+	// The sandbox fixture holds Deny Admin at the organization, the only
+	// level GCP grants it, for the deny policy recordings
+	// (iam-deny-policy-*); the sandbox grant also expires, this one doesn't.
+	_, err = engine.SetPolicy(organization, iam.Policy{Bindings: []iam.Binding{
+		{Role: "roles/iam.denyAdmin", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
+	}})
+	must(err)
 	_, err = engine.SetPolicy(terraformFolder, iam.Policy{Bindings: []iam.Binding{
 		{Role: "roles/resourcemanager.folderAdmin", Members: []string{"serviceAccount:fixture@gcp-local-test.iam.gserviceaccount.com"}},
 		// TestLocalOrgPolicyProject writes organization policies on a project
@@ -253,6 +261,8 @@ func main() {
 	_, err = resourcemanagerprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = orgpolicyprovider.New(context.Background(), registry, server.Backends, index, engine)
+	must(err)
+	_, err = denypolicyprovider.New(context.Background(), registry, server.Backends, index, engine)
 	must(err)
 	_, err = iamadminprovider.New(context.Background(), registry, server.Backends, index, engine, iamadminprovider.Credentials{Tokens: identities, IDTokens: tokens})
 	must(err)
