@@ -420,12 +420,29 @@ func TestAutomatedBackups(t *testing.T) {
 	if count(listed) != 1 || object(t, items(t, listed)[0])["id"] == first || len(h.fleet().backups[testInstance]) != 1 {
 		t.Fatalf("retention kept %v (fleet %v)", listed, h.fleet().backups[testInstance])
 	}
+	kept := object(t, items(t, listed)[0])["id"]
 	h.expect(h.invoke(adminToken, http.MethodPatch, testPath, settingsBodyOf(map[string]any{
 		"backupConfiguration": map[string]any{"enabled": false}})), http.StatusOK)
+	assertStopped(t, h, ticks, waits, now, kept)
+}
+
+// assertStopped checks that a disabled backup schedule takes no backup and
+// waits for no further window. A stopped worker may still take a tick it was
+// already selecting on (select picks among ready cases at random).
+func assertStopped(t *testing.T, h *harness, ticks chan time.Time, waits chan time.Duration, now time.Time, kept any) {
+	t.Helper()
 	select {
 	case ticks <- now:
-		t.Fatal("a disabled schedule still runs")
 	case <-time.After(100 * time.Millisecond):
+	}
+	select {
+	case wait := <-waits:
+		t.Fatalf("a disabled schedule still runs: waited %v", wait)
+	case <-time.After(100 * time.Millisecond):
+	}
+	listed := h.expect(h.invoke(viewerToken, http.MethodGet, testPath+"/backupRuns", nil), http.StatusOK)
+	if count(listed) != 1 || object(t, items(t, listed)[0])["id"] != kept {
+		t.Fatalf("a disabled schedule took a backup: %v", listed)
 	}
 }
 
