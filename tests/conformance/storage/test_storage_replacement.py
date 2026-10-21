@@ -24,6 +24,17 @@ from gcp_validation.services.storage.normalization import StorageObservations
     ),
 )
 def test_storage_object_replacement(storage, gcp_snapshot):
+    def payload(name):
+        # GCP can briefly refuse the allowed caller while the bucket policy
+        # change above propagates; the grant is unchanged, so retry a 403.
+        deadline = time.monotonic() + (120 if storage.sandbox else 0)
+        read = storage.read(name, media=True)
+        while read.status == 403 and time.monotonic() < deadline:
+            time.sleep(5)
+            read = storage.read(name, media=True)
+        assert read.status == 200, f"Storage returned HTTP {read.status} for the media read"
+        return read.body
+
     iam = StorageAuthorization(storage)
     observed = StorageObservations(storage)
     member = iam.member("denied")
@@ -48,11 +59,11 @@ def test_storage_object_replacement(storage, gcp_snapshot):
     gcp_snapshot.match("creator-replacement-denied", observed.error(rejected))
     after = storage.read("creator.txt").require(200)
     assert after["generation"] == original["generation"] and after["etag"] == original["etag"]
-    assert storage.read("creator.txt", media=True).body == b"original payload"
+    assert payload("creator.txt") == b"original payload"
     gcp_snapshot.match("unchanged-after-denial", observed.object(after))
     replacement = storage.upload("creator.txt", b"replacement payload", generation=original["generation"]).require(200)
     assert replacement["generation"] != original["generation"] and replacement["etag"] != original["etag"]
-    assert storage.read("creator.txt", media=True).body == b"replacement payload"
+    assert payload("creator.txt") == b"replacement payload"
     gcp_snapshot.match("object-user-replaced", observed.object(replacement))
     same = storage.upload("creator.txt", b"replacement payload", generation=replacement["generation"]).require(200)
     assert same["generation"] != replacement["generation"] and same["etag"] != replacement["etag"]
@@ -60,4 +71,4 @@ def test_storage_object_replacement(storage, gcp_snapshot):
     stale = storage.upload("creator.txt", b"stale writer", generation=original["generation"])
     stale.require(412)
     gcp_snapshot.match("stale-generation-denied", observed.error(stale))
-    assert storage.read("creator.txt", media=True).body == b"replacement payload"
+    assert payload("creator.txt") == b"replacement payload"
