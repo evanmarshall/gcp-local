@@ -10,7 +10,8 @@
   "limits": {
     "max_documents": 2,
     "max_collections": 1,
-    "max_run_seconds": 600
+    "max_ttl_fields": 1,
+    "max_run_seconds": 900
   },
   "cleanup_required": true,
   "scheduled_runs": true

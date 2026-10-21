@@ -17,11 +17,17 @@ DRIFT = ROOT / ".github/drift"
 
 
 def load_plan() -> list[dict]:
-    """Read the plan and check that every test module and scope file exists."""
+    """Read the plan and check that every test module and scope file exists.
+
+    A scoped entry also names the scenario's scope loader, which
+    tests/validation/harness/test_drift.py runs against the committed scope.
+    """
     entries = json.loads((DRIFT / "plan.json").read_text())["entries"]
     for entry in entries:
         paths = [ROOT / test for test in entry["tests"]]
         if "scope" in entry:
+            if "loader" not in entry:
+                raise SystemExit(f"drift plan entry {entry['name']} has a scope but no loader")
             paths.append(DRIFT / entry["scope"])
         missing = [str(path.relative_to(ROOT)) for path in paths if not path.is_file()]
         if missing:

@@ -28,7 +28,7 @@ Above $10, or anything else live, ask first. Record, review the candidate for se
 
 For more than one scenario, use `scripts/live/batch.py` (parallel lanes, one per sandbox lock) instead of running them one by one.
 
-When a new scenario is cheap and leaves nothing behind, add it to `.github/drift/plan.json` with a scheduled scope, and keep its fixture role standing.
+When a new scenario is cheap and leaves nothing behind, add it to `.github/drift/plan.json` with a scheduled scope and its scope `loader`, and keep its fixture role standing. When a scenario's limits change, update its drift scope in the same change.
 
 ## Permission probes
 

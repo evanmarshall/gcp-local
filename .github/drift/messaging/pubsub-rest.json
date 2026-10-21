@@ -8,8 +8,8 @@
   "project_number": "482773321601",
   "location": "global",
   "limits": {
-    "max_topics": 1,
-    "max_subscriptions": 1,
+    "max_topics": 2,
+    "max_subscriptions": 2,
     "max_messages": 4,
     "max_message_bytes": 1024,
     "max_run_seconds": 900

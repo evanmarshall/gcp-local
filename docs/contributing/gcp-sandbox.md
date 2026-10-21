@@ -84,7 +84,7 @@ gh workflow run cloud-conformance.yml --ref main -f mode=revalidate
 
 ## Weekly drift job
 
-`gcp-drift.yml` runs every Monday and on dispatch. It revalidates each entry in `.github/drift/plan.json` under its committed scope in `.github/drift/`. Those scopes set `scheduled_runs: true`, which authorizes `revalidate` only. A failing run opens or comments on the `GCP drift detected` issue and keeps reports and manifests as artifacts for 30 days.
+`gcp-drift.yml` runs every Monday and on dispatch. It revalidates each entry in `.github/drift/plan.json` under its committed scope in `.github/drift/`. Those scopes set `scheduled_runs: true`, which authorizes `revalidate` only. Each scoped entry names its scenario's scope `loader`; `tests/validation/harness/test_drift.py` runs it on the committed scope, so changing a scenario's limits fails CI until its drift scope matches. A failing run opens or comments on the `GCP drift detected` issue and keeps reports and manifests as artifacts for 30 days.
 
 ```sh
 gh workflow run gcp-drift.yml --ref main
