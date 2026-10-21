@@ -2,19 +2,19 @@
   "source": "gcp",
   "reviewed": true,
   "cleanup": "passed",
-  "recorded_at": "2026-10-13T04:31:51.971953+00:00",
+  "recorded_at": "2026-10-21T03:07:49.719662+00:00",
   "scenario": {
     "id": "storage-lifecycle-rules",
     "service": "storage",
     "transport": "rest-json-v1",
-    "revision": "e3d542e43310db5d35c64c61a78efddb93b5a2ef2b2f92b7c7974caa29495f40",
+    "revision": "92e37462b208fa7d9bce75a531b5f963c83683174c39104569fb7bdc9ed4e2b3",
     "versions": {
       "sdk": "stdlib-http/3.14.2;google-auth/2.56.2",
       "provider": "not-applicable",
       "backend": "not-applicable"
     }
   },
-  "snapshot_sha256": "76de3d8373a38a4acafd37ed50edc8a6fd394f3159be91009a3572aeb9a4d6a7",
+  "snapshot_sha256": "04f15426da69b86c73271f72647cf5b4a705697bc3841f730e300e8da3c3f2fa",
   "runner_versions": {
     "pytest": "9.0.2",
     "pytest-socket": "0.8.1",

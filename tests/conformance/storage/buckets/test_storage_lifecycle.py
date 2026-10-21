@@ -7,9 +7,11 @@ customTime updates the customTime conditions read.
 """
 
 import platform
+import time
 
 import pytest
 
+from gcp_validation.services.storage.configured import RATE_LIMIT_SECONDS
 from gcp_validation.services.storage.normalization import StorageObservations
 
 RULES = [
@@ -100,7 +102,14 @@ def test_storage_lifecycle_rules(storage, gcp_snapshot):
     observed = StorageObservations(storage)
 
     def patch(body, path=storage.path, actor="fixture", query=None):
-        return storage.client.request(actor, "PATCH", path, body=body, query=query)
+        # GCP allows about one update per second to a bucket or object, and
+        # these patches run back to back: wait out a 429 on live runs.
+        deadline = time.monotonic() + (RATE_LIMIT_SECONDS if storage.sandbox else 0)
+        while True:
+            response = storage.client.request(actor, "PATCH", path, body=body, query=query)
+            if response.status != 429 or time.monotonic() >= deadline:
+                return response
+            time.sleep(2)
 
     def lifecycle(response):
         if response.status >= 400:
