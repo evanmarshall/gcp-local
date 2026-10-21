@@ -28,6 +28,7 @@ from gcp_local.bootstrap import (
     data_port_range,
     default_data_ports,
     default_grpc_tls_port,
+    developer_principal,
     initialize,
     load,
     parse_data_ports,
@@ -260,6 +261,8 @@ def application_env(value: dict[str, object]) -> dict[str, str]:
         # Redis and public-IP Cloud SQL instances report ports from this range.
         "GCP_LOCAL_DATA_PORTS": data_port_range(value),
         "GCP_LOCAL_PROJECT_NUMBER": str(value["project_number"]),
+        # The member to grant; identity/subject.txt is a credential, not a name.
+        "GCP_LOCAL_PRINCIPAL": developer_principal(str(value["project"])),
         "GCP_LOCAL_TERRAFORM_CREDENTIALS": str(identity / "terraform-adc.json"),
         **run,
     }

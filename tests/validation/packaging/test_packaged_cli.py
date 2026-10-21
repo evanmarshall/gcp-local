@@ -64,6 +64,8 @@ def test_generated_state_grants_every_service_and_terraform_adc(initialized):
     env = environment.application_env(value)
     assert env["GCP_LOCAL_TERRAFORM_CREDENTIALS"] == str(directory / "identity/terraform-adc.json")
     assert env["GCP_LOCAL_PROJECT_NUMBER"] == value["project_number"]
+    # The IAM member to grant, which subject.txt (a credential) is not.
+    assert env["GCP_LOCAL_PRINCIPAL"] == developer
 
 
 def test_recorded_paths_follow_the_host_directory(tmp_path):

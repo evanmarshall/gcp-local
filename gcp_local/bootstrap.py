@@ -178,6 +178,11 @@ def loopback_endpoint(endpoint: str) -> bool:
     )
 
 
+def developer_principal(project: str) -> str:
+    """Return the IAM member the generated developer identity is granted as."""
+    return "serviceAccount:developer@" + project + ".iam.gserviceaccount.com"
+
+
 def project_number(project: str) -> str:
     """Derive a stable 12-digit project number without a leading zero.
 
@@ -301,7 +306,7 @@ def initialize(
     if tls_port > 65535:
         raise ValueError("Select a base port that leaves room for the gRPC gateway")
     data = check_data_ports(data_ports or default_data_ports(port), port, grpc_port, tls_port)
-    principal = "serviceAccount:developer@" + project + ".iam.gserviceaccount.com"
+    principal = developer_principal(project)
     number = project_number(project)
     write_identity(
         directory / "identity",

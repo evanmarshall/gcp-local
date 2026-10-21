@@ -27,7 +27,7 @@ Set each client's API endpoint to `http://127.0.0.1:4566` and keep the SDK's nor
 | File (mode 0600, directory 0700) | Used by |
 | --- | --- |
 | `server.json` | The core only |
-| `subject.txt`, `adc.json` | The application |
+| `subject.txt`, `adc.json` | The application. `subject.txt` is the credential the ADC exchanges, not an IAM member name; grant `GCP_LOCAL_PRINCIPAL` from `env` |
 | `terraform-adc.json` | Terraform; `adc.json` plus `"universe_domain": "gcp-local.invalid"` ([Terraform setup](workflow.md#terraform-authentication)) |
 
 - The creator refuses an existing directory and accepts only a numeric loopback HTTP endpoint.

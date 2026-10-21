@@ -45,6 +45,7 @@ Options go before the command: `--directory`, `--port`, `--data-ports FIRST-LAST
 | `GOOGLE_APPLICATION_CREDENTIALS` | `<directory>/identity/adc.json` (default directory `.gcp-local/environment`) |
 | `GOOGLE_CLOUD_PROJECT` | `gcp-local-test` |
 | `GCP_LOCAL_PROJECT_NUMBER` | A stable 12-digit number derived from the project ID |
+| `GCP_LOCAL_PRINCIPAL` | `serviceAccount:developer@<project>.iam.gserviceaccount.com`, the IAM member the developer identity is granted as |
 | `GCP_LOCAL_TERRAFORM_CREDENTIALS` | `<directory>/identity/terraform-adc.json`, the ADC marked for Terraform |
 
 The data-port range follows `--port`: `--port 14566` gives 14568-14583, and the gRPC TLS port is the next one (14584). A second environment needs a base port at least 19 away. `--data-ports` sets up to 64 ports. Connect to Redis and Cloud SQL on the port the API reports ([Memorystore](../services/databases/memorystore.md#endpoint-and-auth-semantics), [Cloud SQL](../services/databases/cloudsql.md#connect-from-the-host)).

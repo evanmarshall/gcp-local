@@ -4,7 +4,7 @@
 
 gcp-local issues local credentials and evaluates IAM policies on every request. For every service, selected parts of its behavior (status codes, allow/deny decisions, and chosen response fields) are checked against scenarios recorded from real Google Cloud; [what that proves and doesn't](docs/contributing/validation.md#what-a-recording-proves).
 
-> **Status: pre-1.0.** Nothing is published to PyPI or a container registry yet; run it from source. Each service implements part of its API ([coverage](docs/coverage.md)).
+> **Status: pre-1.0.** Nothing is published to PyPI or a container registry yet; run it from source. Each service implements part of its API, enough for common workflows but not every method: Storage serves 25 of its 88 methods ([coverage](docs/coverage.md)).
 
 ## Quick start
 
@@ -17,7 +17,7 @@ python3 scripts/dev/local_env.py up      # builds and starts the environment
 python3 scripts/dev/local_env.py env     # prints the endpoint, project, and credential file
 ```
 
-HTTP is on `http://127.0.0.1:4566` and gRPC on `127.0.0.1:4567` (TLS on `127.0.0.1:4584`). The project is `gcp-local-test`, and a generated developer identity holds explicit IAM grants. `reset` wipes all data, `down` stops everything, and `logs` shows recent output.
+HTTP is on `http://127.0.0.1:4566` and gRPC on `127.0.0.1:4567` (TLS on `127.0.0.1:4584`). The project is `gcp-local-test`, and a generated developer identity, `serviceAccount:developer@gcp-local-test.iam.gserviceaccount.com` (`GCP_LOCAL_PRINCIPAL` in `env`), holds explicit IAM grants. `reset` wipes all data, `down` stops everything, and `logs` shows recent output.
 
 Point a client library at it with the generated credential file:
 
@@ -52,7 +52,7 @@ More examples are in [`examples/`](examples/): Pub/Sub over gRPC, and a Terrafor
 
 | Service | Backend | Application use |
 | --- | --- | --- |
-| [Cloud Storage](docs/services/storage.md) | fake-gcs-server | Objects: read, write, list, delete, copy, metadata updates; resumable uploads; V4 signed URLs |
+| [Cloud Storage](docs/services/storage.md) | fake-gcs-server | Objects: read, write, list, delete, copy, metadata updates; resumable uploads; V4 signed URLs; versioning, lifecycle rules, retention and holds, Pub/Sub notifications |
 | [Pub/Sub](docs/services/messaging/pubsub.md) | Official Google emulator | Publish, pull, streaming pull, push, ordering, filters, dead-letter topics, retry backoff, exactly-once, snapshots and seek, Avro and Protocol Buffer schemas |
 | [Secret Manager](docs/services/security/secretmanager.md) | gcp-local | Secret versions and access over REST and gRPC; rotation notifications, expiration, aliases, and delayed destruction |
 | [Cloud KMS](docs/services/security/cloudkms.md) | gcp-local | Symmetric encrypt and decrypt, asymmetric sign and decrypt, HMAC, and scheduled rotation over REST and gRPC |
@@ -85,7 +85,7 @@ Scenarios are recorded once against a sandbox Google Cloud project and replayed 
 
 - Unsupported methods and options return `UNIMPLEMENTED`.
 - State is in memory; `reset` and `down` discard it.
-- Storage buckets need uniform bucket-level access; ACLs, versioning, and object retention are not modeled. Public access prevention and soft delete work, but deleted buckets are not soft-deleted ([Storage](docs/services/storage.md#gaps)).
+- Storage buckets need uniform bucket-level access. ACLs, requester pays, encryption keys, and compose are not modeled, and deleted buckets are not soft-deleted ([Storage](docs/services/storage.md#gaps)).
 - Packaged Cloud Run runs your own images only with `gcp-local --cloud-run-docker up`, which mounts the Docker socket (root-equivalent on the host). Revisions have no internet access ([Cloud Run](docs/services/cloudrun.md)).
 - Redis and Cloud SQL listen on `127.0.0.1` ports 4568-4583 by default, not 6379, 5432, or 3306; read the port from the API. Redis doesn't accept TLS; Cloud SQL serves TLS with the instance's own CA ([Cloud SQL](docs/services/databases/cloudsql.md#tls)).
 - The Spanner emulator runs on Linux and in the container image, not natively on macOS.
