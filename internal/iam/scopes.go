@@ -50,7 +50,8 @@ var spannerData = []string{"spanner.sessions.", "spanner.databases.select", "spa
 // oauthScopes is the allowlist of OAuth scopes the local token service issues,
 // from Google's OAuth 2.0 scope reference
 // (https://developers.google.com/identity/protocols/oauth2/scopes). Each is a
-// subset of cloud-platform or an identity scope that grants no API call. A
+// subset of cloud-platform, or an identity or Drive scope that grants no API
+// call gcp-local serves. A
 // scope's coverage follows the scopes its APIs' discovery documents accept;
 // docs/guides/local-identity.md lists the mapping and its approximations.
 var oauthScopes = map[string]oauthScope{
@@ -61,6 +62,10 @@ var oauthScopes = map[string]oauthScope{
 	"https://www.googleapis.com/auth/userinfo.profile": {},
 	// Cloud SQL IAM database login, not the Admin API (sqladmin v1beta4).
 	"https://www.googleapis.com/auth/sqlservice.login": {},
+	// BigQuery clients add Drive scopes to query Sheets-backed tables
+	// (dbt-bigquery requests drive by default). No served API accepts them.
+	"https://www.googleapis.com/auth/drive":          {},
+	"https://www.googleapis.com/auth/drive.readonly": {},
 
 	"https://www.googleapis.com/auth/cloud-platform":           {prefixes: []string{""}},
 	"https://www.googleapis.com/auth/cloud-platform.read-only": {prefixes: []string{""}, readOnly: true},

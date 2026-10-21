@@ -36,6 +36,8 @@ func (p *Provider) execute(call gateway.Call, request *gateway.RESTRequest, scop
 		return p.tableIam(call, request, scope)
 	case methodDatasetsDelete:
 		return p.datasetsDelete(call, request, scope)
+	case methodRoutinesList:
+		return p.routinesList(request, scope)
 	default:
 		return p.executeTables(call, request, scope)
 	}
@@ -47,7 +49,7 @@ func (p *Provider) executeTables(call gateway.Call, request *gateway.RESTRequest
 	case methodTablesCreate:
 		return p.tablesCreate(call, request, scope)
 	case methodTablesGet:
-		return p.tablesGet(request, scope)
+		return p.tablesGet(call, request, scope)
 	case methodTablesList:
 		return p.tablesList(request, scope)
 	case methodTablesUpdate:
@@ -386,6 +388,29 @@ func (p *Provider) datasetsGet(request *gateway.RESTRequest, scope state.Scope) 
 	return &gateway.RESTResponse{JSON: datasetWire(scope.Project, dataset, record)}, nil
 }
 
+// routinesList lists a dataset's routines. No statement or method creates a
+// routine (CREATE FUNCTION and routines.insert are gaps), so every dataset
+// has none: GCP answers an empty list with an empty object (recorded:
+// bigquery-dbt-requests, which dbt-bigquery reads on every run). filter and
+// readMask are gaps; a page token lists nothing, as datasets.list does.
+func (p *Provider) routinesList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+	if err := refuseOptions(request.Query, "filter", "readMask"); err != nil {
+		return nil, err
+	}
+	dataset := request.Path[keyDatasetID]
+	if p.datasetCopy(scope, dataset) == nil {
+		return nil, datasetNotFound(scope.Project, dataset)
+	}
+	page, next, err := listPage([]map[string]any(nil), request.Query)
+	if errors.Is(err, errBadPageToken) {
+		page, next, err = nil, "", nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.RESTResponse{JSON: provider.ListBody("routines", page, next)}, nil
+}
+
 // errBadPageToken marks a page token the provider didn't issue.
 var errBadPageToken = errors.New("bad page token")
 
@@ -416,7 +441,7 @@ func (p *Provider) datasetsList(request *gateway.RESTRequest, scope state.Scope)
 	if err := refuseOptions(request.Query, "filter"); err != nil {
 		return nil, err
 	}
-	all := request.Query.Get("all") == textTrue
+	all := flag(request.Query, "all")
 	var items []map[string]any
 	_ = p.scopes.With(scope, func(s *scopeState) error {
 		for _, id := range slices.Sorted(maps.Keys(s.datasets)) {
@@ -524,7 +549,7 @@ func (p *Provider) datasetsDelete(call gateway.Call, request *gateway.RESTReques
 	if p.datasetCopy(scope, dataset) == nil {
 		return nil, datasetNotFound(scope.Project, dataset)
 	}
-	contents := request.Query.Get("deleteContents") == textTrue
+	contents := flag(request.Query, "deleteContents")
 	// The engine gate keeps queries from creating tables in the dataset
 	// while it goes.
 	if err := p.useEngine(call.Context, scope, func(ctx context.Context, engine *engineBackend) error {

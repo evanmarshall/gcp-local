@@ -45,7 +45,7 @@ Group and domain membership is declared in the `-iam-config` file's `directory`,
 
 ## OAuth scopes
 
-The token service issues only scopes from an allowlist taken from [Google's OAuth 2.0 scope reference](https://developers.google.com/identity/protocols/oauth2/scopes): `cloud-platform` and scopes narrower than it, plus identity scopes that grant no API call. An exchange or metadata token request naming any other scope is refused with `invalid_scope` and the scope's name. An enrollment's `scopes` must come from the list and restrict its tokens to those scopes.
+The token service issues only scopes from an allowlist taken from [Google's OAuth 2.0 scope reference](https://developers.google.com/identity/protocols/oauth2/scopes): `cloud-platform` and scopes narrower than it, plus identity and Drive scopes that grant no API call. An exchange or metadata token request naming any other scope is refused with `invalid_scope` and the scope's name. An enrollment's `scopes` must come from the list and restrict its tokens to those scopes.
 
 IAM checks the token's scopes before policy, as GCP does: when no scope covers every permission the method's plan resolves to, the call is 403 `PERMISSION_DENIED`, "Request had insufficient authentication scopes.", reason `ACCESS_TOKEN_SCOPE_INSUFFICIENT`. Coverage is modeled from the scopes each API's discovery document accepts and is not recorded.
 
@@ -67,7 +67,7 @@ IAM checks the token's scopes before policy, as GCP does: when no scope covers e
 | `bigtable.admin.cluster`, `bigtable.admin.instance`, `cloud-bigtable.admin.cluster` | Bigtable instances, clusters, and app profiles |
 | `bigtable.data`, `cloud-bigtable.data` | Bigtable row reads, sample keys, and mutations |
 | `bigtable.data.readonly`, `cloud-bigtable.data.readonly` | Bigtable row reads and sample keys |
-| `openid`, `email`, `userinfo.email`, `userinfo.profile`, `sqlservice.login` | Nothing (identity and Cloud SQL database login) |
+| `openid`, `email`, `userinfo.email`, `userinfo.profile`, `sqlservice.login`, `drive`, `drive.readonly` | Nothing (identity, Cloud SQL database login, and the Drive scopes BigQuery clients request for Sheets-backed tables; gcp-local serves no Drive API) |
 
 The read-only scopes are approximated by permission verb, so a read the API accepts under them but whose permission is not `get` or `list` (a BigQuery query, for example) is refused. Secret Manager, Cloud Tasks, Cloud Scheduler, Cloud Run, Artifact Registry, Memorystore, Vertex AI, and Resource Manager accept only `cloud-platform` (and, for reads, `cloud-platform.read-only`).
 

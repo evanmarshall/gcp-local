@@ -304,6 +304,7 @@ func TestOAuthScopesLimitPlansBeforeIAM(t *testing.T) {
 		{[]string{auth + "cloud-platform.read-only"}, "storage.objects.insert", insert, false},
 		{[]string{auth + "cloudkms", auth + "pubsub"}, testObjectGet, nil, false},
 		{[]string{"openid", auth + "userinfo.email"}, testObjectGet, nil, false},
+		{[]string{auth + "drive", auth + "drive.readonly"}, testObjectGet, nil, false},
 		{[]string{auth + "not-a-scope"}, testObjectGet, nil, false},
 		{nil, testObjectGet, nil, false},
 		{[]string{auth + "cloudkms", testCloudPlatformScope}, "storage.objects.insert", insert, true},

@@ -20,6 +20,7 @@ var BigQueryRoutes = []contract.Route{
 	{Method: "bigquery.tables.delete", Verb: "DELETE", Path: "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}", JSONBody: false, Media: false},
 	{Method: "bigquery.tables.get", Verb: "GET", Path: "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}", JSONBody: false, Media: false},
 	{Method: "bigquery.tables.list", Verb: "GET", Path: "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables", JSONBody: false, Media: false},
+	{Method: "bigquery.routines.list", Verb: "GET", Path: "/bigquery/v2/projects/{project}/datasets/{datasetId}/routines", JSONBody: false, Media: false},
 	{Method: "bigquery.tables.update", Verb: "PATCH", Path: "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}", JSONBody: true, Media: false},
 	{Method: "bigquery.tabledata.insertAll", Verb: "POST", Path: "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}/insertAll", JSONBody: true, Media: false},
 	{Method: "bigquery.tabledata.list", Verb: "GET", Path: "/bigquery/v2/projects/{project}/datasets/{datasetId}/tables/{tableId}/data", JSONBody: false, Media: false},

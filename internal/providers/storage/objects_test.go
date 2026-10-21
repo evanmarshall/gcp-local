@@ -126,7 +126,11 @@ func TestObjectPreconditionsAndConditionalReads(t *testing.T) {
 	}
 	f.rawRequest("POST", media+"&ifGenerationMatch=0", "text/plain", nil, []byte("v2"), 412)
 	f.rawRequest("POST", media+"&ifGenerationMatch=abc", "text/plain", nil, []byte("v2"), 400)
-	f.rawRequest("POST", media+"&ifGenerationMatch=-1", "text/plain", nil, []byte("v2"), 400)
+	// No generation is negative, so -1 never matches (recorded: storage-client-defaults).
+	refused(t, f.rawRequest("POST", media+"&ifGenerationMatch=-1", "text/plain", nil, []byte("v2"), 412).Body.String(),
+		"At least one of the pre-conditions you specified did not hold.")
+	refused(t, f.rawRequest("POST", media+"&ifGenerationNotMatch=-1", "text/plain", nil, []byte("v2"), 400).Body.String(),
+		"Precondition must be a nonnegative integer")
 
 	object := "/storage/v1/b/pre-bucket/o/obj"
 	read := f.rawRequest("GET", object, "", nil, nil, 200)

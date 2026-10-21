@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -626,7 +627,13 @@ func TestQueryRefusals(t *testing.T) {
 		{"missing table", "SELECT * FROM shop.absent", 404, "Not found: Table"},
 		{"syntax", "SELEC 1", 400, "Syntax error"},
 		{"unknown column", "SELECT nope FROM shop.people", 400, "Unrecognized name: nope"},
-		{"engine gap", "MERGE shop.people T USING (SELECT 1 AS id) S ON T.id = S.id WHEN MATCHED THEN DELETE", 501, "BigQuery coverage gap: the engine does not run this query"},
+		{"engine gap", "SELECT * FROM shop.people FOR SYSTEM_TIME AS OF TIMESTAMP '2020-01-01'", 501, "BigQuery coverage gap: the engine does not run this query"},
+		{"staged merge in a script", "MERGE shop.people T USING (SELECT 1 AS id) S ON T.id = S.id WHEN MATCHED THEN DELETE; SELECT 1", 501, "BigQuery coverage gap: MERGE from a subquery inside a multi-statement script"},
+		{"schema in a script", "CREATE SCHEMA s2; SELECT 1", 501, "BigQuery coverage gap: CREATE SCHEMA inside a multi-statement script"},
+		{"replace schema", "CREATE OR REPLACE SCHEMA shop", 501, "BigQuery coverage gap: CREATE OR REPLACE SCHEMA"},
+		{"schema options", "CREATE SCHEMA s3 OPTIONS (location = 'EU')", 501, "BigQuery coverage gap: CREATE SCHEMA options and collation"},
+		{"cross-project schema", "CREATE SCHEMA `other-project`.s4", 501, "BigQuery coverage gap: cross-project CREATE SCHEMA (other-project.s4)"},
+		{"expiration parameter", "CREATE TABLE shop.e (a INT64) OPTIONS (expiration_timestamp = @at)", 501, "BigQuery coverage gap: query parameters in the expiration_timestamp option"},
 		{"storage collision", "CREATE TABLE shop_people.x (a INT64); CREATE TABLE shop.people_x (a INT64)", 501, "share one storage name in the local engine"},
 	}
 	h.expect(http.MethodPost, testDatasets, map[string]any{"datasetReference": map[string]any{"datasetId": "shop_people"}}, 200)
@@ -863,10 +870,10 @@ func TestLayoutDDLIsAGap(t *testing.T) {
 	h.dataset()
 	ds := testDataset + "."
 	for step, sql := range map[string]string{
-		"partition":  "CREATE TABLE " + ds + "p (d DATE) PARTITION BY d",
-		"cluster":    "CREATE TABLE " + ds + "c (d DATE) CLUSTER BY d",
-		"expiration": "CREATE TABLE " + ds + "e (d DATE) OPTIONS (expiration_timestamp = TIMESTAMP '2030-01-01')",
-		"view":       "CREATE VIEW " + ds + "v OPTIONS (expiration_timestamp = TIMESTAMP '2030-01-01') AS SELECT 1 AS x",
+		"partition":           "CREATE TABLE " + ds + "p (d DATE) PARTITION BY d",
+		"cluster":             "CREATE TABLE " + ds + "c (d DATE) CLUSTER BY d",
+		"partition expiry":    "CREATE TABLE " + ds + "e (d DATE) OPTIONS (partition_expiration_days = 3)",
+		"view partition flag": "CREATE VIEW " + ds + "v OPTIONS (require_partition_filter = TRUE) AS SELECT 1 AS x",
 	} {
 		want(t, step, h.queryAs(testToken, sql, nil), 501, "BigQuery coverage gap: ")
 	}
@@ -1025,4 +1032,254 @@ func TestAccessStaysInItsProject(t *testing.T) {
 	h.rowsAre("authorized in its project", h.queryAs("viewer", "SELECT code FROM shop.leak", nil), "s3cret")
 	want(t, "not in the peer project", h.invokeAs("viewer", http.MethodPost, peer+"/queries", map[string]any{"query": "SELECT code FROM shop.leak"}),
 		403, "User does not have permission to query table "+testPeerProject+":vault.secrets")
+}
+
+// TestJobTimeoutIsAccepted covers jobTimeoutMs, which dbt-bigquery sets on
+// every job: echoed by jobs.insert and jobs.get, accepted by jobs.query, and
+// a gap when it isn't a positive int64 (recorded: bigquery-dbt-requests).
+func TestJobTimeoutIsAccepted(t *testing.T) {
+	h := newHarness(t)
+	h.rows()
+	timed := func(id, limit string) map[string]any {
+		return jobBody(id, testSQL, func(_, configuration, _ map[string]any) { configuration["jobTimeoutMs"] = limit })
+	}
+	for _, path := range []string{testJobs, testJobs + "/timed?location=US"} {
+		var job struct {
+			Configuration struct {
+				JobTimeoutMs string `json:"jobTimeoutMs"`
+			} `json:"configuration"`
+		}
+		if path == testJobs {
+			decode(t, h.expect(http.MethodPost, path, timed("timed", "86400000"), 200), &job)
+		} else {
+			decode(t, h.expect(http.MethodGet, path, nil, 200), &job)
+		}
+		if job.Configuration.JobTimeoutMs != "86400000" {
+			t.Errorf("%s: jobTimeoutMs %q", path, job.Configuration.JobTimeoutMs)
+		}
+	}
+	want(t, "jobs.query", h.queryAs(testToken, testSQL, map[string]any{"jobTimeoutMs": "1000"}), 200, "fire-and-fog")
+	for _, limit := range []string{"0", "-1"} {
+		want(t, "timeout "+limit, h.invoke(http.MethodPost, testJobs, timed("bad", limit)), 501, "BigQuery coverage gap: jobTimeoutMs "+limit)
+	}
+	want(t, "timeout not a number", h.invoke(http.MethodPost, testJobs, timed("bad", "soon")), 400, "configuration.jobTimeoutMs")
+	want(t, "jobs.query timeout", h.queryAs(testToken, testSQL, map[string]any{"jobTimeoutMs": "0"}), 501, "BigQuery coverage gap: jobTimeoutMs 0")
+}
+
+// jobStatistics is the slice of a job resource dbt-bigquery reads.
+type jobStatistics struct {
+	Configuration struct {
+		Query struct {
+			DestinationTable *struct {
+				ProjectID string `json:"projectId"`
+				DatasetID string `json:"datasetId"`
+				TableID   string `json:"tableId"`
+			} `json:"destinationTable"`
+			WriteDisposition string `json:"writeDisposition"`
+		} `json:"query"`
+	} `json:"configuration"`
+	Statistics struct {
+		Query struct {
+			StatementType         string            `json:"statementType"`
+			DDLOperationPerformed string            `json:"ddlOperationPerformed"`
+			DDLTargetTable        map[string]string `json:"ddlTargetTable"`
+			DDLTargetDataset      map[string]string `json:"ddlTargetDataset"`
+		} `json:"query"`
+	} `json:"statistics"`
+}
+
+// insertJob runs one jobs.insert as the fixture principal and reads it.
+func (h *harness) insertJob(id, sql string) jobStatistics {
+	h.t.Helper()
+	recorder := h.invoke(http.MethodPost, testJobs, queryJob(id, sql))
+	if recorder.Code != 200 {
+		h.t.Fatalf("job %s: %d %s", id, recorder.Code, recorder.Body.String())
+	}
+	var job jobStatistics
+	decode(h.t, recorder, &job)
+	return job
+}
+
+// TestCreateSchema covers CREATE SCHEMA [IF NOT EXISTS], as dbt-bigquery
+// creates its dataset: a new dataset in the job's location reporting CREATE,
+// SKIP when it exists, and bigquery.datasets.create on the project
+// (recorded: bigquery-dbt-requests).
+func TestCreateSchema(t *testing.T) {
+	h := newHarness(t)
+	job := h.insertJob("schema", "create schema if not exists `"+testProject+"`.`made`")
+	stats := job.Statistics.Query
+	if stats.StatementType != "CREATE_SCHEMA" || stats.DDLOperationPerformed != "CREATE" || stats.DDLTargetDataset["datasetId"] != "made" ||
+		stats.DDLTargetTable != nil || job.Configuration.Query.DestinationTable != nil {
+		t.Fatalf("create: %+v", job)
+	}
+	dataset := documentOf(t, h.expect(http.MethodGet, testDatasets+"/made", nil, 200))
+	if dataset["location"] != "US" || dataset["maxTimeTravelHours"] != defaultTimeTravel || dataset["labels"] != nil {
+		t.Errorf("dataset: %v", dataset)
+	}
+	if again := h.insertJob("again", "CREATE SCHEMA IF NOT EXISTS made"); again.Statistics.Query.DDLOperationPerformed != "SKIP" {
+		t.Errorf("existing: %+v", again)
+	}
+	want(t, "duplicate", h.queryAs(testToken, "CREATE SCHEMA made", nil), 409, "Already Exists: Dataset "+testProject+":made")
+	want(t, "invalid id", h.queryAs(testToken, "CREATE SCHEMA `bad-id`", nil), 400, "Invalid dataset ID")
+	h.grantJobUsers()
+	want(t, "no datasets.create", h.queryAs("runner", "CREATE SCHEMA other", nil), 403, "bigquery.datasets.create")
+	h.expect(http.MethodGet, testDatasets+"/other", nil, 404)
+}
+
+// TestRoutinesList covers routines.list, which dbt-bigquery calls with every
+// tables.list: an empty object for a dataset, which can hold no routine
+// (recorded: bigquery-dbt-requests).
+func TestRoutinesList(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	routines := testDatasets + "/" + testDataset + "/routines"
+	if body := h.expect(http.MethodGet, routines+"?maxResults=10", nil, 200).Body.String(); strings.TrimSpace(body) != "{}" {
+		t.Errorf("routines: %s", body)
+	}
+	h.expect(http.MethodGet, routines+"?pageToken=anything", nil, 200)
+	want(t, "missing dataset", h.invoke(http.MethodGet, testDatasets+"/absent/routines", nil), 404, "Not found: Dataset "+testProject+":absent")
+	want(t, "filter", h.invoke(http.MethodGet, routines+"?filter=routineType:SCALAR_FUNCTION", nil), 501, "BigQuery coverage gap: query parameter filter")
+	want(t, "no routines.list", h.invokeAs("stranger", http.MethodGet, routines, nil), 403, "bigquery.routines.list")
+}
+
+// millis reads a document's millisecond timestamp field.
+func millis(t *testing.T, document map[string]any, key string) int64 {
+	t.Helper()
+	value, err := strconv.ParseInt(fmt.Sprint(document[key]), 10, 64)
+	if err != nil {
+		t.Fatalf("%s: %v", key, err)
+	}
+	return value
+}
+
+// TestCTASDestination covers what dbt-bigquery reads after a table model: a
+// CTAS's destination and DDL statistics, CREATE then REPLACE, and its row
+// count (recorded: bigquery-dbt-requests).
+func TestCTASDestination(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	ctas := "create or replace table " + testDataset + ".t OPTIONS() as (select n from unnest([1, 2, 3]) as n)"
+	for _, operation := range []string{"CREATE", "REPLACE"} {
+		job := h.insertJob(strings.ToLower(operation), ctas)
+		destination := job.Configuration.Query.DestinationTable
+		if destination == nil || destination.TableID != "t" || job.Statistics.Query.DDLOperationPerformed != operation || job.Statistics.Query.DDLTargetTable["tableId"] != "t" {
+			t.Errorf("%s: %+v", operation, job)
+		}
+	}
+	table := documentOf(t, h.expect(http.MethodGet, testDatasets+"/"+testDataset+"/tables/t", nil, 200))
+	if table["numRows"] != "3" || table["expirationTime"] != nil {
+		t.Errorf("CTAS table: %v", table)
+	}
+	h.expect(http.MethodPost, testDatasets+"/"+testDataset+"/tables", map[string]any{
+		"tableReference": map[string]any{"tableId": testTable},
+		"schema":         map[string]any{"fields": []any{map[string]any{"name": "title", "type": "STRING"}}},
+	}, 200)
+	h.expect(http.MethodPost, testDatasets+"/"+testDataset+"/tables/"+testTable+"/insertAll", map[string]any{
+		"rows": []any{map[string]any{"json": map[string]any{"title": "streamed"}}},
+	}, 200)
+	if streamed := documentOf(t, h.expect(http.MethodGet, testDatasets+"/"+testDataset+"/tables/"+testTable, nil, 200)); streamed["numRows"] != "0" {
+		t.Errorf("streamed rows counted: %v", streamed["numRows"])
+	}
+}
+
+// TestMergeFromSubquery covers dbt-bigquery's merge strategy: a MERGE whose
+// source is a subquery, reporting its target as the destination, with the
+// staged source gone after (recorded: bigquery-dbt-requests).
+func TestMergeFromSubquery(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	h.expect(http.MethodPost, testQueries, map[string]any{"query": "CREATE TABLE " + testDataset + ".t AS SELECT n FROM UNNEST([1, 2, 3]) AS n", "useLegacySql": false}, 200)
+	merge := h.insertJob("merge", "merge into "+testDataset+".t as D using (select n from unnest([3, 4]) as n where n > (select min(n) from "+
+		testDataset+".t)) as S on S.n = D.n when not matched then insert (n) values (n)")
+	if merge.Configuration.Query.DestinationTable == nil || merge.Configuration.Query.DestinationTable.TableID != "t" || merge.Statistics.Query.DDLOperationPerformed != "" {
+		t.Errorf("merge: %+v", merge)
+	}
+	h.rowsAre("merged rows", h.queryAs(testToken, "SELECT n FROM "+testDataset+".t ORDER BY n", nil), "1", "2", "3", "4")
+	if tables := h.expect(http.MethodGet, testDatasets+"/"+testDataset+"/tables", nil, 200).Body.String(); strings.Contains(tables, "_gcp_local_merge_") {
+		t.Errorf("the staged source stayed listed: %s", tables)
+	}
+	h.insertJob("again", "merge into "+testDataset+".t as D using (select n from unnest([5]) as n) as S on S.n = D.n when not matched then insert (n) values (n)")
+	h.rowsAre("a second staged merge", h.queryAs(testToken, "SELECT COUNT(*) FROM "+testDataset+".t", nil), "5")
+}
+
+// TestResultTable covers a SELECT's anonymous result table, which dbt-bigquery
+// reads a data test's row count from: only its creator reads it, with the
+// result's rows and a 24-hour expiry (recorded: bigquery-dbt-requests).
+func TestResultTable(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	h.grantJobUsers()
+	selected := h.insertJob("select", "select count(*) as failures from unnest([1, 2]) as n where n is null")
+	anonymous := selected.Configuration.Query.DestinationTable
+	if anonymous == nil || !strings.HasPrefix(anonymous.DatasetID, "_") || !strings.HasPrefix(anonymous.TableID, "anon") ||
+		selected.Configuration.Query.WriteDisposition != "WRITE_TRUNCATE" {
+		t.Fatalf("select: %+v", selected)
+	}
+	result := testDatasets + "/" + anonymous.DatasetID + "/tables/" + anonymous.TableID
+	document := documentOf(t, h.expect(http.MethodGet, result, nil, 200))
+	if document["numRows"] != "1" || document["type"] != "TABLE" || millis(t, document, "expirationTime")-millis(t, document, "creationTime") != resultLifetime.Milliseconds() {
+		t.Errorf("result table: %v", document)
+	}
+	want(t, "another user's result", h.invokeAs("peer", http.MethodGet, result, nil), 403, "bigquery.tables.get")
+	want(t, "result rows", h.invoke(http.MethodGet, result+"/data", nil), 501, "tabledata.list on a query's anonymous result table")
+}
+
+// TestExpirationOption covers expiration_timestamp in CREATE TABLE and
+// CREATE VIEW, evaluated once when the statement runs, as dbt-bigquery's
+// snapshot staging table sets it (recorded: bigquery-dbt-requests).
+func TestExpirationOption(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	for name, sql := range map[string]string{
+		"staged": "create or replace table " + testDataset + ".staged OPTIONS( expiration_timestamp=TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 12 hour) ) as (select 1 as a)",
+		"fixed":  "CREATE TABLE " + testDataset + ".fixed (d DATE) OPTIONS (description = 'kept', expiration_timestamp = TIMESTAMP '2099-01-01 00:00:00+00')",
+		"view":   "CREATE VIEW " + testDataset + ".view OPTIONS (expiration_timestamp = TIMESTAMP '2099-01-01 00:00:00+00') AS SELECT 1 AS x",
+	} {
+		h.expect(http.MethodPost, testQueries, map[string]any{"query": sql, "useLegacySql": false}, 200)
+		table := documentOf(t, h.expect(http.MethodGet, testDatasets+"/"+testDataset+"/tables/"+name, nil, 200))
+		created, expires := millis(t, table, "creationTime"), millis(t, table, "expirationTime")
+		switch hours := float64(expires-created) / float64(time.Hour.Milliseconds()); name {
+		case "staged":
+			if hours < 11.9 || hours > 12 {
+				t.Errorf("staged expires after %v hours", hours)
+			}
+		default:
+			if expires != time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli() {
+				t.Errorf("%s: expirationTime %v", name, table["expirationTime"])
+			}
+		}
+	}
+	want(t, "not a timestamp", h.queryAs(testToken, "CREATE TABLE "+testDataset+".bad (a INT64) OPTIONS (expiration_timestamp = 'soon')", nil), 400, "")
+}
+
+// TestClockIsFixedPerJob covers the current-time functions, which GoogleSQL
+// evaluates once per statement: dbt-bigquery's snapshots rely on
+// NULLIF(CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP()) being NULL.
+func TestClockIsFixedPerJob(t *testing.T) {
+	h := newHarness(t)
+	h.dataset()
+	h.rowsAre("one instant", h.queryAs(testToken, "SELECT CURRENT_TIMESTAMP() = current_timestamp, "+
+		"NULLIF(CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP()) IS NULL, CURRENT_DATE() = CURRENT_DATE('UTC'), "+
+		"CURRENT_DATETIME('UTC') = DATETIME(CURRENT_TIMESTAMP(), 'UTC'), CURRENT_TIME() = CURRENT_TIME()", nil), "true,true,true,true,true")
+	h.expect(http.MethodPost, testQueries, map[string]any{"query": "CREATE TABLE " + testDataset + ".stamped AS SELECT CURRENT_TIMESTAMP() AS a, " +
+		"CURRENT_TIMESTAMP() AS b FROM UNNEST([1, 2, 3])", "useLegacySql": false}, 200)
+	h.rowsAre("a written instant", h.queryAs(testToken, "SELECT COUNT(DISTINCT a), COUNTIF(a != b) FROM "+testDataset+".stamped", nil), "1,0")
+	h.rowsAre("a parameter zone stays", h.queryAs(testToken, "SELECT CURRENT_DATE(@zone) IS NOT NULL", map[string]any{
+		"parameterMode": "NAMED", "queryParameters": []any{map[string]any{"name": "zone", "parameterType": map[string]any{"type": "STRING"}, "parameterValue": map[string]any{"value": "UTC"}}},
+	}), "true")
+}
+
+// TestPythonBooleans covers boolean query parameters spelled as the Python
+// client sends them.
+func TestPythonBooleans(t *testing.T) {
+	h := newHarness(t)
+	h.rows()
+	var job struct {
+		JobReference struct {
+			JobID string `json:"jobId"`
+		} `json:"jobReference"`
+	}
+	decode(t, h.expect(http.MethodPost, testQueries, map[string]any{"query": "SELECT TIMESTAMP '2026-01-01 00:00:00' AS t", "useLegacySql": false}, 200), &job)
+	h.rowsAre("int64 timestamps", h.invoke(http.MethodGet, testQueries+"/"+job.JobReference.JobID+"?formatOptions.useInt64Timestamp=True", nil), "1767225600000000")
+	h.expect(http.MethodDelete, testDatasets+"/"+testDataset+"?deleteContents=True", nil, 204)
 }

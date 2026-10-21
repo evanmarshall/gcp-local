@@ -157,6 +157,29 @@ func TestRESTValidationBeforeDispatchAndExplicitGaps(t *testing.T) {
 		t.Fatalf("malformed/unsupported request reached provider: %d", called.Load())
 	}
 }
+
+// An unserved method under another API's path prefix is a missing method, not
+// a Storage XML object in a bucket named after the API.
+func TestUnservedAPIPathIsNotAnXMLObject(t *testing.T) {
+	r := NewRegistry()
+	var objects atomic.Int32
+	register(t, r, "storage.xml.objects.get", func(Call, any) (any, error) {
+		objects.Add(1)
+		return &RESTResponse{Status: 200, JSON: map[string]any{}}, nil
+	})
+	server := httptest.NewServer(New(r, nil))
+	defer server.Close()
+	for _, path := range []string{"/bigquery/v2/projects/p/datasets/d/models", "/storage/v1/b/bucket/unserved", "/v1/projects/p/unserved"} {
+		code, body, _ := request(t, server.Client(), "GET", server.URL+path, "", nil)
+		message, _ := body["error"].(map[string]any)["message"].(string)
+		if code != 501 || message != "No provider implements this REST API method" {
+			t.Fatalf("%s: %d %v", path, code, body)
+		}
+	}
+	if code, _, _ := request(t, server.Client(), "GET", server.URL+"/bucket/object", "", nil); code != 200 || objects.Load() != 1 {
+		t.Fatalf("XML object read: %d, %d calls", code, objects.Load())
+	}
+}
 func TestRESTEmptyBodyIsTheEmptyMessage(t *testing.T) {
 	r := NewRegistry()
 	register(t, r, "storage.buckets.insert", func(_ Call, input any) (any, error) {

@@ -1,6 +1,7 @@
 package bigquery
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"runtime"
@@ -156,6 +157,23 @@ type statementRefs struct {
 	targetFilter []*astNode
 	// columnList reports an INSERT that names its columns.
 	columnList bool
+	// merge is a MERGE whose USING clause is a subquery, or nil.
+	merge *mergeSubquery
+	// expiration is a CREATE statement's expiration_timestamp option, or nil.
+	expiration *optionEntry
+}
+
+// mergeSubquery is a MERGE source written as a subquery: the span of the
+// subquery's query, and the span the staged table's name replaces (the
+// parenthesized subquery, up to its alias).
+type mergeSubquery struct {
+	query, source [2]int
+}
+
+// optionEntry is one OPTIONS entry: the span of its value expression, and
+// the span that removes the whole entry from its list (with one comma).
+type optionEntry struct {
+	value, entry [2]int
 }
 
 // selectRefs is one SELECT: the tables its FROM clause reads directly, by
@@ -209,7 +227,25 @@ type scriptRefs struct {
 	parameters []parameterRef
 	selects    []*selectRefs
 	pseudo     []pseudoRef
+	clock      []clockRef
 }
+
+// clockRef is one CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_DATETIME, or
+// CURRENT_TIME call: its span, its lowercased name, and the span of its
+// time zone argument, or nil.
+type clockRef struct {
+	start, end int
+	name       string
+	zone       *[2]int
+}
+
+// clockFunctions are GoogleSQL's current-time functions. GoogleSQL fixes
+// their value for a whole statement; the engine evaluates each call anew,
+// so the planner pins them (pinClock).
+var clockFunctions = map[string]bool{clockTimestamp: true, "current_date": true, "current_datetime": true, "current_time": true}
+
+// clockTimestamp is CURRENT_TIMESTAMP, which takes no time zone.
+const clockTimestamp = "current_timestamp"
 
 // Node kinds the parse step reads.
 const (
@@ -222,6 +258,8 @@ const (
 	nodeCreateTable = "CreateTableStatement"
 	nodeCreateView  = "CreateViewStatement"
 	nodeDrop        = "DropStatement"
+	nodeSchema      = "CreateSchemaStatement"
+	nodeAlias       = "Alias"
 	nodePath        = "PathExpression"
 	nodeIdentifier  = "Identifier"
 )
@@ -234,6 +272,8 @@ const (
 	statementInsert = "INSERT"
 	statementUpdate = "UPDATE"
 	statementScript = "SCRIPT"
+	statementSelect = "SELECT"
+	statementCTAS   = "CREATE_TABLE_AS_SELECT"
 	modePositional  = "POSITIONAL"
 )
 
@@ -243,7 +283,7 @@ const (
 // references cannot be resolved here or the engine does not run it.
 var targetedStatements = map[string]bool{
 	nodeInsert: true, nodeUpdate: true, nodeDelete: true, nodeMerge: true,
-	nodeTruncate: true, nodeCreateTable: true, nodeCreateView: true, nodeDrop: true,
+	nodeTruncate: true, nodeCreateTable: true, nodeCreateView: true, nodeDrop: true, nodeSchema: true,
 }
 
 var scriptStatements = map[string]bool{
@@ -313,6 +353,12 @@ func (refs *scriptRefs) scanStatement(statement *astNode) error {
 	}
 	entry.query = createQuery(statement.kind, children)
 	entry.targetFilter, entry.columnList = targetShape(statement.kind, children)
+	entry.merge = mergeSource(statement.kind, children)
+	expiration, err := expirationOption(children)
+	if err != nil && !errors.Is(err, errNoOption) {
+		return err
+	}
+	entry.expiration = expiration
 	position := len(refs.statements)
 	refs.statements = append(refs.statements, entry)
 	for _, child := range children {
@@ -349,6 +395,92 @@ type scanContext struct {
 	query    *selectRefs
 }
 
+// mergeSource reads a MERGE whose USING clause is a subquery. The engine
+// merges only from a table, so the provider stages the subquery first.
+func mergeSource(kind string, children []*astNode) *mergeSubquery {
+	if kind != nodeMerge {
+		return nil
+	}
+	for _, child := range children {
+		if child.kind != "TableSubquery" || len(child.children) == 0 || child.children[0].kind != "Query" {
+			continue
+		}
+		query := child.children[0]
+		source := [2]int{child.start, child.end}
+		if last := child.children[len(child.children)-1]; last.kind == nodeAlias {
+			source[1] = last.start
+		}
+		return &mergeSubquery{query: [2]int{query.start, query.end}, source: source}
+	}
+	return nil
+}
+
+// expirationOption reads a CREATE statement's expiration_timestamp option,
+// or returns nil. Its value is evaluated once before the statement runs, as
+// GCP evaluates the constant expression; one naming a query parameter is a
+// gap.
+func expirationOption(children []*astNode) (*optionEntry, error) {
+	for _, child := range children {
+		if child.kind != "OptionsList" {
+			continue
+		}
+		index, err := optionIndex(child, "expiration_timestamp")
+		if err != nil {
+			return nil, err
+		}
+		if index < 0 {
+			continue
+		}
+		option := child.children[index]
+		value := option.children[1]
+		if names(value, "ParameterExpr") {
+			return nil, gap("query parameters in the expiration_timestamp option")
+		}
+		entry := [2]int{option.start, option.end}
+		switch {
+		case index+1 < len(child.children):
+			entry[1] = child.children[index+1].start
+		case index > 0:
+			entry[0] = child.children[index-1].end
+		}
+		return &optionEntry{value: [2]int{value.start, value.end}, entry: entry}, nil
+	}
+	return nil, errNoOption
+}
+
+// errNoOption reports a statement without the option asked for.
+var errNoOption = errors.New("no such option")
+
+// optionIndex is the position of the named entry in an OptionsList, or -1.
+func optionIndex(list *astNode, want string) (int, error) {
+	for index, option := range list.children {
+		if len(option.children) != 2 || option.children[0].kind != nodeIdentifier {
+			continue
+		}
+		name, err := identifierText(option.children[0].payload)
+		if err != nil {
+			return -1, err
+		}
+		if strings.EqualFold(name, want) {
+			return index, nil
+		}
+	}
+	return -1, nil
+}
+
+// names reports whether a subtree holds a node of kind.
+func names(node *astNode, kind string) bool {
+	if node.kind == kind {
+		return true
+	}
+	for _, child := range node.children {
+		if names(child, kind) {
+			return true
+		}
+	}
+	return false
+}
+
 // createQuery is the span of a CREATE statement's AS query, or nil.
 func createQuery(kind string, children []*astNode) *[2]int {
 	if !strings.HasPrefix(kind, "Create") {
@@ -383,10 +515,24 @@ func validateStatement(statement *astNode, rest []*astNode) error {
 			return gap("temporary views")
 		}
 		return layoutOptions(rest)
+	case nodeSchema:
+		return validateSchema(statement, rest)
 	case nodeDrop:
 		if !strings.HasPrefix(statement.payload, " TABLE") && !strings.HasPrefix(statement.payload, " VIEW") {
 			return gap("DROP" + strings.SplitN(statement.payload, "(", 2)[0])
 		}
+	}
+	return nil
+}
+
+// validateSchema refuses the CREATE SCHEMA forms not served; dbt-bigquery
+// sends CREATE SCHEMA IF NOT EXISTS without options.
+func validateSchema(statement *astNode, rest []*astNode) error {
+	if strings.Contains(statement.payload, "is_or_replace") {
+		return gap("CREATE OR REPLACE SCHEMA")
+	}
+	if len(rest) > 0 {
+		return gap("CREATE SCHEMA options and collation")
 	}
 	return nil
 }
@@ -405,8 +551,9 @@ func createTableClauses(rest []*astNode) error {
 	return layoutOptions(rest)
 }
 
-// layoutOptions refuses the DDL options that set a table's partitioning or
-// expiration, which DDL tables don't model; other options are ignored.
+// layoutOptions refuses the DDL options that set a table's partitioning,
+// which DDL tables don't model; expiration_timestamp is read by
+// expirationOption, and other options are ignored.
 func layoutOptions(children []*astNode) error {
 	for _, child := range children {
 		if child.kind != "OptionsList" {
@@ -421,7 +568,7 @@ func layoutOptions(children []*astNode) error {
 				return err
 			}
 			switch name = strings.ToLower(name); name {
-			case "expiration_timestamp", "partition_expiration_days", "require_partition_filter":
+			case "partition_expiration_days", "require_partition_filter":
 				return gap("DDL option " + name + "; set it with tables.insert or tables.patch")
 			}
 		}
@@ -469,9 +616,10 @@ func (refs *scriptRefs) scanNode(node *astNode, at scanContext) error {
 	return nil
 }
 
-// visit records what one node adds: a SELECT's scope, a star, a
-// pseudo-column reference, or a table read.
+// visit records what one node adds: a current-time call, a SELECT's scope,
+// a star, a pseudo-column reference, or a table read.
 func (refs *scriptRefs) visit(node *astNode, at *scanContext) error {
+	refs.scanClock(node)
 	switch node.kind {
 	case "Select":
 		at.query, at.filter = &selectRefs{}, whereOf(node)
@@ -498,6 +646,37 @@ func (refs *scriptRefs) visit(node *astNode, at *scanContext) error {
 	return nil
 }
 
+// scanClock records a current-time call with at most a time zone argument
+// that names no query parameter; any other form is left to the engine.
+func (refs *scriptRefs) scanClock(node *astNode) {
+	name := clockName(node)
+	if name == "" {
+		return
+	}
+	ref := clockRef{start: node.start, end: node.end, name: name}
+	if len(node.children) == 2 {
+		if name == clockTimestamp || names(node.children[1], "ParameterExpr") {
+			return
+		}
+		ref.zone = &[2]int{node.children[1].start, node.children[1].end}
+	}
+	refs.clock = append(refs.clock, ref)
+}
+
+// clockName is the lowercased name of a current-time call with at most one
+// argument, or "".
+func clockName(node *astNode) string {
+	if node.kind != "FunctionCall" || len(node.children) == 0 || len(node.children) > 2 ||
+		node.children[0].kind != nodePath || len(node.children[0].children) != 1 {
+		return ""
+	}
+	name, err := identifierText(node.children[0].children[0].payload)
+	if name = strings.ToLower(name); err != nil || !clockFunctions[name] {
+		return ""
+	}
+	return name
+}
+
 // whereOf is a SELECT's WHERE clause, or nil.
 func whereOf(node *astNode) []*astNode {
 	for _, child := range node.children {
@@ -512,7 +691,7 @@ func whereOf(node *astNode) []*astNode {
 // its last name part.
 func aliasOf(node *astNode, read tablePath) string {
 	for _, child := range node.children {
-		if child.kind == "Alias" && len(child.children) > 0 {
+		if child.kind == nodeAlias && len(child.children) > 0 {
 			if name, err := identifierText(child.children[0].payload); err == nil {
 				return strings.ToLower(name)
 			}
@@ -698,7 +877,7 @@ func rangeVarOf(node *astNode) (string, error) {
 	}
 	first := node.children[0]
 	switch {
-	case (node.kind == "Alias" || node.kind == "AliasedQuery" || node.kind == "ForInStatement") && first.kind == nodeIdentifier:
+	case (node.kind == nodeAlias || node.kind == "AliasedQuery" || node.kind == "ForInStatement") && first.kind == nodeIdentifier:
 		name, err := identifierText(first.payload)
 		return strings.ToLower(name), err
 	case node.kind == "TablePathExpression" && first.kind == nodePath && len(first.children) > 0:

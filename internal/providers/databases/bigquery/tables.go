@@ -349,16 +349,76 @@ func (p *Provider) tableWire(scope state.Scope, dataset, table string, record *t
 	return document
 }
 
-func (p *Provider) tablesGet(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
+// tablesGet returns one table. A table's numRows counts the rows DDL and DML
+// wrote (recorded: bigquery-dbt-requests), not streamed rows. A query's
+// anonymous result table reads to the job's creator.
+func (p *Provider) tablesGet(call gateway.Call, request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	if err := refuseOptions(request.Query, "view", "selectedFields"); err != nil {
 		return nil, err
 	}
 	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
+	if job := p.resultJob(scope, call.Principal.Subject, dataset, table); job != nil {
+		return &gateway.RESTResponse{JSON: p.resultTableWire(scope, job)}, nil
+	}
 	record := p.tableCopy(scope, dataset, table)
 	if record == nil {
 		return nil, tableNotFound(scope.Project, dataset, table)
 	}
-	return &gateway.RESTResponse{JSON: p.tableWire(scope, dataset, table, record, true)}, nil
+	document := p.tableWire(scope, dataset, table, record, true)
+	if record.Type != typeView {
+		var count int64
+		if err := p.useEngine(call.Context, scope, func(ctx context.Context, engine *engineBackend) error {
+			if err := p.expirePartitions(ctx, engine, scope, []tableName{{dataset, table}}); err != nil {
+				return err
+			}
+			result, err := engine.query(ctx, "SELECT COUNT(*) FROM "+canonicalPath(scope.Project, dataset, table), nil)
+			if err != nil {
+				return err
+			}
+			count, _ = firstInt(result)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		document["numRows"] = strconv.FormatInt(max(count-record.Streamed, 0), 10)
+	}
+	return &gateway.RESTResponse{JSON: document}, nil
+}
+
+// resultJob returns the caller's SELECT job whose anonymous result table is
+// dataset.table while its result lasts, or nil. GCP's anonymous datasets
+// are the job creator's; anyone else reads the table as missing.
+func (p *Provider) resultJob(scope state.Scope, principal, dataset, table string) *jobRecord {
+	if !strings.HasPrefix(dataset, "_") || principal == "" {
+		return nil
+	}
+	var found *jobRecord
+	_ = p.scopes.With(scope, func(s *scopeState) error {
+		s.expireJobs(p.clock())
+		for _, job := range s.jobs {
+			name := job.destination(false)
+			if job.Principal == principal && job.StatementType == statementSelect && p.clock().Sub(job.CreatedAt) <= resultLifetime &&
+				name.dataset == dataset && name.table == table {
+				clone := *job
+				found = &clone
+			}
+		}
+		return nil
+	})
+	return found
+}
+
+// resultTableWire renders a job's anonymous result table: its result
+// schema, row count, and expiry when the result does, 24 hours after the
+// job (recorded: bigquery-dbt-requests).
+func (p *Provider) resultTableWire(scope state.Scope, job *jobRecord) map[string]any {
+	name := job.destination(false)
+	record := &tableRecord{Dataset: name.dataset, ID: name.table, Type: typeTable, Location: job.Location,
+		Schema: map[string]any{keyFields: resultFields(job.Columns)}, CreatedAt: job.CreatedAt,
+		Expiration: job.CreatedAt.Add(resultLifetime)}
+	document := p.tableWire(scope, name.dataset, name.table, record, false)
+	document["numRows"] = strconv.Itoa(len(job.Rows))
+	return document
 }
 
 // tablesList returns one page of the dataset's tables by ID, as GCP orders
@@ -551,6 +611,12 @@ func (p *Provider) rowsInsert(call gateway.Call, request *gateway.RESTRequest, s
 	var bad badValueError
 	switch {
 	case err == nil:
+		_ = p.scopes.With(scope, func(s *scopeState) error {
+			if stored := s.tables[tableKey(dataset, table)]; stored != nil {
+				stored.Streamed += int64(len(rows))
+			}
+			return nil
+		})
 		return &gateway.RESTResponse{JSON: map[string]any{keyKind: "bigquery#tableDataInsertAllResponse"}}, nil
 	case failed >= 0 && (errors.As(err, &bad) || status.Code(err) == codes.InvalidArgument):
 		return insertErrors(failed, len(rows), err.Error()), nil
@@ -628,6 +694,9 @@ func (p *Provider) rowsList(call gateway.Call, request *gateway.RESTRequest, sco
 		return nil, err
 	}
 	dataset, table := request.Path[keyDatasetID], request.Path[keyTableID]
+	if p.resultJob(scope, call.Principal.Subject, dataset, table) != nil {
+		return nil, gap("tabledata.list on a query's anonymous result table; read it with jobs.getQueryResults")
+	}
 	record := p.tableCopy(scope, dataset, table)
 	if record == nil {
 		return nil, tableNotFound(scope.Project, dataset, table)

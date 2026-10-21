@@ -1,0 +1,467 @@
+{
+  "bigquery-dbt-requests": {
+    "recorded-date": "21-10-2026, 02:12:23",
+    "recorded-content": {
+      "create-schema": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "destination": null,
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "priority",
+          "query",
+          "useLegacySql"
+        ],
+        "statementType": "CREATE_SCHEMA",
+        "writeDisposition": null
+      },
+      "create-schema-done": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "ddlOperationPerformed": "CREATE",
+        "ddlTargetDataset": {
+          "datasetId": "<dataset>",
+          "projectId": "<project>"
+        },
+        "ddlTargetTable": null,
+        "destination": null,
+        "error": null,
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "priority",
+          "query",
+          "useLegacySql"
+        ],
+        "state": "DONE",
+        "statementType": "CREATE_SCHEMA",
+        "writeDisposition": null
+      },
+      "schema-dataset": {
+        "datasetReference": {
+          "datasetId": "<dataset>",
+          "projectId": "<project>"
+        },
+        "fields": [
+          "access",
+          "creationTime",
+          "datasetReference",
+          "etag",
+          "id",
+          "kind",
+          "lastModifiedTime",
+          "location",
+          "maxTimeTravelHours",
+          "selfLink",
+          "type"
+        ],
+        "http_status": 200,
+        "location": "US"
+      },
+      "create-schema-exists": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "ddlOperationPerformed": "SKIP",
+        "ddlTargetDataset": {
+          "datasetId": "<dataset>",
+          "projectId": "<project>"
+        },
+        "ddlTargetTable": null,
+        "destination": null,
+        "error": null,
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "priority",
+          "query",
+          "useLegacySql"
+        ],
+        "state": "DONE",
+        "statementType": "CREATE_SCHEMA",
+        "writeDisposition": null
+      },
+      "routines-empty": {
+        "fields": [],
+        "http_status": 200
+      },
+      "routines-denied": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "ctas": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "destination": {
+          "anonymous_dataset": false,
+          "anonymous_table": false,
+          "fields": [
+            "datasetId",
+            "projectId",
+            "tableId"
+          ],
+          "project": "<project>",
+          "value": {
+            "datasetId": "<dataset>",
+            "projectId": "<project>",
+            "tableId": "orders"
+          }
+        },
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "destinationTable",
+          "priority",
+          "query",
+          "useLegacySql"
+        ],
+        "statementType": "CREATE_TABLE_AS_SELECT",
+        "writeDisposition": null
+      },
+      "ctas-done": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "ddlOperationPerformed": "CREATE",
+        "ddlTargetDataset": null,
+        "ddlTargetTable": {
+          "datasetId": "<dataset>",
+          "projectId": "<project>",
+          "tableId": "orders"
+        },
+        "destination": {
+          "anonymous_dataset": false,
+          "anonymous_table": false,
+          "fields": [
+            "datasetId",
+            "projectId",
+            "tableId"
+          ],
+          "project": "<project>",
+          "value": {
+            "datasetId": "<dataset>",
+            "projectId": "<project>",
+            "tableId": "orders"
+          }
+        },
+        "error": null,
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "destinationTable",
+          "priority",
+          "query",
+          "useLegacySql"
+        ],
+        "state": "DONE",
+        "statementType": "CREATE_TABLE_AS_SELECT",
+        "writeDisposition": null
+      },
+      "ctas-destination": {
+        "expires": false,
+        "http_status": 200,
+        "numRows": "3",
+        "schema": {
+          "fields": [
+            {
+              "name": "order_id",
+              "type": "INTEGER"
+            },
+            {
+              "name": "status",
+              "type": "STRING"
+            }
+          ]
+        },
+        "type": "TABLE"
+      },
+      "ctas-replace-done": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "ddlOperationPerformed": "REPLACE",
+        "ddlTargetDataset": null,
+        "ddlTargetTable": {
+          "datasetId": "<dataset>",
+          "projectId": "<project>",
+          "tableId": "orders"
+        },
+        "destination": {
+          "anonymous_dataset": false,
+          "anonymous_table": false,
+          "fields": [
+            "datasetId",
+            "projectId",
+            "tableId"
+          ],
+          "project": "<project>",
+          "value": {
+            "datasetId": "<dataset>",
+            "projectId": "<project>",
+            "tableId": "orders"
+          }
+        },
+        "error": null,
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "destinationTable",
+          "priority",
+          "query",
+          "useLegacySql"
+        ],
+        "state": "DONE",
+        "statementType": "CREATE_TABLE_AS_SELECT",
+        "writeDisposition": null
+      },
+      "select": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "destination": {
+          "anonymous_dataset": true,
+          "anonymous_table": true,
+          "fields": [
+            "datasetId",
+            "projectId",
+            "tableId"
+          ],
+          "project": "<project>",
+          "value": null
+        },
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "destinationTable",
+          "priority",
+          "query",
+          "useLegacySql",
+          "writeDisposition"
+        ],
+        "statementType": "SELECT",
+        "writeDisposition": "WRITE_TRUNCATE"
+      },
+      "select-done": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "ddlOperationPerformed": null,
+        "ddlTargetDataset": null,
+        "ddlTargetTable": null,
+        "destination": {
+          "anonymous_dataset": true,
+          "anonymous_table": true,
+          "fields": [
+            "datasetId",
+            "projectId",
+            "tableId"
+          ],
+          "project": "<project>",
+          "value": null
+        },
+        "error": null,
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "destinationTable",
+          "priority",
+          "query",
+          "useLegacySql",
+          "writeDisposition"
+        ],
+        "state": "DONE",
+        "statementType": "SELECT",
+        "writeDisposition": "WRITE_TRUNCATE"
+      },
+      "select-destination-fixture": {
+        "expires": true,
+        "http_status": 200,
+        "lifetime_hours": 24,
+        "numRows": "1",
+        "schema": {
+          "fields": [
+            {
+              "mode": "NULLABLE",
+              "name": "failures",
+              "type": "INTEGER"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "should_warn",
+              "type": "BOOLEAN"
+            },
+            {
+              "mode": "NULLABLE",
+              "name": "should_error",
+              "type": "BOOLEAN"
+            }
+          ]
+        },
+        "type": "TABLE"
+      },
+      "select-destination-denied": {
+        "code": 403,
+        "http_status": 403,
+        "status": "PERMISSION_DENIED"
+      },
+      "merge-done": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "ddlOperationPerformed": null,
+        "ddlTargetDataset": null,
+        "ddlTargetTable": null,
+        "destination": {
+          "anonymous_dataset": false,
+          "anonymous_table": false,
+          "fields": [
+            "datasetId",
+            "projectId",
+            "tableId"
+          ],
+          "project": "<project>",
+          "value": {
+            "datasetId": "<dataset>",
+            "projectId": "<project>",
+            "tableId": "orders"
+          }
+        },
+        "error": null,
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "destinationTable",
+          "priority",
+          "query",
+          "useLegacySql"
+        ],
+        "state": "DONE",
+        "statementType": "MERGE",
+        "writeDisposition": null
+      },
+      "merged-rows": {
+        "http_status": 200,
+        "rows": [
+          [
+            "1",
+            "shipped"
+          ],
+          [
+            "2",
+            "shipped"
+          ],
+          [
+            "3",
+            "shipped"
+          ],
+          [
+            "4",
+            "placed"
+          ]
+        ]
+      },
+      "staging-done": {
+        "configuration_fields": [
+          "dryRun",
+          "jobTimeoutMs",
+          "jobType",
+          "labels",
+          "query"
+        ],
+        "ddlOperationPerformed": "CREATE",
+        "ddlTargetDataset": null,
+        "ddlTargetTable": {
+          "datasetId": "<dataset>",
+          "projectId": "<project>",
+          "tableId": "orders__dbt_tmp"
+        },
+        "destination": {
+          "anonymous_dataset": false,
+          "anonymous_table": false,
+          "fields": [
+            "datasetId",
+            "projectId",
+            "tableId"
+          ],
+          "project": "<project>",
+          "value": {
+            "datasetId": "<dataset>",
+            "projectId": "<project>",
+            "tableId": "orders__dbt_tmp"
+          }
+        },
+        "error": null,
+        "http_status": 200,
+        "jobTimeoutMs": "86400000",
+        "query_fields": [
+          "destinationTable",
+          "priority",
+          "query",
+          "useLegacySql"
+        ],
+        "state": "DONE",
+        "statementType": "CREATE_TABLE_AS_SELECT",
+        "writeDisposition": null
+      },
+      "staging-table": {
+        "expires": true,
+        "http_status": 200,
+        "lifetime_hours": 12,
+        "numRows": "4",
+        "schema": {
+          "fields": [
+            {
+              "name": "order_id",
+              "type": "INTEGER"
+            }
+          ]
+        },
+        "type": "TABLE"
+      },
+      "cleanup": {
+        "dataset_absent": true
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "storage-client-defaults": {
+    "recorded-date": "21-10-2026, 03:36:47",
+    "recorded-content": {
+      "negative-generation-match": {
+        "code": 412,
+        "content_type": "application/json",
+        "format": "json",
+        "message": "At least one of the pre-conditions you specified did not hold.",
+        "reasons": [
+          "conditionNotMet"
+        ],
+        "status": 412
+      },
+      "predefined-acl-create": {
+        "acl_returned": false,
+        "default_object_acl_returned": false,
+        "status": 200,
+        "uniform_access": true
+      },
+      "cleanup": {
+        "bucket_absent": true,
+        "owned_objects_removed": true
+      }
+    }
+  }
+}

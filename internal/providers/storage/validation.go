@@ -58,7 +58,7 @@ const (
 
 // queryOptions lists the documented query parameters each method may carry.
 var queryOptions = map[string][]string{
-	MethodBucketsInsert:       {queryProject, queryObjectRetention},
+	MethodBucketsInsert:       {queryProject, queryObjectRetention, queryPredefinedACL, queryPredefinedObjectACL},
 	MethodBucketsList:         {queryProject, queryPrefix, queryMaxResults, queryPageToken, queryPartialSuccess},
 	MethodBucketsGetIamPolicy: {"optionsRequestedPolicyVersion"},
 	MethodBucketsPatch:        {queryIfMetaMatch, queryIfMetaNotMatch},
@@ -438,7 +438,11 @@ func uploadName(u *uploadRequest, value map[string]json.RawMessage) error {
 }
 
 // checkNumericPreconditions applies the ifGeneration*/ifMetageneration* pair for
-// one numeric field. A non-numeric or negative value is a caller error.
+// one numeric field. A non-numeric value is a caller error, and so is a
+// negative one, except ifGenerationMatch: no generation is negative, so GCP
+// answers 412 conditionNotMet (recorded: storage-client-defaults, which
+// thanos-io/objstore's acceptance test relies on). Other negative values
+// stay refused; GCP's answer to them is not recorded.
 func checkNumericPreconditions(r *gateway.RESTRequest, current map[string]any, field string, fail func() *gateway.RESTResponse) (*gateway.RESTResponse, error) {
 	actual := "0"
 	if current != nil {
@@ -454,7 +458,7 @@ func checkNumericPreconditions(r *gateway.RESTRequest, current map[string]any, f
 			continue
 		}
 		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || parsed < 0 {
+		if err != nil || (parsed < 0 && (field != "Generation" || !match)) {
 			return nil, status.Error(codes.InvalidArgument, "Precondition must be a nonnegative integer")
 		}
 		if (value == actual) != match {
@@ -545,7 +549,7 @@ const (
 )
 
 func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gateway.RESTRequest, scope state.Scope, decision string) (*gateway.RESTResponse, error) {
-	request, rules, refused, err := p.decodeBucketCreate(r.JSON, decision, scope)
+	request, rules, refused, err := p.decodeBucketCreate(r, decision, scope)
 	if refused != nil || err != nil {
 		return refused, err
 	}
@@ -576,14 +580,65 @@ func (p *Provider) createBucket(ctx context.Context, b *memoryBackend, r *gatewa
 	return response, nil
 }
 
+// Predefined ACL options of buckets.insert.
+const (
+	queryPredefinedACL       = "predefinedAcl"
+	queryPredefinedObjectACL = "predefinedDefaultObjectAcl"
+)
+
+// recordedPredefinedACLs are the predefined ACLs GCP was recorded accepting
+// on a bucket that the organization's uniform access policy makes uniform:
+// gcsfs's mkdir defaults (recorded: storage-client-defaults).
+var recordedPredefinedACLs = map[string]string{queryPredefinedACL: "projectPrivate", queryPredefinedObjectACL: "bucketOwnerFullControl"}
+
+// predefinedACLs accepts gcsfs's default predefined ACLs on a bucket create
+// whose body names no access setting, which reaches this point only when
+// storage.uniformBucketLevelAccess made the bucket uniform: GCP then ignores
+// them and returns no ACLs (recorded). The options are dropped before the
+// backend sees them. Any other value, or an explicit access setting, is a
+// gap: those ACLs would apply in GCP, and ACLs are not modeled.
+func predefinedACLs(r *gateway.RESTRequest) error {
+	present := false
+	for key, recorded := range recordedPredefinedACLs {
+		value := r.Query.Get(key)
+		if value == "" {
+			continue
+		}
+		if value != recorded {
+			return gap(key + "=" + value + "; ACLs are not modeled")
+		}
+		present = true
+		r.Query.Del(key)
+	}
+	if present && namesAccess(r.JSON) {
+		return gap("predefined ACLs with an explicit uniform bucket-level access setting")
+	}
+	return nil
+}
+
+// namesAccess reports whether a bucket create body sets uniform bucket-level
+// access under either of its names.
+func namesAccess(body []byte) bool {
+	var request struct {
+		IAM map[string]json.RawMessage `json:"iamConfiguration"`
+	}
+	if json.Unmarshal(body, &request) != nil {
+		return true
+	}
+	_, uniform := request.IAM["uniformBucketLevelAccess"]
+	_, alias := request.IAM["bucketPolicyOnly"]
+	return uniform || alias
+}
+
 // decodeBucketCreate decodes a bucket create and its lifecycle rules under
 // the project's organization policies: uniform access applies to the access
 // setting, and gcp.resourceLocations to the location (modeled, not recorded:
-// the sandbox allows every location).
-func (p *Provider) decodeBucketCreate(body []byte, decision string, scope state.Scope) (bucketRequest, []bucketconfig.Rule, *gateway.RESTResponse, error) {
+// the sandbox allows every location). Its predefined ACL options are checked
+// last, once the access setting is known.
+func (p *Provider) decodeBucketCreate(r *gateway.RESTRequest, decision string, scope state.Scope) (bucketRequest, []bucketconfig.Rule, *gateway.RESTResponse, error) {
 	name := provider.ProjectResource(scope.Project)
 	project, _ := p.index.Get(name)
-	request, err := decodeBucketRequest(body, func(request *bucketRequest) error {
+	request, err := decodeBucketRequest(r.JSON, func(request *bucketRequest) error {
 		return p.uniformPolicy(decision, name, request)
 	})
 	if _, violated := errors.AsType[*iam.OrgPolicyError](err); err != nil && !violated {
@@ -596,7 +651,10 @@ func (p *Provider) decodeBucketCreate(body []byte, decision string, scope state.
 		return request, nil, refused, err
 	}
 	rules, err := bucketconfig.ParseLifecycle(request.Lifecycle, request.Location, project.Number)
-	return request, rules, nil, err //nolint:wrapcheck // GCP's refusal, rendered as is
+	if err == nil {
+		err = predefinedACLs(r)
+	}
+	return request, rules, nil, err
 }
 
 func bucketNameOwned() *gateway.RESTResponse {

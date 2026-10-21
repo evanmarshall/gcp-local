@@ -73,15 +73,23 @@ type Gateway struct {
 	// serves; shared marks those RPCs.
 	transcoded map[string][]contract.Transcoding
 	shared     map[string]bool
+	// apiPrefixes are the first path segments of every non-XML REST route.
+	// The XML API's /{bucket}/{object} route would read an unserved method of
+	// those APIs (bigquery/v2/.../models) as an object in a bucket named
+	// after the API, so the gateway answers it as a missing method instead.
+	apiPrefixes map[string]bool
 }
 
 func New(registry *Registry, resolve Resolver) *Gateway {
 	if registry == nil {
 		registry = NewRegistry()
 	}
-	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]contract.RPC{}, transcoded: map[string][]contract.Transcoding{}, shared: map[string]bool{}}
+	g := &Gateway{Registry: registry, resolve: resolve, rpcs: map[string]contract.RPC{}, transcoded: map[string][]contract.Transcoding{}, shared: map[string]bool{}, apiPrefixes: map[string]bool{}}
 	for _, contract := range contracts() {
 		g.routes = append(g.routes, compileRoute(contract))
+		if !isXMLRoute(contract) {
+			g.apiPrefixes[firstSegment(contract.Path)] = true
+		}
 	}
 	for _, rpc := range pubsub.PubSubMethods {
 		g.rpcs[rpc.Method] = rpc
@@ -131,6 +139,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !route.matches(r) {
 			continue
 		}
+		if isXMLRoute(route.contract) && g.apiPrefixes[firstSegment(r.URL.EscapedPath())] {
+			break
+		}
 		request, call, err := g.restRequest(r, &route)
 		if err != nil {
 			writeRouteError(w, route.contract.Method, err)
@@ -173,6 +184,17 @@ func contracts() []contract.Route {
 	// The XML API's /{bucket}/{object} shape matches almost any path, so it
 	// is tried only after every service route.
 	return append(routes, storage.StorageXMLRoutes...)
+}
+
+// isXMLRoute reports whether a route belongs to the Storage XML API.
+func isXMLRoute(route contract.Route) bool {
+	return strings.HasPrefix(route.Method, "storage.xml.")
+}
+
+// firstSegment returns a path's first segment.
+func firstSegment(path string) string {
+	segment, _, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+	return segment
 }
 
 // variables is the REST path template variable shape.

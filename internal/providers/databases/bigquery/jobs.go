@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,12 +82,19 @@ func validateJobOptions(method string, query url.Values) error {
 func timestampFormat(query url.Values) (bool, error) {
 	switch format := query.Get(optionTimestampFormat); format {
 	case "", "TIMESTAMP_OUTPUT_FORMAT_UNSPECIFIED", sqlFloat64:
-		return query.Get(optionInt64Timestamp) == textTrue, nil
+		return flag(query, optionInt64Timestamp), nil
 	case sqlInt64:
 		return true, nil
 	default:
 		return false, gap("formatOptions.timestampOutputFormat=" + format)
 	}
+}
+
+// flag reads a boolean query parameter. The Python client sends Python's
+// spelling (formatOptions.useInt64Timestamp=True, deleteContents=True),
+// which GCP accepts, so case is ignored.
+func flag(query url.Values, name string) bool {
+	return strings.EqualFold(query.Get(name), textTrue)
 }
 
 // partial keeps only the top-level fields a fields parameter names; GCP
@@ -138,7 +147,7 @@ var unmodeledQuery = []string{
 var jobFields = func() provider.Fields {
 	fields := provider.Fields{
 		Unmodeled: []string{
-			"configuration.load", "configuration.extract", "configuration.copy", "configuration.jobTimeoutMs",
+			"configuration.load", "configuration.extract", "configuration.copy",
 			"configuration.maxSlots", "configuration.reservation",
 		},
 		OutputOnly: []string{
@@ -158,7 +167,7 @@ var jobFields = func() provider.Fields {
 var queryFields = provider.Fields{
 	Unmodeled: []string{
 		"secureContext", "createSession", "connectionProperties", "reservation", "arrowSerializationOptions",
-		"writeIncrementalResults", "destinationEncryptionConfiguration", "jobTimeoutMs", "maxSlots", "preserveNulls",
+		"writeIncrementalResults", "destinationEncryptionConfiguration", "maxSlots", "preserveNulls",
 		"queryResultsFormat", "continuous", "maximumBytesBilled",
 	},
 	IgnoreUnknown: true,
@@ -172,10 +181,11 @@ type insertBody struct {
 		Location  string `json:"location"`
 	} `json:"jobReference"`
 	Configuration struct {
-		JobType string            `json:"jobType"`
-		DryRun  bool              `json:"dryRun"`
-		Labels  map[string]string `json:"labels"`
-		Query   *struct {
+		JobType      string            `json:"jobType"`
+		DryRun       *bool             `json:"dryRun"`
+		Labels       map[string]string `json:"labels"`
+		JobTimeoutMs json.Number       `json:"jobTimeoutMs"`
+		Query        *struct {
 			queryOptions
 			Priority string `json:"priority"`
 		} `json:"query"`
@@ -197,7 +207,24 @@ func decodeInsert(body []byte, project string) (insertBody, error) {
 	if reference.JobID != "" && (len(reference.JobID) > 1024 || !jobIDPattern.MatchString(reference.JobID)) {
 		return job, provider.Invalid("Invalid job id")
 	}
+	if err := validateTimeout(job.Configuration.JobTimeoutMs); err != nil {
+		return job, err
+	}
 	return job, validateQueryJob(job)
+}
+
+// validateTimeout reads jobTimeoutMs, which dbt-bigquery sets on every job
+// (recorded: bigquery-dbt-requests, echoed by jobs.insert and jobs.get). A
+// local query finishes inside the call that runs it, so a positive limit is
+// never reached; a value that isn't a positive int64 is a gap.
+func validateTimeout(limit json.Number) error {
+	if limit == "" {
+		return nil
+	}
+	if value, err := strconv.ParseInt(limit.String(), 10, 64); err != nil || value <= 0 {
+		return gap("jobTimeoutMs " + limit.String())
+	}
+	return nil
 }
 
 // validateQueryJob refuses every job but an interactive Standard SQL query.
@@ -226,16 +253,20 @@ func (p *Provider) jobsInsert(call gateway.Call, request *gateway.RESTRequest, s
 		return nil, err
 	}
 	id := cmp.Or(body.JobReference.JobID, newJobID())
-	if !body.Configuration.DryRun && p.jobCopy(scope, id) != nil {
+	dryRun := body.Configuration.DryRun != nil && *body.Configuration.DryRun
+	if !dryRun && p.jobCopy(scope, id) != nil {
 		return nil, status.Errorf(codes.AlreadyExists, "Already Exists: Job %s:%s.%s", scope.Project, cmp.Or(body.JobReference.Location, "US"), id)
 	}
-	job, err := p.runQuery(call, scope, body.Configuration.Query.queryOptions, body.JobReference.Location, body.Configuration.DryRun)
+	job, err := p.runQuery(call, scope, body.Configuration.Query.queryOptions, body.JobReference.Location, dryRun)
 	if err != nil {
 		return nil, err
 	}
 	job.ID = id
 	job.Labels = body.Configuration.Labels
-	if body.Configuration.DryRun {
+	job.JobTimeoutMs = body.Configuration.JobTimeoutMs.String()
+	// GCP echoes a dryRun the job sent, false too (recorded: bigquery-dbt-requests).
+	job.DryRunSent = body.Configuration.DryRun != nil
+	if dryRun {
 		return &gateway.RESTResponse{JSON: partial(request.Query, jobWire(scope.Project, job, true))}, nil
 	}
 	if err := p.scopes.With(scope, func(s *scopeState) error {
@@ -274,7 +305,8 @@ type queryRequest struct {
 		UseInt64Timestamp     bool   `json:"useInt64Timestamp"`
 		TimestampOutputFormat string `json:"timestampOutputFormat"`
 	} `json:"formatOptions"`
-	JobCreationMode string `json:"jobCreationMode"`
+	JobCreationMode string      `json:"jobCreationMode"`
+	JobTimeoutMs    json.Number `json:"jobTimeoutMs"`
 }
 
 // decodeQuery reads and validates a jobs.query request.
@@ -284,6 +316,9 @@ func decodeQuery(request *gateway.RESTRequest) (queryRequest, error) {
 		return body, err
 	}
 	if err := provider.DecodeJSON(request.JSON, "", &body, gap, queryFields); err != nil {
+		return body, err
+	}
+	if err := validateTimeout(body.JobTimeoutMs); err != nil {
 		return body, err
 	}
 	if body.UseLegacySQL != nil && *body.UseLegacySQL {
@@ -390,7 +425,7 @@ func (p *Provider) planAndRun(call gateway.Call, scope state.Scope, options quer
 		return nil, err
 	}
 	catalog := p.catalogOf(scope)
-	plan, err := planQuery(catalog, options.Query, defaultDataset, options.parameterMode(), options.QueryParameters)
+	plan, err := planQuery(catalog, options.Query, defaultDataset, options.parameterMode(), options.QueryParameters, p.clock())
 	if err != nil {
 		return nil, err
 	}
@@ -411,10 +446,68 @@ func (p *Provider) planAndRun(call gateway.Call, scope state.Scope, options quer
 	if dryRun {
 		return job, p.dryRunSchema(call.Context, scope, plan, job)
 	}
+	if plan.schema != nil {
+		return job, p.createSchema(call, scope, plan.schema, job)
+	}
 	if err := p.runPlan(call.Context, scope, plan, job); err != nil {
 		return nil, missingTable(err, scope.Project, jobLocation)
 	}
+	job.describe(plan)
 	return job, nil
+}
+
+// createSchema runs CREATE SCHEMA: a new dataset in the job's location with
+// the creator as owner, or, with IF NOT EXISTS, nothing when it exists. The
+// engine keeps no datasets, so the statement never reaches it. A dataset
+// created this way reports its time-travel window (recorded:
+// bigquery-dbt-requests).
+func (p *Provider) createSchema(call gateway.Call, scope state.Scope, schema *schemaTarget, job *jobRecord) error {
+	now := p.clock()
+	job.DDLOperation, job.DDLDataset = ddlCreate, schema.dataset
+	return p.scopes.With(scope, func(s *scopeState) error { //nolint:wrapcheck // the callback returns a wire status
+		for id := range s.datasets {
+			if strings.EqualFold(id, schema.dataset) && schema.ifNotExists {
+				job.DDLOperation, job.DDLDataset = ddlSkip, id
+				return nil
+			}
+		}
+		created := &datasetRecord{ID: schema.dataset, Location: job.Location, CreatedAt: now, ModifiedAt: now, Patched: true}
+		return p.insertDataset(s, scope, call.Principal.Subject, nil, created)
+	})
+}
+
+// describe records what a finished job's statement did, as jobs.insert and
+// jobs.get report it (recorded: bigquery-dbt-requests): a single DDL
+// statement's operation and target; the destination table of a CREATE
+// TABLE AS SELECT or MERGE, which is its target. A SELECT's destination is
+// its anonymous result table (resultTable). Other statements' destinations
+// are not recorded and not reported.
+func (job *jobRecord) describe(plan *queryPlan) {
+	if len(plan.ddl) == 1 && plan.statementType != statementScript {
+		target := plan.ddl[0]
+		job.DDLOperation, job.DDLTable = target.operation(), &target.name
+	}
+	if plan.target != nil && (plan.statementType == statementMerge || plan.statementType == statementCTAS) {
+		target := *plan.target
+		job.Destination = &target
+	}
+}
+
+// destination is the table a job wrote: its target, or a SELECT's anonymous
+// result table; nil for a dry run, which writes nothing.
+func (job *jobRecord) destination(dryRun bool) *tableName {
+	if job.StatementType == statementSelect && !dryRun {
+		return anonymousTable(job.Principal, job.ID)
+	}
+	return job.Destination
+}
+
+// anonymousTable names a SELECT's result table: a hidden dataset per user
+// ("_" and a hash) and a table per job ("anon" and a hash), as GCP names
+// them (recorded: bigquery-dbt-requests; the hashes are local).
+func anonymousTable(principal, job string) *tableName {
+	user, table := sha256.Sum256([]byte(principal)), sha256.Sum256([]byte(job))
+	return &tableName{dataset: "_" + hex.EncodeToString(user[:20]), table: "anon" + hex.EncodeToString(table[:20])}
 }
 
 // missingTable spells the engine's refusal of a table that doesn't exist as
@@ -463,7 +556,7 @@ func (options queryOptions) parameterMode() string {
 // LIMIT 0 after authorization; a SELECT changes nothing. Other statements
 // report no schema.
 func (p *Provider) dryRunSchema(ctx context.Context, scope state.Scope, plan *queryPlan, job *jobRecord) error {
-	if plan.statementType != "SELECT" {
+	if plan.statementType != statementSelect {
 		return nil
 	}
 	query := strings.TrimRight(strings.TrimSpace(plan.script), ";")
@@ -516,6 +609,9 @@ func (p *Provider) runPlan(ctx context.Context, scope state.Scope, plan *queryPl
 		if err := p.expirePartitions(ctx, engine, scope, plan.tables); err != nil {
 			return err
 		}
+		if err := evaluateExpirations(ctx, engine, plan.ddl); err != nil {
+			return err
+		}
 		result, runErr := runStatements(ctx, engine, plan)
 		reconcileErr := p.reconcile(ctx, engine, scope, plan.ddl)
 		if runErr != nil {
@@ -560,6 +656,9 @@ func (p *Provider) requireDatasets(scope state.Scope, plan *queryPlan) error {
 // the engine reports the rows it changed (not for MERGE, whose count the
 // engine does not report), and anything else through query.
 func runStatements(ctx context.Context, engine *engineBackend, plan *queryPlan) (*engineResult, error) {
+	if plan.merge != nil {
+		return runStagedMerge(ctx, engine, plan)
+	}
 	switch plan.statementType {
 	case statementInsert, statementUpdate, statementDelete:
 		return engine.exec(ctx, plan.script, plan.args)
@@ -572,6 +671,41 @@ func runStatements(ctx context.Context, engine *engineBackend, plan *queryPlan) 
 	default:
 		return engine.query(ctx, plan.script, plan.args)
 	}
+}
+
+// runStagedMerge runs a MERGE whose source is a subquery: the subquery's rows
+// go into a table no metadata names, the MERGE reads it, and the table is
+// dropped whatever the MERGE did. Like any MERGE, it reports no row count.
+func runStagedMerge(ctx context.Context, engine *engineBackend, plan *queryPlan) (*engineResult, error) {
+	if _, err := engine.exec(ctx, plan.merge.stage, plan.args); err != nil {
+		return nil, err
+	}
+	result, err := engine.exec(ctx, plan.merge.script, plan.args)
+	if result != nil {
+		result.affected = nil
+	}
+	staged := plan.merge.staged
+	return result, errors.Join(err, dropEngineTable(ctx, engine, staged.dataset, staged.table, false))
+}
+
+// evaluateExpirations evaluates each CREATE target's expiration_timestamp
+// option once, before the statement runs.
+func evaluateExpirations(ctx context.Context, engine *engineBackend, targets []ddlTarget) error {
+	for index, target := range targets {
+		if target.expiration == "" {
+			continue
+		}
+		result, err := engine.query(ctx, "SELECT UNIX_MICROS(CAST(("+target.expiration+") AS TIMESTAMP))", nil)
+		if err != nil {
+			return err
+		}
+		micros, ok := firstInt(result)
+		if !ok {
+			return invalidQuery("expiration_timestamp must be a TIMESTAMP")
+		}
+		targets[index].expires = time.UnixMicro(micros)
+	}
+	return nil
 }
 
 // reconcile reads each CREATE or DROP target back from the engine and makes
@@ -625,8 +759,9 @@ func (p *Provider) applyTarget(s *scopeState, scope state.Scope, target ddlTarge
 		return nil
 	}
 	// A DDL table or view is unpartitioned and unclustered (PARTITION BY and
-	// CLUSTER BY are gaps); it takes its dataset's default table expiration.
-	var shape layout
+	// CLUSTER BY are gaps); it expires at its expiration_timestamp option, or
+	// takes its dataset's default table expiration.
+	shape := layout{expiration: target.expires}
 	shape.applyDefaults(owner, p.clock())
 	shape.store(record)
 	fields := make([]any, 0, len(columns))
@@ -634,7 +769,7 @@ func (p *Provider) applyTarget(s *scopeState, scope state.Scope, target ddlTarge
 		fields = append(fields, tableField(column.name, column.kind))
 	}
 	record.Schema = map[string]any{keyFields: fields}
-	record.Type, record.ViewQuery, record.ViewRefs = typeTable, "", nil
+	record.Type, record.ViewQuery, record.ViewRefs, record.Streamed = typeTable, "", nil, 0
 	if target.view {
 		record.Type, record.ViewQuery, record.ViewRefs = typeView, target.viewQuery, slices.Clone(target.viewRefs)
 	}
@@ -787,6 +922,21 @@ func (p *Provider) jobCopy(scope state.Scope, job string) *jobRecord {
 	return copied
 }
 
+// firstInt reads a one-row, one-column integer result.
+func firstInt(result *engineResult) (int64, bool) {
+	if len(result.rows) != 1 || len(result.rows[0]) != 1 {
+		return 0, false
+	}
+	switch value := result.rows[0][0].(type) {
+	case int64:
+		return value, true
+	case string:
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		return parsed, err == nil
+	}
+	return 0, false
+}
+
 // resultPage reads the requested row window. startIndex and pageToken (the
 // decimal index of the next row, which this emulator issues) set the first
 // row; maxResults bounds the page, and 0 returns no rows.
@@ -925,24 +1075,51 @@ func jobReference(project string, job *jobRecord) map[string]any {
 	return map[string]any{keyProjectID: project, "jobId": job.ID, keyLocation: cmp.Or(job.Location, "US")}
 }
 
-// jobWire renders a completed query job resource (jobs.insert, jobs.get).
-// No anonymous destination table is modeled, so configuration.query carries
-// no destinationTable; a dry run has no start or end time.
-func jobWire(project string, job *jobRecord, dryRun bool) map[string]any {
-	location := cmp.Or(job.Location, "US")
-	created := strconv.FormatInt(job.CreatedAt.UnixMilli(), 10)
-	configuration := map[string]any{
-		"jobType": "QUERY",
-		keyQuery:  map[string]any{keyQuery: job.Query, keyUseLegacySQL: false, "priority": "INTERACTIVE"},
+// jobConfiguration renders a query job's configuration: the options it
+// sent, and the table it wrote.
+func jobConfiguration(project string, job *jobRecord, dryRun bool) map[string]any {
+	query := map[string]any{keyQuery: job.Query, keyUseLegacySQL: false, "priority": "INTERACTIVE"}
+	configuration := map[string]any{"jobType": "QUERY", keyQuery: query}
+	if dryRun || job.DryRunSent {
+		configuration["dryRun"] = dryRun
 	}
-	if dryRun {
-		configuration["dryRun"] = true
+	if job.JobTimeoutMs != "" {
+		configuration["jobTimeoutMs"] = job.JobTimeoutMs
+	}
+	if destination := job.destination(dryRun); destination != nil {
+		query["destinationTable"] = tableRef(project, *destination)
+		if job.StatementType == statementSelect {
+			query["writeDisposition"] = "WRITE_TRUNCATE"
+		}
 	}
 	if len(job.Labels) > 0 {
 		configuration["labels"] = job.Labels
 	}
+	return configuration
+}
+
+// addDDL reports a single DDL statement's operation and target.
+func addDDL(statistics map[string]any, project string, job *jobRecord) {
+	if job.DDLOperation != "" {
+		statistics["ddlOperationPerformed"] = job.DDLOperation
+	}
+	if job.DDLTable != nil {
+		statistics["ddlTargetTable"] = tableRef(project, *job.DDLTable)
+	}
+	if job.DDLDataset != "" {
+		statistics["ddlTargetDataset"] = map[string]any{keyProjectID: project, keyDatasetID: job.DDLDataset}
+	}
+}
+
+// jobWire renders a completed query job resource (jobs.insert, jobs.get); a
+// dry run has no start or end time.
+func jobWire(project string, job *jobRecord, dryRun bool) map[string]any {
+	location := cmp.Or(job.Location, "US")
+	created := strconv.FormatInt(job.CreatedAt.UnixMilli(), 10)
+	configuration := jobConfiguration(project, job, dryRun)
 	queryStatistics := map[string]any{keyBytesProcessed: "0", "totalBytesBilled": "0", keyCacheHit: false, "statementType": job.StatementType}
 	addAffected(queryStatistics, job)
+	addDDL(queryStatistics, project, job)
 	if dryRun && len(job.Columns) > 0 {
 		queryStatistics[keySchema] = map[string]any{keyFields: resultFields(job.Columns)}
 	}
@@ -967,6 +1144,11 @@ func jobWire(project string, job *jobRecord, dryRun bool) map[string]any {
 	}
 	document["jobCreationReason"] = map[string]any{keyCode: "REQUESTED"}
 	return document
+}
+
+// tableRef renders a table name as a TableReference document.
+func tableRef(project string, name tableName) map[string]any {
+	return map[string]any{keyProjectID: project, keyDatasetID: name.dataset, keyTableID: name.table}
 }
 
 // resultsWire renders one jobs.getQueryResults page: rows start through end,
@@ -1006,7 +1188,7 @@ func (p *Provider) jobsList(call gateway.Call, request *gateway.RESTRequest, sco
 		return nil, err
 	}
 	owner := call.Principal.Subject
-	if query.Get("allUsers") == textTrue {
+	if flag(query, "allUsers") {
 		related := call
 		related.Method = checkListAll
 		if _, err := p.authorize(related, call.Method, scope.Project, provider.ProjectResource(scope.Project)); err != nil {

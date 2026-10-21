@@ -142,6 +142,8 @@ func TestExchangeIssuesAllowlistedScopes(t *testing.T) {
 		{auth + "bigquery", CloudPlatform},
 		{auth + "spanner.data", auth + "spanner.admin", auth + "datastore", auth + "logging.write", auth + "cloud-platform.read-only", auth + "devstorage.read_write"},
 		{"openid", auth + "userinfo.email", CloudPlatform, auth + "appengine.admin", auth + "sqlservice.login", auth + "compute"},
+		// dbt-bigquery's default scopes.
+		{auth + "bigquery", CloudPlatform, auth + "drive"},
 	} {
 		values := form()
 		values.Set("scope", strings.Join(scopes, " "))

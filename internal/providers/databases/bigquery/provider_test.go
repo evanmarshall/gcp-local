@@ -914,7 +914,7 @@ func TestQueryOnADeletedDataset(t *testing.T) {
 	h.dataset()
 	scope := provider.ProjectScope(testProject)
 	ddl := "CREATE TABLE " + testDataset + ".made (x INT64)"
-	plan, err := planQuery(h.bq.catalogOf(scope), ddl, "", "", nil)
+	plan, err := planQuery(h.bq.catalogOf(scope), ddl, "", "", nil, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

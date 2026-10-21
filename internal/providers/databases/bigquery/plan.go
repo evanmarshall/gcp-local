@@ -1,11 +1,15 @@
 package bigquery
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/evanmarshall/gcp-local/internal/providers/provider"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -44,6 +48,52 @@ type ddlTarget struct {
 	view      bool
 	viewQuery string
 	viewRefs  []tableName
+	// existed reports the table existed when the script was planned.
+	existed bool
+	// expirationSpan is the expiration_timestamp option's expression;
+	// expiration is its rewritten text, or "", and expires its value,
+	// evaluated before the script runs.
+	expirationSpan *[2]int
+	expiration     string
+	expires        time.Time
+}
+
+// operation names what a single DDL statement did, as GCP's
+// ddlOperationPerformed does: CREATE and REPLACE (recorded:
+// bigquery-dbt-requests); SKIP and DROP follow the JobStatistics2 reference.
+func (t ddlTarget) operation() string {
+	switch {
+	case !t.create && t.existed:
+		return "DROP"
+	case t.create && !t.existed:
+		return ddlCreate
+	case t.create && t.replace:
+		return "REPLACE"
+	default:
+		return ddlSkip
+	}
+}
+
+// ddlOperationPerformed values a CREATE SCHEMA reports (recorded:
+// bigquery-dbt-requests).
+const (
+	ddlCreate = "CREATE"
+	ddlSkip   = "SKIP"
+)
+
+// schemaTarget is the dataset a CREATE SCHEMA statement creates.
+type schemaTarget struct {
+	dataset     string
+	ifNotExists bool
+}
+
+// mergePlan runs a MERGE whose source is a subquery, which the engine does
+// not merge from: stage creates a table from the subquery, script merges
+// from it, and the staged table is dropped after.
+type mergePlan struct {
+	staged tableName
+	stage  string
+	script string
 }
 
 // queryPlan is a script ready to run: every table path rewritten to its
@@ -60,6 +110,11 @@ type queryPlan struct {
 	// tables are the existing tables the script reads or writes, whose
 	// expired partitions go before it runs.
 	tables []tableName
+	// schema is a CREATE SCHEMA statement's dataset, or nil; such a script
+	// has only that statement and never reaches the engine.
+	schema *schemaTarget
+	// merge stages a MERGE's subquery source, or is nil.
+	merge *mergePlan
 }
 
 // queryParameter is one jobs.query or jobs.insert query parameter.
@@ -115,7 +170,7 @@ type rewrite struct {
 
 // planQuery parses a script, resolves its tables, and lists its checks.
 // Nothing runs and nothing is authorized here.
-func planQuery(c *catalog, script, defaultDataset string, mode string, parameters []queryParameter) (*queryPlan, error) {
+func planQuery(c *catalog, script, defaultDataset string, mode string, parameters []queryParameter, now time.Time) (*queryPlan, error) {
 	root, err := parseTree(script)
 	if err != nil {
 		return nil, err
@@ -132,18 +187,103 @@ func planQuery(c *catalog, script, defaultDataset string, mode string, parameter
 	if err := p.resolveScript(script, refs, mode, parameters); err != nil {
 		return nil, err
 	}
-	p.plan.script = applyRewrites(script, p.rewrites)
+	return p.plan, p.finish(script, refs, now)
+}
+
+// finish pins the clock, reads the expiration options, stages a MERGE's
+// subquery, and writes the script the engine runs.
+func (p *planner) finish(script string, refs scriptRefs, now time.Time) error {
+	p.pinClock(script, refs.clock, now)
+	for index, target := range p.plan.ddl {
+		if span := target.expirationSpan; span != nil {
+			p.plan.ddl[index].expiration = applyRewrites(script[span[0]:span[1]], within(p.rewrites, *span))
+		}
+	}
+	if err := p.stageMerge(script, refs.statements); err != nil {
+		return err
+	}
+	p.plan.script = applyRewrites(script, slices.Clone(p.rewrites))
 	p.plan.statementType = statementType(refs.statements)
-	if only := refs.statements; len(only) == 1 && only[0].target != nil && only[0].kind != nodeDrop {
+	if only := refs.statements; len(only) == 1 && only[0].target != nil && only[0].kind != nodeDrop && only[0].kind != nodeSchema {
 		p.plan.target = &p.lastTarget
 	}
-	return p.plan, nil
+	return nil
+}
+
+// stageMerge plans a MERGE whose USING clause is a subquery: the engine
+// merges only from a table, so the subquery is staged in a table of the
+// target's dataset that no metadata names, and the MERGE reads that table
+// under the subquery's alias. The subquery's reads are checked like any
+// other. Only a script of that one statement is served.
+func (p *planner) stageMerge(script string, statements []statementRefs) error {
+	var merge *mergeSubquery
+	for _, statement := range statements {
+		if statement.merge != nil {
+			merge = statement.merge
+		}
+	}
+	if merge == nil {
+		return nil
+	}
+	if len(statements) != 1 {
+		return gap("MERGE from a subquery inside a multi-statement script")
+	}
+	raw := make([]byte, 12)
+	_, _ = rand.Read(raw) // crypto/rand.Read never returns an error.
+	staged := tableName{dataset: p.lastTarget.dataset, table: "_gcp_local_merge_" + hex.EncodeToString(raw)}
+	path := canonicalPath(p.catalog.project, staged.dataset, staged.table)
+	query := applyRewrites(script[merge.query[0]:merge.query[1]], within(p.rewrites, merge.query))
+	var outside []rewrite
+	for _, r := range p.rewrites {
+		if r.end <= merge.source[0] || r.start >= merge.source[1] {
+			outside = append(outside, r)
+		}
+	}
+	outside = append(outside, rewrite{start: merge.source[0], end: merge.source[1], text: path + " "})
+	p.plan.merge = &mergePlan{staged: staged, stage: "CREATE TABLE " + path + " AS " + query, script: applyRewrites(script, outside)}
+	return nil
+}
+
+// pinClock rewrites every current-time call to the job's start, so each
+// call in a statement reads the same instant, as GoogleSQL evaluates them
+// once per statement ("Function calls", current date and time functions).
+// A script's statements share the job's instant (not recorded).
+func (p *planner) pinClock(script string, calls []clockRef, now time.Time) {
+	instant := "TIMESTAMP_MICROS(" + strconv.FormatInt(now.UnixMicro(), 10) + ")"
+	for _, call := range calls {
+		text := instant
+		if call.name != clockTimestamp {
+			zone := ""
+			if call.zone != nil {
+				zone = ", " + script[call.zone[0]:call.zone[1]]
+			}
+			text = strings.ToUpper(strings.TrimPrefix(call.name, "current_")) + "(" + instant + zone + ")"
+		}
+		p.rewrites = append(p.rewrites, rewrite{start: call.start, end: call.end, text: text})
+	}
+}
+
+// within returns the rewrites inside span, shifted to start at its start.
+func within(rewrites []rewrite, span [2]int) []rewrite {
+	var inner []rewrite
+	for _, r := range rewrites {
+		if r.start >= span[0] && r.end <= span[1] {
+			inner = append(inner, rewrite{start: r.start - span[0], end: r.end - span[0], text: r.text})
+		}
+	}
+	return inner
 }
 
 // resolveScript resolves every statement, then the pseudo-columns and the
 // parameters.
 func (p *planner) resolveScript(script string, refs scriptRefs, mode string, parameters []queryParameter) error {
 	for _, statement := range refs.statements {
+		if statement.kind == nodeSchema {
+			if err := p.schema(statement, len(refs.statements)); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := p.statement(script, statement); err != nil {
 			return err
 		}
@@ -185,8 +325,42 @@ func (p *planner) statement(script string, statement statementRefs) error {
 		return p.create(script, statement, target, exists, reads)
 	case nodeDrop:
 		p.check(checkQueryDrop, target, exists)
-		p.plan.ddl = append(p.plan.ddl, ddlTarget{name: target})
+		p.plan.ddl = append(p.plan.ddl, ddlTarget{name: target, existed: exists})
 	}
+	return nil
+}
+
+// expiration takes a CREATE statement's expiration_timestamp option out of
+// the script the engine runs and returns its expression's span, or nil: the
+// expression is evaluated on its own.
+func (p *planner) expiration(statement statementRefs) *[2]int {
+	option := statement.expiration
+	if option == nil {
+		return nil
+	}
+	p.rewrites = append(p.rewrites, rewrite{start: option.entry[0], end: option.entry[1]})
+	return &option.value
+}
+
+// schema plans CREATE SCHEMA [IF NOT EXISTS] [project.]dataset: it needs
+// bigquery.datasets.create on the project (DDL reference, "Required
+// permissions"), and must be the script's only statement.
+func (p *planner) schema(statement statementRefs, count int) error {
+	if count != 1 {
+		return gap("CREATE SCHEMA inside a multi-statement script")
+	}
+	parts := statement.target.parts
+	if len(parts) == 2 && !strings.EqualFold(parts[0], p.catalog.project) {
+		return gap("cross-project CREATE SCHEMA (" + strings.Join(parts, ".") + ")")
+	}
+	dataset := parts[len(parts)-1]
+	if len(parts) > 2 || !validDatasetID(dataset) {
+		return invalidQuery("Invalid dataset ID: " + strings.Join(parts, "."))
+	}
+	p.plan.schema = &schemaTarget{dataset: dataset, ifNotExists: strings.Contains(statement.flags, "is_if_not_exists")}
+	entry := tableCheck{method: checkQuerySchema, resource: provider.ProjectResource(p.catalog.project)}
+	p.seen[entry] = true
+	p.plan.checks = append(p.plan.checks, entry)
 	return nil
 }
 
@@ -239,7 +413,8 @@ func (p *planner) create(script string, statement statementRefs, target tableNam
 			p.check(checkQueryWrite, target, true)
 		}
 	}
-	entry := ddlTarget{name: target, create: true, replace: strings.Contains(statement.flags, "is_or_replace"), view: view}
+	entry := ddlTarget{name: target, create: true, replace: strings.Contains(statement.flags, "is_or_replace"), view: view, existed: exists}
+	entry.expirationSpan = p.expiration(statement)
 	if view && statement.query != nil {
 		entry.viewQuery = script[statement.query[0]:statement.query[1]]
 		entry.viewRefs = reads
@@ -517,15 +692,29 @@ func collisionGap(existing, created tableName) error {
 func applyRewrites(script string, rewrites []rewrite) string {
 	slices.SortFunc(rewrites, func(a, b rewrite) int { return b.start - a.start })
 	for _, r := range rewrites {
-		script = script[:r.start] + r.text + script[r.end:]
+		if !nested(r, rewrites) {
+			script = script[:r.start] + r.text + script[r.end:]
+		}
 	}
 	return script
 }
 
+// nested reports whether a non-empty rewrite lies inside a longer one, which
+// replaces its text anyway (a removed option entry, a staged subquery).
+func nested(r rewrite, rewrites []rewrite) bool {
+	for _, outer := range rewrites {
+		if r.start < r.end && outer.start <= r.start && r.end <= outer.end && outer.end-outer.start > r.end-r.start {
+			return true
+		}
+	}
+	return false
+}
+
 // statementTypes name a single statement the way query statistics do.
 var statementTypes = map[string]string{
-	nodeQuery: "SELECT", nodeInsert: statementInsert, nodeUpdate: statementUpdate, nodeDelete: statementDelete, nodeMerge: statementMerge,
+	nodeQuery: statementSelect, nodeInsert: statementInsert, nodeUpdate: statementUpdate, nodeDelete: statementDelete, nodeMerge: statementMerge,
 	nodeTruncate: "TRUNCATE_TABLE", nodeCreateTable: "CREATE_TABLE", nodeCreateView: "CREATE_VIEW", nodeDrop: "DROP_TABLE",
+	nodeSchema: "CREATE_SCHEMA",
 }
 
 // statementType names the job's statement; a script of several statements,
@@ -537,7 +726,7 @@ func statementType(statements []statementRefs) string {
 	statement := statements[0]
 	switch {
 	case statement.kind == nodeCreateTable && statement.query != nil:
-		return "CREATE_TABLE_AS_SELECT"
+		return statementCTAS
 	case statement.kind == nodeDrop && strings.HasPrefix(statement.flags, " VIEW"):
 		return "DROP_VIEW"
 	}

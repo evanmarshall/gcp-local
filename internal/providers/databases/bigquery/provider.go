@@ -205,7 +205,7 @@ func resolveTarget(call gateway.Call, request *gateway.RESTRequest) (state.Scope
 	}
 	switch call.Method {
 	case methodDatasetsGet, methodDatasetsDelete, methodDatasetsUpdate, methodDatasetsGetIam, methodDatasetsSetIam,
-		methodTablesCreate, methodTablesList:
+		methodTablesCreate, methodTablesList, methodRoutinesList:
 		target.Name = datasetResource(project, dataset)
 		return scope, target, nil
 	default:
@@ -443,6 +443,7 @@ const (
 	methodTablesDelete   = "bigquery.tables.delete"
 	methodTablesGet      = "bigquery.tables.get"
 	methodTablesList     = "bigquery.tables.list"
+	methodRoutinesList   = "bigquery.routines.list"
 	methodTablesUpdate   = "bigquery.tables.update"
 	methodRowsInsert     = "bigquery.tabledata.insertAll"
 	methodRowsList       = "bigquery.tabledata.list"
@@ -468,6 +469,7 @@ var permissions = map[string]string{
 	methodTablesDelete:   "bigquery.tables.delete",
 	methodTablesGet:      "bigquery.tables.get",
 	methodTablesList:     "bigquery.tables.list",
+	methodRoutinesList:   "bigquery.routines.list",
 	methodTablesUpdate:   "bigquery.tables.update",
 	methodRowsInsert:     "bigquery.tables.updateData",
 	methodRowsList:       "bigquery.tables.getData",
@@ -486,7 +488,8 @@ var permissions = map[string]string{
 // project and, per table it names (access-control "Run a query" row and the
 // DML and DDL references): bigquery.tables.getData to read, updateData to
 // change rows, tables.create on the dataset to create, tables.update to
-// replace, and tables.delete to drop. jobs.get and getQueryResults need
+// replace, tables.delete to drop, and datasets.create on the project to
+// create a dataset. jobs.get and getQueryResults need
 // bigquery.jobs.get, except for the job's creator ("Requires that you're the
 // person who ran the job", jobs.get reference); the creator's check is
 // modeled as bigquery.jobs.create on the project, not recorded.
@@ -496,6 +499,7 @@ const (
 	checkQueryCreate = "bigquery.query.createTable"
 	checkQueryUpdate = "bigquery.query.replaceTable"
 	checkQueryDrop   = "bigquery.query.dropTable"
+	checkQuerySchema = "bigquery.query.createDataset"
 	checkOwnJob      = "bigquery.jobs.readOwn"
 	// checkListAll lists other users' jobs (jobs.list allUsers=true).
 	checkListAll = "bigquery.jobs.listAllUsers"
@@ -507,6 +511,7 @@ var relatedPermissions = map[string]string{
 	checkQueryCreate: "bigquery.tables.create",
 	checkQueryUpdate: "bigquery.tables.update",
 	checkQueryDrop:   "bigquery.tables.delete",
+	checkQuerySchema: "bigquery.datasets.create",
 	checkOwnJob:      permJobsCreate,
 	checkListAll:     "bigquery.jobs.listAll",
 }
@@ -581,6 +586,9 @@ type tableRecord struct {
 	Clustering             []string
 	RequirePartitionFilter *bool
 	Expiration             time.Time
+	// Streamed counts the rows insertAll added. GCP holds streamed rows in
+	// the streaming buffer, which numRows does not count.
+	Streamed int64
 }
 
 // jobRecord is one stored query job with its materialized result. Principal
@@ -602,6 +610,18 @@ type jobRecord struct {
 	Labels       map[string]string
 	// RequestID is the jobs.query requestId that ran the job, if any.
 	RequestID string
+	// JobTimeoutMs is the job's jobTimeoutMs, or "". DryRunSent reports
+	// that the job's configuration set dryRun.
+	JobTimeoutMs string
+	DryRunSent   bool
+	// Destination is the table the job wrote (its configuration's
+	// destinationTable), or nil; a SELECT's is its anonymous result table.
+	Destination *tableName
+	// DDLOperation, DDLTable, and DDLDataset are a single DDL statement's
+	// ddlOperationPerformed and target.
+	DDLOperation string
+	DDLTable     *tableName
+	DDLDataset   string
 }
 
 // scopeState is one project slice of provider state.

@@ -580,6 +580,30 @@ func TestOrganizationPoliciesAtTheMutation(t *testing.T) {
 		"explicit uniform bucket-level access is required")
 }
 
+// TestPredefinedACLsUnderUniformPolicy covers gcsfs's mkdir: predefined ACLs
+// on a create that names no access setting, which GCP accepts when the
+// organization enforces uniform access, making the bucket uniform and
+// returning no ACLs (recorded: storage-client-defaults). Every other
+// predefined ACL stays a gap.
+func TestPredefinedACLsUnderUniformPolicy(t *testing.T) {
+	f := setup(t)
+	create := "/storage/v1/b?project=project-a&predefinedAcl=projectPrivate&predefinedDefaultObjectAcl=bucketOwnerFullControl"
+	body := func(name string) []byte { return []byte(`{"name":"` + name + `","location":"US-CENTRAL1"}`) }
+	refused(t, f.request(admin, "POST", create, body("no-policy"), 400).Body.String(), "explicit uniform bucket-level access is required")
+	declarePolicy(t, f, "storage.uniformBucketLevelAccess", `{"rules":[{"enforce":true}]}`)
+	created := decodeBody(t, f.request(admin, "POST", create, body("gcsfs"), 200).Body.Bytes())
+	access, _ := created["iamConfiguration"].(map[string]any)
+	uniform, _ := access["uniformBucketLevelAccess"].(map[string]any)
+	_, acl := created["acl"]
+	_, objectACL := created["defaultObjectAcl"]
+	expectf(t, uniform["enabled"] == true && !acl && !objectACL, "created = %v", created)
+	refused(t, f.request(admin, "POST", "/storage/v1/b?project=project-a&predefinedAcl=publicRead", body("public"), 400).Body.String(),
+		"predefinedAcl=publicRead; ACLs are not modeled")
+	explicit := []byte(`{"name":"explicit","location":"US-CENTRAL1","iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}}}`)
+	refused(t, f.request(admin, "POST", create, explicit, 400).Body.String(),
+		"predefined ACLs with an explicit uniform bucket-level access setting")
+}
+
 // TestOrganizationPublicAccessPrevention covers storage.publicAccessPrevention
 // over buckets that inherit prevention (modeled, not recorded: the sandbox
 // doesn't enforce it): public members are refused and public grants grant
