@@ -1,6 +1,6 @@
 {
   "serviceaccount-lifecycle-authorization": {
-    "recorded-date": "13-10-2026, 02:11:03",
+    "recorded-date": "21-10-2026, 01:09:58",
     "recorded-content": {
       "created": {
         "client_id_equals_unique_id": true,
@@ -286,7 +286,6 @@
         "first_has_next": true,
         "first_status": 200,
         "owned_count": 2,
-        "owned_in_unique_id_order": true,
         "second_count": 1,
         "second_status": 200
       },

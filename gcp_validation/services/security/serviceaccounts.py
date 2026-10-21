@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from gcp_validation.config import Target
-from gcp_validation.evidence import now
+from gcp_validation.evidence import Inconclusive, now
 from gcp_validation.live_rest import LiveScope, Observations, OwnedRun, Response, RestClient
 from gcp_validation.sandbox import Sandbox
 from gcp_validation.services.security.refusals import outcome
@@ -153,6 +153,25 @@ def poll(
         time.sleep(10)
 
 
+def resolved_denial(fixture: ServiceAccountFixture) -> Response:
+    """Return the denied caller's 403 once it names the new account (live only).
+
+    Right after create, GCP has refused the denied caller without naming the
+    resource (2026-10-20), then with it once the account propagates.
+    """
+    deadline = min(fixture.deadline, time.monotonic() + (120 if fixture.client.sandbox else 0))
+    while True:
+        response = fixture.call('GET', actor='denied')
+        if response.status != 403:
+            return response
+        details = response.json().get('error', {}).get('details', [])
+        if any('resource' in item.get('metadata', {}) for item in details):
+            return response
+        if time.monotonic() >= deadline:
+            raise Inconclusive('The denied read never named the new account')
+        time.sleep(10)
+
+
 def observe_conditions(
     fixture: ServiceAccountFixture,
     snapshot: object,
@@ -262,10 +281,10 @@ def observe_decoding(
 
 
 def observe_lists(fixture: ServiceAccountFixture, snapshot: object, observe: Observations) -> None:
-    """Observe the two owned accounts' order, one-account pages, and refused page parameters.
+    """Observe that both owned accounts list, one-account pages, and refused page parameters.
 
-    Unique ids are random in GCP, so the order is recorded as whether the
-    accounts list by unique id.
+    GCP listed the two accounts in unique-id order on 2026-10-13 and out of it
+    on 2026-10-20, so membership is recorded, not order.
     """
     owned = {fixture.email, fixture.second}
     unique_ids, token = [], ''
@@ -286,7 +305,6 @@ def observe_lists(fixture: ServiceAccountFixture, snapshot: object, observe: Obs
         'list-paged',
         {
             'owned_count': len(unique_ids),
-            'owned_in_unique_id_order': unique_ids == sorted(unique_ids),
             'first_status': first.status,
             'first_count': len(first.json().get('accounts', [])),
             'first_has_next': bool(token),
@@ -330,7 +348,7 @@ def run_scenario(fixture, snapshot, created):
     )
     read = fixture.wait_until(lambda: fixture.call('GET'), {404}, 60)
     snapshot.match('fixture-read', observe.select(read, ('name', 'email', 'displayName')))
-    snapshot.match('denied-read', outcome(observe, fixture.call('GET', actor='denied')))
+    snapshot.match('denied-read', outcome(observe, resolved_denial(fixture)))
     snapshot.match(
         'denied-missing',
         outcome(observe, fixture.call('GET', actor='denied', email=fixture.second)),

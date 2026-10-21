@@ -197,7 +197,8 @@ var (
 )
 
 // accountsList returns one page of the project's accounts in unique-id
-// order (recorded "list-paged"); unique ids grow with creation here.
+// order, which grows with creation here. GCP's order varied between
+// recordings, so "list-paged" records membership and paging, not order.
 func (p *Provider) accountsList(request *gateway.RESTRequest, scope state.Scope) (*gateway.RESTResponse, error) {
 	if size, err := strconv.Atoi(request.Query.Get("pageSize")); err == nil && size > accounts.Max {
 		return nil, errPageSize
